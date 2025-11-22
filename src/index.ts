@@ -14,8 +14,8 @@ const config = new Conf({
     registries: {
       'official': {
         ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
-        ANTHROPIC_MODEL: 'claude-3-opus-20240229',
-        ANTHROPIC_SMALL_FAST_MODEL: 'claude-3-haiku-20240307'
+        ANTHROPIC_MODEL: 'claude-sonnet-4-5-20250929',
+        ANTHROPIC_SMALL_FAST_MODEL: 'claude-haiku-4-5-20251001'
       }
     },
     current: 'official'
@@ -233,13 +233,13 @@ program
         type: 'input',
         name: 'ANTHROPIC_MODEL',
         message: 'Enter ANTHROPIC_MODEL:',
-        default: presetConfig.ANTHROPIC_MODEL || 'claude-3-opus-20240229'
+        default: presetConfig.ANTHROPIC_MODEL || 'claude-sonnet-4-5-20250929'
       },
       {
         type: 'input',
         name: 'ANTHROPIC_SMALL_FAST_MODEL',
         message: 'Enter ANTHROPIC_SMALL_FAST_MODEL:',
-        default: presetConfig.ANTHROPIC_SMALL_FAST_MODEL || 'claude-3-haiku-20240307'
+        default: presetConfig.ANTHROPIC_SMALL_FAST_MODEL || 'claude-haiku-4-5-20251001'
       }
     ]);
 
