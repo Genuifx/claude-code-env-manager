@@ -4,7 +4,7 @@
 
 `ccem` 是一个受 `nrm` 启发的命令行工具，专为 Claude Code 用户设计。它可以帮助你轻松管理多个 API 配置（如官方 API、Kimi、DeepSeek 等），并在它们之间快速切换。
 
-![Demo](./demo.jpg)
+![Demo](./demo.png)
 
 ## ✨ 特性
 
