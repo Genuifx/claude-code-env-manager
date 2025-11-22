@@ -1,8 +1,12 @@
 {
   "name": "claude-code-env-manager",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Claude Code Environment Manager",
-  "author": {"name": "Genuifx", "email": "genuifx@gmail.com", "url": "https://genuifx.com"},
+  "author": {
+    "name": "Genuifx",
+    "email": "genuifx@gmail.com",
+    "url": "https://genuifx.com"
+  },
   "files": [
     "dist"
   ],
