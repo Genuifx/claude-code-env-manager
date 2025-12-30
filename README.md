@@ -1,93 +1,79 @@
-# Claude Code Env Manager (ccem)
+# Claude Code Env Manager
 
-**一键管理和切换 Claude Code 的多环境配置工具**
+你是不是也遇到过这样的场景：手头有好几个 API 服务商的 Key，官方的、Kimi 的、DeepSeek 的，每次想换一个试试都要手动改环境变量，改完还容易忘了改回来。
 
-`ccem` 是一个受 `nrm` 启发的命令行工具，专为 Claude Code 用户设计。它可以帮助你轻松管理多个 API 配置（如官方 API、Kimi、DeepSeek 等），并在它们之间快速切换。
+ccem 就是为了解决这个问题。一个命令切换环境，一个命令启动 Claude Code，API Key 加密存储，内置常用服务商配置。
 
-![Demo](./demo.png)
+![Demo](./index.png) 
 
-## ✨ 特性
-
-*   🚀 **一键切换**：在不同的模型服务商之间快速切换。
-*   🔒 **安全存储**：API Key 经过 AES 加密存储，保护你的隐私。
-*   ⚡️ **预设配置**：内置 GLM、Kimi、MiniMax、DeepSeek 等常用服务商配置，开箱即用。
-*   🛠 **灵活运行**：支持直接使用指定环境运行命令，或导出环境变量到 Shell。
-
-## 📦 安装
-
-### 全局安装（推荐）
-
-使用 npm 或 pnpm 全局安装：
+## 安装
 
 ```bash
 npm install -g claude-code-env-manager
-# 或者
+```
+
+或者用 pnpm
+
+```bash
 pnpm add -g claude-code-env-manager
 ```
 
-### 免安装运行
-
-你也可以直接使用 `npx` 或 `pnpx` 运行（无需安装）：
+不想装也行，直接 npx 跑
 
 ```bash
 npx claude-code-env-manager
-# 或者
-pnpx claude-code-env-manager
 ```
 
-## 🚀 快速开始
+## 三分钟上手
 
-### 1. 添加配置
+装好之后，终端里敲 `ccem` 回车，你会看到一个交互式菜单。当前用的是哪个环境、Base URL 是什么、模型是哪个，一目了然。
 
-使用 `add` 命令添加一个新的环境配置。支持选择预设，省去手动输入 URL 和模型名称的麻烦。
+想加一个新环境？
 
 ```bash
-ccem add my-env
+ccem add kimi
 ```
 
-按照提示操作即可：
-1.  选择是否使用预设（如 Kimi, DeepSeek 等）。
-2.  输入你的 API Key。
+它会问你要不要用预设。选 KIMI，然后输入你的 API Key 就行了。URL 和模型名都帮你填好了。
 
-### 2. 切换环境与启动
-
-直接运行 `ccem` 进入交互式菜单（推荐）：
+切换环境更简单
 
 ```bash
-ccem
+ccem use kimi
 ```
 
-在菜单中，你可以直观地查看当前配置、**切换环境**，或者直接**启动 Claude Code**。
+或者直接在交互菜单里选。
 
-> 当然，你也可以使用命令行快速操作：
-> *   切换：`ccem use my-env`
-> *   直接运行：`ccem run claude`
+![Demo](./demo.png) 
 
----
 
-## 📖 详细指南
+## 权限模式
 
-### 查看所有环境
+Claude Code 的权限配置挺繁琐的。ccem 内置了几种常用模式，一键切换。
+
+想放飞自我让 Claude 随便干？
 
 ```bash
-ccem ls
+ccem yolo
 ```
 
-### 查看当前环境
+在不熟悉的代码库里想保守一点？
 
 ```bash
-ccem current
+ccem safe
 ```
 
-### 删除环境
+只想让它读代码做分析？
 
 ```bash
-ccem del my-env
+ccem audit
 ```
 
-### 进阶：Shell 集成（自动生效）
+这些都是临时生效的，退出 Claude Code 之后自动还原。想永久设置的话用 `ccem setup perms --dev` 这种。
 
-如果你希望 `ccem use` 能直接修改当前终端的环境变量（就像 `nvm` 那样），请将以下函数添加到你的 `~/.zshrc` 或 `~/.bashrc` 文件末尾：
+## Shell 集成
+
+如果你希望 `ccem use` 之后环境变量立刻在当前终端生效，把下面这段加到你的 `~/.zshrc` 或 `~/.bashrc` 里
 
 ```bash
 ccem() {
@@ -102,24 +88,11 @@ ccem() {
 }
 ```
 
-添加后，运行 `source ~/.zshrc` (或 `~/.bashrc`) 使其生效。之后你执行 `ccem use xxx` 时，环境变量就会立即在当前窗口生效。
+然后 `source ~/.zshrc` 一下就好了。
 
-### 手动导出环境变量
+## 内置预设
 
-如果你不想配置 Shell 集成，也可以手动执行：
-
-```bash
-eval $(ccem env)
-```
-
-## 📝 预设列表
-
-目前内置了以下服务商的推荐配置：
-
-*   **GLM** (智谱 AI)
-*   **KIMI** (月之暗面)
-*   **MiniMax**
-*   **DeepSeek**
+GLM（智谱 AI）、KIMI（月之暗面）、MiniMax、DeepSeek，这几个国内常用的都有。添加环境的时候选一下就行，省得自己查 URL 和模型名。
 
 ## License
 
