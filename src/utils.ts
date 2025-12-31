@@ -73,3 +73,35 @@ export const ensureClaudeDir = (): string => {
   }
   return claudeDir;
 };
+
+/**
+ * 获取用户主目录
+ */
+export const getHomeDir = (): string => {
+  return process.env.HOME || process.env.USERPROFILE || '';
+};
+
+/**
+ * 获取全局 Claude 配置文件路径 (~/.claude.json)
+ */
+export const getGlobalClaudeConfigPath = (): string => {
+  return path.join(getHomeDir(), '.claude.json');
+};
+
+/**
+ * 获取全局 Claude settings 文件路径 (~/.claude/settings.json)
+ */
+export const getGlobalClaudeSettingsPath = (): string => {
+  return path.join(getHomeDir(), '.claude', 'settings.json');
+};
+
+/**
+ * 确保全局 ~/.claude 目录存在
+ */
+export const ensureGlobalClaudeDir = (): string => {
+  const claudeDir = path.join(getHomeDir(), '.claude');
+  if (!fs.existsSync(claudeDir)) {
+    fs.mkdirSync(claudeDir, { recursive: true });
+  }
+  return claudeDir;
+};

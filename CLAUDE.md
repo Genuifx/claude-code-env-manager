@@ -36,7 +36,8 @@ src/
 ├── presets.ts     # Environment presets and permission presets
 ├── permissions.ts # Permission management core logic
 ├── ui.ts          # UI components (menus, panels, formatting)
-└── usage.ts       # Usage statistics tracking and cost calculation
+├── usage.ts       # Usage statistics tracking and cost calculation
+└── setup.ts       # Claude Code initialization (onboarding, privacy, MCP tools)
 ```
 
 ### Key Components
@@ -83,6 +84,9 @@ src/
 - `ccem setup default-mode --dev` - Set default permission mode for interactive menu
 - `ccem setup default-mode --reset` - Clear default mode setting
 - `ccem setup default-mode` - Show current default mode
+
+#### Setup & Initialization
+- `ccem setup init` - Initialize Claude Code (sets onboarding, disables telemetry, installs chrome-devtools MCP)
 
 ### Permission Modes
 

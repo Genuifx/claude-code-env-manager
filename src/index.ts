@@ -32,6 +32,7 @@ import {
   runWithTempPermissions
 } from './permissions.js';
 import { getUsageStats, getUsageStatsFromCache } from './usage.js';
+import { runSetupInit } from './setup.js';
 import type { UsageStats } from './types.js';
 
 const program = new Command();
@@ -441,6 +442,13 @@ setupCmd
     console.log(chalk.gray('\n设置默认模式: ccem setup default-mode --dev'));
     console.log(chalk.gray('清除默认模式: ccem setup default-mode --reset'));
     console.log(chalk.gray('可用模式: ' + PERMISSION_MODES.join(', ')));
+  });
+
+setupCmd
+  .command('init')
+  .description('初始化 Claude Code 全局配置（跳过 onboarding、禁用遥测、安装 MCP 工具）')
+  .action(async () => {
+    await runSetupInit();
   });
 
 // 默认交互式菜单
