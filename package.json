@@ -8,7 +8,8 @@
     "url": "https://genuifx.com"
   },
   "files": [
-    "dist"
+    "dist",
+    "model-prices.json"
   ],
   "bin": {
     "ccem": "./dist/index.js"

@@ -27,3 +27,61 @@ export interface PermissionPreset {
 
 // 权限模式名称
 export type PermissionModeName = 'yolo' | 'dev' | 'readonly' | 'safe' | 'ci' | 'audit';
+
+// Token 使用量
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+}
+
+// 带费用的 Token 使用量
+export interface TokenUsageWithCost extends TokenUsage {
+  cost: number;
+}
+
+// 使用统计
+export interface UsageStats {
+  today: TokenUsageWithCost;
+  week: TokenUsageWithCost;
+  total: TokenUsageWithCost;
+  byModel: Record<string, TokenUsageWithCost>;
+  lastUpdated: string;
+}
+
+// 模型价格
+export interface ModelPrice {
+  input_cost_per_token: number;
+  output_cost_per_token: number;
+  cache_read_input_token_cost?: number;
+  cache_creation_input_token_cost?: number;
+}
+
+// 文件元数据
+export interface FileMeta {
+  mtime: number;  // 文件修改时间
+  size: number;   // 文件大小
+}
+
+// 单个文件的统计条目
+export interface FileStatsEntry {
+  timestamp: string;
+  model: string;
+  usage: TokenUsageWithCost;
+}
+
+// 单个文件的统计
+export interface FileStats {
+  entries: FileStatsEntry[];
+}
+
+// 使用缓存（文件级）
+export interface UsageCache {
+  version: number;  // 缓存版本号
+  files: Record<string, {  // key = 文件路径
+    meta: FileMeta;
+    stats: FileStats;
+  }>;
+  lastUpdated: string;
+}

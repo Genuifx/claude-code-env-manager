@@ -5,6 +5,7 @@ import inquirer from 'inquirer';
 import chalk from 'chalk';
 import Table from 'cli-table3';
 import { spawn } from 'child_process';
+import * as readline from 'readline';
 
 import type { EnvConfig, PermissionModeName } from './types.js';
 import { encrypt, decrypt } from './utils.js';
@@ -17,6 +18,11 @@ import {
   getEnvChoices,
   msg,
   renderStarting,
+  renderUsageDetail,
+  renderLogoWithEnvPanel,
+  renderUsageLine,
+  startSpinner,
+  stopSpinner,
 } from './ui.js';
 import {
   applyPermissionMode,
@@ -25,6 +31,8 @@ import {
   listAvailableModes,
   runWithTempPermissions
 } from './permissions.js';
+import { getUsageStats, getUsageStatsFromCache } from './usage.js';
+import type { UsageStats } from './types.js';
 
 const program = new Command();
 const config = new Conf({
@@ -44,6 +52,44 @@ const config = new Conf({
 
 // 权限模式列表
 const PERMISSION_MODES: PermissionModeName[] = ['yolo', 'dev', 'readonly', 'safe', 'ci', 'audit'];
+
+// 缓存 usage stats
+let usageStats: UsageStats | null = null;
+let usageLoading = true;
+let refreshCallback: (() => void) | null = null;
+
+// 先从缓存快速加载，后台更新
+const initUsageStats = (onUpdate?: () => void): void => {
+  // 1. 先尝试从缓存快速加载（同步，很快）
+  const cachedStats = getUsageStatsFromCache();
+  if (cachedStats) {
+    usageStats = cachedStats;
+    usageLoading = false;
+  } else {
+    // 没有缓存，启动 spinner 动画
+    if (onUpdate) {
+      startSpinner(onUpdate);
+    }
+  }
+
+  // 2. 后台异步更新缓存
+  getUsageStats()
+    .then(stats => {
+      const needRefresh = usageLoading ||
+        (usageStats && stats && usageStats.lastUpdated !== stats.lastUpdated);
+      usageStats = stats;
+      usageLoading = false;
+      stopSpinner();
+      // 如果数据有更新，触发刷新回调
+      if (needRefresh && onUpdate) {
+        onUpdate();
+      }
+    })
+    .catch(() => {
+      usageLoading = false;
+      stopSpinner();
+    });
+};
 
 program
   .name('ccem')
@@ -67,7 +113,7 @@ PERMISSION_MODES.forEach(mode => {
     });
 });
 
-const showCurrentEnv = () => {
+const showCurrentEnv = (usageStats: UsageStats | null, usageLoading: boolean) => {
   if (!process.stdout.isTTY) return;
 
   const current = config.get('current') as string;
@@ -77,18 +123,24 @@ const showCurrentEnv = () => {
 
   if (!env) return;
 
-  // 使用新的 UI 组件
-  console.log(renderCompactHeader());
-  console.log('');
-  console.log(renderEnvPanel(current, {
+  // 显示 Logo + 环境信息（横向布局）
+  console.log(renderLogoWithEnvPanel(current, {
     ANTHROPIC_BASE_URL: env.ANTHROPIC_BASE_URL,
     ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY ? decrypt(env.ANTHROPIC_API_KEY) : undefined,
     ANTHROPIC_MODEL: env.ANTHROPIC_MODEL,
     ANTHROPIC_SMALL_FAST_MODEL: env.ANTHROPIC_SMALL_FAST_MODEL,
   }, defaultMode));
+
+  // 分隔线
+  console.log('');
+  console.log(renderUsageLine(usageStats, usageLoading));
+  console.log(renderCompactHeader());
+
+  // 底部 Usage 信息行
+  console.log('');
 };
 
-const switchEnvironment = (name: string) => {
+const switchEnvironment = async (name: string) => {
   const registries = config.get('registries') as Record<string, EnvConfig>;
   if (!registries[name]) {
     console.error(chalk.red(`Environment '${name}' not found.`));
@@ -102,7 +154,7 @@ const switchEnvironment = (name: string) => {
     console.error(chalk.green(`Switched to environment '${name}'`));
   }
 
-  showCurrentEnv();
+  showCurrentEnv(null, false);
 
   const env = registries[name];
   const exportCmds: string[] = [];
@@ -151,8 +203,8 @@ program
 program
   .command('use <name>')
   .description('Switch to a specific environment')
-  .action((name) => {
-    switchEnvironment(name);
+  .action(async (name) => {
+    await switchEnvironment(name);
   });
 
 program
@@ -405,10 +457,30 @@ program
       return;
     }
 
+    // 刷新界面函数
+    const refreshScreen = () => {
+      // 移动光标到顶部并清屏
+      readline.cursorTo(process.stdout, 0, 0);
+      readline.clearScreenDown(process.stdout);
+      showCurrentEnv(usageStats, usageLoading);
+      console.log('');
+      // 重新显示菜单提示
+      const defaultMode = config.get('defaultMode') as PermissionModeName | null;
+      console.log(chalk.gray('?') + ' ' + chalk.gray('Select action') + ' ' + chalk.cyan('(Use arrow keys)'));
+      const choices = getMainMenuChoices(defaultMode);
+      choices.forEach((choice, i) => {
+        const prefix = i === 0 ? chalk.cyan('❯') : ' ';
+        console.log(prefix + ' ' + choice.name);
+      });
+    };
+
+    // 异步加载 usage stats，加载完成后刷新界面
+    initUsageStats(refreshScreen);
+
     // 交互式菜单
     while (true) {
       console.clear();
-      showCurrentEnv();
+      showCurrentEnv(usageStats, usageLoading);
       console.log('');
 
       // 获取默认模式
@@ -455,6 +527,22 @@ program
           });
         }
         return;
+      } else if (action === 'usage') {
+        // 显示详细 usage 统计
+        console.clear();
+        if (usageStats) {
+          console.log(renderUsageDetail(usageStats));
+        } else {
+          msg.warning('No usage data available');
+        }
+        await inquirer.prompt([
+          {
+            type: 'input',
+            name: 'continue',
+            message: chalk.gray('Press Enter to continue...'),
+            prefix: '',
+          }
+        ]);
       } else if (action === 'switch') {
         const { selected } = await inquirer.prompt([
             {
