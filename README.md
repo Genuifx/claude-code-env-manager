@@ -1,10 +1,31 @@
 # Claude Code Env Manager
 
-你是不是也遇到过这样的场景：手头有好几个 API 服务商的 Key，官方的、Kimi 的、DeepSeek 的，每次想换一个试试都要手动改环境变量，改完还容易忘了改回来。
+优雅的使用Claude Code 🍷。 快速切换环境，一个命令启动 Claude Code。API Key 加密存储，内置常用服务商配置。
 
-ccem 就是为了解决这个问题。一个命令切换环境，一个命令启动 Claude Code，API Key 加密存储，内置常用服务商配置。
+![Demo](./index.png)
 
-![Demo](./index.png) 
+## 核心功能
+
+### 多环境管理
+
+支持同时管理多个 API 服务商配置，包括官方 Anthropic、GLM（智谱 AI）、KIMI（月之暗面）、MiniMax、DeepSeek。每个环境独立存储 Base URL、API Key、模型名称。API Key 使用 AES-256-CBC 加密本地存储。
+
+### 权限模式快捷切换
+
+不想使用`--dangerously-skip-permissions`，又被繁琐的权限请求许可搞烦了？ ccem 内置 6 种权限预设，一键切换 Claude Code 的权限配置，减少 9 成的权限许可同时保证安全性：
+
+| 模式 | 说明 |
+|------|------|
+| yolo | 允许所有操作，无任何限制 |
+| dev | 标准开发权限，保护敏感文件 |
+| readonly | 只读模式，禁止任何修改 |
+| safe | 保守模式，适合不熟悉的代码库 |
+| ci | CI/CD 流水线专用权限 |
+| audit | 只读加搜索，用于安全审计 |
+
+### 用量统计
+
+自动解析 Claude Code 的日志文件，统计 token 使用量和费用。支持按项目、按时间段查看，价格数据从 LiteLLM 实时获取。
 
 ## 安装
 
@@ -18,62 +39,51 @@ npm install -g claude-code-env-manager
 pnpm add -g claude-code-env-manager
 ```
 
-不想装也行，直接 npx 跑
+直接 npx 运行也可以
 
 ```bash
 npx claude-code-env-manager
 ```
 
-## 三分钟上手
+## 快速上手
 
-装好之后，终端里敲 `ccem` 回车，你会看到一个交互式菜单。当前用的是哪个环境、Base URL 是什么、模型是哪个，一目了然。
+终端里敲 `ccem` 回车，进入交互式菜单。当前环境、Base URL、模型名称一目了然。
 
-想加一个新环境？
+添加新环境：
 
 ```bash
 ccem add kimi
 ```
 
-它会问你要不要用预设。选 KIMI，然后输入你的 API Key 就行了。URL 和模型名都帮你填好了。
+选择预设后输入 API Key，URL 和模型名自动填充。
 
-切换环境更简单
+切换环境：
 
 ```bash
 ccem use kimi
 ```
 
-或者直接在交互菜单里选。
-
-![Demo](./demo.png) 
-
+![Demo](./demo.png)
 
 ## 权限模式
 
-Claude Code 的权限配置挺繁琐的。ccem 内置了几种常用模式，一键切换。
-
-想放飞自我让 Claude 随便干？
+临时切换（退出后自动还原）：
 
 ```bash
-ccem yolo
+ccem yolo    # 放飞模式
+ccem safe    # 保守模式
+ccem audit   # 审计模式
 ```
 
-在不熟悉的代码库里想保守一点？
+永久设置：
 
 ```bash
-ccem safe
+ccem setup perms --dev
 ```
-
-只想让它读代码做分析？
-
-```bash
-ccem audit
-```
-
-这些都是临时生效的，退出 Claude Code 之后自动还原。想永久设置的话用 `ccem setup perms --dev` 这种。
 
 ## Shell 集成
 
-如果你希望 `ccem use` 之后环境变量立刻在当前终端生效，把下面这段加到你的 `~/.zshrc` 或 `~/.bashrc` 里
+让 `ccem use` 后环境变量立刻在当前终端生效，把下面这段加到 `~/.zshrc` 或 `~/.bashrc`：
 
 ```bash
 ccem() {
@@ -88,11 +98,22 @@ ccem() {
 }
 ```
 
-然后 `source ~/.zshrc` 一下就好了。
+然后 `source ~/.zshrc` 生效。
 
-## 内置预设
+## 命令一览
 
-GLM（智谱 AI）、KIMI（月之暗面）、MiniMax、DeepSeek，这几个国内常用的都有。添加环境的时候选一下就行，省得自己查 URL 和模型名。
+```bash
+ccem              # 交互式菜单
+ccem ls           # 列出所有环境
+ccem use <name>   # 切换环境
+ccem add <name>   # 添加环境
+ccem del <name>   # 删除环境
+ccem current      # 显示当前环境
+ccem env          # 输出环境变量（用于 eval）
+ccem run <cmd>    # 注入环境变量后执行命令
+ccem --mode       # 显示当前权限模式
+ccem --list-modes # 列出所有权限模式
+```
 
 ## License
 

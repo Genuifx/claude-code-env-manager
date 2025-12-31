@@ -35,7 +35,8 @@ src/
 ├── utils.ts       # Utility functions (encryption, project root detection)
 ├── presets.ts     # Environment presets and permission presets
 ├── permissions.ts # Permission management core logic
-└── ui.ts          # UI components (menus, panels, formatting)
+├── ui.ts          # UI components (menus, panels, formatting)
+└── usage.ts       # Usage statistics tracking and cost calculation
 ```
 
 ### Key Components
@@ -44,6 +45,7 @@ src/
 - **Encryption**: API keys encrypted with AES-256-CBC before storage (obfuscation, not secure storage - key is derived from hardcoded secret).
 - **Environment Presets**: Built-in configurations for GLM, KIMI, MiniMax, DeepSeek defined in `ENV_PRESETS`.
 - **Permission Presets**: Built-in permission modes (yolo, dev, readonly, safe, ci, audit) defined in `PERMISSION_PRESETS`.
+- **Usage Statistics**: Parses Claude's JSONL logs from `~/.claude/projects/` to track token usage and costs. Uses incremental caching in `~/.ccem/usage-cache.json`. Prices fetched from LiteLLM with local fallback.
 - **Environment variables managed**: `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`
 
 ### CLI Commands
