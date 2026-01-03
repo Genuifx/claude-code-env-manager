@@ -34,6 +34,12 @@ import {
 import { getUsageStats, getUsageStatsFromCache } from './usage.js';
 import { runSetupInit } from './setup.js';
 import type { UsageStats } from './types.js';
+import {
+  SKILL_PRESETS,
+  addSkillFromGitHub,
+  listInstalledSkills,
+  removeSkill,
+} from './skills.js';
 
 const program = new Command();
 const config = new Conf({
@@ -449,6 +455,93 @@ setupCmd
   .description('初始化 Claude Code 全局配置（跳过 onboarding、禁用遥测、安装 MCP 工具）')
   .action(async () => {
     await runSetupInit();
+  });
+
+// skill 命令组（管理 Claude Code skills）
+const skillCmd = program
+  .command('skill')
+  .description('管理 Claude Code skills');
+
+skillCmd
+  .command('add [url]')
+  .description('添加 skill（从官方预设或 GitHub URL）')
+  .action(async (url?: string) => {
+    if (url) {
+      // 直接添加指定的 URL 或预设名
+      addSkillFromGitHub(url);
+    } else {
+      // 交互式选择
+      const choices = [
+        ...SKILL_PRESETS.map(p => ({
+          name: `${chalk.cyan(p.name)} - ${chalk.gray(p.description)}`,
+          value: p.name,
+          short: p.name,
+        })),
+        new inquirer.Separator(),
+        { name: chalk.yellow('输入自定义 GitHub URL'), value: '__custom__', short: 'Custom' },
+      ];
+
+      const { selected } = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'selected',
+          message: '选择要添加的 skill',
+          choices,
+          pageSize: 15,
+        }
+      ]);
+
+      if (selected === '__custom__') {
+        const { customUrl } = await inquirer.prompt([
+          {
+            type: 'input',
+            name: 'customUrl',
+            message: '输入 GitHub URL:',
+            validate: (input: string) => {
+              if (!input.trim()) return '请输入有效的 URL';
+              if (!input.includes('github.com') && !/^[\w-]+\/[\w-]+$/.test(input)) {
+                return '请输入有效的 GitHub URL 或 owner/repo 格式';
+              }
+              return true;
+            }
+          }
+        ]);
+        addSkillFromGitHub(customUrl);
+      } else {
+        addSkillFromGitHub(selected);
+      }
+    }
+  });
+
+skillCmd
+  .command('ls')
+  .description('列出已安装的 skills')
+  .action(() => {
+    const skills = listInstalledSkills();
+
+    if (skills.length === 0) {
+      console.log(chalk.yellow('当前目录没有安装任何 skill'));
+      console.log(chalk.gray('使用 ccem skill add 添加 skills'));
+      return;
+    }
+
+    const table = new Table({
+      head: ['Name', 'Path'],
+      style: { head: ['cyan'] }
+    });
+
+    skills.forEach(skill => {
+      table.push([chalk.green(skill.name), chalk.gray(skill.path)]);
+    });
+
+    console.log(table.toString());
+  });
+
+skillCmd
+  .command('rm <name>')
+  .description('删除已安装的 skill')
+  .action((name: string) => {
+    removeSkill(name);
   });
 
 // 默认交互式菜单
