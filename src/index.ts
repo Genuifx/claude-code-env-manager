@@ -6,6 +6,12 @@ import chalk from 'chalk';
 import Table from 'cli-table3';
 import { spawn } from 'child_process';
 import * as readline from 'readline';
+import * as fs from 'fs';
+import * as path from 'path';
+
+// 读取 package.json 版本号（CJS 兼容）
+const pkgPath = path.resolve(__dirname, '..', 'package.json');
+const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
 
 import type { EnvConfig, PermissionModeName } from './types.js';
 import { encrypt, decrypt } from './utils.js';
@@ -101,7 +107,7 @@ const initUsageStats = (onUpdate?: () => void): void => {
 program
   .name('ccem')
   .description('Claude Code Environment Manager - 管理 Claude Code 环境变量和权限')
-  .version('1.1.0')
+  .version(pkg.version)
   // 权限管理选项
   .option('--mode', '查看当前权限模式')
   .option('--list-modes', '列出所有可用权限模式');
