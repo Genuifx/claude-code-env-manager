@@ -29,6 +29,7 @@ export const PERMISSION_PRESETS: Record<PermissionModeName, PermissionPreset> = 
   'yolo': {
     name: 'YOLO 模式',
     description: '全部放开，无任何限制',
+    permissionMode: 'bypassPermissions',
     permissions: {
       allow: [
         'Bash(*)',
@@ -49,6 +50,7 @@ export const PERMISSION_PRESETS: Record<PermissionModeName, PermissionPreset> = 
   'dev': {
     name: '开发模式',
     description: '日常开发权限，保护敏感文件',
+    permissionMode: 'acceptEdits',
     permissions: {
       allow: [
         'Read(*)',
@@ -107,6 +109,7 @@ export const PERMISSION_PRESETS: Record<PermissionModeName, PermissionPreset> = 
   'readonly': {
     name: '只读模式',
     description: '仅允许读取和搜索，禁止任何修改',
+    permissionMode: 'plan',
     permissions: {
       allow: [
         'Read(*)',
@@ -151,6 +154,7 @@ export const PERMISSION_PRESETS: Record<PermissionModeName, PermissionPreset> = 
   'safe': {
     name: '安全模式',
     description: '保守权限，适合不熟悉的代码库',
+    permissionMode: 'default',
     permissions: {
       allow: [
         'Read(*)',
@@ -192,6 +196,7 @@ export const PERMISSION_PRESETS: Record<PermissionModeName, PermissionPreset> = 
   'ci': {
     name: 'CI/CD 模式',
     description: '适合自动化流水线的权限',
+    permissionMode: 'default',
     permissions: {
       allow: [
         'Read(*)',
@@ -230,6 +235,7 @@ export const PERMISSION_PRESETS: Record<PermissionModeName, PermissionPreset> = 
   'audit': {
     name: '审计模式',
     description: '仅读取和搜索，用于安全审计',
+    permissionMode: 'plan',
     permissions: {
       allow: [
         'Read(*)',

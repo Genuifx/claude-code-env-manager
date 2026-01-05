@@ -15,18 +15,22 @@ export interface PermissionConfig {
   [key: string]: unknown; // 保留其他配置字段
 }
 
+// 权限模式名称
+export type PermissionModeName = 'yolo' | 'dev' | 'readonly' | 'safe' | 'ci' | 'audit';
+
+// Claude Code 官方 permission mode
+export type OfficialPermissionMode = 'default' | 'acceptEdits' | 'plan' | 'dontAsk' | 'bypassPermissions';
+
 // 权限预设类型
 export interface PermissionPreset {
   name: string;
   description: string;
+  permissionMode: OfficialPermissionMode;
   permissions: {
     allow: string[];
     deny: string[];
   };
 }
-
-// 权限模式名称
-export type PermissionModeName = 'yolo' | 'dev' | 'readonly' | 'safe' | 'ci' | 'audit';
 
 // Token 使用量
 export interface TokenUsage {

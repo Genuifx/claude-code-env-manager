@@ -197,6 +197,9 @@ export const runWithTempPermissions = async (
   // 构建 Claude CLI 参数（用引号包裹，避免 shell 解析括号）
   const args: string[] = [];
 
+  // 添加 permission mode
+  args.push('--permission-mode', preset.permissionMode);
+
   if (preset.permissions.allow.length > 0) {
     const quoted = preset.permissions.allow.map(t => `"${t}"`).join(' ');
     args.push('--allowedTools', quoted);
