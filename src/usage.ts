@@ -1,7 +1,11 @@
 import * as fs from 'fs';
+import * as fsPromises from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
+import * as readline from 'readline';
 import type { TokenUsage, TokenUsageWithCost, UsageStats, ModelPrice, UsageCache, FileMeta, FileStats, FileStatsEntry } from './types.js';
+
+// ... (保持前面的 import 和常量定义不变) ...
 
 // Claude 项目数据目录
 const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
@@ -16,10 +20,21 @@ const CACHE_VERSION = 1;
 const getCachePath = () => path.join(CCEM_DIR, 'usage-cache.json');
 const getPricesPath = () => path.join(CCEM_DIR, 'model-prices.json');
 
-// 确保 ccem 目录存在
-function ensureCcemDir(): void {
+// ... (保持 ensureCcemDir 等辅助函数不变) ...
+
+// 确保 ccem 目录存在 (Sync version for cache reading)
+function ensureCcemDirSync(): void {
   if (!fs.existsSync(CCEM_DIR)) {
     fs.mkdirSync(CCEM_DIR, { recursive: true });
+  }
+}
+
+// 确保 ccem 目录存在 (Async version)
+async function ensureCcemDir(): Promise<void> {
+  try {
+    await fsPromises.access(CCEM_DIR);
+  } catch {
+    await fsPromises.mkdir(CCEM_DIR, { recursive: true });
   }
 }
 
@@ -28,10 +43,10 @@ const LITELLM_PRICES_URL = 'https://raw.githubusercontent.com/BerriAI/litellm/ma
 
 // 获取 ccem 安装目录下的 model-prices.json 路径
 const getBundledPricesPath = () => {
-  // 使用 import.meta.url 获取当前模块路径，兼容 ESM
-  const currentDir = path.dirname(new URL(import.meta.url).pathname);
-  return path.join(currentDir, '..', 'model-prices.json');
+  return path.join(__dirname, '..', 'model-prices.json');
 };
+
+// ... (保持 DEFAULT_PRICES, normalizeModelName, loadPrices 等函数不变) ...
 
 // 内置默认价格（fallback）
 const DEFAULT_PRICES: Record<string, ModelPrice> = {
@@ -73,7 +88,7 @@ let pricesCache: Record<string, ModelPrice> | null = null;
 export async function loadPrices(): Promise<Record<string, ModelPrice>> {
   if (pricesCache) return pricesCache;
 
-  ensureCcemDir();
+  await ensureCcemDir();
   const pricesPath = getPricesPath();
 
   // 尝试从远程获取
@@ -95,7 +110,7 @@ export async function loadPrices(): Promise<Record<string, ModelPrice>> {
       }
 
       // 保存到本地
-      fs.writeFileSync(pricesPath, JSON.stringify(prices, null, 2));
+      await fsPromises.writeFile(pricesPath, JSON.stringify(prices, null, 2));
       pricesCache = prices;
       return prices;
     }
@@ -105,11 +120,10 @@ export async function loadPrices(): Promise<Record<string, ModelPrice>> {
 
   // 尝试从用户缓存目录加载
   try {
-    if (fs.existsSync(pricesPath)) {
-      const data = JSON.parse(fs.readFileSync(pricesPath, 'utf-8'));
-      pricesCache = data;
-      return data;
-    }
+    const content = await fsPromises.readFile(pricesPath, 'utf-8');
+    const data = JSON.parse(content);
+    pricesCache = data;
+    return data;
   } catch {
     // 用户缓存加载失败
   }
@@ -117,11 +131,10 @@ export async function loadPrices(): Promise<Record<string, ModelPrice>> {
   // 尝试从 ccem 安装目录加载内置价格文件
   try {
     const bundledPath = getBundledPricesPath();
-    if (fs.existsSync(bundledPath)) {
-      const data = JSON.parse(fs.readFileSync(bundledPath, 'utf-8'));
-      pricesCache = data;
-      return data;
-    }
+    const content = await fsPromises.readFile(bundledPath, 'utf-8');
+    const data = JSON.parse(content);
+    pricesCache = data;
+    return data;
   } catch {
     // 内置价格文件加载失败
   }
@@ -187,10 +200,10 @@ function mergeUsage(a: TokenUsageWithCost, b: TokenUsageWithCost): TokenUsageWit
   };
 }
 
-// 获取文件元数据
-function getFileMeta(filePath: string): FileMeta | null {
+// 获取文件元数据 (Async)
+async function getFileMetaAsync(filePath: string): Promise<FileMeta | null> {
   try {
-    const stat = fs.statSync(filePath);
+    const stat = await fsPromises.stat(filePath);
     return {
       mtime: stat.mtimeMs,
       size: stat.size,
@@ -200,8 +213,8 @@ function getFileMeta(filePath: string): FileMeta | null {
   }
 }
 
-// 加载缓存
-function loadCache(): UsageCache | null {
+// 加载缓存 (Sync - for initial render)
+function loadCacheSync(): UsageCache | null {
   try {
     const cachePath = getCachePath();
     if (!fs.existsSync(cachePath)) return null;
@@ -217,9 +230,25 @@ function loadCache(): UsageCache | null {
   }
 }
 
+// 加载缓存 (Async)
+async function loadCacheAsync(): Promise<UsageCache | null> {
+  try {
+    const cachePath = getCachePath();
+    const content = await fsPromises.readFile(cachePath, 'utf-8');
+    const data = JSON.parse(content) as UsageCache;
+
+    // 检查缓存版本
+    if (data.version !== CACHE_VERSION) return null;
+
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 // 从缓存快速聚合统计（不重新解析文件）
 export function getUsageStatsFromCache(): UsageStats | null {
-  const cache = loadCache();
+  const cache = loadCacheSync();
   if (!cache) return null;
 
   // 从缓存中聚合统计
@@ -269,11 +298,11 @@ export function getUsageStatsFromCache(): UsageStats | null {
   return stats;
 }
 
-// 保存缓存
-function saveCache(cache: UsageCache): void {
+// 保存缓存 (Async)
+async function saveCacheAsync(cache: UsageCache): Promise<void> {
   try {
-    ensureCcemDir();
-    fs.writeFileSync(getCachePath(), JSON.stringify(cache, null, 2));
+    await ensureCcemDir();
+    await fsPromises.writeFile(getCachePath(), JSON.stringify(cache, null, 2));
   } catch {
     // 保存失败，忽略
   }
@@ -294,14 +323,38 @@ interface JSONLEntry {
   };
 }
 
-function parseJSONLFile(filePath: string, prices: Record<string, ModelPrice>): FileStats {
+async function parseJSONLFileAsync(filePath: string, prices: Record<string, ModelPrice>, signal?: AbortSignal): Promise<FileStats> {
   const entries: FileStatsEntry[] = [];
 
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const lines = content.split('\n').filter(line => line.trim());
+    // 使用流式读取，避免一次性读取大文件占用过多内存和阻塞事件循环
+    const fileStream = fs.createReadStream(filePath, { encoding: 'utf-8' });
+    const rl = readline.createInterface({
+      input: fileStream,
+      crlfDelay: Infinity
+    });
 
-    for (const line of lines) {
+    let lineCount = 0;
+
+    // 使用 for await...of 遍历每一行
+    for await (const line of rl) {
+      lineCount++;
+
+      // 每处理 100 行检查一次 abort 信号，避免检查过于频繁
+      if (lineCount % 100 === 0) {
+        if (signal?.aborted) {
+          rl.close();
+          fileStream.destroy();
+          throw new Error('Aborted');
+        }
+        // 每 1000 行让出一次主线程，避免 UI 卡顿
+        if (lineCount % 1000 === 0) {
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
+      }
+
+      if (!line.trim()) continue;
+
       try {
         const entry = JSON.parse(line) as JSONLEntry;
 
@@ -330,33 +383,42 @@ function parseJSONLFile(filePath: string, prices: Record<string, ModelPrice>): F
         // 跳过无效行
       }
     }
-  } catch {
-    // 文件读取失败
+  } catch (err) {
+    if ((err as Error).message === 'Aborted') {
+      throw err;
+    }
+    // 其他错误忽略（文件读取失败等）
   }
 
   return { entries };
 }
 
-// 获取所有 JSONL 文件
-function getAllJSONLFiles(): string[] {
+// 获取所有 JSONL 文件 (Async)
+async function getAllJSONLFilesAsync(): Promise<string[]> {
+// ... (保持不变) ...
   const files: string[] = [];
 
-  if (!fs.existsSync(CLAUDE_PROJECTS_DIR)) return files;
-
   try {
-    const projects = fs.readdirSync(CLAUDE_PROJECTS_DIR);
+    const projectsDirExists = await fsPromises.access(CLAUDE_PROJECTS_DIR).then(() => true).catch(() => false);
+    if (!projectsDirExists) return files;
+
+    const projects = await fsPromises.readdir(CLAUDE_PROJECTS_DIR);
 
     for (const project of projects) {
       const projectPath = path.join(CLAUDE_PROJECTS_DIR, project);
-      const stat = fs.statSync(projectPath);
+      try {
+        const stat = await fsPromises.stat(projectPath);
 
-      if (stat.isDirectory()) {
-        const projectFiles = fs.readdirSync(projectPath);
-        for (const file of projectFiles) {
-          if (file.endsWith('.jsonl')) {
-            files.push(path.join(projectPath, file));
+        if (stat.isDirectory()) {
+          const projectFiles = await fsPromises.readdir(projectPath);
+          for (const file of projectFiles) {
+            if (file.endsWith('.jsonl')) {
+              files.push(path.join(projectPath, file));
+            }
           }
         }
+      } catch {
+        // 忽略无法访问的目录
       }
     }
   } catch {
@@ -366,11 +428,17 @@ function getAllJSONLFiles(): string[] {
   return files;
 }
 
-// 获取使用统计（带增量缓存）
-export async function getUsageStats(): Promise<UsageStats> {
+// 获取使用统计（带增量缓存）- 完全 Async
+export async function getUsageStats(signal?: AbortSignal): Promise<UsageStats> {
+  if (signal?.aborted) throw new Error('Aborted');
+
   const prices = await loadPrices();
-  const files = getAllJSONLFiles();
-  const cache = loadCache();
+  if (signal?.aborted) throw new Error('Aborted');
+
+  const files = await getAllJSONLFilesAsync();
+  if (signal?.aborted) throw new Error('Aborted');
+
+  const cache = await loadCacheAsync();
 
   // 构建新的缓存
   const newCache: UsageCache = {
@@ -382,40 +450,73 @@ export async function getUsageStats(): Promise<UsageStats> {
   // 收集所有 entries（从缓存或重新解析）
   const allEntries: FileStatsEntry[] = [];
 
-  for (const file of files) {
-    const meta = getFileMeta(file);
-    if (!meta) continue;
+  // 限制并发数，避免阻塞事件循环
+  const CONCURRENCY_LIMIT = 5;
 
-    // 检查缓存是否有效
-    const cachedFile = cache?.files[file];
-    const cacheValid = cachedFile &&
-      cachedFile.meta.mtime === meta.mtime &&
-      cachedFile.meta.size === meta.size;
-
-    let fileStats: FileStats;
-
-    if (cacheValid) {
-      // 使用缓存
-      fileStats = cachedFile.stats;
-    } else {
-      // 重新解析
-      fileStats = parseJSONLFile(file, prices);
-    }
-
-    // 保存到新缓存
-    newCache.files[file] = {
-      meta,
-      stats: fileStats,
-    };
-
-    // 收集 entries
-    allEntries.push(...fileStats.entries);
+  // 将文件分块
+  const chunks: string[][] = [];
+  for (let i = 0; i < files.length; i += CONCURRENCY_LIMIT) {
+    chunks.push(files.slice(i, i + CONCURRENCY_LIMIT));
   }
 
-  // 保存缓存
-  saveCache(newCache);
+  // 分块串行处理，块内并行
+  for (const chunk of chunks) {
+    // 检查取消信号
+    if (signal?.aborted) {
+      throw new Error('Aborted');
+    }
 
-  // 聚合统计（每次都重新聚合，因为时间窗口会变化）
+    const chunkPromises = chunk.map(async (file) => {
+      const meta = await getFileMetaAsync(file);
+      if (!meta) return null;
+
+      // 检查缓存是否有效
+      const cachedFile = cache?.files[file];
+      const cacheValid = cachedFile &&
+        cachedFile.meta.mtime === meta.mtime &&
+        cachedFile.meta.size === meta.size;
+
+      let fileStats: FileStats;
+
+      if (cacheValid) {
+        // 使用缓存
+        fileStats = cachedFile.stats;
+      } else {
+        // 重新解析
+        fileStats = await parseJSONLFileAsync(file, prices, signal);
+        // 让出时间片，避免 JSON.parse 连续占用 CPU
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+
+      // 返回结果而不是直接修改外部变量
+      return {
+        file,
+        meta,
+        stats: fileStats
+      };
+    });
+
+    const chunkResults = await Promise.all(chunkPromises);
+
+    // 处理结果
+    for (const result of chunkResults) {
+      if (!result) continue;
+
+      newCache.files[result.file] = {
+        meta: result.meta,
+        stats: result.stats,
+      };
+
+      allEntries.push(...result.stats.entries);
+    }
+  }
+
+  // 保存缓存 (Async, no await needed for return)
+  if (!signal?.aborted) {
+    saveCacheAsync(newCache).catch(() => {});
+  }
+
+  // 聚合统计
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const weekStart = new Date(todayStart);

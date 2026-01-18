@@ -70,6 +70,7 @@ const PERMISSION_MODES: PermissionModeName[] = ['yolo', 'dev', 'readonly', 'safe
 let usageStats: UsageStats | null = null;
 let usageLoading = true;
 let refreshCallback: (() => void) | null = null;
+let usageAbortController: AbortController | null = null;
 
 // 先从缓存快速加载，后台更新
 const initUsageStats = (onUpdate?: () => void): void => {
@@ -85,9 +86,18 @@ const initUsageStats = (onUpdate?: () => void): void => {
     }
   }
 
+  // 取消之前的请求
+  if (usageAbortController) {
+    usageAbortController.abort();
+  }
+  usageAbortController = new AbortController();
+  const signal = usageAbortController.signal;
+
   // 2. 后台异步更新缓存
-  getUsageStats()
+  getUsageStats(signal)
     .then(stats => {
+      if (signal.aborted) return;
+
       const needRefresh = usageLoading ||
         (usageStats && stats && usageStats.lastUpdated !== stats.lastUpdated);
       usageStats = stats;
@@ -98,7 +108,9 @@ const initUsageStats = (onUpdate?: () => void): void => {
         onUpdate();
       }
     })
-    .catch(() => {
+    .catch((err) => {
+      if (err.message === 'Aborted') return;
+
       usageLoading = false;
       stopSpinner();
     });
@@ -608,6 +620,13 @@ program
       ]);
 
       if (action === 'start') {
+        // 停止后台统计任务，释放资源
+        if (usageAbortController) {
+          usageAbortController.abort();
+          usageAbortController = null;
+        }
+        stopSpinner();
+
         if (!envConfig) {
           msg.error('No environment configuration found.');
           process.exit(1);
