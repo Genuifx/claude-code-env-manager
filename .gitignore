@@ -25,4 +25,4 @@ dist-ssr
 dist
 dist
 
-.review-state
+.review-state.worktrees/
