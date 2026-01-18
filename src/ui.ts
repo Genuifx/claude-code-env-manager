@@ -364,12 +364,151 @@ export const renderUsageSummary = (stats: UsageStats): string => {
   return parts.join('');
 };
 
+// Render Calendar Heatmap
+const renderCalendarHeatmap = (stats: UsageStats, months: number = 6): string => {
+  const lines: string[] = [];
+  const now = new Date();
+
+  // Calculate start date (Monday of the week 'months' ago)
+  const startDate = new Date(now);
+  startDate.setMonth(startDate.getMonth() - months);
+  // Adjust to previous Monday
+  const day = startDate.getDay();
+  const diff = startDate.getDate() - day + (day === 0 ? -6 : 1);
+  startDate.setDate(diff);
+  // Ensure we start at 00:00:00
+  startDate.setHours(0, 0, 0, 0);
+
+  // Generate all dates in range
+  const dates: string[] = [];
+  const d = new Date(startDate);
+  // Go until we cover full weeks up to now
+  while (d <= now || d.getDay() !== 1) { // Stop when we hit a Monday after now
+    dates.push(d.toISOString().split('T')[0]);
+    d.setDate(d.getDate() + 1);
+    if (d > now && d.getDay() === 1) break;
+  }
+
+  // Calculate max tokens for scaling (only in visible range)
+  let maxTokens = 0;
+  for (const date of dates) {
+    const usage = stats.dailyHistory[date];
+    if (usage) {
+      const tokens = getTotalTokens(usage);
+      if (tokens > maxTokens) maxTokens = tokens;
+    }
+  }
+
+  // Header (Months)
+  let header = '     ';
+  let currentMonth = -1;
+
+  const weeks = Math.ceil(dates.length / 7);
+  for (let w = 0; w < weeks; w++) {
+    const dateIndex = w * 7;
+    if (dateIndex < dates.length) {
+      const date = new Date(dates[dateIndex]);
+      const month = date.getMonth();
+      // Only show month label if it changes and we have enough space (not the very last column)
+      if (month !== currentMonth && w < weeks - 1) {
+        const monthName = date.toLocaleString('default', { month: 'short' });
+        header += theme.muted(monthName);
+        // Pad based on length to align with grid (2 chars per week)
+        // If month name is 3 chars ('Jan'), it takes 1.5 blocks.
+        // We just print it and skip spaces in next iterations or rely on visual approximation?
+        // Better approach: Check if we are at the start of a month
+        currentMonth = month;
+        // Simple padding for now: each week is 2 chars width ("X ")
+        // We added 3 chars. So we essentially "consumed" 1.5 weeks.
+        // Let's just output the month name and let it overflow slightly or handle spacing carefully.
+        // Simplified approach: Just print at the start of the month, reset spacing counter.
+      }
+    }
+    // Add spacing for the grid column if not printing month
+    // This is tricky with variable length text.
+    // Let's use a simpler heuristic: Just print spaces, but overlay month names?
+    // Alternative: Just print month names approximately.
+  }
+
+  // Re-doing Header to be simpler and aligned
+  header = '     ';
+  let lastMonth = -1;
+  for (let w = 0; w < weeks; w++) {
+    const dateIndex = w * 7;
+    if (dateIndex >= dates.length) break;
+    const date = new Date(dates[dateIndex]);
+    const month = date.getMonth();
+
+    if (month !== lastMonth) {
+        const monthName = date.toLocaleString('default', { month: 'short' });
+        header += theme.muted(monthName.padEnd(4)); // 2 weeks space
+        w++; // Skip next week slot visually to prevent overlap
+        lastMonth = month;
+    } else {
+        header += '  ';
+    }
+  }
+  lines.push(header);
+
+  // Grid (Days Mon-Sun)
+  const dayLabels = ['Mon', '', 'Wed', '', 'Fri', '', 'Sun'];
+  const levels = [' ', '░', '▒', '▓', '█'];
+
+  for (let dayOfWeek = 0; dayOfWeek < 7; dayOfWeek++) {
+    let row = theme.muted((dayLabels[dayOfWeek] || '').padEnd(4) + ' ');
+
+    for (let w = 0; w < weeks; w++) {
+      const dateIndex = w * 7 + dayOfWeek;
+      if (dateIndex < dates.length) {
+        const dateKey = dates[dateIndex];
+        // Don't show future dates
+        if (new Date(dateKey) > now) {
+           row += '  ';
+        } else {
+           const usage = stats.dailyHistory[dateKey];
+           const tokens = usage ? getTotalTokens(usage) : 0;
+
+           let level = 0;
+           if (tokens > 0) {
+             if (maxTokens === 0) level = 0;
+             else {
+               // Linear scale 1-4
+               level = Math.ceil((tokens / maxTokens) * 4);
+             }
+           }
+           // Use level 0 char for 0 tokens
+           row += (level === 0 ? theme.dim('·') : theme.primary(levels[level])) + ' ';
+        }
+      }
+    }
+    lines.push(row);
+  }
+
+  // Legend
+  lines.push('');
+  lines.push('     ' + theme.dim('Less ') +
+    theme.dim('·') + ' ' +
+    theme.primary(levels[1]) + ' ' +
+    theme.primary(levels[2]) + ' ' +
+    theme.primary(levels[3]) + ' ' +
+    theme.primary(levels[4]) + ' ' +
+    theme.dim(' More'));
+
+  return lines.join('\n');
+};
+
 // Usage 详细统计页面
 export const renderUsageDetail = (stats: UsageStats): string => {
   const lines: string[] = [];
 
   lines.push('');
   lines.push(theme.primary('  Token Usage Statistics'));
+  lines.push(theme.dim('─'.repeat(60)));
+
+  // Heatmap
+  lines.push('');
+  lines.push(renderCalendarHeatmap(stats));
+  lines.push('');
   lines.push(theme.dim('─'.repeat(60)));
 
   // 时间段统计表格

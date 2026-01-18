@@ -232,6 +232,7 @@ export function getUsageStatsFromCache(): UsageStats | null {
     today: emptyUsage(),
     week: emptyUsage(),
     total: emptyUsage(),
+    dailyHistory: {},
     byModel: {},
     lastUpdated: now.toISOString(),
   };
@@ -239,8 +240,15 @@ export function getUsageStatsFromCache(): UsageStats | null {
   for (const fileData of Object.values(cache.files)) {
     for (const entry of fileData.stats.entries) {
       const entryTime = new Date(entry.timestamp);
+      const dateKey = entry.timestamp.split('T')[0]; // YYYY-MM-DD
 
       stats.total = mergeUsage(stats.total, entry.usage);
+
+      // Daily History
+      if (!stats.dailyHistory[dateKey]) {
+        stats.dailyHistory[dateKey] = emptyUsage();
+      }
+      stats.dailyHistory[dateKey] = mergeUsage(stats.dailyHistory[dateKey], entry.usage);
 
       const normalizedModel = normalizeModelName(entry.model);
       if (!stats.byModel[normalizedModel]) {
@@ -417,15 +425,23 @@ export async function getUsageStats(): Promise<UsageStats> {
     today: emptyUsage(),
     week: emptyUsage(),
     total: emptyUsage(),
+    dailyHistory: {},
     byModel: {},
     lastUpdated: now.toISOString(),
   };
 
   for (const entry of allEntries) {
     const entryTime = new Date(entry.timestamp);
+    const dateKey = entry.timestamp.split('T')[0]; // YYYY-MM-DD
 
     // 总计
     stats.total = mergeUsage(stats.total, entry.usage);
+
+    // Daily History
+    if (!stats.dailyHistory[dateKey]) {
+      stats.dailyHistory[dateKey] = emptyUsage();
+    }
+    stats.dailyHistory[dateKey] = mergeUsage(stats.dailyHistory[dateKey], entry.usage);
 
     // 按模型
     const normalizedModel = normalizeModelName(entry.model);

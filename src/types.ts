@@ -50,6 +50,7 @@ export interface UsageStats {
   today: TokenUsageWithCost;
   week: TokenUsageWithCost;
   total: TokenUsageWithCost;
+  dailyHistory: Record<string, TokenUsageWithCost>; // key: YYYY-MM-DD
   byModel: Record<string, TokenUsageWithCost>;
   lastUpdated: string;
 }
