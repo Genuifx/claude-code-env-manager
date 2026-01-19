@@ -1,89 +1,85 @@
 # Claude Code Env Manager
 
-优雅的使用Claude Code 🍷。 快速切换环境，一个命令启动 Claude Code。API Key 加密存储，内置常用服务商配置。
+优雅的使用 Claude Code 🍷
+
+切换 API 服务商、配置权限模式、查看用量统计、安装 Skills。
 
 ![Demo](./index.png)
 
-## 核心功能
+## 这工具干嘛的
 
-### 多环境管理
+用 Claude Code 的人可能会遇到几个烦心事：
 
-支持同时管理多个 API 服务商配置，包括官方 Anthropic、GLM（智谱 AI）、KIMI（月之暗面）、MiniMax、DeepSeek。每个环境独立存储 Base URL、API Key、模型名称。API Key 使用 AES-256-CBC 加密本地存储。
+- 想用国产模型（GLM、KIMI、DeepSeek）但每次都要手动设置环境变量
+- 每次执行命令都要点"允许"，烦死了，但又不想用 `--dangerously-skip-permissions`
+- 想知道这个月花了多少钱，但 Claude 没有用量统计界面
 
-### 权限模式快捷切换
-
-不想使用`--dangerously-skip-permissions`，又被繁琐的权限请求许可搞烦了？ ccem 内置 6 种权限预设，一键切换 Claude Code 的权限配置，减少 9 成的权限许可同时保证安全性：
-
-| 模式 | 说明 |
-|------|------|
-| yolo | 允许所有操作，无任何限制 |
-| dev | 标准开发权限，保护敏感文件 |
-| readonly | 只读模式，禁止任何修改 |
-| safe | 保守模式，适合不熟悉的代码库 |
-| ci | CI/CD 流水线专用权限 |
-| audit | 只读加搜索，用于安全审计 |
-
-### 用量统计
-
-自动解析 Claude Code 的日志文件，统计 token 使用量和费用。支持按项目、按时间段查看，价格数据从 LiteLLM 实时获取。
+ccem 就是解决这些问题的。
 
 ## 安装
 
 ```bash
 npm install -g claude-code-env-manager
-```
-
-或者用 pnpm
-
-```bash
+# 或
 pnpm add -g claude-code-env-manager
-```
-
-直接 npx 运行也可以
-
-```bash
+# 或直接跑
 npx claude-code-env-manager
 ```
 
 ## 快速上手
 
-终端里敲 `ccem` 回车，进入交互式菜单。当前环境、Base URL、模型名称一目了然。
-
-添加新环境：
-
 ```bash
-ccem add kimi
-```
-
-选择预设后输入 API Key，URL 和模型名自动填充。
-
-切换环境：
-
-```bash
-ccem use kimi
+ccem              # 进入交互菜单
+ccem add kimi     # 添加 KIMI 环境，自动填好 URL 和模型
+ccem use kimi     # 切换到 KIMI
+ccem dev          # 用开发模式启动 Claude Code
 ```
 
 ![Demo](./demo.png)
 
-## 权限模式
+---
 
-临时切换（退出后自动还原）：
+## 环境管理
+
+### 交互菜单
+
+运行 `ccem` 会看到一个菜单：
+
+| 选项 | 干嘛用 |
+|------|--------|
+| Start Claude Code | 启动，如果设了默认权限模式会自动带上 |
+| Switch Environment | 切换 API 环境 |
+| Permission Mode | 选个权限模式再启动 |
+| View Usage | 看用量和花费 |
+| Set Default Mode | 设置默认权限模式 |
+
+### 命令
 
 ```bash
-ccem yolo    # 放飞模式
-ccem safe    # 保守模式
-ccem audit   # 审计模式
+ccem ls              # 列出所有环境
+ccem use <name>      # 切换环境
+ccem add <name>      # 添加环境
+ccem del <name>      # 删除环境（official 删不掉）
+ccem current         # 当前用的哪个环境
+ccem env             # 输出 export 命令，配合 eval 用
+ccem env --json      # 输出 JSON
+ccem run <command>   # 带着环境变量跑命令
 ```
 
-永久设置：
+### 内置预设
 
-```bash
-ccem setup perms --dev
-```
+添加环境时可以选预设，省得自己填 URL：
 
-## Shell 集成
+| 预设 | Base URL | 模型 |
+|------|----------|------|
+| GLM（智谱） | `https://open.bigmodel.cn/api/anthropic` | glm-4.6 |
+| KIMI（月之暗面） | `https://api.moonshot.cn/anthropic` | kimi-k2-thinking-turbo |
+| MiniMax | `https://api.minimaxi.com/anthropic` | MiniMax-M2 |
+| DeepSeek | `https://api.deepseek.com/anthropic` | deepseek-chat |
 
-让 `ccem use` 后环境变量立刻在当前终端生效，把下面这段加到 `~/.zshrc` 或 `~/.bashrc`：
+### Shell 集成
+
+`ccem use` 切换环境后，当前终端的环境变量不会自动更新。加这段到 `~/.zshrc` 或 `~/.bashrc`：
 
 ```bash
 ccem() {
@@ -98,22 +94,271 @@ ccem() {
 }
 ```
 
-然后 `source ~/.zshrc` 生效。
+加完跑一下 `source ~/.zshrc`。
 
-## 命令一览
+---
+
+## 权限模式
+
+Claude Code 默认每个操作都要确认。用 `--dangerously-skip-permissions` 又太放飞。ccem 提供 6 种预设，在"什么都要确认"和"什么都不管"之间找个平衡。
+
+### 6 种模式
+
+| 模式 | 图标 | 说明 | 什么时候用 |
+|------|------|------|------------|
+| yolo | 🔓 | 全部放开 | 自己的项目，完全信任 |
+| dev | 💻 | 开发常用权限，屏蔽敏感文件 | 日常开发 |
+| readonly | 👀 | 只能读不能改 | 看代码、学习 |
+| safe | 🛡️ | 限制网络和修改 | 不熟悉的代码库 |
+| ci | 🔧 | CI/CD 用 | 自动化流程 |
+| audit | 🔍 | 只读 + 搜索 | 安全审计 |
+
+### 临时模式
+
+退出就还原，不改配置文件：
 
 ```bash
-ccem              # 交互式菜单
-ccem ls           # 列出所有环境
-ccem use <name>   # 切换环境
-ccem add <name>   # 添加环境
-ccem del <name>   # 删除环境
-ccem current      # 显示当前环境
-ccem env          # 输出环境变量（用于 eval）
-ccem run <cmd>    # 注入环境变量后执行命令
-ccem --mode       # 显示当前权限模式
-ccem --list-modes # 列出所有权限模式
+ccem yolo      # 放飞
+ccem dev       # 开发
+ccem readonly  # 只读
+ccem safe      # 安全
+ccem ci        # CI
+ccem audit     # 审计
 ```
+
+实现方式是通过 `--allowedTools` 和 `--disallowedTools` 参数传给 Claude Code。
+
+### 永久模式
+
+写到 `.claude/settings.json`，下次启动还生效：
+
+```bash
+ccem setup perms --yolo
+ccem setup perms --dev
+ccem setup perms --readonly
+ccem setup perms --safe
+ccem setup perms --ci
+ccem setup perms --audit
+ccem setup perms --reset     # 恢复默认
+```
+
+### 默认模式
+
+设了默认模式后，交互菜单里点 "Start Claude Code" 会自动用这个模式：
+
+```bash
+ccem setup default-mode --dev    # 默认用开发模式
+ccem setup default-mode --reset  # 清掉默认设置
+ccem setup default-mode          # 看当前默认是啥
+```
+
+### 查看当前权限
+
+```bash
+ccem --mode        # 当前用的什么模式
+ccem --list-modes  # 列出所有模式
+```
+
+### 权限细节
+
+<details>
+<summary><b>dev 模式具体允许/禁止什么</b></summary>
+
+**允许：**
+- 文件：Read、Edit、Write、Glob、Grep、LSP、NotebookEdit
+- 开发工具：npm、pnpm、yarn、bun、node、npx、git、tsc、tsx
+- 质量工具：eslint、prettier、jest、vitest
+- 其他：cargo、python、pip、go、make、cmake
+- 常用命令：ls、cat、head、tail、find、wc、mkdir、cp、mv、touch
+- WebSearch
+
+**禁止：**
+- 敏感文件：.env、.env.*、secrets/、*.pem、*.key、*credential*
+- 危险命令：rm -rf、sudo、chmod、chown
+
+</details>
+
+<details>
+<summary><b>safe 模式具体允许/禁止什么</b></summary>
+
+**允许：**
+- 只读：Read、Glob、Grep、LSP
+- Git 查看：git status、git log、git diff
+- 文件查看：ls、cat、head、tail、find、wc
+
+**禁止：**
+- 敏感文件：.env、secrets/、*.pem、*.key、*credential*、*password*
+- 修改：Edit、Write、NotebookEdit
+- 网络：curl、wget、ssh、scp、WebFetch
+- 文件操作：rm、mv
+
+</details>
+
+---
+
+## 用量统计
+
+ccem 会读 Claude Code 的日志（在 `~/.claude/projects/` 下面的 JSONL 文件），统计 token 用量和费用。
+
+价格数据从 LiteLLM 的 GitHub 仓库拉取，会缓存到本地。
+
+交互菜单里选 "View Usage" 可以看详细统计：
+
+```
+  Token Usage Statistics
+────────────────────────────────────────────────────────
+     Oct     Nov     Dec     Jan
+Mon  ·  ░  ▒  ▓  █  ░  ·  ▒  ...
+Tue  ░  ▒  ·  █  ▓  ░  ▒  ·  ...
+...
+
+     Less · ░ ▒ ▓ █  More
+
+  Period      Input    Output   Cache Read   Cost
+  Today       12.5K    8.2K     45.3K        $0.15
+  This Week   89.2K    52.1K    312.4K       $1.23
+  All Time    1.2M     823.5K   4.5M         $15.67
+
+  By Model
+  claude-sonnet-4-5    823.5K    $12.34
+  claude-haiku-4-5     412.3K    $3.33
+```
+
+日志解析结果会缓存到 `~/.ccem/usage-cache.json`，下次打开会先显示缓存数据，后台更新。
+
+---
+
+## Skill 管理
+
+可以从 GitHub 装 Claude Code 的 Skills。装完会放到当前目录的 `.claude/skills/` 下面。
+
+```bash
+ccem skill add              # 交互选择
+ccem skill add <name>       # 装预设的
+ccem skill add <github-url> # 从 GitHub 装
+ccem skill ls               # 列出已装的
+ccem skill rm <name>        # 删掉
+```
+
+### 预设列表
+
+| Skill | 干嘛用 |
+|-------|--------|
+| frontend-design | 前端界面设计 |
+| skill-creator | 创建新 skill |
+| web-artifacts-builder | 做可交互的 Web 组件 |
+| canvas-design | Canvas 绘图 |
+| algorithmic-art | 算法艺术 |
+| theme-factory | 做 UI 主题 |
+| mcp-builder | 做 MCP 服务器 |
+| webapp-testing | Web 应用测试 |
+| pdf | 处理 PDF |
+| docx | 处理 Word |
+| pptx | 处理 PPT |
+| xlsx | 处理 Excel |
+| brand-guidelines | 品牌指南 |
+| doc-coauthoring | 文档协作 |
+| internal-comms | 内部通信文档 |
+| slack-gif-creator | 做 Slack GIF |
+
+### 从 GitHub 装
+
+```bash
+ccem skill add https://github.com/owner/repo
+ccem skill add https://github.com/owner/repo/tree/main/path/to/skill
+ccem skill add owner/repo
+```
+
+---
+
+## 初始化
+
+新装 Claude Code 后可以跑一下：
+
+```bash
+ccem setup init
+```
+
+会做三件事：
+
+1. 设置 `hasCompletedOnboarding: true`，跳过新手引导
+2. 禁用遥测（设置 `DISABLE_TELEMETRY=1` 等环境变量）
+3. 装 `chrome-devtools` MCP 工具
+
+配置写到：
+- `~/.claude.json`
+- `~/.claude/settings.json`
+
+---
+
+## 命令速查
+
+### 环境
+
+| 命令 | 说明 |
+|------|------|
+| `ccem` | 交互菜单 |
+| `ccem ls` | 列出环境 |
+| `ccem use <name>` | 切换 |
+| `ccem add <name>` | 添加 |
+| `ccem del <name>` | 删除 |
+| `ccem current` | 当前环境 |
+| `ccem env` | 输出环境变量 |
+| `ccem env --json` | JSON 格式 |
+| `ccem run <cmd>` | 带环境变量跑命令 |
+
+### 权限（临时）
+
+| 命令 | 说明 |
+|------|------|
+| `ccem yolo` | YOLO 模式 |
+| `ccem dev` | 开发模式 |
+| `ccem readonly` | 只读模式 |
+| `ccem safe` | 安全模式 |
+| `ccem ci` | CI 模式 |
+| `ccem audit` | 审计模式 |
+| `ccem --mode` | 看当前模式 |
+| `ccem --list-modes` | 列出所有模式 |
+
+### 权限（永久）
+
+| 命令 | 说明 |
+|------|------|
+| `ccem setup perms --<mode>` | 永久应用 |
+| `ccem setup perms --reset` | 重置 |
+| `ccem setup default-mode --<mode>` | 设默认模式 |
+| `ccem setup default-mode --reset` | 清默认模式 |
+| `ccem setup default-mode` | 看默认模式 |
+
+### Skill
+
+| 命令 | 说明 |
+|------|------|
+| `ccem skill add` | 交互添加 |
+| `ccem skill add <name>` | 添加预设 |
+| `ccem skill add <url>` | 从 GitHub 添加 |
+| `ccem skill ls` | 列出已装 |
+| `ccem skill rm <name>` | 删除 |
+
+### 初始化
+
+| 命令 | 说明 |
+|------|------|
+| `ccem setup init` | 初始化配置 |
+
+---
+
+## 数据存哪了
+
+| 路径 | 内容 |
+|------|------|
+| `~/.config/claude-code-env-manager/` | 环境配置 |
+| `~/.ccem/usage-cache.json` | 用量缓存 |
+| `~/.ccem/model-prices.json` | 价格缓存 |
+| `.claude/settings.json` | 项目权限配置 |
+| `.claude/skills/` | 已装的 skills |
+
+---
 
 ## License
 
