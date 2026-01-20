@@ -7,113 +7,175 @@ import * as fs from 'fs';
 import * as path from 'path';
 import chalk from 'chalk';
 
+// 分组类型
+export type SkillGroup = 'official' | 'featured' | 'others';
+
+// 安装方式类型
+export type InstallMethod =
+  | { type: 'preset'; name: string }
+  | { type: 'github'; url: string }
+  | { type: 'plugin'; marketplace: string; package: string };
+
+// 分组元信息
+export const SKILL_GROUPS: Record<SkillGroup, { label: string; icon: string }> = {
+  official: { label: '官方', icon: '🏢' },
+  featured: { label: '精选', icon: '⭐' },
+  others: { label: '其他', icon: '📦' },
+};
+
 export interface SkillPreset {
   name: string;
   description: string;
-  repo: string;       // GitHub 仓库路径 owner/repo
-  path?: string;      // 仓库内的子路径（如 skills/frontend-design）
-  branch?: string;    // 分支名，默认 main
+  group: SkillGroup;
+  install: InstallMethod;
 }
 
-// 官方 skills 预设列表
+// Skills 预设列表（按分组）
 export const SKILL_PRESETS: SkillPreset[] = [
+  // ===== 官方 (Official) =====
   {
     name: 'frontend-design',
     description: '创建高质量前端界面设计',
-    repo: 'anthropics/skills',
-    path: 'skills/frontend-design',
+    group: 'official',
+    install: { type: 'preset', name: 'frontend-design' },
   },
   {
     name: 'skill-creator',
     description: '创建新的 Claude Code skills',
-    repo: 'anthropics/skills',
-    path: 'skills/skill-creator',
+    group: 'official',
+    install: { type: 'preset', name: 'skill-creator' },
   },
   {
     name: 'web-artifacts-builder',
     description: '构建可交互的 Web 组件',
-    repo: 'anthropics/skills',
-    path: 'skills/web-artifacts-builder',
+    group: 'official',
+    install: { type: 'preset', name: 'web-artifacts-builder' },
   },
   {
     name: 'canvas-design',
     description: 'Canvas 绘图设计',
-    repo: 'anthropics/skills',
-    path: 'skills/canvas-design',
+    group: 'official',
+    install: { type: 'preset', name: 'canvas-design' },
   },
   {
     name: 'algorithmic-art',
     description: '算法艺术生成',
-    repo: 'anthropics/skills',
-    path: 'skills/algorithmic-art',
+    group: 'official',
+    install: { type: 'preset', name: 'algorithmic-art' },
   },
   {
     name: 'theme-factory',
     description: '主题工厂 - 创建 UI 主题',
-    repo: 'anthropics/skills',
-    path: 'skills/theme-factory',
+    group: 'official',
+    install: { type: 'preset', name: 'theme-factory' },
   },
   {
     name: 'mcp-builder',
     description: '构建 MCP 服务器',
-    repo: 'anthropics/skills',
-    path: 'skills/mcp-builder',
+    group: 'official',
+    install: { type: 'preset', name: 'mcp-builder' },
   },
   {
     name: 'webapp-testing',
     description: 'Web 应用测试',
-    repo: 'anthropics/skills',
-    path: 'skills/webapp-testing',
+    group: 'official',
+    install: { type: 'preset', name: 'webapp-testing' },
   },
   {
     name: 'pdf',
     description: 'PDF 文档处理',
-    repo: 'anthropics/skills',
-    path: 'skills/pdf',
+    group: 'official',
+    install: { type: 'preset', name: 'pdf' },
   },
   {
     name: 'docx',
     description: 'Word 文档处理',
-    repo: 'anthropics/skills',
-    path: 'skills/docx',
+    group: 'official',
+    install: { type: 'preset', name: 'docx' },
   },
   {
     name: 'pptx',
     description: 'PowerPoint 演示文稿处理',
-    repo: 'anthropics/skills',
-    path: 'skills/pptx',
+    group: 'official',
+    install: { type: 'preset', name: 'pptx' },
   },
   {
     name: 'xlsx',
     description: 'Excel 表格处理',
-    repo: 'anthropics/skills',
-    path: 'skills/xlsx',
+    group: 'official',
+    install: { type: 'preset', name: 'xlsx' },
   },
   {
     name: 'brand-guidelines',
     description: '品牌指南生成',
-    repo: 'anthropics/skills',
-    path: 'skills/brand-guidelines',
+    group: 'official',
+    install: { type: 'preset', name: 'brand-guidelines' },
   },
   {
     name: 'doc-coauthoring',
     description: '文档协作编写',
-    repo: 'anthropics/skills',
-    path: 'skills/doc-coauthoring',
+    group: 'official',
+    install: { type: 'preset', name: 'doc-coauthoring' },
   },
   {
     name: 'internal-comms',
     description: '内部通信文档',
-    repo: 'anthropics/skills',
-    path: 'skills/internal-comms',
+    group: 'official',
+    install: { type: 'preset', name: 'internal-comms' },
   },
   {
     name: 'slack-gif-creator',
     description: 'Slack GIF 创建器',
-    repo: 'anthropics/skills',
-    path: 'skills/slack-gif-creator',
+    group: 'official',
+    install: { type: 'preset', name: 'slack-gif-creator' },
+  },
+
+  // ===== 精选 (Featured) =====
+  {
+    name: 'superpowers',
+    description: 'Claude Code Plan模式升级版，连续追问讨论确定开发方案',
+    group: 'featured',
+    install: {
+      type: 'plugin',
+      marketplace: 'obra/superpowers-marketplace',
+      package: 'superpowers@superpowers-marketplace',
+    },
+  },
+  {
+    name: 'ui-ux-pro-max',
+    description: '专业 UI/UX 设计',
+    group: 'featured',
+    install: {
+      type: 'github',
+      url: 'https://github.com/nextlevelbuilder/ui-ux-pro-max-skill/tree/main/.claude/skills/ui-ux-pro-max',
+    },
+  },
+
+  // ===== 其他 (Others) =====
+  {
+    name: 'skill-writer',
+    description: '指导用户为 Claude Code 创建代理技能',
+    group: 'others',
+    install: {
+      type: 'github',
+      url: 'https://github.com/pytorch/pytorch/tree/main/.claude/skills/skill-writer',
+    },
   },
 ];
+
+/**
+ * 按分组获取 skills
+ */
+export function getSkillsByGroup(group: SkillGroup): SkillPreset[] {
+  return SKILL_PRESETS.filter(p => p.group === group);
+}
+
+/**
+ * 获取所有分组（按顺序）
+ */
+export function getGroupOrder(): SkillGroup[] {
+  return ['official', 'featured', 'others'];
+}
 
 /**
  * 解析 GitHub URL
@@ -278,14 +340,37 @@ export function addSkillFromGitHub(urlOrPreset: string): boolean {
   // 检查是否是预设名称
   const preset = SKILL_PRESETS.find(p => p.name === urlOrPreset);
   if (preset) {
-    const [owner, repo] = preset.repo.split('/');
-    return downloadSkillWithGit(
-      owner,
-      repo,
-      preset.branch || 'main',
-      preset.path || '',
-      preset.name
-    );
+    // 根据安装方式处理
+    if (preset.install.type === 'preset') {
+      // 官方预设：从 anthropics/skills 仓库安装
+      return downloadSkillWithGit(
+        'anthropics',
+        'skills',
+        'main',
+        `skills/${preset.install.name}`,
+        preset.name
+      );
+    } else if (preset.install.type === 'github') {
+      // GitHub URL 安装
+      const parsed = parseGitHubUrl(preset.install.url);
+      if (!parsed) {
+        console.error(chalk.red(`Invalid GitHub URL in preset: ${preset.install.url}`));
+        return false;
+      }
+      return downloadSkillWithGit(
+        parsed.owner,
+        parsed.repo,
+        parsed.branch,
+        parsed.path,
+        preset.name
+      );
+    } else if (preset.install.type === 'plugin') {
+      // Plugin 安装（暂不支持，提示用户）
+      console.error(chalk.yellow(`Plugin installation not yet supported for "${preset.name}"`));
+      console.log(chalk.gray(`Marketplace: ${preset.install.marketplace}`));
+      console.log(chalk.gray(`Package: ${preset.install.package}`));
+      return false;
+    }
   }
 
   // 解析 GitHub URL
