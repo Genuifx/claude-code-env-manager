@@ -41,11 +41,12 @@ import { getUsageStats, getUsageStatsFromCache } from './usage.js';
 import { runSetupInit } from './setup.js';
 import type { UsageStats } from './types.js';
 import {
-  SKILL_PRESETS,
   addSkillFromGitHub,
   listInstalledSkills,
   removeSkill,
+  installSkill,
 } from './skills.js';
+import { runSkillSelector } from './components/index.js';
 
 const program = new Command();
 const config = new Conf({
@@ -488,28 +489,16 @@ skillCmd
       // 直接添加指定的 URL 或预设名
       addSkillFromGitHub(url);
     } else {
-      // 交互式选择
-      const choices = [
-        ...SKILL_PRESETS.map(p => ({
-          name: `${chalk.cyan(p.name)} - ${chalk.gray(p.description)}`,
-          value: p.name,
-          short: p.name,
-        })),
-        new inquirer.Separator(),
-        { name: chalk.yellow('输入自定义 GitHub URL'), value: '__custom__', short: 'Custom' },
-      ];
+      // 交互式选择（使用 ink Tab 选择器）
+      const result = await runSkillSelector();
 
-      const { selected } = await inquirer.prompt([
-        {
-          type: 'list',
-          name: 'selected',
-          message: '选择要添加的 skill',
-          choices,
-          pageSize: 15,
-        }
-      ]);
+      if (result.type === 'cancelled') {
+        console.log(chalk.yellow('已取消'));
+        return;
+      }
 
-      if (selected === '__custom__') {
+      if (result.type === 'custom') {
+        // 用户选择自定义 URL
         const { customUrl } = await inquirer.prompt([
           {
             type: 'input',
@@ -525,8 +514,9 @@ skillCmd
           }
         ]);
         addSkillFromGitHub(customUrl);
-      } else {
-        addSkillFromGitHub(selected);
+      } else if (result.skill) {
+        // 使用统一安装函数
+        installSkill(result.skill);
       }
     }
   });
