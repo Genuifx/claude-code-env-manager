@@ -438,3 +438,62 @@ export function removeSkill(name: string): boolean {
   console.log(chalk.green(`Removed skill "${name}"`));
   return true;
 }
+
+/**
+ * 从 Plugin Marketplace 安装 skill
+ */
+export function installFromPluginMarketplace(
+  marketplace: string,
+  packageName: string
+): boolean {
+  try {
+    console.log(chalk.cyan(`Adding marketplace: ${marketplace}...`));
+    execSync(`claude plugin marketplace add ${marketplace}`, { stdio: 'inherit' });
+
+    console.log(chalk.cyan(`Installing package: ${packageName}...`));
+    execSync(`claude plugin install ${packageName}`, { stdio: 'inherit' });
+
+    console.log(chalk.green(`Successfully installed ${packageName}`));
+    return true;
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error(chalk.red(`Failed to install from marketplace: ${errMsg}`));
+    return false;
+  }
+}
+
+/**
+ * 统一安装入口 - 根据 InstallMethod 类型选择安装方式
+ */
+export function installSkill(preset: SkillPreset): boolean {
+  console.log(chalk.cyan(`Installing ${preset.name}...`));
+
+  switch (preset.install.type) {
+    case 'preset':
+      // 官方预设：使用现有的 GitHub 下载逻辑
+      const officialPreset = {
+        repo: 'anthropics/skills',
+        path: `skills/${preset.install.name}`,
+        branch: 'main',
+      };
+      const [owner, repo] = officialPreset.repo.split('/');
+      return downloadSkillWithGit(
+        owner,
+        repo,
+        officialPreset.branch,
+        officialPreset.path,
+        preset.name
+      );
+
+    case 'github':
+      // GitHub URL：直接使用 URL 安装
+      return addSkillFromGitHub(preset.install.url);
+
+    case 'plugin':
+      // Plugin Marketplace：使用 claude 命令安装
+      return installFromPluginMarketplace(
+        preset.install.marketplace,
+        preset.install.package
+      );
+  }
+}
