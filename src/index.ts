@@ -8,14 +8,19 @@ import { spawn } from 'child_process';
 import * as readline from 'readline';
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 
-// 读取 package.json 版本号（CJS 兼容）
+// ESM 兼容：获取 __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// 读取 package.json 版本号
 const pkgPath = path.resolve(__dirname, '..', 'package.json');
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
 
 import type { EnvConfig, PermissionModeName } from './types.js';
 import { encrypt, decrypt } from './utils.js';
-import { ENV_PRESETS, PERMISSION_PRESETS } from './presets.js';
+import { ENV_PRESETS, PERMISSION_PRESETS } from './presets.js'; // SKILL_PRESETS removed
 import {
   renderCompactHeader,
   renderEnvPanel,
