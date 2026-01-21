@@ -9,35 +9,42 @@ Claude Code Environment Manager (ccem) is a CLI tool for managing multiple API c
 ## Commands
 
 ```bash
-# Build
-npm run build      # Build with tsup (outputs to dist/)
-npm run dev        # Watch mode for development
+# Build (ESM output to dist/)
+pnpm run build
+
+# Watch mode for development
+pnpm run dev
 
 # Run locally
-npm run start      # Run built CLI
-node dist/index.js # Direct execution
+pnpm run start
+node dist/index.js
 ```
 
 ## Architecture
 
-Modular CLI application using:
+ESM-based modular CLI application using:
 - **commander** - CLI command parsing
 - **conf** - Persistent JSON config storage (stored in OS config directory)
 - **inquirer** - Interactive prompts
+- **ink/react** - Terminal UI components (Tab selector for skill groups)
 - **chalk/cli-table3** - Terminal formatting
 
 ### Source Files
 
 ```
 src/
-├── index.ts       # Main entry, CLI commands
-├── types.ts       # TypeScript type definitions
-├── utils.ts       # Utility functions (encryption, project root detection)
-├── presets.ts     # Environment presets and permission presets
-├── permissions.ts # Permission management core logic
-├── ui.ts          # UI components (menus, panels, formatting)
-├── usage.ts       # Usage statistics tracking and cost calculation
-└── setup.ts       # Claude Code initialization (onboarding, privacy, MCP tools)
+├── index.ts           # Main entry, CLI commands
+├── types.ts           # TypeScript type definitions
+├── utils.ts           # Utility functions (encryption, project root detection)
+├── presets.ts         # Environment presets and permission presets
+├── permissions.ts     # Permission management core logic
+├── ui.ts              # UI components (menus, panels, formatting)
+├── usage.ts           # Usage statistics tracking and cost calculation
+├── setup.ts           # Claude Code initialization (onboarding, privacy, MCP tools)
+├── skills.ts          # Skill management (presets, install methods, GitHub download)
+└── components/
+    ├── index.tsx      # Ink render entry point (runSkillSelector)
+    └── SkillSelector.tsx  # Tab-based skill group selector component
 ```
 
 ### Key Components
@@ -46,6 +53,10 @@ src/
 - **Encryption**: API keys encrypted with AES-256-CBC before storage (obfuscation, not secure storage - key is derived from hardcoded secret).
 - **Environment Presets**: Built-in configurations for GLM, KIMI, MiniMax, DeepSeek defined in `ENV_PRESETS`.
 - **Permission Presets**: Built-in permission modes (yolo, dev, readonly, safe, ci, audit) defined in `PERMISSION_PRESETS`.
+- **Skill Groups**: Three categories (official, featured, others) with different install methods:
+  - `preset`: Official anthropics/skills via git sparse-checkout
+  - `github`: Direct GitHub URL installation
+  - `plugin`: Claude Plugin Marketplace installation
 - **Usage Statistics**: Parses Claude's JSONL logs from `~/.claude/projects/` to track token usage and costs. Uses incremental caching in `~/.ccem/usage-cache.json`. Prices fetched from LiteLLM with local fallback.
 - **Environment variables managed**: `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`
 
@@ -84,6 +95,13 @@ src/
 - `ccem setup default-mode --dev` - Set default permission mode for interactive menu
 - `ccem setup default-mode --reset` - Clear default mode setting
 - `ccem setup default-mode` - Show current default mode
+
+#### Skill Management
+- `ccem skill add` - Interactive Tab-based skill selector (Tab to switch groups, arrows to select)
+- `ccem skill add <name>` - Add skill by preset name
+- `ccem skill add <github-url>` - Add skill from GitHub URL
+- `ccem skill ls` - List installed skills
+- `ccem skill rm <name>` - Remove installed skill
 
 #### Setup & Initialization
 - `ccem setup init` - Initialize Claude Code (sets onboarding, disables telemetry, installs chrome-devtools MCP)
