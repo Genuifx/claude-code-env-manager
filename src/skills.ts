@@ -150,6 +150,15 @@ export const SKILL_PRESETS: SkillPreset[] = [
       url: 'https://github.com/nextlevelbuilder/ui-ux-pro-max-skill/tree/main/.claude/skills/ui-ux-pro-max',
     },
   },
+  {
+    name: 'Humanizer-zh',
+    description: '去除文本中 AI 生成痕迹，改写得更自然、更像人类书写',
+    group: 'featured',
+    install: {
+      type: 'github',
+      url: 'https://github.com/op7418/Humanizer-zh',
+    },
+  },
 
   // ===== 其他 (Others) =====
   {
