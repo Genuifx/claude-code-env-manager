@@ -19,11 +19,11 @@ ccem 就是解决这些问题的。
 ## 安装
 
 ```bash
-npm install -g claude-code-env-manager
+npm install -g ccem
 # 或
-pnpm add -g claude-code-env-manager
+pnpm add -g ccem
 # 或直接跑
-npx claude-code-env-manager
+npx ccem
 ```
 
 ## 快速上手

@@ -1,5 +1,5 @@
 {
-  "name": "claude-code-env-manager",
+  "name": "ccem",
   "version": "1.5.0",
   "type": "module",
   "description": "Claude Code Environment Manager",
