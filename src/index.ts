@@ -52,6 +52,7 @@ import {
   installSkill,
 } from './skills.js';
 import { runSkillSelector } from './components/index.js';
+import { loadFromRemote } from './remote.js';
 
 const program = new Command();
 const config = new Conf({
@@ -555,6 +556,15 @@ skillCmd
   .description('删除已安装的 skill')
   .action((name: string) => {
     removeSkill(name);
+  });
+
+// load 命令 - 从远程加载环境配置
+program
+  .command('load <url>')
+  .description('从远程服务器加载环境配置')
+  .requiredOption('--secret <secret>', '解密密钥')
+  .action(async (url: string, options: { secret: string }) => {
+    await loadFromRemote(url, options.secret);
   });
 
 // 默认交互式菜单

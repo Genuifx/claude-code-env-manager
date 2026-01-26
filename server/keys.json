@@ -1,0 +1,10 @@
+{
+  "ccem_k1_a3b2c1d4e5f6g7h8": {
+    "environments": ["glm", "kimi"],
+    "note": "示例 key 1"
+  },
+  "ccem_k2_i9j8k7l6m5n4o3p2": {
+    "environments": ["deepseek"],
+    "note": "示例 key 2"
+  }
+}

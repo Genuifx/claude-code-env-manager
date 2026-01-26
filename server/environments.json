@@ -1,0 +1,17 @@
+{
+  "glm": {
+    "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/paas/v4",
+    "ANTHROPIC_API_KEY": "your-glm-api-key",
+    "ANTHROPIC_MODEL": "glm-4-plus"
+  },
+  "kimi": {
+    "ANTHROPIC_BASE_URL": "https://api.moonshot.cn/v1",
+    "ANTHROPIC_API_KEY": "your-kimi-api-key",
+    "ANTHROPIC_MODEL": "moonshot-v1-8k"
+  },
+  "deepseek": {
+    "ANTHROPIC_BASE_URL": "https://api.deepseek.com",
+    "ANTHROPIC_API_KEY": "your-deepseek-api-key",
+    "ANTHROPIC_MODEL": "deepseek-chat"
+  }
+}

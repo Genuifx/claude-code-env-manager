@@ -1,0 +1,15 @@
+{
+  "name": "ccem-server",
+  "version": "1.0.0",
+  "description": "CCEM Remote Config Server",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "helmet": "^7.1.0",
+    "express-rate-limit": "^7.1.5"
+  }
+}
