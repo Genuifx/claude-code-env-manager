@@ -4,18 +4,31 @@
 
 切换 API 服务商、配置权限模式、查看用量统计、安装 Skills。
 
+[![npm version](https://img.shields.io/npm/v/ccem.svg)](https://www.npmjs.com/package/ccem)
+[![license](https://img.shields.io/npm/l/ccem.svg)](https://github.com/genuifx/claude-code-env-manager/blob/main/LICENSE)
+
 ![Demo](./index.png)
 
 ## 这工具干嘛的
 
 用 Claude Code 的人可能会遇到几个烦心事：
 
-- 想用国产模型（GLM、KIMI、DeepSeek）但每次都要手动设置环境变量
+- 想用国产模型（GLM、KIMI、DeepSeek、MiniMax）但每次都要手动设置环境变量
 - 每次执行命令都要点"允许"，烦死了，但又不想用 `--dangerously-skip-permissions`
 - 想知道这个月花了多少钱，但 Claude 没有用量统计界面
 - 团队想共享 API 配置，但不想把密钥明文传来传去
+- 想快速安装官方和社区的 Skills，但手动 clone 太麻烦
 
 ccem 就是解决这些问题的。
+
+## 功能特性
+
+- 🔄 **环境切换** - 一键切换 API 服务商（官方/GLM/KIMI/DeepSeek/MiniMax）
+- 🔐 **权限管理** - 6 种预设权限模式，在安全和便捷之间找平衡
+- 📊 **用量统计** - 日历热力图 + 按模型统计 + 费用计算
+- 🛠️ **Skill 管理** - 从官方/GitHub/Plugin Marketplace 安装 Skills
+- 🌐 **远程配置** - 团队共享 API 配置，加密传输
+- ⚡ **性能优化** - 增量缓存、流式解析、后台更新
 
 ## 安装
 
@@ -33,7 +46,8 @@ npx ccem
 ccem              # 进入交互菜单
 ccem add kimi     # 添加 KIMI 环境，自动填好 URL 和模型
 ccem use kimi     # 切换到 KIMI
-ccem dev          # 用开发模式启动 Claude Code
+ccem dev          # 用开发模式启动 Claude Code（临时）
+ccem --mode       # 查看当前权限模式
 ```
 
 ![Demo](./demo.png)
@@ -77,6 +91,8 @@ ccem run <command>   # 带着环境变量跑命令
 | KIMI（月之暗面） | `https://api.moonshot.cn/anthropic` | kimi-k2-thinking-turbo | kimi-k2-turbo-preview |
 | MiniMax | `https://api.minimaxi.com/anthropic` | MiniMax-M2 | MiniMax-M2 |
 | DeepSeek | `https://api.deepseek.com/anthropic` | deepseek-chat | deepseek-chat |
+
+> 💡 **官方环境**：默认使用 `claude-sonnet-4-5-20250929` 和 `claude-haiku-4-5-20251001`
 
 ### Shell 集成
 
@@ -201,7 +217,10 @@ ccem --list-modes  # 列出所有模式
 
 ccem 会读 Claude Code 的日志（在 `~/.claude/projects/` 下面的 JSONL 文件），统计 token 用量和费用。
 
-价格数据从 LiteLLM 的 GitHub 仓库拉取，会缓存到本地。
+价格数据从 LiteLLM 的 GitHub 仓库拉取，会缓存到本地。如果网络不可用，会依次尝试：
+1. 本地缓存（`~/.ccem/model-prices.json`）
+2. 内置价格文件（随 ccem 安装）
+3. 默认价格（Claude Opus/Sonnet/Haiku）
 
 交互菜单里选 "View Usage" 可以看详细统计，包括**日历热力图**：
 
@@ -232,7 +251,9 @@ Wed  ▒  ▓  █  ░  ·  ▒  ▓  █  ...
 
 - **增量缓存**：日志解析结果缓存到 `~/.ccem/usage-cache.json`，只解析新增/修改的文件
 - **后台更新**：打开菜单时先显示缓存数据，后台异步更新
-- **流式解析**：大文件使用流式读取，避免内存占用过高
+- **流式解析**：大文件使用流式读取（readline），避免内存占用过高
+- **并发控制**：限制并发解析数量（5 个），避免阻塞事件循环
+- **缓存版本**：缓存结构变更时自动失效重建
 
 ---
 
@@ -250,7 +271,7 @@ ccem skill rm <name>        # 删掉
 
 ### 交互式选择器
 
-运行 `ccem skill add` 会打开分组选择界面：
+运行 `ccem skill add` 会打开分组选择界面（使用 Ink 渲染）：
 
 ```
  🏢 官方   ⭐ 精选   📦 其他 
@@ -264,6 +285,16 @@ ccem skill rm <name>        # 删掉
 
 Tab 切换分组 | ↑↓ 选择 | Enter 确认 | Esc 取消
 ```
+
+### 安装方式
+
+ccem 支持三种安装方式：
+
+| 类型 | 说明 | 示例 |
+|------|------|------|
+| preset | 官方预设，从 anthropics/skills 仓库安装 | `ccem skill add frontend-design` |
+| github | 从任意 GitHub 仓库/子目录安装 | `ccem skill add owner/repo` |
+| plugin | 从 Plugin Marketplace 安装（实验性） | 通过交互菜单选择 |
 
 ### 预设列表
 
@@ -304,11 +335,18 @@ Tab 切换分组 | ↑↓ 选择 | Enter 确认 | Esc 取消
 
 ### 从 GitHub 装
 
+支持多种 URL 格式：
+
 ```bash
+# 完整 URL
 ccem skill add https://github.com/owner/repo
 ccem skill add https://github.com/owner/repo/tree/main/path/to/skill
+
+# 简写格式
 ccem skill add owner/repo
 ```
+
+> 💡 使用 git sparse-checkout 只下载指定目录，不会 clone 整个仓库
 
 ---
 
@@ -402,8 +440,8 @@ ccem setup init
 会做三件事：
 
 1. 设置 `hasCompletedOnboarding: true`，跳过新手引导
-2. 禁用遥测（设置 `DISABLE_TELEMETRY=1` 等环境变量）
-3. 装 `chrome-devtools` MCP 工具
+2. 禁用遥测（设置 `DISABLE_TELEMETRY=1`、`DISABLE_ERROR_REPORTING=1`、`DISABLE_BUG_COMMAND=1`）
+3. 装 `chrome-devtools` MCP 工具（用于浏览器调试）
 
 配置写到：
 - `~/.claude.json`
@@ -432,12 +470,12 @@ ccem setup init
 
 | 命令 | 说明 |
 |------|------|
-| `ccem yolo` | YOLO 模式 |
-| `ccem dev` | 开发模式 |
-| `ccem readonly` | 只读模式 |
-| `ccem safe` | 安全模式 |
-| `ccem ci` | CI 模式 |
-| `ccem audit` | 审计模式 |
+| `ccem yolo` | 🔓 YOLO 模式（全部放开） |
+| `ccem dev` | 💻 开发模式 |
+| `ccem readonly` | 👀 只读模式 |
+| `ccem safe` | 🛡️ 安全模式 |
+| `ccem ci` | 🔧 CI 模式 |
+| `ccem audit` | 🔍 审计模式 |
 | `ccem --mode` | 看当前模式 |
 | `ccem --list-modes` | 列出所有模式 |
 
@@ -474,12 +512,24 @@ ccem setup init
 | 路径 | 内容 |
 |------|------|
 | `~/.config/claude-code-env-manager/` | 环境配置（加密存储 API Key） |
-| `~/.ccem/usage-cache.json` | 用量缓存 |
-| `~/.ccem/model-prices.json` | 价格缓存 |
+| `~/.ccem/usage-cache.json` | 用量缓存（增量解析结果） |
+| `~/.ccem/model-prices.json` | 价格缓存（从 LiteLLM 拉取） |
 | `.claude/settings.json` | 项目权限配置 |
 | `.claude/skills/` | 已装的 skills |
 
 ---
+
+## 技术栈
+
+- **CLI 框架**: Commander.js
+- **配置存储**: Conf（加密存储敏感信息）
+- **交互界面**: Inquirer.js + Ink (React for CLI)
+- **表格渲染**: cli-table3
+- **样式**: Chalk
+
+## Contributing
+
+欢迎提 Issue 和 PR！
 
 ## License
 
