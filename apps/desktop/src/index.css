@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* macOS 原生风格基础样式 */
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  @apply bg-gray-50 text-gray-900;
+  margin: 0;
+  padding: 0;
+}
+
+/* 卡片样式 */
+.card {
+  @apply bg-white rounded-xl shadow-sm border border-gray-100 p-4;
+}
+
+/* 主按钮 */
+.btn-primary {
+  @apply bg-gradient-to-r from-green-500 to-green-600 text-white px-4 py-2 rounded-lg
+         hover:from-green-600 hover:to-green-700 transition-all font-medium;
+}
+
+/* 次要按钮 */
+.btn-secondary {
+  @apply bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-lg
+         hover:bg-gray-50 transition-all font-medium;
+}
