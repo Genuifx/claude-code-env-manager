@@ -1,49 +1,23 @@
 {
-  "name": "ccem",
+  "name": "ccem-monorepo",
   "version": "1.8.0",
+  "private": true,
   "type": "module",
-  "description": "Claude Code Environment Manager",
+  "description": "Claude Code Environment Manager - Monorepo",
   "author": {
     "name": "Genuifx",
     "email": "genuifx@gmail.com",
     "url": "https://genuifx.com"
   },
-  "files": [
-    "dist",
-    "model-prices.json"
-  ],
-  "bin": {
-    "ccem": "./dist/index.js"
-  },
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
-    "start": "node dist/index.js",
-    "test": "vitest",
-    "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "build": "pnpm -r build",
+    "dev": "pnpm -r --parallel dev",
+    "test": "pnpm -r test",
+    "test:run": "pnpm -r test:run",
+    "test:coverage": "pnpm -r test:coverage"
   },
   "devDependencies": {
-    "@types/inquirer": "^9.0.7",
-    "@types/node": "^20.11.24",
-    "@types/react": "^19.2.9",
-    "@vitest/coverage-v8": "^4.0.18",
-    "asciify-image": "^0.1.10",
-    "sharp": "^0.34.5",
-    "terminal-image": "^4.2.0",
-    "tsup": "^8.0.2",
-    "typescript": "^5.3.3",
-    "vitest": "^4.0.18"
-  },
-  "dependencies": {
-    "chalk": "^4.1.2",
-    "cli-table3": "^0.6.3",
-    "commander": "^12.0.0",
-    "conf": "^10.2.0",
-    "ink": "^6.6.0",
-    "ink-select-input": "^6.2.0",
-    "inquirer": "^8.2.6",
-    "react": "^19.2.3"
+    "typescript": "^5.3.3"
   },
   "packageManager": "pnpm@10.27.0+sha512.72d699da16b1179c14ba9e64dc71c9a40988cbdc65c264cb0e489db7de917f20dcf4d64d8723625f2969ba52d4b7e2a1170682d9ac2a5dcaeaab732b7e16f04a"
 }
