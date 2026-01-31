@@ -24,6 +24,9 @@
     "@types/inquirer": "^9.0.7",
     "@types/node": "^20.11.24",
     "@types/react": "^19.2.9",
+    "asciify-image": "^0.1.10",
+    "sharp": "^0.34.5",
+    "terminal-image": "^4.2.0",
     "tsup": "^8.0.2",
     "typescript": "^5.3.3"
   },

@@ -587,5 +587,126 @@ export const renderUsageDetail = (stats: UsageStats): string => {
   return lines.join('\n');
 };
 
+// 环境选择结果类型
+export type EnvSelectResult =
+  | { action: 'select'; name: string }
+  | { action: 'edit'; name: string }
+  | { action: 'rename'; name: string }
+  | { action: 'copy'; name: string }
+  | { action: 'delete'; name: string }
+  | { action: 'cancel' };
+
+// 带快捷键的环境选择器
+export const selectEnvWithKeys = (
+  registries: Record<string, unknown>,
+  current: string
+): Promise<EnvSelectResult> => {
+  return new Promise((resolve) => {
+    const envNames = Object.keys(registries);
+    let selectedIndex = envNames.indexOf(current);
+    if (selectedIndex === -1) selectedIndex = 0;
+
+    const stdin = process.stdin;
+    const wasRaw = stdin.isRaw;
+    stdin.setRawMode(true);
+    stdin.resume();
+
+    // 列表总行数 = 标题行 + 环境数
+    const totalLines = 1 + envNames.length;
+    let firstRender = true;
+
+    const render = () => {
+      process.stdout.write('\x1B[?25l'); // 隐藏光标
+
+      if (!firstRender) {
+        // 非首次渲染：移动到列表开始位置
+        process.stdout.write(`\x1B[${totalLines}A`); // 向上移动
+        process.stdout.write('\x1B[J'); // 清除到屏幕底部
+      }
+      firstRender = false;
+
+      console.log(theme.muted('?') + ' ' + theme.text('Select environment') + ' ' + theme.dim('(↑↓ navigate, Enter select, e edit, r rename, c copy, d delete)'));
+
+      envNames.forEach((name, i) => {
+        const isCurrent = name === current;
+        const isSelected = i === selectedIndex;
+        const prefix = isSelected ? theme.primary('❯ ') : '  ';
+        const tag = isCurrent ? theme.success(' *') : '';
+        const nameText = isSelected ? theme.primary(name) : (isCurrent ? theme.primary(name) : theme.text(name));
+        console.log(prefix + nameText + tag);
+      });
+    };
+
+    // 初始渲染
+    render();
+
+    const cleanup = () => {
+      stdin.setRawMode(wasRaw ?? false);
+      stdin.removeListener('data', onKeypress);
+      process.stdout.write('\x1B[?25h'); // 显示光标
+    };
+
+    const onKeypress = (key: Buffer) => {
+      const char = key.toString();
+
+      // Ctrl+C
+      if (char === '\x03') {
+        cleanup();
+        process.exit(0);
+      }
+
+      // Escape
+      if (char === '\x1B' && key.length === 1) {
+        cleanup();
+        resolve({ action: 'cancel' });
+        return;
+      }
+
+      // Arrow keys
+      if (char === '\x1B[A' || char === 'k') { // Up
+        selectedIndex = Math.max(0, selectedIndex - 1);
+        render();
+        return;
+      }
+      if (char === '\x1B[B' || char === 'j') { // Down
+        selectedIndex = Math.min(envNames.length - 1, selectedIndex + 1);
+        render();
+        return;
+      }
+
+      // Enter
+      if (char === '\r' || char === '\n') {
+        cleanup();
+        resolve({ action: 'select', name: envNames[selectedIndex] });
+        return;
+      }
+
+      // Hotkeys
+      if (char === 'e' || char === 'E') {
+        cleanup();
+        resolve({ action: 'edit', name: envNames[selectedIndex] });
+        return;
+      }
+      if (char === 'r' || char === 'R') {
+        cleanup();
+        resolve({ action: 'rename', name: envNames[selectedIndex] });
+        return;
+      }
+      if (char === 'c' || char === 'C') {
+        cleanup();
+        resolve({ action: 'copy', name: envNames[selectedIndex] });
+        return;
+      }
+      if (char === 'd' || char === 'D') {
+        cleanup();
+        resolve({ action: 'delete', name: envNames[selectedIndex] });
+        return;
+      }
+    };
+
+    stdin.on('data', onKeypress);
+  });
+};
+
 // 导出 theme 供其他模块使用
 export { theme };

@@ -34,6 +34,7 @@ import {
   renderUsageLine,
   startSpinner,
   stopSpinner,
+  selectEnvWithKeys,
 } from './ui.js';
 import {
   applyPermissionMode,
@@ -335,6 +336,107 @@ program
   });
 
 program
+  .command('rename <old> <new>')
+  .description('Rename an environment configuration')
+  .action((oldName, newName) => {
+    const registries = config.get('registries') as Record<string, EnvConfig>;
+
+    if (!registries[oldName]) {
+      console.log(chalk.red(`Environment '${oldName}' not found.`));
+      return;
+    }
+
+    if (registries[newName]) {
+      console.log(chalk.red(`Environment '${newName}' already exists.`));
+      return;
+    }
+
+    if (oldName === 'official') {
+      console.log(chalk.red(`Cannot rename default 'official' environment.`));
+      return;
+    }
+
+    registries[newName] = registries[oldName];
+    delete registries[oldName];
+    config.set('registries', registries);
+
+    const current = config.get('current');
+    if (current === oldName) {
+      config.set('current', newName);
+    }
+
+    console.log(chalk.green(`Environment '${oldName}' renamed to '${newName}'.`));
+  });
+
+program
+  .command('cp <source> <target>')
+  .description('Copy an environment configuration')
+  .action(async (source, target) => {
+    const registries = config.get('registries') as Record<string, EnvConfig>;
+
+    if (!registries[source]) {
+      console.log(chalk.red(`Environment '${source}' not found.`));
+      return;
+    }
+
+    if (registries[target]) {
+      console.log(chalk.red(`Environment '${target}' already exists.`));
+      return;
+    }
+
+    registries[target] = { ...registries[source] };
+    config.set('registries', registries);
+    console.log(chalk.green(`Environment '${source}' copied to '${target}'.`));
+
+    const { modify } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'modify',
+        message: 'Do you want to modify the configuration?',
+        default: false
+      }
+    ]);
+
+    if (modify) {
+      const current = registries[target];
+      const answers = await inquirer.prompt([
+        {
+          type: 'input',
+          name: 'ANTHROPIC_BASE_URL',
+          message: 'ANTHROPIC_BASE_URL:',
+          default: current.ANTHROPIC_BASE_URL
+        },
+        {
+          type: 'password',
+          name: 'ANTHROPIC_API_KEY',
+          message: 'ANTHROPIC_API_KEY (leave empty to keep current):',
+        },
+        {
+          type: 'input',
+          name: 'ANTHROPIC_MODEL',
+          message: 'ANTHROPIC_MODEL:',
+          default: current.ANTHROPIC_MODEL
+        },
+        {
+          type: 'input',
+          name: 'ANTHROPIC_SMALL_FAST_MODEL',
+          message: 'ANTHROPIC_SMALL_FAST_MODEL:',
+          default: current.ANTHROPIC_SMALL_FAST_MODEL
+        }
+      ]);
+
+      if (answers.ANTHROPIC_BASE_URL) current.ANTHROPIC_BASE_URL = answers.ANTHROPIC_BASE_URL;
+      if (answers.ANTHROPIC_API_KEY) current.ANTHROPIC_API_KEY = encrypt(answers.ANTHROPIC_API_KEY);
+      if (answers.ANTHROPIC_MODEL) current.ANTHROPIC_MODEL = answers.ANTHROPIC_MODEL;
+      if (answers.ANTHROPIC_SMALL_FAST_MODEL) current.ANTHROPIC_SMALL_FAST_MODEL = answers.ANTHROPIC_SMALL_FAST_MODEL;
+
+      registries[target] = current;
+      config.set('registries', registries);
+      console.log(chalk.green(`Environment '${target}' updated.`));
+    }
+  });
+
+program
   .command('current')
   .description('Show current environment name')
   .action(() => {
@@ -581,25 +683,12 @@ program
       return;
     }
 
-    // 刷新界面函数
-    const refreshScreen = () => {
-      // 移动光标到顶部并清屏
-      readline.cursorTo(process.stdout, 0, 0);
-      readline.clearScreenDown(process.stdout);
-      showCurrentEnv(usageStats, usageLoading);
-      console.log('');
-      // 重新显示菜单提示
-      const defaultMode = config.get('defaultMode') as PermissionModeName | null;
-      console.log(chalk.gray('?') + ' ' + chalk.gray('Select action') + ' ' + chalk.cyan('(Use arrow keys)'));
-      const choices = getMainMenuChoices(defaultMode);
-      choices.forEach((choice, i) => {
-        const prefix = i === 0 ? chalk.cyan('❯') : ' ';
-        console.log(prefix + ' ' + choice.name);
-      });
-    };
+    // 刷新界面函数 - 仅在菜单未显示时使用
+    // 由于 inquirer 运行时无法安全刷新，这里不再使用回调刷新
+    // usage stats 会在下一次循环时自动更新显示
 
-    // 异步加载 usage stats，加载完成后刷新界面
-    initUsageStats(refreshScreen);
+    // 异步加载 usage stats（不传回调，避免与 inquirer 冲突）
+    initUsageStats();
 
     // 交互式菜单
     while (true) {
@@ -675,18 +764,175 @@ program
           }
         ]);
       } else if (action === 'switch') {
-        const { selected } = await inquirer.prompt([
-            {
-                type: 'list',
-                name: 'selected',
-                message: chalk.gray('Select environment'),
-                choices: getEnvChoices(registries, current),
-                prefix: chalk.gray('?'),
-                default: current
-            }
-        ]);
+        const result = await selectEnvWithKeys(registries, current);
 
-        config.set('current', selected);
+        if (result.action === 'select') {
+          config.set('current', result.name);
+        } else if (result.action === 'edit') {
+          // 编辑环境配置
+          const envToEdit = registries[result.name];
+          console.log(chalk.yellow(`\nEditing environment '${result.name}'`));
+
+          const answers = await inquirer.prompt([
+            {
+              type: 'input',
+              name: 'ANTHROPIC_BASE_URL',
+              message: 'ANTHROPIC_BASE_URL:',
+              default: envToEdit.ANTHROPIC_BASE_URL
+            },
+            {
+              type: 'password',
+              name: 'ANTHROPIC_API_KEY',
+              message: 'ANTHROPIC_API_KEY (leave empty to keep current):',
+            },
+            {
+              type: 'input',
+              name: 'ANTHROPIC_MODEL',
+              message: 'ANTHROPIC_MODEL:',
+              default: envToEdit.ANTHROPIC_MODEL
+            },
+            {
+              type: 'input',
+              name: 'ANTHROPIC_SMALL_FAST_MODEL',
+              message: 'ANTHROPIC_SMALL_FAST_MODEL:',
+              default: envToEdit.ANTHROPIC_SMALL_FAST_MODEL
+            }
+          ]);
+
+          if (answers.ANTHROPIC_BASE_URL) envToEdit.ANTHROPIC_BASE_URL = answers.ANTHROPIC_BASE_URL;
+          if (answers.ANTHROPIC_API_KEY) envToEdit.ANTHROPIC_API_KEY = encrypt(answers.ANTHROPIC_API_KEY);
+          if (answers.ANTHROPIC_MODEL) envToEdit.ANTHROPIC_MODEL = answers.ANTHROPIC_MODEL;
+          if (answers.ANTHROPIC_SMALL_FAST_MODEL) envToEdit.ANTHROPIC_SMALL_FAST_MODEL = answers.ANTHROPIC_SMALL_FAST_MODEL;
+
+          registries[result.name] = envToEdit;
+          config.set('registries', registries);
+          msg.success(`Environment '${result.name}' updated.`);
+          await new Promise(resolve => setTimeout(resolve, 800));
+        } else if (result.action === 'rename') {
+          // 重命名环境
+          if (result.name === 'official') {
+            msg.error("Cannot rename default 'official' environment.");
+            await new Promise(resolve => setTimeout(resolve, 800));
+          } else {
+            const { newName } = await inquirer.prompt([
+              {
+                type: 'input',
+                name: 'newName',
+                message: `Rename '${result.name}' to:`,
+                validate: (input: string) => {
+                  if (!input.trim()) return 'Name cannot be empty';
+                  if (registries[input]) return `Environment '${input}' already exists`;
+                  return true;
+                }
+              }
+            ]);
+
+            registries[newName] = registries[result.name];
+            delete registries[result.name];
+            config.set('registries', registries);
+
+            if (current === result.name) {
+              config.set('current', newName);
+            }
+            msg.success(`Environment '${result.name}' renamed to '${newName}'.`);
+            await new Promise(resolve => setTimeout(resolve, 800));
+          }
+        } else if (result.action === 'copy') {
+          // 复制环境
+          const { targetName } = await inquirer.prompt([
+            {
+              type: 'input',
+              name: 'targetName',
+              message: `Copy '${result.name}' to:`,
+              validate: (input: string) => {
+                if (!input.trim()) return 'Name cannot be empty';
+                if (registries[input]) return `Environment '${input}' already exists`;
+                return true;
+              }
+            }
+          ]);
+
+          registries[targetName] = { ...registries[result.name] };
+          config.set('registries', registries);
+          msg.success(`Environment '${result.name}' copied to '${targetName}'.`);
+
+          const { modify } = await inquirer.prompt([
+            {
+              type: 'confirm',
+              name: 'modify',
+              message: 'Do you want to modify the configuration?',
+              default: false
+            }
+          ]);
+
+          if (modify) {
+            const envToEdit = registries[targetName];
+            const editAnswers = await inquirer.prompt([
+              {
+                type: 'input',
+                name: 'ANTHROPIC_BASE_URL',
+                message: 'ANTHROPIC_BASE_URL:',
+                default: envToEdit.ANTHROPIC_BASE_URL
+              },
+              {
+                type: 'password',
+                name: 'ANTHROPIC_API_KEY',
+                message: 'ANTHROPIC_API_KEY (leave empty to keep current):',
+              },
+              {
+                type: 'input',
+                name: 'ANTHROPIC_MODEL',
+                message: 'ANTHROPIC_MODEL:',
+                default: envToEdit.ANTHROPIC_MODEL
+              },
+              {
+                type: 'input',
+                name: 'ANTHROPIC_SMALL_FAST_MODEL',
+                message: 'ANTHROPIC_SMALL_FAST_MODEL:',
+                default: envToEdit.ANTHROPIC_SMALL_FAST_MODEL
+              }
+            ]);
+
+            if (editAnswers.ANTHROPIC_BASE_URL) envToEdit.ANTHROPIC_BASE_URL = editAnswers.ANTHROPIC_BASE_URL;
+            if (editAnswers.ANTHROPIC_API_KEY) envToEdit.ANTHROPIC_API_KEY = encrypt(editAnswers.ANTHROPIC_API_KEY);
+            if (editAnswers.ANTHROPIC_MODEL) envToEdit.ANTHROPIC_MODEL = editAnswers.ANTHROPIC_MODEL;
+            if (editAnswers.ANTHROPIC_SMALL_FAST_MODEL) envToEdit.ANTHROPIC_SMALL_FAST_MODEL = editAnswers.ANTHROPIC_SMALL_FAST_MODEL;
+
+            registries[targetName] = envToEdit;
+            config.set('registries', registries);
+            msg.success(`Environment '${targetName}' updated.`);
+          }
+          await new Promise(resolve => setTimeout(resolve, 800));
+        } else if (result.action === 'delete') {
+          // 删除环境
+          if (result.name === 'official') {
+            msg.error("Cannot delete default 'official' environment.");
+            await new Promise(resolve => setTimeout(resolve, 800));
+          } else {
+            const { confirm } = await inquirer.prompt([
+              {
+                type: 'confirm',
+                name: 'confirm',
+                message: `Are you sure you want to delete '${result.name}'?`,
+                default: false
+              }
+            ]);
+
+            if (confirm) {
+              delete registries[result.name];
+              config.set('registries', registries);
+
+              if (current === result.name) {
+                config.set('current', 'official');
+                msg.warning(`Deleted current environment. Switched back to 'official'.`);
+              } else {
+                msg.success(`Environment '${result.name}' deleted.`);
+              }
+            }
+            await new Promise(resolve => setTimeout(resolve, 800));
+          }
+        }
+        // cancel: do nothing, return to main menu
       } else if (action === 'perm') {
         const { permMode } = await inquirer.prompt([
           {
