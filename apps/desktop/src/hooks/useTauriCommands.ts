@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { useAppStore, type Environment } from '@/store';
+import { useAppStore, type Environment, type Session } from '@/store';
 import { useCallback } from 'react';
 
 interface TauriEnvConfig {
@@ -9,6 +9,16 @@ interface TauriEnvConfig {
   small_model?: string;
 }
 
+interface TauriSession {
+  id: string;
+  pid?: number;
+  env_name: string;
+  perm_mode: string;
+  working_dir: string;
+  start_time: string;
+  status: string;
+}
+
 export function useTauriCommands() {
   const {
     setEnvironments,
@@ -16,7 +26,11 @@ export function useTauriCommands() {
     setLoading,
     setError,
     addSession,
+    setSessions,
+    removeSession,
+    updateSessionStatus,
     currentEnv,
+    permissionMode,
   } = useAppStore();
 
   const loadEnvironments = useCallback(async () => {
@@ -64,32 +78,73 @@ export function useTauriCommands() {
   const launchClaudeCode = useCallback(async (workingDir?: string) => {
     setLoading(true);
     try {
-      await invoke('launch_claude_code', {
+      const tauriSession = await invoke<TauriSession>('launch_claude_code', {
         envName: currentEnv,
+        permMode: permissionMode,
         workingDir: workingDir || null,
       });
 
-      // Add session to state
-      addSession({
-        id: crypto.randomUUID(),
-        envName: currentEnv,
-        workingDir: workingDir || process.cwd?.() || '~',
-        startedAt: new Date(),
-        status: 'running',
-      });
+      // Convert Tauri session to frontend session
+      const session: Session = {
+        id: tauriSession.id,
+        envName: tauriSession.env_name,
+        workingDir: tauriSession.working_dir,
+        pid: tauriSession.pid,
+        startedAt: new Date(tauriSession.start_time),
+        status: tauriSession.status as 'running' | 'stopped' | 'error',
+      };
 
+      addSession(session);
       setError(null);
     } catch (err) {
       setError(`Failed to launch Claude Code: ${err}`);
     } finally {
       setLoading(false);
     }
-  }, [currentEnv, addSession, setLoading, setError]);
+  }, [currentEnv, permissionMode, addSession, setLoading, setError]);
+
+  const loadSessions = useCallback(async () => {
+    try {
+      const tauriSessions = await invoke<TauriSession[]>('list_sessions');
+      const sessions: Session[] = tauriSessions.map((s) => ({
+        id: s.id,
+        envName: s.env_name,
+        workingDir: s.working_dir,
+        pid: s.pid,
+        startedAt: new Date(s.start_time),
+        status: s.status as 'running' | 'stopped' | 'error',
+      }));
+      setSessions(sessions);
+    } catch (err) {
+      console.error('Failed to load sessions:', err);
+    }
+  }, [setSessions]);
+
+  const stopSession = useCallback(async (sessionId: string) => {
+    try {
+      await invoke('stop_session', { sessionId });
+      updateSessionStatus(sessionId, 'stopped');
+    } catch (err) {
+      setError(`Failed to stop session: ${err}`);
+    }
+  }, [updateSessionStatus, setError]);
+
+  const deleteSession = useCallback(async (sessionId: string) => {
+    try {
+      await invoke('remove_session', { sessionId });
+      removeSession(sessionId);
+    } catch (err) {
+      setError(`Failed to remove session: ${err}`);
+    }
+  }, [removeSession, setError]);
 
   return {
     loadEnvironments,
     loadCurrentEnv,
     switchEnvironment,
     launchClaudeCode,
+    loadSessions,
+    stopSession,
+    deleteSession,
   };
 }

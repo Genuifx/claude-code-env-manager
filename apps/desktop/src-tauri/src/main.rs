@@ -1,14 +1,16 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod session;
 mod tray;
 
 use serde::{Deserialize, Serialize};
+use session::{Session, SessionManager};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
-use tauri::Manager;
+use tauri::{Manager, State};
 use tray::create_tray;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -34,6 +36,15 @@ fn get_config_path() -> PathBuf {
     home.join(".config")
         .join("claude-code-env-manager")
         .join("config.json")
+}
+
+fn generate_session_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    format!("session-{}", timestamp)
 }
 
 #[tauri::command]
@@ -108,7 +119,12 @@ fn set_current_env(name: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn launch_claude_code(env_name: String, working_dir: Option<String>) -> Result<(), String> {
+fn launch_claude_code(
+    state: State<SessionManager>,
+    env_name: String,
+    perm_mode: Option<String>,
+    working_dir: Option<String>,
+) -> Result<Session, String> {
     let config_path = get_config_path();
 
     let env_vars = if config_path.exists() {
@@ -139,25 +155,82 @@ fn launch_claude_code(env_name: String, working_dir: Option<String>) -> Result<(
         }
     }
 
-    if let Some(dir) = working_dir {
-        cmd.current_dir(dir);
-    }
+    let work_dir = working_dir.clone().unwrap_or_else(|| {
+        dirs::home_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| "~".to_string())
+    });
 
-    cmd.spawn()
+    cmd.current_dir(&work_dir);
+
+    let child = cmd.spawn()
         .map_err(|e| format!("Failed to launch Claude Code: {}", e))?;
 
+    let session = Session {
+        id: generate_session_id(),
+        pid: Some(child.id()),
+        env_name,
+        perm_mode: perm_mode.unwrap_or_else(|| "dev".to_string()),
+        working_dir: work_dir,
+        start_time: chrono::Utc::now().to_rfc3339(),
+        status: "running".to_string(),
+    };
+
+    state.add_session(session.clone());
+    Ok(session)
+}
+
+#[tauri::command]
+fn list_sessions(state: State<SessionManager>) -> Vec<Session> {
+    state.list_sessions()
+}
+
+#[tauri::command]
+fn stop_session(state: State<SessionManager>, session_id: String) -> Result<(), String> {
+    let session = state.get_session(&session_id)
+        .ok_or_else(|| format!("Session not found: {}", session_id))?;
+
+    if let Some(pid) = session.pid {
+        #[cfg(unix)]
+        {
+            Command::new("kill")
+                .arg("-15")
+                .arg(pid.to_string())
+                .output()
+                .map_err(|e| format!("Failed to stop process: {}", e))?;
+        }
+
+        #[cfg(windows)]
+        {
+            Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/F"])
+                .output()
+                .map_err(|e| format!("Failed to stop process: {}", e))?;
+        }
+    }
+
+    state.update_session_status(&session_id, "stopped");
     Ok(())
+}
+
+#[tauri::command]
+fn remove_session(state: State<SessionManager>, session_id: String) {
+    state.remove_session(&session_id);
 }
 
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .manage(SessionManager::default())
         .invoke_handler(tauri::generate_handler![
             greet,
             get_environments,
             get_current_env,
             set_current_env,
-            launch_claude_code
+            launch_claude_code,
+            list_sessions,
+            stop_session,
+            remove_session
         ])
         .setup(|app| {
             let _ = create_tray(app.handle())?;
