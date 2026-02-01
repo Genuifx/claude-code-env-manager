@@ -6,7 +6,8 @@ mod terminal;
 mod tray;
 
 use serde::{Deserialize, Serialize};
-use session::{Session, SessionManager};
+use session::{Session, SessionManager, start_session_monitor};
+use std::sync::Arc;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -274,7 +275,7 @@ fn set_preferred_terminal(terminal_type: TerminalType) -> Result<(), String> {
 
 #[tauri::command]
 fn launch_claude_code(
-    state: State<SessionManager>,
+    state: State<Arc<SessionManager>>,
     env_name: String,
     perm_mode: Option<String>,
     working_dir: Option<String>,
@@ -340,12 +341,12 @@ fn launch_claude_code(
 }
 
 #[tauri::command]
-fn list_sessions(state: State<SessionManager>) -> Vec<Session> {
+fn list_sessions(state: State<Arc<SessionManager>>) -> Vec<Session> {
     state.list_sessions()
 }
 
 #[tauri::command]
-fn stop_session(state: State<SessionManager>, session_id: String) -> Result<(), String> {
+fn stop_session(state: State<Arc<SessionManager>>, session_id: String) -> Result<(), String> {
     let session = state.get_session(&session_id)
         .ok_or_else(|| format!("Session not found: {}", session_id))?;
 
@@ -373,14 +374,17 @@ fn stop_session(state: State<SessionManager>, session_id: String) -> Result<(), 
 }
 
 #[tauri::command]
-fn remove_session(state: State<SessionManager>, session_id: String) {
+fn remove_session(state: State<Arc<SessionManager>>, session_id: String) {
     state.remove_session(&session_id);
 }
 
 fn main() {
+    // Create SessionManager wrapped in Arc for sharing with monitor
+    let session_manager = Arc::new(SessionManager::default());
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .manage(SessionManager::default())
+        .manage(session_manager.clone())
         .invoke_handler(tauri::generate_handler![
             greet,
             get_environments,
@@ -397,8 +401,12 @@ fn main() {
             stop_session,
             remove_session
         ])
-        .setup(|app| {
+        .setup(move |app| {
             let _ = create_tray(app.handle())?;
+
+            // Start session monitor background task
+            start_session_monitor(app.handle().clone(), session_manager.clone());
+
             Ok(())
         })
         .run(tauri::generate_context!())
