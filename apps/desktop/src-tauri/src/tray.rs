@@ -1,12 +1,25 @@
 use std::fs;
 use std::path::PathBuf;
+use serde::Serialize;
 use tauri::{
     menu::{Menu, MenuItem, Submenu},
     tray::{TrayIcon, TrayIconBuilder, TrayIconId},
-    AppHandle, Manager,
+    AppHandle, Emitter, Manager,
 };
 
 use crate::CcemConfig;
+
+/// Event payload for environment changes
+#[derive(Clone, Serialize)]
+pub struct EnvChangedPayload {
+    pub env: String,
+}
+
+/// Event payload for permission changes
+#[derive(Clone, Serialize)]
+pub struct PermChangedPayload {
+    pub perm: String,
+}
 
 /// Get the config file path
 fn get_config_path() -> PathBuf {
@@ -135,13 +148,11 @@ pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, tauri::Error> {
             }
             id if id.starts_with("env_") => {
                 let env_name = id.strip_prefix("env_").unwrap();
-                println!("Switch to env: {}", env_name);
-                // TODO: Emit event to frontend
+                handle_env_switch(app, env_name);
             }
             id if id.starts_with("perm_") => {
                 let perm_mode = id.strip_prefix("perm_").unwrap();
-                println!("Switch to perm: {}", perm_mode);
-                // TODO: Emit event to frontend
+                handle_perm_switch(app, perm_mode);
             }
             _ => {}
         })
@@ -159,4 +170,74 @@ pub fn rebuild_tray_menu(app: &AppHandle) -> Result<(), tauri::Error> {
     }
 
     Ok(())
+}
+
+/// Set the current environment and update config file
+fn set_current_env_internal(env_name: &str) -> Result<(), String> {
+    let config_path = get_config_path();
+
+    let mut config = if config_path.exists() {
+        let content = fs::read_to_string(&config_path)
+            .map_err(|e| format!("Failed to read config: {}", e))?;
+        serde_json::from_str(&content)
+            .map_err(|e| format!("Failed to parse config: {}", e))?
+    } else {
+        CcemConfig {
+            registries: std::collections::HashMap::new(),
+            current: None,
+        }
+    };
+
+    config.current = Some(env_name.to_string());
+
+    let content = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create config directory: {}", e))?;
+    }
+
+    fs::write(&config_path, content)
+        .map_err(|e| format!("Failed to write config: {}", e))?;
+
+    Ok(())
+}
+
+/// Handle environment switch from tray menu
+fn handle_env_switch(app: &AppHandle, env_name: &str) {
+    // Update the config file
+    match set_current_env_internal(env_name) {
+        Ok(_) => {
+            println!("Switched to environment: {}", env_name);
+
+            // Emit event to frontend
+            let _ = app.emit("env-changed", EnvChangedPayload {
+                env: env_name.to_string(),
+            });
+
+            // Rebuild tray menu to show updated selection
+            if let Err(e) = rebuild_tray_menu(app) {
+                eprintln!("Failed to rebuild tray menu: {}", e);
+            }
+        }
+        Err(e) => {
+            eprintln!("Failed to switch environment: {}", e);
+        }
+    }
+}
+
+/// Handle permission mode switch from tray menu
+fn handle_perm_switch(app: &AppHandle, perm_mode: &str) {
+    println!("Switched to permission mode: {}", perm_mode);
+
+    // Emit event to frontend
+    let _ = app.emit("perm-changed", PermChangedPayload {
+        perm: perm_mode.to_string(),
+    });
+
+    // Rebuild tray menu to show updated selection
+    if let Err(e) = rebuild_tray_menu(app) {
+        eprintln!("Failed to rebuild tray menu: {}", e);
+    }
 }
