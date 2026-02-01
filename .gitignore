@@ -28,3 +28,7 @@ dist
 .review-state
 
 .worktrees/
+
+# Rust build artifacts
+apps/desktop/src-tauri/target/
+
