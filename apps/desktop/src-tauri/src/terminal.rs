@@ -186,8 +186,9 @@ pub fn set_preferred_terminal(terminal: TerminalType) -> Result<(), String> {
 fn build_shell_command(env_vars: &HashMap<String, String>, working_dir: &str) -> String {
     let mut parts = Vec::new();
 
-    // Change to working directory
-    parts.push(format!("cd \"{}\"", working_dir));
+    // Change to working directory (escape backslashes and double quotes to prevent shell injection)
+    let escaped_dir = working_dir.replace("\\", "\\\\").replace("\"", "\\\"");
+    parts.push(format!("cd \"{}\"", escaped_dir));
 
     // Export environment variables
     for (key, value) in env_vars {
