@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod session;
+mod terminal;
 mod tray;
 
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use tauri::State;
+use terminal::{TerminalInfo, TerminalType};
 use tray::create_tray;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -247,6 +249,29 @@ fn delete_environment(name: String) -> Result<(), String> {
     Ok(())
 }
 
+// ============================================
+// Terminal Management Commands
+// ============================================
+
+#[tauri::command]
+fn detect_terminals() -> Vec<TerminalInfo> {
+    terminal::detect_terminals()
+}
+
+#[tauri::command]
+fn get_preferred_terminal() -> TerminalType {
+    terminal::get_preferred_terminal()
+}
+
+#[tauri::command]
+fn set_preferred_terminal(terminal_type: TerminalType) -> Result<(), String> {
+    terminal::set_preferred_terminal(terminal_type)
+}
+
+// ============================================
+// Claude Code Launch Commands
+// ============================================
+
 #[tauri::command]
 fn launch_claude_code(
     state: State<SessionManager>,
@@ -256,7 +281,8 @@ fn launch_claude_code(
 ) -> Result<Session, String> {
     let config_path = get_config_path();
 
-    let env_vars = if config_path.exists() {
+    // Read environment configuration
+    let env_config = if config_path.exists() {
         let content = fs::read_to_string(&config_path)
             .map_err(|e| format!("Failed to read config: {}", e))?;
         let config: CcemConfig = serde_json::from_str(&content)
@@ -267,20 +293,20 @@ fn launch_claude_code(
         None
     };
 
-    let mut cmd = Command::new("claude");
-
-    if let Some(env) = env_vars {
+    // Build environment variables map
+    let mut env_vars: HashMap<String, String> = HashMap::new();
+    if let Some(env) = env_config {
         if let Some(url) = env.base_url {
-            cmd.env("ANTHROPIC_BASE_URL", url);
+            env_vars.insert("ANTHROPIC_BASE_URL".to_string(), url);
         }
         if let Some(key) = env.api_key {
-            cmd.env("ANTHROPIC_API_KEY", key);
+            env_vars.insert("ANTHROPIC_API_KEY".to_string(), key);
         }
         if let Some(model) = env.model {
-            cmd.env("ANTHROPIC_MODEL", model);
+            env_vars.insert("ANTHROPIC_MODEL".to_string(), model);
         }
         if let Some(small_model) = env.small_model {
-            cmd.env("ANTHROPIC_SMALL_FAST_MODEL", small_model);
+            env_vars.insert("ANTHROPIC_SMALL_FAST_MODEL".to_string(), small_model);
         }
     }
 
@@ -290,16 +316,20 @@ fn launch_claude_code(
             .unwrap_or_else(|| "~".to_string())
     });
 
-    cmd.current_dir(&work_dir);
+    let perm = perm_mode.clone().unwrap_or_else(|| "dev".to_string());
 
-    let child = cmd.spawn()
-        .map_err(|e| format!("Failed to launch Claude Code: {}", e))?;
+    // Build session name for iTerm2 tab title
+    let session_name = format!("Claude: {} + {}", env_name, perm);
+
+    // Get preferred terminal and launch
+    let preferred_terminal = terminal::get_preferred_terminal();
+    terminal::launch_in_terminal(preferred_terminal, env_vars, &work_dir, &session_name)?;
 
     let session = Session {
         id: generate_session_id(),
-        pid: Some(child.id()),
+        pid: None, // Terminal-launched sessions don't have direct PID access
         env_name,
-        perm_mode: perm_mode.unwrap_or_else(|| "dev".to_string()),
+        perm_mode: perm,
         working_dir: work_dir,
         start_time: chrono::Utc::now().to_rfc3339(),
         status: "running".to_string(),
@@ -359,6 +389,9 @@ fn main() {
             add_environment,
             update_environment,
             delete_environment,
+            detect_terminals,
+            get_preferred_terminal,
+            set_preferred_terminal,
             launch_claude_code,
             list_sessions,
             stop_session,
