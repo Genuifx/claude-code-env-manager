@@ -14,7 +14,9 @@
       "types": "./dist/browser.d.ts"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -23,6 +25,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
+    "@types/node": "^20.19.27",
     "@vitest/coverage-v8": "^4.0.18",
     "tsup": "^8.0.2",
     "typescript": "^5.3.3",

@@ -148,6 +148,9 @@ importers:
 
   packages/core:
     devDependencies:
+      '@types/node':
+        specifier: ^20.19.27
+        version: 20.19.27
       '@vitest/coverage-v8':
         specifier: ^4.0.18
         version: 4.0.18(vitest@4.0.18(@types/node@20.19.27)(jiti@1.21.7))
