@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { ENV_PRESETS, PERMISSION_PRESETS, type PermissionModeName } from '@ccem/core';
+import { ENV_PRESETS, PERMISSION_PRESETS, type PermissionModeName } from '@ccem/core/browser';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store';

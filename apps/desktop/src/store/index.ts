@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { PermissionModeName } from '@ccem/core';
+import type { PermissionModeName } from '@ccem/core/browser';
 
 export interface Environment {
   name: string;
