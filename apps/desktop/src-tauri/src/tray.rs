@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 use serde::Serialize;
 use tauri::{
     menu::{Menu, MenuItem, Submenu},
@@ -8,6 +9,8 @@ use tauri::{
 };
 
 use crate::CcemConfig;
+use crate::session::SessionManager;
+use crate::terminal;
 
 /// Event payload for environment changes
 #[derive(Clone, Serialize)]
@@ -84,6 +87,37 @@ fn build_env_menu(app: &AppHandle, current: &str, envs: Vec<String>) -> Result<S
     Submenu::with_items(app, &title, true, &item_refs)
 }
 
+/// Build the active sessions submenu dynamically
+fn build_sessions_menu(app: &AppHandle) -> Result<Option<Submenu<tauri::Wry>>, tauri::Error> {
+    // Get the SessionManager from app state
+    let manager = match app.try_state::<Arc<SessionManager>>() {
+        Some(m) => m,
+        None => return Ok(None),
+    };
+
+    let running_sessions = manager.get_running_sessions();
+
+    if running_sessions.is_empty() {
+        return Ok(None);
+    }
+
+    let mut items: Vec<MenuItem<tauri::Wry>> = Vec::new();
+
+    for session in &running_sessions {
+        // Format: "env_name + perm_mode    [Focus]"
+        let label = format!("{} + {}", session.env_name, session.perm_mode);
+        let id = format!("session_{}", session.id);
+        items.push(MenuItem::with_id(app, &id, &label, true, None::<&str>)?);
+    }
+
+    let title = format!("Active Sessions ({})", running_sessions.len());
+
+    // Convert Vec<MenuItem> to Vec<&dyn IsMenuItem>
+    let item_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = items.iter().map(|i| i as &dyn tauri::menu::IsMenuItem<tauri::Wry>).collect();
+
+    Ok(Some(Submenu::with_items(app, &title, true, &item_refs)?))
+}
+
 /// Build the full tray menu
 fn build_tray_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
     // Read environments from config
@@ -107,19 +141,39 @@ fn build_tray_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
         ],
     )?;
 
-    // Main menu
-    Menu::with_items(
-        app,
-        &[
-            &env_submenu,
-            &perm_submenu,
-            &MenuItem::with_id(app, "separator1", "─────────", false, None::<&str>)?,
-            &MenuItem::with_id(app, "launch", "▶ Launch Claude", true, None::<&str>)?,
-            &MenuItem::with_id(app, "separator2", "─────────", false, None::<&str>)?,
-            &MenuItem::with_id(app, "open_window", "Open Window", true, None::<&str>)?,
-            &MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?,
-        ],
-    )
+    // Active sessions submenu (dynamic)
+    let sessions_submenu = build_sessions_menu(app)?;
+
+    // Build menu items list dynamically based on whether we have active sessions
+    if let Some(sessions_menu) = sessions_submenu {
+        Menu::with_items(
+            app,
+            &[
+                &sessions_menu,
+                &MenuItem::with_id(app, "separator0", "─────────", false, None::<&str>)?,
+                &env_submenu,
+                &perm_submenu,
+                &MenuItem::with_id(app, "separator1", "─────────", false, None::<&str>)?,
+                &MenuItem::with_id(app, "launch", "▶ Launch Claude", true, None::<&str>)?,
+                &MenuItem::with_id(app, "separator2", "─────────", false, None::<&str>)?,
+                &MenuItem::with_id(app, "open_window", "Open Window", true, None::<&str>)?,
+                &MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?,
+            ],
+        )
+    } else {
+        Menu::with_items(
+            app,
+            &[
+                &env_submenu,
+                &perm_submenu,
+                &MenuItem::with_id(app, "separator1", "─────────", false, None::<&str>)?,
+                &MenuItem::with_id(app, "launch", "▶ Launch Claude", true, None::<&str>)?,
+                &MenuItem::with_id(app, "separator2", "─────────", false, None::<&str>)?,
+                &MenuItem::with_id(app, "open_window", "Open Window", true, None::<&str>)?,
+                &MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?,
+            ],
+        )
+    }
 }
 
 /// Tray icon ID constant for rebuilding
@@ -145,6 +199,10 @@ pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, tauri::Error> {
             }
             "quit" => {
                 app.exit(0);
+            }
+            id if id.starts_with("session_") => {
+                let session_id = id.strip_prefix("session_").unwrap();
+                handle_session_focus(app, session_id);
             }
             id if id.starts_with("env_") => {
                 let env_name = id.strip_prefix("env_").unwrap();
@@ -239,5 +297,38 @@ fn handle_perm_switch(app: &AppHandle, perm_mode: &str) {
     // Rebuild tray menu to show updated selection
     if let Err(e) = rebuild_tray_menu(app) {
         eprintln!("Failed to rebuild tray menu: {}", e);
+    }
+}
+
+/// Handle session focus from tray menu
+fn handle_session_focus(app: &AppHandle, session_id: &str) {
+    // Get the SessionManager from app state
+    let manager = match app.try_state::<Arc<SessionManager>>() {
+        Some(m) => m,
+        None => {
+            eprintln!("SessionManager not found in app state");
+            return;
+        }
+    };
+
+    // Find the session
+    let session = match manager.get_session(session_id) {
+        Some(s) => s,
+        None => {
+            eprintln!("Session not found: {}", session_id);
+            return;
+        }
+    };
+
+    // Build session name (same format as used when launching)
+    let session_name = format!("Claude: {} + {}", session.env_name, session.perm_mode);
+
+    // Get preferred terminal and focus
+    let preferred_terminal = terminal::get_preferred_terminal();
+
+    if let Err(e) = terminal::focus_terminal_window(preferred_terminal, &session_name) {
+        eprintln!("Failed to focus terminal window: {}", e);
+    } else {
+        println!("Focused session: {}", session_name);
     }
 }
