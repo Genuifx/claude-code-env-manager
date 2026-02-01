@@ -18,7 +18,7 @@ function App() {
     setCurrentEnv,
   } = useAppStore();
 
-  const { loadEnvironments, loadCurrentEnv, switchEnvironment, launchClaudeCode } =
+  const { loadEnvironments, loadCurrentEnv, switchEnvironment, launchClaudeCode, loadSessions, stopSession, deleteSession } =
     useTauriCommands();
 
   useEffect(() => {
@@ -34,6 +34,9 @@ function App() {
     });
     loadCurrentEnv().catch(() => {
       setCurrentEnv('official');
+    });
+    loadSessions().catch(() => {
+      // Sessions will be empty in dev mode
     });
   }, []);
 
@@ -177,7 +180,7 @@ function App() {
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Active Sessions</CardTitle>
-              <CardDescription>{sessions.length} Claude Code instance(s) running</CardDescription>
+              <CardDescription>{sessions.length} Claude Code instance(s)</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
               {sessions.map((session) => (
@@ -185,17 +188,39 @@ function App() {
                   key={session.id}
                   className="flex items-center justify-between p-2 bg-muted/30 rounded-lg"
                 >
-                  <div>
+                  <div className="flex-1 min-w-0">
                     <span className="font-medium text-sm">{session.envName}</span>
-                    <p className="text-xs text-muted-foreground">{session.workingDir}</p>
+                    <p className="text-xs text-muted-foreground truncate">{session.workingDir}</p>
                   </div>
-                  <span className={`text-xs px-2 py-1 rounded ${
-                    session.status === 'running' ? 'bg-green-100 text-green-700' :
-                    session.status === 'error' ? 'bg-red-100 text-red-700' :
-                    'bg-gray-100 text-gray-700'
-                  }`}>
-                    {session.status}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs px-2 py-1 rounded ${
+                      session.status === 'running' ? 'bg-green-100 text-green-700' :
+                      session.status === 'error' ? 'bg-red-100 text-red-700' :
+                      'bg-gray-100 text-gray-700'
+                    }`}>
+                      {session.status}
+                    </span>
+                    {session.status === 'running' && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0"
+                        onClick={() => stopSession(session.id)}
+                      >
+                        ⏹
+                      </Button>
+                    )}
+                    {session.status === 'stopped' && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0"
+                        onClick={() => deleteSession(session.id)}
+                      >
+                        ✕
+                      </Button>
+                    )}
+                  </div>
                 </div>
               ))}
             </CardContent>

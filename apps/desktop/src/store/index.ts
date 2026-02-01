@@ -33,6 +33,7 @@ interface AppState {
 
   // Sessions
   sessions: Session[];
+  setSessions: (sessions: Session[]) => void;
   addSession: (session: Session) => void;
   removeSession: (id: string) => void;
   updateSessionStatus: (id: string, status: Session['status']) => void;
@@ -63,6 +64,7 @@ export const useAppStore = create<AppState>((set) => ({
 
   // Sessions
   sessions: [],
+  setSessions: (sessions) => set({ sessions }),
   addSession: (session) =>
     set((state) => ({ sessions: [...state.sessions, session] })),
   removeSession: (id) =>
