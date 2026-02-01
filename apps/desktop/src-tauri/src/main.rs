@@ -1,12 +1,15 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod tray;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use tauri::Manager;
+use tray::create_tray;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct EnvConfig {
@@ -156,6 +159,10 @@ fn main() {
             set_current_env,
             launch_claude_code
         ])
+        .setup(|app| {
+            let _ = create_tray(app.handle())?;
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
