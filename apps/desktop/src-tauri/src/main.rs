@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
-use tauri::{Manager, State};
+use tauri::State;
 use tray::create_tray;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
