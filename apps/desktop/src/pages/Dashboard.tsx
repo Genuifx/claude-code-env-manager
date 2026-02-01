@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { StatsCard, CurrentEnvCard, SessionsCard } from '@/components/dashboard';
 import { useEnvStore } from '@/stores';
+import { useAppStore } from '@/store';
 
 interface DashboardProps {
   onNavigate?: (tab: string) => void;
@@ -8,8 +9,10 @@ interface DashboardProps {
 }
 
 export function Dashboard({ onNavigate, onLaunch }: DashboardProps) {
-  const { environments, sessions, currentMode } = useEnvStore();
+  const { environments } = useEnvStore();
+  const { sessions, permissionMode } = useAppStore();
   const envCount = Object.keys(environments).length;
+  const runningSessions = sessions.filter((s) => s.status === 'running');
 
   return (
     <div className="space-y-8">
@@ -68,14 +71,14 @@ export function Dashboard({ onNavigate, onLaunch }: DashboardProps) {
         />
         <StatsCard
           icon="🚀"
-          value={sessions.length}
+          value={runningSessions.length}
           label="活跃会话"
           sublabel="运行中"
           accentColor="violet"
         />
         <StatsCard
           icon="⚡"
-          value={currentMode}
+          value={permissionMode}
           label="权限模式"
           sublabel="当前模式"
           accentColor="rose"
