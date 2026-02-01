@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { useAppStore, type Environment } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { EnvironmentDialog } from '@/components/EnvironmentDialog';
+import { SettingsDialog } from '@/components/SettingsDialog';
 
 function App() {
   const {
@@ -36,6 +37,7 @@ function App() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<'add' | 'edit'>('add');
   const [editingEnv, setEditingEnv] = useState<Environment | undefined>(undefined);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     // Try to load from Tauri backend first
@@ -140,7 +142,7 @@ function App() {
                 {sessions.length} active
               </span>
             )}
-            <Button variant="ghost" size="sm">
+            <Button variant="ghost" size="sm" onClick={() => setSettingsOpen(true)}>
               ⚙️ Settings
             </Button>
           </div>
@@ -345,6 +347,12 @@ function App() {
         mode={dialogMode}
         environment={editingEnv}
         onSave={handleSaveEnvironment}
+      />
+
+      {/* Settings Dialog */}
+      <SettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
       />
     </div>
   );
