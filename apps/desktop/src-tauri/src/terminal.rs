@@ -272,6 +272,73 @@ pub fn launch_in_terminal(
     Ok(())
 }
 
+/// Focus a terminal window by session name using AppleScript
+///
+/// For iTerm2: Searches for a tab with matching name and activates it
+/// For Terminal.app: Activates the most recent Terminal window (no tab name support)
+///
+/// # Arguments
+/// * `terminal` - The terminal type to focus
+/// * `session_name` - The session name (used for iTerm2 tab matching)
+///
+/// # Returns
+/// * `Ok(())` on success
+/// * `Err(String)` with error message on failure
+pub fn focus_terminal_window(terminal: TerminalType, session_name: &str) -> Result<(), String> {
+    let script = match terminal {
+        TerminalType::TerminalApp => {
+            // Terminal.app doesn't support tab naming, just activate the app
+            r#"tell application "Terminal"
+    activate
+end tell"#.to_string()
+        }
+        TerminalType::ITerm2 => {
+            // iTerm2: Search for tab with matching name and activate it
+            format!(
+                r#"tell application "iTerm2"
+    set targetName to "{}"
+    repeat with aWindow in windows
+        tell aWindow
+            repeat with aTab in tabs
+                tell aTab
+                    repeat with aSession in sessions
+                        if name of aSession is targetName then
+                            select aTab
+                            select aWindow
+                            tell application "iTerm2" to activate
+                            return
+                        end if
+                    end repeat
+                end tell
+            end repeat
+        end tell
+    end repeat
+    -- Fallback: just activate iTerm2
+    activate
+end tell"#,
+                session_name.replace("\"", "\\\"")
+            )
+        }
+    };
+
+    // Execute the AppleScript
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|e| format!("Failed to execute AppleScript: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Ignore minor errors, the focus may still work
+        if !stderr.is_empty() {
+            eprintln!("AppleScript warning: {}", stderr.trim());
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
