@@ -75,6 +75,57 @@ export function useTauriCommands() {
     }
   }, [setCurrentEnv, setLoading, setError]);
 
+  const addEnvironment = useCallback(async (env: Environment) => {
+    setLoading(true);
+    try {
+      await invoke('add_environment', {
+        name: env.name,
+        baseUrl: env.baseUrl,
+        apiKey: env.apiKey,
+        model: env.model,
+        smallModel: env.smallModel,
+      });
+      await loadEnvironments();
+      setError(null);
+    } catch (err) {
+      setError(`Failed to add environment: ${err}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [loadEnvironments, setLoading, setError]);
+
+  const updateEnvironment = useCallback(async (env: Environment) => {
+    setLoading(true);
+    try {
+      await invoke('update_environment', {
+        name: env.name,
+        baseUrl: env.baseUrl,
+        apiKey: env.apiKey,
+        model: env.model,
+        smallModel: env.smallModel,
+      });
+      await loadEnvironments();
+      setError(null);
+    } catch (err) {
+      setError(`Failed to update environment: ${err}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [loadEnvironments, setLoading, setError]);
+
+  const deleteEnvironment = useCallback(async (name: string) => {
+    setLoading(true);
+    try {
+      await invoke('delete_environment', { name });
+      await loadEnvironments();
+      setError(null);
+    } catch (err) {
+      setError(`Failed to delete environment: ${err}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [loadEnvironments, setLoading, setError]);
+
   const launchClaudeCode = useCallback(async (workingDir?: string) => {
     setLoading(true);
     try {
@@ -142,6 +193,9 @@ export function useTauriCommands() {
     loadEnvironments,
     loadCurrentEnv,
     switchEnvironment,
+    addEnvironment,
+    updateEnvironment,
+    deleteEnvironment,
     launchClaudeCode,
     loadSessions,
     stopSession,

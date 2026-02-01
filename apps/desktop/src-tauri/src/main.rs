@@ -119,6 +119,135 @@ fn set_current_env(name: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn add_environment(
+    name: String,
+    base_url: String,
+    api_key: Option<String>,
+    model: String,
+    small_model: Option<String>,
+) -> Result<(), String> {
+    let config_path = get_config_path();
+
+    let mut config = if config_path.exists() {
+        let content = fs::read_to_string(&config_path)
+            .map_err(|e| format!("Failed to read config: {}", e))?;
+        serde_json::from_str(&content)
+            .map_err(|e| format!("Failed to parse config: {}", e))?
+    } else {
+        CcemConfig {
+            registries: HashMap::new(),
+            current: None,
+        }
+    };
+
+    if config.registries.contains_key(&name) {
+        return Err(format!("Environment '{}' already exists", name));
+    }
+
+    let env_config = EnvConfig {
+        base_url: Some(base_url),
+        api_key,
+        model: Some(model),
+        small_model,
+    };
+
+    config.registries.insert(name, env_config);
+
+    let content = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create config directory: {}", e))?;
+    }
+
+    fs::write(&config_path, content)
+        .map_err(|e| format!("Failed to write config: {}", e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+fn update_environment(
+    name: String,
+    base_url: String,
+    api_key: Option<String>,
+    model: String,
+    small_model: Option<String>,
+) -> Result<(), String> {
+    let config_path = get_config_path();
+
+    if !config_path.exists() {
+        return Err(format!("Environment '{}' does not exist", name));
+    }
+
+    let content = fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read config: {}", e))?;
+
+    let mut config: CcemConfig = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse config: {}", e))?;
+
+    if !config.registries.contains_key(&name) {
+        return Err(format!("Environment '{}' does not exist", name));
+    }
+
+    let env_config = EnvConfig {
+        base_url: Some(base_url),
+        api_key,
+        model: Some(model),
+        small_model,
+    };
+
+    config.registries.insert(name, env_config);
+
+    let content = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+
+    fs::write(&config_path, content)
+        .map_err(|e| format!("Failed to write config: {}", e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_environment(name: String) -> Result<(), String> {
+    if name == "official" {
+        return Err("Cannot delete the 'official' environment".to_string());
+    }
+
+    let config_path = get_config_path();
+
+    if !config_path.exists() {
+        return Err(format!("Environment '{}' does not exist", name));
+    }
+
+    let content = fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read config: {}", e))?;
+
+    let mut config: CcemConfig = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse config: {}", e))?;
+
+    if !config.registries.contains_key(&name) {
+        return Err(format!("Environment '{}' does not exist", name));
+    }
+
+    config.registries.remove(&name);
+
+    // Reset current to "official" if we deleted the current environment
+    if config.current.as_ref() == Some(&name) {
+        config.current = Some("official".to_string());
+    }
+
+    let content = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+
+    fs::write(&config_path, content)
+        .map_err(|e| format!("Failed to write config: {}", e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
 fn launch_claude_code(
     state: State<SessionManager>,
     env_name: String,
@@ -227,6 +356,9 @@ fn main() {
             get_environments,
             get_current_env,
             set_current_env,
+            add_environment,
+            update_environment,
+            delete_environment,
             launch_claude_code,
             list_sessions,
             stop_session,
