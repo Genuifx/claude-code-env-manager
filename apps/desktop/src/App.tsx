@@ -22,6 +22,7 @@ function App() {
   const {
     loadEnvironments,
     loadCurrentEnv,
+    loadSessions,
     launchClaudeCode,
     addEnvironment,
     updateEnvironment,
@@ -48,6 +49,10 @@ function App() {
     });
     loadCurrentEnv().catch(() => {
       setCurrentEnv('official');
+    });
+    // Load sessions on mount
+    loadSessions().catch((err) => {
+      console.error('Failed to load sessions:', err);
     });
   }, []);
 
