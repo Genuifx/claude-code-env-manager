@@ -1,9 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { ENV_PRESETS, PERMISSION_PRESETS, type PermissionModeName } from '@ccem/core/browser';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { useAppStore } from '@/store';
+import { useAppStore, type Environment } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
+import { EnvironmentDialog } from '@/components/EnvironmentDialog';
 
 function App() {
   const {
@@ -18,8 +19,23 @@ function App() {
     setCurrentEnv,
   } = useAppStore();
 
-  const { loadEnvironments, loadCurrentEnv, switchEnvironment, launchClaudeCode, loadSessions, stopSession, deleteSession } =
-    useTauriCommands();
+  const {
+    loadEnvironments,
+    loadCurrentEnv,
+    switchEnvironment,
+    addEnvironment,
+    updateEnvironment,
+    deleteEnvironment,
+    launchClaudeCode,
+    loadSessions,
+    stopSession,
+    deleteSession,
+  } = useTauriCommands();
+
+  // Dialog state for environment CRUD
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogMode, setDialogMode] = useState<'add' | 'edit'>('add');
+  const [editingEnv, setEditingEnv] = useState<Environment | undefined>(undefined);
 
   useEffect(() => {
     // Try to load from Tauri backend first
@@ -58,6 +74,42 @@ function App() {
       await launchClaudeCode();
     } catch (err) {
       console.error('Launch failed:', err);
+    }
+  };
+
+  // Handler functions for environment CRUD
+  const handleAddClick = () => {
+    setDialogMode('add');
+    setEditingEnv(undefined);
+    setDialogOpen(true);
+  };
+
+  const handleEditClick = (env: Environment) => {
+    setDialogMode('edit');
+    setEditingEnv(env);
+    setDialogOpen(true);
+  };
+
+  const handleDeleteClick = async (name: string) => {
+    if (confirm(`Are you sure you want to delete the environment "${name}"?`)) {
+      try {
+        await deleteEnvironment(name);
+      } catch (err) {
+        console.error('Delete failed:', err);
+      }
+    }
+  };
+
+  const handleSaveEnvironment = async (env: Environment) => {
+    try {
+      if (dialogMode === 'add') {
+        await addEnvironment(env);
+      } else {
+        await updateEnvironment(env);
+      }
+      setDialogOpen(false);
+    } catch (err) {
+      console.error('Save failed:', err);
     }
   };
 
@@ -105,9 +157,14 @@ function App() {
       <main className="space-y-6">
         {/* Environment Card */}
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Environments</CardTitle>
-            <CardDescription>Select an environment to use with Claude Code</CardDescription>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-lg">Environments</CardTitle>
+              <CardDescription>Select an environment to use with Claude Code</CardDescription>
+            </div>
+            <Button variant="outline" size="sm" onClick={handleAddClick}>
+              ➕ Add
+            </Button>
           </CardHeader>
           <CardContent className="space-y-2 max-h-[300px] overflow-y-auto">
             {environments.length === 0 ? (
@@ -118,7 +175,7 @@ function App() {
               environments.map((env) => (
                 <div
                   key={env.name}
-                  className={`p-3 rounded-lg cursor-pointer transition-all border ${
+                  className={`group p-3 rounded-lg cursor-pointer transition-all border ${
                     currentEnv === env.name
                       ? 'bg-primary/10 border-primary/30'
                       : 'bg-muted/30 border-transparent hover:bg-muted/50'
@@ -137,9 +194,37 @@ function App() {
                         </p>
                       </div>
                     </div>
-                    <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
-                      {env.model}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
+                        {env.model}
+                      </span>
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEditClick(env);
+                          }}
+                        >
+                          ✏️
+                        </Button>
+                        {env.name !== 'official' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteClick(env.name);
+                            }}
+                          >
+                            🗑️
+                          </Button>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               ))
@@ -252,6 +337,15 @@ function App() {
           )}
         </div>
       </main>
+
+      {/* Environment Dialog */}
+      <EnvironmentDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        mode={dialogMode}
+        environment={editingEnv}
+        onSave={handleSaveEnvironment}
+      />
     </div>
   );
 }
