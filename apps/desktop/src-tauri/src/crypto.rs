@@ -32,8 +32,9 @@ pub fn encrypt(plaintext: &str) -> String {
     let mut buffer = plaintext.as_bytes().to_vec();
     buffer.extend(std::iter::repeat(padding_len as u8).take(padding_len));
 
+    let len = buffer.len();
     let cipher = Aes256CbcEnc::new(&key.into(), &iv.into());
-    cipher.encrypt_padded_mut::<aes::cipher::block_padding::NoPadding>(&mut buffer, buffer.len()).unwrap();
+    cipher.encrypt_padded_mut::<aes::cipher::block_padding::NoPadding>(&mut buffer, len).unwrap();
 
     format!("enc:{}:{}", hex::encode(iv), hex::encode(&buffer))
 }

@@ -1,5 +1,3 @@
-use std::fs;
-use std::path::PathBuf;
 use std::sync::Arc;
 use serde::Serialize;
 use tauri::{
@@ -8,7 +6,7 @@ use tauri::{
     AppHandle, Emitter, Manager,
 };
 
-use crate::CcemConfig;
+use crate::config::{self, CcemConfig};
 use crate::session::SessionManager;
 use crate::terminal;
 
@@ -24,37 +22,18 @@ pub struct PermChangedPayload {
     pub perm: String,
 }
 
-/// Get the config file path
-fn get_config_path() -> PathBuf {
-    let home = dirs::home_dir().expect("Could not find home directory");
-    home.join(".config")
-        .join("claude-code-env-manager")
-        .join("config.json")
-}
-
 /// Read environments from the config file
 fn read_environments() -> (String, Vec<String>) {
-    let config_path = get_config_path();
-
-    if !config_path.exists() {
-        return ("official".to_string(), vec!["official".to_string()]);
-    }
-
-    let content = match fs::read_to_string(&config_path) {
+    let cfg = match config::read_config() {
         Ok(c) => c,
         Err(_) => return ("official".to_string(), vec!["official".to_string()]),
     };
 
-    let config: CcemConfig = match serde_json::from_str(&content) {
-        Ok(c) => c,
-        Err(_) => return ("official".to_string(), vec!["official".to_string()]),
-    };
-
-    let current = config.current.unwrap_or_else(|| "official".to_string());
+    let current = cfg.current.unwrap_or_else(|| "official".to_string());
 
     // Build environment list, always include "official" first
     let mut envs: Vec<String> = vec!["official".to_string()];
-    for name in config.registries.keys() {
+    for name in cfg.registries.keys() {
         if name != "official" {
             envs.push(name.clone());
         }
@@ -232,34 +211,9 @@ pub fn rebuild_tray_menu(app: &AppHandle) -> Result<(), tauri::Error> {
 
 /// Set the current environment and update config file
 fn set_current_env_internal(env_name: &str) -> Result<(), String> {
-    let config_path = get_config_path();
-
-    let mut config = if config_path.exists() {
-        let content = fs::read_to_string(&config_path)
-            .map_err(|e| format!("Failed to read config: {}", e))?;
-        serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse config: {}", e))?
-    } else {
-        CcemConfig {
-            registries: std::collections::HashMap::new(),
-            current: None,
-        }
-    };
-
-    config.current = Some(env_name.to_string());
-
-    let content = serde_json::to_string_pretty(&config)
-        .map_err(|e| format!("Failed to serialize config: {}", e))?;
-
-    if let Some(parent) = config_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create config directory: {}", e))?;
-    }
-
-    fs::write(&config_path, content)
-        .map_err(|e| format!("Failed to write config: {}", e))?;
-
-    Ok(())
+    let mut cfg = config::read_config()?;
+    cfg.current = Some(env_name.to_string());
+    config::write_config(&cfg)
 }
 
 /// Handle environment switch from tray menu
