@@ -18,7 +18,7 @@ const pkgPath = path.resolve(__dirname, '..', 'package.json');
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
 
 import type { EnvConfig, PermissionModeName } from '@ccem/core';
-import { encrypt, decrypt, ENV_PRESETS, PERMISSION_PRESETS } from '@ccem/core';
+import { encrypt, decrypt, ENV_PRESETS, PERMISSION_PRESETS, getCcemConfigDir, ensureCcemDir } from '@ccem/core';
 import {
   renderCompactHeader,
   renderEnvPanel,
@@ -54,8 +54,13 @@ import { runSkillSelector } from './components/index.js';
 import { loadFromRemote } from './remote.js';
 
 const program = new Command();
+
+// 确保配置目录存在
+ensureCcemDir();
+
 const config = new Conf({
   projectName: 'claude-code-env-manager',
+  cwd: getCcemConfigDir(),  // 使用新路径
   defaults: {
     registries: {
       'official': {
