@@ -262,6 +262,11 @@ fn main() {
             remove_session
         ])
         .setup(move |app| {
+            // Auto-migrate configuration if needed
+            if let Err(e) = config::migrate_if_needed() {
+                eprintln!("Config migration warning: {}", e);
+            }
+
             let _ = create_tray(app.handle())?;
 
             // Start session monitor background task
