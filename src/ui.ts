@@ -596,7 +596,31 @@ export type EnvSelectResult =
   | { action: 'delete'; name: string }
   | { action: 'cancel' };
 
-// 带快捷键的环境选择器
+// Footer 提示项类型
+type FooterHint = {
+  key: string;      // 按键，如 "[↑↓]", "[e]"
+  label: string;    // 完整标签，如 "navigate", "dit"
+  short?: string;   // 缩写标签，如 "nav"
+};
+
+// 渲染 footer 提示
+const renderFooterHints = (hints: FooterHint[]): string => {
+  const termWidth = process.stdout.columns || 80;
+
+  // 构建不同宽度的版本
+  const full = hints.map(h => theme.primary(h.key) + theme.dim(h.label)).join('  ');
+  const medium = hints.map(h => theme.primary(h.key) + theme.dim(h.short || h.label)).join('  ');
+  const minimal = hints.map(h => theme.primary(h.key)).join(' ');
+
+  // 计算纯文本长度（去除 ANSI 转义序列）
+  const stripAnsi = (s: string) => s.replace(/\x1B\[[0-9;]*m/g, '');
+
+  if (stripAnsi(full).length <= termWidth) return full;
+  if (stripAnsi(medium).length <= termWidth) return medium;
+  return minimal;
+};
+
+// 带快捷键的环境选择器（增量更新 + footer）
 export const selectEnvWithKeys = (
   registries: Record<string, unknown>,
   current: string
@@ -611,34 +635,68 @@ export const selectEnvWithKeys = (
     stdin.setRawMode(true);
     stdin.resume();
 
-    // 列表总行数 = 标题行 + 环境数
-    const totalLines = 1 + envNames.length;
-    let firstRender = true;
+    // Footer 提示配置
+    const footerHints: FooterHint[] = [
+      { key: '[↑↓]', label: ' navigate', short: ' nav' },
+      { key: '[Enter]', label: ' select', short: ' sel' },
+      { key: '[e]', label: 'dit', short: '' },
+      { key: '[r]', label: 'ename', short: 'en' },
+      { key: '[c]', label: 'opy', short: 'py' },
+      { key: '[d]', label: 'elete', short: 'el' },
+    ];
 
-    const render = () => {
+    // 总行数 = 列表行数 + footer 行数
+    const totalLines = envNames.length + 1;
+
+    // 渲染单个列表项
+    const renderItem = (index: number): string => {
+      const name = envNames[index];
+      const isCurrent = name === current;
+      const isSelected = index === selectedIndex;
+      const prefix = isSelected ? theme.primary('❯ ') : '  ';
+      const tag = isCurrent ? theme.success(' *') : '';
+      const nameText = isSelected ? theme.primary(name) : (isCurrent ? theme.primary(name) : theme.text(name));
+      return prefix + nameText + tag;
+    };
+
+    // 更新单行（增量更新）
+    const updateLine = (lineIndex: number, content: string) => {
+      // lineIndex: 0 = 第一个列表项
+      // 从 footer 位置（当前光标）向上移动到目标行
+      const moveUp = totalLines - lineIndex;
+      process.stdout.write(`\x1B[${moveUp}A`); // 上移
+      process.stdout.write('\x1B[2K');          // 清除当前行
+      process.stdout.write('\x1B[G');           // 移到行首
+      process.stdout.write(content);
+      process.stdout.write(`\x1B[${moveUp}B`); // 下移回 footer
+      process.stdout.write('\x1B[G');           // 移到行首
+    };
+
+    // 首次渲染
+    const initialRender = () => {
       process.stdout.write('\x1B[?25l'); // 隐藏光标
 
-      if (!firstRender) {
-        // 非首次渲染：移动到列表开始位置
-        process.stdout.write(`\x1B[${totalLines}A`); // 向上移动
-        process.stdout.write('\x1B[J'); // 清除到屏幕底部
-      }
-      firstRender = false;
-
-      console.log(theme.muted('?') + ' ' + theme.text('Select environment') + ' ' + theme.dim('(↑↓ navigate, Enter select, e edit, r rename, c copy, d delete)'));
-
-      envNames.forEach((name, i) => {
-        const isCurrent = name === current;
-        const isSelected = i === selectedIndex;
-        const prefix = isSelected ? theme.primary('❯ ') : '  ';
-        const tag = isCurrent ? theme.success(' *') : '';
-        const nameText = isSelected ? theme.primary(name) : (isCurrent ? theme.primary(name) : theme.text(name));
-        console.log(prefix + nameText + tag);
+      // 渲染列表
+      envNames.forEach((_, i) => {
+        console.log(renderItem(i));
       });
+
+      // 渲染 footer
+      console.log(renderFooterHints(footerHints));
+    };
+
+    // 处理选择变化（增量更新）
+    const handleSelectionChange = (oldIndex: number, newIndex: number) => {
+      if (oldIndex === newIndex) return;
+
+      // 先更新 selectedIndex，再渲染两行
+      selectedIndex = newIndex;
+      updateLine(oldIndex, renderItem(oldIndex));  // 旧项：无高亮
+      updateLine(newIndex, renderItem(newIndex));  // 新项：有高亮
     };
 
     // 初始渲染
-    render();
+    initialRender();
 
     const cleanup = () => {
       stdin.setRawMode(wasRaw ?? false);
@@ -662,15 +720,17 @@ export const selectEnvWithKeys = (
         return;
       }
 
-      // Arrow keys
+      // Arrow keys（增量更新）
       if (char === '\x1B[A' || char === 'k') { // Up
-        selectedIndex = Math.max(0, selectedIndex - 1);
-        render();
+        const oldIndex = selectedIndex;
+        const newIndex = Math.max(0, selectedIndex - 1);
+        handleSelectionChange(oldIndex, newIndex);
         return;
       }
       if (char === '\x1B[B' || char === 'j') { // Down
-        selectedIndex = Math.min(envNames.length - 1, selectedIndex + 1);
-        render();
+        const oldIndex = selectedIndex;
+        const newIndex = Math.min(envNames.length - 1, selectedIndex + 1);
+        handleSelectionChange(oldIndex, newIndex);
         return;
       }
 
