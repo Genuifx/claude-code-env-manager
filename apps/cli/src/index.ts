@@ -18,7 +18,7 @@ const pkgPath = path.resolve(__dirname, '..', 'package.json');
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
 
 import type { EnvConfig, PermissionModeName } from '@ccem/core';
-import { encrypt, decrypt, ENV_PRESETS, PERMISSION_PRESETS, getCcemConfigDir, ensureCcemDir } from '@ccem/core';
+import { encrypt, decrypt, ENV_PRESETS, PERMISSION_PRESETS, getCcemConfigDir, ensureCcemDir, getCcemConfigPath, getLegacyConfigPath } from '@ccem/core';
 import {
   renderCompactHeader,
   renderEnvPanel,
@@ -585,6 +585,60 @@ setupCmd
   .description('初始化 Claude Code 全局配置（跳过 onboarding、禁用遥测、安装 MCP 工具）')
   .action(async () => {
     await runSetupInit();
+  });
+
+setupCmd
+  .command('migrate')
+  .description('迁移旧版配置到 ~/.ccem/')
+  .option('--clean', '迁移后删除旧配置文件')
+  .option('--force', '强制重新迁移（覆盖现有配置）')
+  .action(async function(this: any) {
+    const options = this.opts();
+    const newConfigPath = getCcemConfigPath();
+    const legacyConfigPath = getLegacyConfigPath();
+
+    console.log(chalk.cyan('\n🔄 配置迁移\n'));
+
+    // 检查旧配置是否存在
+    if (!fs.existsSync(legacyConfigPath)) {
+      console.log(chalk.yellow('未找到旧版配置文件'));
+      console.log(chalk.gray(`  旧路径: ${legacyConfigPath}`));
+      return;
+    }
+
+    // 检查新配置是否存在
+    if (fs.existsSync(newConfigPath) && !options.force) {
+      console.log(chalk.green('✓ 配置已在新路径'));
+      console.log(chalk.gray(`  路径: ${newConfigPath}`));
+      console.log(chalk.gray('\n使用 --force 强制重新迁移'));
+      return;
+    }
+
+    try {
+      // 确保目录存在
+      ensureCcemDir();
+
+      // 复制配置
+      fs.copyFileSync(legacyConfigPath, newConfigPath);
+      console.log(chalk.green('✓ 配置已迁移'));
+      console.log(chalk.gray(`  从: ${legacyConfigPath}`));
+      console.log(chalk.gray(`  到: ${newConfigPath}`));
+
+      // 清理旧文件
+      if (options.clean) {
+        fs.unlinkSync(legacyConfigPath);
+        // 尝试删除空目录
+        const legacyDir = path.dirname(legacyConfigPath);
+        try {
+          fs.rmdirSync(legacyDir);
+        } catch {
+          // 目录非空，忽略
+        }
+        console.log(chalk.green('✓ 已删除旧配置文件'));
+      }
+    } catch (err) {
+      console.error(chalk.red(`✗ 迁移失败: ${err}`));
+    }
   });
 
 // skill 命令组（管理 Claude Code skills）
