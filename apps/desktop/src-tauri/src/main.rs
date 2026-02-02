@@ -7,41 +7,14 @@ mod session;
 mod terminal;
 mod tray;
 
-use serde::{Deserialize, Serialize};
+use config::{EnvConfig, get_env_with_decrypted_key, create_env_with_encrypted_key};
 use session::{Session, SessionManager, start_session_monitor};
 use std::sync::Arc;
 use std::collections::HashMap;
-use std::fs;
-use std::path::PathBuf;
 use std::process::Command;
 use tauri::State;
 use terminal::{TerminalInfo, TerminalType};
 use tray::create_tray;
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct EnvConfig {
-    #[serde(rename = "ANTHROPIC_BASE_URL")]
-    pub base_url: Option<String>,
-    #[serde(rename = "ANTHROPIC_API_KEY")]
-    pub api_key: Option<String>,
-    #[serde(rename = "ANTHROPIC_MODEL")]
-    pub model: Option<String>,
-    #[serde(rename = "ANTHROPIC_SMALL_FAST_MODEL")]
-    pub small_model: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CcemConfig {
-    pub registries: HashMap<String, EnvConfig>,
-    pub current: Option<String>,
-}
-
-fn get_config_path() -> PathBuf {
-    let home = dirs::home_dir().expect("Could not find home directory");
-    home.join(".config")
-        .join("claude-code-env-manager")
-        .join("config.json")
-}
 
 fn generate_session_id() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -59,68 +32,21 @@ fn greet(name: &str) -> String {
 
 #[tauri::command]
 fn get_environments() -> Result<HashMap<String, EnvConfig>, String> {
-    let config_path = get_config_path();
-
-    if !config_path.exists() {
-        return Ok(HashMap::new());
-    }
-
-    let content = fs::read_to_string(&config_path)
-        .map_err(|e| format!("Failed to read config: {}", e))?;
-
-    let config: CcemConfig = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse config: {}", e))?;
-
-    Ok(config.registries)
+    let cfg = config::read_config()?;
+    Ok(cfg.registries)
 }
 
 #[tauri::command]
 fn get_current_env() -> Result<String, String> {
-    let config_path = get_config_path();
-
-    if !config_path.exists() {
-        return Ok("official".to_string());
-    }
-
-    let content = fs::read_to_string(&config_path)
-        .map_err(|e| format!("Failed to read config: {}", e))?;
-
-    let config: CcemConfig = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse config: {}", e))?;
-
-    Ok(config.current.unwrap_or_else(|| "official".to_string()))
+    let cfg = config::read_config()?;
+    Ok(cfg.current.unwrap_or_else(|| "official".to_string()))
 }
 
 #[tauri::command]
 fn set_current_env(name: String) -> Result<(), String> {
-    let config_path = get_config_path();
-
-    let mut config = if config_path.exists() {
-        let content = fs::read_to_string(&config_path)
-            .map_err(|e| format!("Failed to read config: {}", e))?;
-        serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse config: {}", e))?
-    } else {
-        CcemConfig {
-            registries: HashMap::new(),
-            current: None,
-        }
-    };
-
-    config.current = Some(name);
-
-    let content = serde_json::to_string_pretty(&config)
-        .map_err(|e| format!("Failed to serialize config: {}", e))?;
-
-    if let Some(parent) = config_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create config directory: {}", e))?;
-    }
-
-    fs::write(&config_path, content)
-        .map_err(|e| format!("Failed to write config: {}", e))?;
-
-    Ok(())
+    let mut cfg = config::read_config()?;
+    cfg.current = Some(name);
+    config::write_config(&cfg)
 }
 
 #[tauri::command]
@@ -131,45 +57,21 @@ fn add_environment(
     model: String,
     small_model: Option<String>,
 ) -> Result<(), String> {
-    let config_path = get_config_path();
+    let mut cfg = config::read_config()?;
 
-    let mut config = if config_path.exists() {
-        let content = fs::read_to_string(&config_path)
-            .map_err(|e| format!("Failed to read config: {}", e))?;
-        serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse config: {}", e))?
-    } else {
-        CcemConfig {
-            registries: HashMap::new(),
-            current: None,
-        }
-    };
-
-    if config.registries.contains_key(&name) {
+    if cfg.registries.contains_key(&name) {
         return Err(format!("Environment '{}' already exists", name));
     }
 
-    let env_config = EnvConfig {
-        base_url: Some(base_url),
+    let env_config = create_env_with_encrypted_key(
+        Some(base_url),
         api_key,
-        model: Some(model),
+        Some(model),
         small_model,
-    };
+    );
 
-    config.registries.insert(name, env_config);
-
-    let content = serde_json::to_string_pretty(&config)
-        .map_err(|e| format!("Failed to serialize config: {}", e))?;
-
-    if let Some(parent) = config_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create config directory: {}", e))?;
-    }
-
-    fs::write(&config_path, content)
-        .map_err(|e| format!("Failed to write config: {}", e))?;
-
-    Ok(())
+    cfg.registries.insert(name, env_config);
+    config::write_config(&cfg)
 }
 
 #[tauri::command]
@@ -180,38 +82,21 @@ fn update_environment(
     model: String,
     small_model: Option<String>,
 ) -> Result<(), String> {
-    let config_path = get_config_path();
+    let mut cfg = config::read_config()?;
 
-    if !config_path.exists() {
+    if !cfg.registries.contains_key(&name) {
         return Err(format!("Environment '{}' does not exist", name));
     }
 
-    let content = fs::read_to_string(&config_path)
-        .map_err(|e| format!("Failed to read config: {}", e))?;
-
-    let mut config: CcemConfig = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse config: {}", e))?;
-
-    if !config.registries.contains_key(&name) {
-        return Err(format!("Environment '{}' does not exist", name));
-    }
-
-    let env_config = EnvConfig {
-        base_url: Some(base_url),
+    let env_config = create_env_with_encrypted_key(
+        Some(base_url),
         api_key,
-        model: Some(model),
+        Some(model),
         small_model,
-    };
+    );
 
-    config.registries.insert(name, env_config);
-
-    let content = serde_json::to_string_pretty(&config)
-        .map_err(|e| format!("Failed to serialize config: {}", e))?;
-
-    fs::write(&config_path, content)
-        .map_err(|e| format!("Failed to write config: {}", e))?;
-
-    Ok(())
+    cfg.registries.insert(name, env_config);
+    config::write_config(&cfg)
 }
 
 #[tauri::command]
@@ -220,36 +105,19 @@ fn delete_environment(name: String) -> Result<(), String> {
         return Err("Cannot delete the 'official' environment".to_string());
     }
 
-    let config_path = get_config_path();
+    let mut cfg = config::read_config()?;
 
-    if !config_path.exists() {
+    if !cfg.registries.contains_key(&name) {
         return Err(format!("Environment '{}' does not exist", name));
     }
 
-    let content = fs::read_to_string(&config_path)
-        .map_err(|e| format!("Failed to read config: {}", e))?;
+    cfg.registries.remove(&name);
 
-    let mut config: CcemConfig = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse config: {}", e))?;
-
-    if !config.registries.contains_key(&name) {
-        return Err(format!("Environment '{}' does not exist", name));
+    if cfg.current.as_ref() == Some(&name) {
+        cfg.current = Some("official".to_string());
     }
 
-    config.registries.remove(&name);
-
-    // Reset current to "official" if we deleted the current environment
-    if config.current.as_ref() == Some(&name) {
-        config.current = Some("official".to_string());
-    }
-
-    let content = serde_json::to_string_pretty(&config)
-        .map_err(|e| format!("Failed to serialize config: {}", e))?;
-
-    fs::write(&config_path, content)
-        .map_err(|e| format!("Failed to write config: {}", e))?;
-
-    Ok(())
+    config::write_config(&cfg)
 }
 
 // ============================================
@@ -282,19 +150,9 @@ fn launch_claude_code(
     perm_mode: Option<String>,
     working_dir: Option<String>,
 ) -> Result<Session, String> {
-    let config_path = get_config_path();
-
     // Read environment configuration
-    let env_config = if config_path.exists() {
-        let content = fs::read_to_string(&config_path)
-            .map_err(|e| format!("Failed to read config: {}", e))?;
-        let config: CcemConfig = serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse config: {}", e))?;
-
-        config.registries.get(&env_name).cloned()
-    } else {
-        None
-    };
+    let cfg = config::read_config()?;
+    let env_config = cfg.registries.get(&env_name).map(get_env_with_decrypted_key);
 
     // Build environment variables map
     let mut env_vars: HashMap<String, String> = HashMap::new();
