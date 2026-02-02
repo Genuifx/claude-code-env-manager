@@ -6,7 +6,7 @@ use tauri::{
     AppHandle, Emitter, Manager,
 };
 
-use crate::config::{self, CcemConfig};
+use crate::config;
 use crate::session::SessionManager;
 use crate::terminal;
 
