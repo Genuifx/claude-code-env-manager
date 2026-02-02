@@ -105,3 +105,41 @@ export const ensureGlobalClaudeDir = (): string => {
   }
   return claudeDir;
 };
+
+/**
+ * CCEM 配置目录路径 (~/.ccem/)
+ */
+export const getCcemConfigDir = (): string => {
+  return path.join(getHomeDir(), '.ccem');
+};
+
+/**
+ * CCEM 主配置文件路径 (~/.ccem/config.json)
+ */
+export const getCcemConfigPath = (): string => {
+  return path.join(getCcemConfigDir(), 'config.json');
+};
+
+/**
+ * 确保 ~/.ccem 目录存在
+ */
+export const ensureCcemDir = (): string => {
+  const ccemDir = getCcemConfigDir();
+  if (!fs.existsSync(ccemDir)) {
+    fs.mkdirSync(ccemDir, { recursive: true });
+  }
+  return ccemDir;
+};
+
+/**
+ * 获取旧配置路径 (conf 包默认路径)
+ * macOS: ~/Library/Preferences/claude-code-env-manager-nodejs/config.json
+ * Linux: ~/.config/claude-code-env-manager-nodejs/config.json
+ */
+export const getLegacyConfigPath = (): string => {
+  const home = getHomeDir();
+  if (process.platform === 'darwin') {
+    return path.join(home, 'Library', 'Preferences', 'claude-code-env-manager-nodejs', 'config.json');
+  }
+  return path.join(home, '.config', 'claude-code-env-manager-nodejs', 'config.json');
+};
