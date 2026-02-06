@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { PermissionModeName } from '@ccem/core/browser';
+import type { UsageStats, Milestone } from '@/types/analytics';
 
 export interface Environment {
   name: string;
@@ -77,6 +78,14 @@ interface AppState {
   removeFavorite: (path: string) => void;
   setSelectedWorkingDir: (dir: string | null) => void;
 
+  // Analytics
+  usageStats: UsageStats | null;
+  milestones: Milestone[];
+  continuousUsageDays: number;
+  setUsageStats: (stats: UsageStats) => void;
+  setMilestones: (milestones: Milestone[]) => void;
+  setContinuousUsageDays: (days: number) => void;
+
   // UI State
   isLoading: boolean;
   setLoading: (loading: boolean) => void;
@@ -136,6 +145,14 @@ export const useAppStore = create<AppState>((set) => ({
       favorites: state.favorites.filter((f) => f.path !== path),
     })),
   setSelectedWorkingDir: (dir) => set({ selectedWorkingDir: dir }),
+
+  // Analytics
+  usageStats: null,
+  milestones: [],
+  continuousUsageDays: 0,
+  setUsageStats: (stats) => set({ usageStats: stats }),
+  setMilestones: (milestones) => set({ milestones }),
+  setContinuousUsageDays: (days) => set({ continuousUsageDays: days }),
 
   // UI State
   isLoading: false,
