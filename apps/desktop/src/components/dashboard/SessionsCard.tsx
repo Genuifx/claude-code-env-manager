@@ -12,7 +12,7 @@ interface SessionsCardProps {
 
 export function SessionsCard({ onStopAll }: SessionsCardProps) {
   const { sessions, updateSessionStatus } = useAppStore();
-  const { loadSessions, stopSession, deleteSession, focusSession, closeSession, minimizeSession } = useTauriCommands();
+  const { loadSessions, deleteSession, focusSession, closeSession, minimizeSession } = useTauriCommands();
 
   // Load sessions on mount
   useEffect(() => {
@@ -54,15 +54,6 @@ export function SessionsCard({ onStopAll }: SessionsCardProps) {
     const error = await closeSession(sessionId);
     if (error) {
       toast.error(error);
-    }
-  };
-
-  // Handle stop session (legacy - for PID-based sessions)
-  const handleStopSession = async (sessionId: string) => {
-    try {
-      await stopSession(sessionId);
-    } catch (err) {
-      console.error('Failed to stop session:', err);
     }
   };
 
@@ -128,7 +119,6 @@ export function SessionsCard({ onStopAll }: SessionsCardProps) {
               onFocus={() => handleFocusSession(session.id)}
               onMinimize={() => handleMinimizeSession(session.id)}
               onClose={() => handleCloseSession(session.id)}
-              onStop={() => handleStopSession(session.id)}
               onRemove={() => handleRemoveSession(session.id)}
             />
           ))}
@@ -154,11 +144,10 @@ interface SessionItemProps {
   onFocus: () => void;
   onMinimize: () => void;
   onClose: () => void;
-  onStop: () => void;
   onRemove: () => void;
 }
 
-function SessionItem({ session, onFocus, onMinimize, onClose, onStop, onRemove }: SessionItemProps) {
+function SessionItem({ session, onFocus, onMinimize, onClose, onRemove }: SessionItemProps) {
   const startTime = new Date(session.startedAt).toLocaleTimeString('zh-CN', {
     hour: '2-digit',
     minute: '2-digit',
