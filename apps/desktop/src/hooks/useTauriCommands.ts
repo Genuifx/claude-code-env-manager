@@ -3,10 +3,10 @@ import { useAppStore, type Environment, type Session } from '@/store';
 import { useCallback } from 'react';
 
 interface TauriEnvConfig {
-  base_url?: string;
-  api_key?: string;
-  model?: string;
-  small_model?: string;
+  ANTHROPIC_BASE_URL?: string;
+  ANTHROPIC_API_KEY?: string;
+  ANTHROPIC_MODEL?: string;
+  ANTHROPIC_SMALL_FAST_MODEL?: string;
 }
 
 interface TauriSession {
@@ -16,7 +16,37 @@ interface TauriSession {
   perm_mode: string;
   working_dir: string;
   start_time: string;
-  status: string;
+  status: string;  // "running" | "stopped" | "interrupted"
+  terminal_type?: string;  // "iterm2" | "terminalapp"
+  window_id?: string;      // iTerm2 window ID
+}
+
+interface TauriFavoriteProject {
+  path: string;
+  name: string;
+}
+
+interface TauriRecentProject {
+  path: string;
+  lastUsed: string;
+}
+
+interface TauriVSCodeProject {
+  path: string;
+  syncedAt: string;
+}
+
+interface TauriJetBrainsProject {
+  path: string;
+  ide: string;
+  syncedAt: string;
+}
+
+interface TauriAppConfig {
+  favorites: TauriFavoriteProject[];
+  recent: TauriRecentProject[];
+  vscodeProjects: TauriVSCodeProject[];
+  jetbrainsProjects: TauriJetBrainsProject[];
 }
 
 export function useTauriCommands() {
@@ -31,6 +61,11 @@ export function useTauriCommands() {
     updateSessionStatus,
     currentEnv,
     permissionMode,
+    setFavorites,
+    setRecent,
+    setVSCodeProjects,
+    setJetBrainsProjects,
+    selectedWorkingDir,
   } = useAppStore();
 
   const loadEnvironments = useCallback(async () => {
@@ -39,10 +74,10 @@ export function useTauriCommands() {
       const envs = await invoke<Record<string, TauriEnvConfig>>('get_environments');
       const envList: Environment[] = Object.entries(envs).map(([name, config]) => ({
         name,
-        baseUrl: config.base_url || '',
-        apiKey: config.api_key,
-        model: config.model || '',
-        smallModel: config.small_model,
+        baseUrl: config.ANTHROPIC_BASE_URL || '',
+        apiKey: config.ANTHROPIC_API_KEY,
+        model: config.ANTHROPIC_MODEL || '',
+        smallModel: config.ANTHROPIC_SMALL_FAST_MODEL,
       }));
       setEnvironments(envList);
       setError(null);
@@ -80,10 +115,10 @@ export function useTauriCommands() {
     try {
       await invoke('add_environment', {
         name: env.name,
-        baseUrl: env.baseUrl,
-        apiKey: env.apiKey,
+        base_url: env.baseUrl,
+        api_key: env.apiKey,
         model: env.model,
-        smallModel: env.smallModel,
+        small_model: env.smallModel,
       });
       await loadEnvironments();
       setError(null);
@@ -99,10 +134,10 @@ export function useTauriCommands() {
     try {
       await invoke('update_environment', {
         name: env.name,
-        baseUrl: env.baseUrl,
-        apiKey: env.apiKey,
+        base_url: env.baseUrl,
+        api_key: env.apiKey,
         model: env.model,
-        smallModel: env.smallModel,
+        small_model: env.smallModel,
       });
       await loadEnvironments();
       setError(null);
@@ -129,10 +164,11 @@ export function useTauriCommands() {
   const launchClaudeCode = useCallback(async (workingDir?: string) => {
     setLoading(true);
     try {
+      const workDir = workingDir || selectedWorkingDir || null;
       const tauriSession = await invoke<TauriSession>('launch_claude_code', {
         envName: currentEnv,
         permMode: permissionMode,
-        workingDir: workingDir || null,
+        workingDir: workDir,
       });
 
       // Convert Tauri session to frontend session
@@ -142,17 +178,25 @@ export function useTauriCommands() {
         workingDir: tauriSession.working_dir,
         pid: tauriSession.pid,
         startedAt: new Date(tauriSession.start_time),
-        status: tauriSession.status as 'running' | 'stopped' | 'error',
+        status: tauriSession.status as 'running' | 'stopped' | 'interrupted' | 'error',
+        terminalType: tauriSession.terminal_type,
+        windowId: tauriSession.window_id,
       };
 
       addSession(session);
+
+      // Add to recent projects if a working directory was used
+      if (workDir) {
+        await invoke('add_recent', { path: workDir });
+      }
+
       setError(null);
     } catch (err) {
       setError(`Failed to launch Claude Code: ${err}`);
     } finally {
       setLoading(false);
     }
-  }, [currentEnv, permissionMode, addSession, setLoading, setError]);
+  }, [currentEnv, permissionMode, selectedWorkingDir, addSession, setLoading, setError]);
 
   const loadSessions = useCallback(async () => {
     try {
@@ -163,7 +207,9 @@ export function useTauriCommands() {
         workingDir: s.working_dir,
         pid: s.pid,
         startedAt: new Date(s.start_time),
-        status: s.status as 'running' | 'stopped' | 'error',
+        status: s.status as 'running' | 'stopped' | 'interrupted' | 'error',
+        terminalType: s.terminal_type,
+        windowId: s.window_id,
       }));
       setSessions(sessions);
     } catch (err) {
@@ -189,6 +235,95 @@ export function useTauriCommands() {
     }
   }, [removeSession, setError]);
 
+  const focusSession = useCallback(async (sessionId: string) => {
+    try {
+      await invoke('focus_session', { sessionId });
+    } catch (err) {
+      // Return error message for toast display
+      return `${err}`;
+    }
+    return null;
+  }, []);
+
+  const closeSession = useCallback(async (sessionId: string) => {
+    try {
+      await invoke('close_session', { sessionId });
+      removeSession(sessionId);
+    } catch (err) {
+      // Return error message for toast display
+      return `${err}`;
+    }
+    return null;
+  }, [removeSession]);
+
+  const minimizeSession = useCallback(async (sessionId: string) => {
+    try {
+      await invoke('minimize_session', { sessionId });
+    } catch (err) {
+      // Return error message for toast display
+      return `${err}`;
+    }
+    return null;
+  }, []);
+
+  const loadAppConfig = useCallback(async () => {
+    try {
+      const config = await invoke<TauriAppConfig>('get_app_config');
+      setFavorites(config.favorites);
+      setRecent(config.recent);
+      setVSCodeProjects(config.vscodeProjects);
+      setJetBrainsProjects(config.jetbrainsProjects || []);
+    } catch (err) {
+      console.error('Failed to load app config:', err);
+    }
+  }, [setFavorites, setRecent, setVSCodeProjects, setJetBrainsProjects]);
+
+  const addFavoriteProject = useCallback(async (path: string, name: string) => {
+    try {
+      await invoke('add_favorite', { path, name });
+      await loadAppConfig();
+    } catch (err) {
+      setError(`Failed to add favorite: ${err}`);
+    }
+  }, [loadAppConfig, setError]);
+
+  const removeFavoriteProject = useCallback(async (path: string) => {
+    try {
+      await invoke('remove_favorite', { path });
+      await loadAppConfig();
+    } catch (err) {
+      setError(`Failed to remove favorite: ${err}`);
+    }
+  }, [loadAppConfig, setError]);
+
+  const openDirectoryPicker = useCallback(async (): Promise<string | null> => {
+    try {
+      const path = await invoke<string | null>('open_directory_dialog');
+      return path;
+    } catch (err) {
+      setError(`Failed to open directory picker: ${err}`);
+      return null;
+    }
+  }, [setError]);
+
+  const syncVSCodeProjects = useCallback(async () => {
+    try {
+      await invoke('sync_vscode_projects');
+      await loadAppConfig();
+    } catch (err) {
+      setError(`Failed to sync VS Code projects: ${err}`);
+    }
+  }, [loadAppConfig, setError]);
+
+  const syncJetBrainsProjects = useCallback(async () => {
+    try {
+      await invoke('sync_jetbrains_projects');
+      await loadAppConfig();
+    } catch (err) {
+      setError(`Failed to sync JetBrains projects: ${err}`);
+    }
+  }, [loadAppConfig, setError]);
+
   return {
     loadEnvironments,
     loadCurrentEnv,
@@ -200,5 +335,14 @@ export function useTauriCommands() {
     loadSessions,
     stopSession,
     deleteSession,
+    focusSession,
+    closeSession,
+    minimizeSession,
+    loadAppConfig,
+    addFavoriteProject,
+    removeFavoriteProject,
+    openDirectoryPicker,
+    syncVSCodeProjects,
+    syncJetBrainsProjects,
   };
 }

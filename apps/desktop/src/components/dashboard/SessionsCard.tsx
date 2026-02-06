@@ -4,6 +4,7 @@ import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useSessionUpdatedEvent, type SessionUpdatePayload } from '@/hooks/useTauriEvents';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 interface SessionsCardProps {
   onStopAll?: () => void;
@@ -11,7 +12,7 @@ interface SessionsCardProps {
 
 export function SessionsCard({ onStopAll }: SessionsCardProps) {
   const { sessions, updateSessionStatus } = useAppStore();
-  const { loadSessions, stopSession, deleteSession } = useTauriCommands();
+  const { loadSessions, stopSession, deleteSession, focusSession, closeSession, minimizeSession } = useTauriCommands();
 
   // Load sessions on mount
   useEffect(() => {
@@ -32,7 +33,31 @@ export function SessionsCard({ onStopAll }: SessionsCardProps) {
   // Listen to session-updated events
   useSessionUpdatedEvent(handleSessionUpdated);
 
-  // Handle stop session
+  // Handle focus session
+  const handleFocusSession = async (sessionId: string) => {
+    const error = await focusSession(sessionId);
+    if (error) {
+      toast.error(error);
+    }
+  };
+
+  // Handle minimize session
+  const handleMinimizeSession = async (sessionId: string) => {
+    const error = await minimizeSession(sessionId);
+    if (error) {
+      toast.error(error);
+    }
+  };
+
+  // Handle close session (terminal window)
+  const handleCloseSession = async (sessionId: string) => {
+    const error = await closeSession(sessionId);
+    if (error) {
+      toast.error(error);
+    }
+  };
+
+  // Handle stop session (legacy - for PID-based sessions)
   const handleStopSession = async (sessionId: string) => {
     try {
       await stopSession(sessionId);
@@ -55,9 +80,9 @@ export function SessionsCard({ onStopAll }: SessionsCardProps) {
     const runningSessions = sessions.filter((s) => s.status === 'running');
     for (const session of runningSessions) {
       try {
-        await stopSession(session.id);
+        await closeSession(session.id);
       } catch (err) {
-        console.error(`Failed to stop session ${session.id}:`, err);
+        console.error(`Failed to close session ${session.id}:`, err);
       }
     }
     onStopAll?.();
@@ -100,6 +125,9 @@ export function SessionsCard({ onStopAll }: SessionsCardProps) {
             <SessionItem
               key={session.id}
               session={session}
+              onFocus={() => handleFocusSession(session.id)}
+              onMinimize={() => handleMinimizeSession(session.id)}
+              onClose={() => handleCloseSession(session.id)}
               onStop={() => handleStopSession(session.id)}
               onRemove={() => handleRemoveSession(session.id)}
             />
@@ -123,21 +151,27 @@ export function SessionsCard({ onStopAll }: SessionsCardProps) {
 
 interface SessionItemProps {
   session: Session;
+  onFocus: () => void;
+  onMinimize: () => void;
+  onClose: () => void;
   onStop: () => void;
   onRemove: () => void;
 }
 
-function SessionItem({ session, onStop, onRemove }: SessionItemProps) {
+function SessionItem({ session, onFocus, onMinimize, onClose, onStop, onRemove }: SessionItemProps) {
   const startTime = new Date(session.startedAt).toLocaleTimeString('zh-CN', {
     hour: '2-digit',
     minute: '2-digit',
   });
 
-  const statusColors = {
-    running: 'bg-emerald-400',
-    stopped: 'bg-slate-400',
-    error: 'bg-rose-400',
+  const statusConfig = {
+    running: { color: 'bg-emerald-400', label: '运行中' },
+    stopped: { color: 'bg-slate-400', label: '已停止' },
+    interrupted: { color: 'bg-amber-400', label: '已中断' },
+    error: { color: 'bg-rose-400', label: '错误' },
   };
+
+  const status = statusConfig[session.status] || statusConfig.stopped;
 
   // Get short working dir name
   const workingDirName = session.workingDir.split('/').pop() || session.workingDir;
@@ -147,7 +181,7 @@ function SessionItem({ session, onStop, onRemove }: SessionItemProps) {
       <div className="flex items-center gap-3 min-w-0 flex-1">
         <div className={cn(
           'w-2 h-2 rounded-full flex-shrink-0',
-          statusColors[session.status],
+          status.color,
           session.status === 'running' && 'animate-pulse'
         )} />
         <div className="min-w-0 flex-1">
@@ -161,14 +195,35 @@ function SessionItem({ session, onStop, onRemove }: SessionItemProps) {
       </div>
       <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
         {session.status === 'running' ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-xs text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20"
-            onClick={onStop}
-          >
-            停止
-          </Button>
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+              onClick={onFocus}
+              title="聚焦窗口"
+            >
+              聚焦
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs text-slate-500 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700"
+              onClick={onMinimize}
+              title="最小化"
+            >
+              最小化
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20"
+              onClick={onClose}
+              title="关闭会话"
+            >
+              关闭
+            </Button>
+          </>
         ) : (
           <Button
             variant="ghost"

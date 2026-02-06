@@ -183,8 +183,11 @@ pub fn set_preferred_terminal(terminal: TerminalType) -> Result<(), String> {
 }
 
 /// Build the shell command to set environment variables and launch Claude
-fn build_shell_command(env_vars: &HashMap<String, String>, working_dir: &str) -> String {
+fn build_shell_command(env_vars: &HashMap<String, String>, working_dir: &str, session_id: &str) -> String {
     let mut parts = Vec::new();
+
+    // Ensure sessions directory exists
+    parts.push("mkdir -p ~/.ccem/sessions".to_string());
 
     // Change to working directory (escape backslashes and double quotes to prevent shell injection)
     let escaped_dir = working_dir.replace("\\", "\\\\").replace("\"", "\\\"");
@@ -197,36 +200,41 @@ fn build_shell_command(env_vars: &HashMap<String, String>, working_dir: &str) ->
         parts.push(format!("export {}='{}'", key, escaped_value));
     }
 
-    // Launch claude
-    parts.push("claude".to_string());
+    // Launch claude and write exit code to file after it exits
+    let escaped_session_id = session_id.replace("'", "'\\''");
+    parts.push(format!("claude; echo $? > ~/.ccem/sessions/'{}'.exit", escaped_session_id));
 
     parts.join(" && ")
 }
 
 /// Generate AppleScript for Terminal.app
 fn terminal_app_script(shell_command: &str) -> String {
+    // IMPORTANT: Escape backslashes FIRST, then double quotes
+    let escaped = shell_command.replace("\\", "\\\\").replace("\"", "\\\"");
     format!(
         r#"tell application "Terminal"
     do script "{}"
     activate
 end tell"#,
-        shell_command.replace("\"", "\\\"").replace("\\", "\\\\")
+        escaped
     )
 }
 
 /// Generate AppleScript for iTerm2 with tab title
-fn iterm2_script(shell_command: &str, session_name: &str) -> String {
+/// Returns the window ID for later operations
+fn iterm2_script(shell_command: &str) -> String {
+    // IMPORTANT: Escape backslashes FIRST, then double quotes
+    let escaped_cmd = shell_command.replace("\\", "\\\\").replace("\"", "\\\"");
     format!(
         r#"tell application "iTerm2"
-    create window with default profile
-    tell current session of current window
-        set name to "{}"
+    set newWindow to (create window with default profile)
+    tell current session of newWindow
         write text "{}"
     end tell
     activate
+    return id of newWindow
 end tell"#,
-        session_name.replace("\"", "\\\""),
-        shell_command.replace("\"", "\\\"").replace("\\", "\\\\")
+        escaped_cmd
     )
 }
 
@@ -236,22 +244,22 @@ end tell"#,
 /// * `terminal` - The terminal to launch in
 /// * `env_vars` - Environment variables to set
 /// * `working_dir` - Working directory for the session
-/// * `session_name` - Session name (used for iTerm2 tab title)
+/// * `session_id` - Session ID (used for exit status tracking)
 ///
 /// # Returns
-/// * `Ok(())` on success
+/// * `Ok(Option<String>)` - Window ID on success (None for Terminal.app)
 /// * `Err(String)` with error message on failure
 pub fn launch_in_terminal(
     terminal: TerminalType,
     env_vars: HashMap<String, String>,
     working_dir: &str,
-    session_name: &str,
-) -> Result<(), String> {
-    let shell_command = build_shell_command(&env_vars, working_dir);
+    session_id: &str,
+) -> Result<Option<String>, String> {
+    let shell_command = build_shell_command(&env_vars, working_dir, session_id);
 
     let script = match terminal {
         TerminalType::TerminalApp => terminal_app_script(&shell_command),
-        TerminalType::ITerm2 => iterm2_script(&shell_command, session_name),
+        TerminalType::ITerm2 => iterm2_script(&shell_command),
     };
 
     // Execute the AppleScript
@@ -269,59 +277,41 @@ pub fn launch_in_terminal(
         ));
     }
 
-    Ok(())
+    // For iTerm2, return the window ID
+    match terminal {
+        TerminalType::ITerm2 => {
+            let window_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            Ok(Some(window_id))
+        }
+        TerminalType::TerminalApp => Ok(None),
+    }
 }
 
-/// Focus a terminal window by session name using AppleScript
-///
-/// For iTerm2: Searches for a tab with matching name and activates it
-/// For Terminal.app: Activates the most recent Terminal window (no tab name support)
-///
-/// # Arguments
-/// * `terminal` - The terminal type to focus
-/// * `session_name` - The session name (used for iTerm2 tab matching)
-///
-/// # Returns
-/// * `Ok(())` on success
-/// * `Err(String)` with error message on failure
-pub fn focus_terminal_window(terminal: TerminalType, session_name: &str) -> Result<(), String> {
+/// Focus a terminal window by window ID
+pub fn focus_terminal_window(terminal: TerminalType, window_id: &str) -> Result<(), String> {
     let script = match terminal {
         TerminalType::TerminalApp => {
-            // Terminal.app doesn't support tab naming, just activate the app
             r#"tell application "Terminal"
     activate
 end tell"#.to_string()
         }
         TerminalType::ITerm2 => {
-            // iTerm2: Search for tab with matching name and activate it
             format!(
                 r#"tell application "iTerm2"
-    set targetName to "{}"
     repeat with aWindow in windows
-        tell aWindow
-            repeat with aTab in tabs
-                tell aTab
-                    repeat with aSession in sessions
-                        if name of aSession is targetName then
-                            select aTab
-                            select aWindow
-                            tell application "iTerm2" to activate
-                            return
-                        end if
-                    end repeat
-                end tell
-            end repeat
-        end tell
+        if id of aWindow is {} then
+            select aWindow
+            activate
+            return
+        end if
     end repeat
-    -- Fallback: just activate iTerm2
     activate
 end tell"#,
-                session_name.replace("\"", "\\\"")
+                window_id
             )
         }
     };
 
-    // Execute the AppleScript
     let output = Command::new("osascript")
         .arg("-e")
         .arg(&script)
@@ -330,13 +320,114 @@ end tell"#,
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        // Ignore minor errors, the focus may still work
         if !stderr.is_empty() {
             eprintln!("AppleScript warning: {}", stderr.trim());
         }
     }
 
     Ok(())
+}
+
+/// Batch query all iTerm2 window IDs (single AppleScript call for performance)
+pub fn list_iterm_sessions() -> Vec<String> {
+    let script = r#"tell application "iTerm2"
+    if not running then return ""
+    set windowIds to {}
+    repeat with aWindow in windows
+        set end of windowIds to (id of aWindow as string)
+    end repeat
+    return windowIds
+end tell"#;
+
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output();
+
+    match output {
+        Ok(result) if result.status.success() => {
+            let stdout = String::from_utf8_lossy(&result.stdout);
+            stdout
+                .trim()
+                .split(", ")
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Close a terminal window by window ID
+pub fn close_terminal_session(terminal: TerminalType, window_id: &str) -> Result<(), String> {
+    match terminal {
+        TerminalType::TerminalApp => {
+            Err("Terminal.app does not support precise session closing. Please close the window manually.".to_string())
+        }
+        TerminalType::ITerm2 => {
+            let script = format!(
+                r#"tell application "iTerm2"
+    repeat with aWindow in windows
+        if id of aWindow is {} then
+            close aWindow
+            return "closed"
+        end if
+    end repeat
+    return "not found"
+end tell"#,
+                window_id
+            );
+
+            let output = Command::new("osascript")
+                .arg("-e")
+                .arg(&script)
+                .output()
+                .map_err(|e| format!("Failed to execute AppleScript: {}", e))?;
+
+            if output.status.success() {
+                Ok(())
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                Err(format!("Failed to close session: {}", stderr.trim()))
+            }
+        }
+    }
+}
+
+/// Minimize a terminal window by window ID
+pub fn minimize_terminal_window(terminal: TerminalType, window_id: &str) -> Result<(), String> {
+    match terminal {
+        TerminalType::TerminalApp => {
+            Err("Terminal.app does not support precise window control. Please minimize manually.".to_string())
+        }
+        TerminalType::ITerm2 => {
+            let script = format!(
+                r#"tell application "iTerm2"
+    repeat with aWindow in windows
+        if id of aWindow is {} then
+            set miniaturized of aWindow to true
+            return "minimized"
+        end if
+    end repeat
+    return "not found"
+end tell"#,
+                window_id
+            );
+
+            let output = Command::new("osascript")
+                .arg("-e")
+                .arg(&script)
+                .output()
+                .map_err(|e| format!("Failed to execute AppleScript: {}", e))?;
+
+            if output.status.success() {
+                Ok(())
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                Err(format!("Failed to minimize window: {}", stderr.trim()))
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -349,12 +440,13 @@ mod tests {
         env_vars.insert("KEY1".to_string(), "value1".to_string());
         env_vars.insert("KEY2".to_string(), "value2".to_string());
 
-        let cmd = build_shell_command(&env_vars, "/home/user");
+        let cmd = build_shell_command(&env_vars, "/home/user", "test-session-123");
 
+        assert!(cmd.contains("mkdir -p ~/.ccem/sessions"));
         assert!(cmd.contains("cd \"/home/user\""));
         assert!(cmd.contains("export KEY1='value1'"));
         assert!(cmd.contains("export KEY2='value2'"));
-        assert!(cmd.ends_with("claude"));
+        assert!(cmd.contains("claude; echo $? > ~/.ccem/sessions/'test-session-123'.exit"));
     }
 
     #[test]

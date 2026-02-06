@@ -55,9 +55,20 @@ import {
 import { runSkillSelector } from './components/index.js';
 import { loadFromRemote } from './remote.js';
 
+import os from 'os';
+
 const program = new Command();
+
+// 使用 ~/.ccem/ 作为配置目录，与 Desktop 保持一致
+const ccemDir = path.join(os.homedir(), '.ccem');
+if (!fs.existsSync(ccemDir)) {
+  fs.mkdirSync(ccemDir, { recursive: true });
+}
+
 const config = new Conf({
   projectName: 'claude-code-env-manager',
+  cwd: ccemDir,  // 强制使用 ~/.ccem/ 目录
+  configName: 'config',  // 生成 config.json
   defaults: {
     registries: {
       'official': {

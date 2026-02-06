@@ -1,17 +1,17 @@
 import { Button } from '@/components/ui/button';
 import { StatsCard, CurrentEnvCard, SessionsCard } from '@/components/dashboard';
-import { useEnvStore } from '@/stores';
+import { ProjectList } from '@/components/projects';
 import { useAppStore } from '@/store';
 
 interface DashboardProps {
   onNavigate?: (tab: string) => void;
   onLaunch?: () => void;
+  onLaunchWithDir?: (workingDir: string) => void;
 }
 
-export function Dashboard({ onNavigate, onLaunch }: DashboardProps) {
-  const { environments } = useEnvStore();
-  const { sessions, permissionMode } = useAppStore();
-  const envCount = Object.keys(environments).length;
+export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardProps) {
+  const { environments, sessions, permissionMode } = useAppStore();
+  const envCount = environments.length;
   const runningSessions = sessions.filter((s) => s.status === 'running');
 
   return (
@@ -90,6 +90,9 @@ export function Dashboard({ onNavigate, onLaunch }: DashboardProps) {
         <CurrentEnvCard onSwitchEnv={() => onNavigate?.('environments')} />
         <SessionsCard />
       </div>
+
+      {/* Project List */}
+      <ProjectList onLaunch={(dir) => onLaunchWithDir?.(dir)} />
 
       {/* Quick links */}
       <div className="space-y-3">

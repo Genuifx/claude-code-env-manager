@@ -1,18 +1,18 @@
 import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { ModeCard } from '@/components/permissions';
-import { useEnvStore } from '@/stores';
+import { useAppStore } from '@/store';
 
 interface PermissionsProps {
   onLaunch?: (mode: PermissionModeName) => void;
 }
 
 export function Permissions({ onLaunch }: PermissionsProps) {
-  const { defaultMode, setDefaultMode, currentMode, setCurrentMode } = useEnvStore();
+  const { defaultMode, setDefaultMode, permissionMode, setPermissionMode } = useAppStore();
   const modeNames = Object.keys(PERMISSION_PRESETS) as PermissionModeName[];
 
   const handleApply = (mode: PermissionModeName) => {
-    setCurrentMode(mode);
+    setPermissionMode(mode);
     onLaunch?.(mode);
   };
 
@@ -47,7 +47,7 @@ export function Permissions({ onLaunch }: PermissionsProps) {
             </div>
             <div>
               <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider">当前模式</p>
-              <p className="text-lg font-semibold text-slate-900 dark:text-white capitalize">{currentMode}</p>
+              <p className="text-lg font-semibold text-slate-900 dark:text-white capitalize">{permissionMode}</p>
             </div>
           </div>
           {defaultMode && (
@@ -70,7 +70,7 @@ export function Permissions({ onLaunch }: PermissionsProps) {
               key={modeName}
               modeName={modeName}
               isDefault={defaultMode === modeName}
-              isActive={currentMode === modeName}
+              isActive={permissionMode === modeName}
               onSetDefault={() => setDefaultMode(modeName)}
               onApply={() => handleApply(modeName)}
             />

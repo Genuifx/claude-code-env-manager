@@ -1,4 +1,5 @@
-import { useEnvStore, type EnvConfig } from '@/stores';
+import { useAppStore, type Environment } from '@/store';
+import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -8,11 +9,10 @@ interface EnvListProps {
 }
 
 export function EnvList({ onEdit, onDelete }: EnvListProps) {
-  const { environments, currentEnv, setCurrentEnv } = useEnvStore();
+  const { environments, currentEnv } = useAppStore();
+  const { switchEnvironment } = useTauriCommands();
 
-  const envEntries = Object.entries(environments);
-
-  if (envEntries.length === 0) {
+  if (environments.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
         <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
@@ -26,15 +26,15 @@ export function EnvList({ onEdit, onDelete }: EnvListProps) {
 
   return (
     <div className="space-y-3">
-      {envEntries.map(([name, env]) => (
+      {environments.map((env) => (
         <EnvCard
-          key={name}
-          name={name}
+          key={env.name}
+          name={env.name}
           env={env}
-          isActive={name === currentEnv}
-          onSelect={() => setCurrentEnv(name)}
-          onEdit={() => onEdit?.(name)}
-          onDelete={() => onDelete?.(name)}
+          isActive={env.name === currentEnv}
+          onSelect={() => switchEnvironment(env.name)}
+          onEdit={() => onEdit?.(env.name)}
+          onDelete={() => onDelete?.(env.name)}
         />
       ))}
     </div>
@@ -43,7 +43,7 @@ export function EnvList({ onEdit, onDelete }: EnvListProps) {
 
 interface EnvCardProps {
   name: string;
-  env: EnvConfig;
+  env: Environment;
   isActive: boolean;
   onSelect: () => void;
   onEdit: () => void;
@@ -96,11 +96,11 @@ function EnvCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardPro
           <div className="space-y-1">
             <p className="text-sm text-slate-500 dark:text-slate-400 truncate">
               <span className="text-slate-400 dark:text-slate-500">API:</span>{' '}
-              {env.ANTHROPIC_BASE_URL || 'api.anthropic.com'}
+              {env.baseUrl || 'api.anthropic.com'}
             </p>
             <p className="text-sm text-slate-500 dark:text-slate-400">
               <span className="text-slate-400 dark:text-slate-500">Model:</span>{' '}
-              {env.ANTHROPIC_MODEL || 'claude-sonnet-4-5'}
+              {env.model || 'claude-sonnet-4-5'}
             </p>
           </div>
         </div>
