@@ -1,6 +1,8 @@
 import { Button } from '@/components/ui/button';
 import { EnvList } from '@/components/environments';
-import { ENV_PRESETS } from '@ccem/core/browser';
+import { ENV_PRESETS, PERMISSION_PRESETS } from '@ccem/core/browser';
+import type { PermissionModeName } from '@ccem/core/browser';
+import { useAppStore } from '@/store';
 
 interface EnvironmentsProps {
   onAddEnv?: () => void;
@@ -10,6 +12,7 @@ interface EnvironmentsProps {
 
 export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsProps) {
   const presetNames = Object.keys(ENV_PRESETS);
+  const { permissionMode, defaultMode, setPermissionMode, setDefaultMode } = useAppStore();
 
   return (
     <div className="space-y-8">
@@ -38,6 +41,64 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
           已配置的环境
         </h3>
         <EnvList onEdit={onEditEnv} onDelete={onDeleteEnv} />
+      </div>
+
+      {/* Permission Mode Section */}
+      <div className="border-t border-slate-200 dark:border-slate-700 pt-8">
+        <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
+          权限模式
+        </h3>
+
+        <div className="space-y-4">
+          {/* Default Permission Setting */}
+          <div className="flex items-center justify-between p-4 rounded-lg bg-slate-50 dark:bg-slate-800/50">
+            <div>
+              <div className="font-medium text-slate-900 dark:text-white mb-1">
+                默认权限
+              </div>
+              <div className="text-sm text-slate-600 dark:text-slate-400">
+                用户级别，所有环境通用
+              </div>
+            </div>
+            <select
+              value={defaultMode || permissionMode}
+              onChange={(e) => {
+                const mode = e.target.value as PermissionModeName;
+                setDefaultMode(mode);
+                setPermissionMode(mode);
+              }}
+              className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+            >
+              {Object.entries(PERMISSION_PRESETS).map(([key, preset]) => (
+                <option key={key} value={key}>
+                  {key} - {preset.description}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Quick Switch (Temporary) */}
+          <div>
+            <div className="text-sm font-medium text-slate-900 dark:text-white mb-2">
+              快速切换 (临时)
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {Object.keys(PERMISSION_PRESETS).map((mode) => (
+                <Button
+                  key={mode}
+                  size="sm"
+                  variant={permissionMode === mode ? 'default' : 'outline'}
+                  onClick={() => setPermissionMode(mode as PermissionModeName)}
+                >
+                  {mode}
+                </Button>
+              ))}
+            </div>
+            <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+              💡 临时权限仅对下次启动生效，不改变默认设置
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Presets section */}
