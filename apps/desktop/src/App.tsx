@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ENV_PRESETS } from '@ccem/core/browser';
 import { AppLayout } from '@/components/layout';
-import { Dashboard, Environments, Permissions, Settings } from '@/pages';
+import { Dashboard, Environments, Settings } from '@/pages';
 import { useAppStore, type Environment } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { EnvironmentDialog } from '@/components/EnvironmentDialog';
@@ -138,12 +138,6 @@ function App() {
             onAddEnv={handleAddEnv}
             onEditEnv={handleEditEnv}
             onDeleteEnv={handleDeleteEnv}
-          />
-        );
-      case 'permissions':
-        return (
-          <Permissions
-            onLaunch={handleLaunch}
           />
         );
       case 'skills':
