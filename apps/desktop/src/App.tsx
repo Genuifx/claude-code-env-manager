@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react';
 import { ENV_PRESETS } from '@ccem/core/browser';
 import { AppLayout } from '@/components/layout';
 import { Dashboard, Environments, Permissions, Settings } from '@/pages';
-import { useEnvStore } from '@/stores';
+import { useAppStore, type Environment } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { EnvironmentDialog } from '@/components/EnvironmentDialog';
-import type { Environment } from '@/store';
+import { Toaster } from 'sonner';
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -17,12 +17,13 @@ function App() {
     setEnvironments,
     setCurrentEnv,
     environments,
-  } = useEnvStore();
+  } = useAppStore();
 
   const {
     loadEnvironments,
     loadCurrentEnv,
     loadSessions,
+    loadAppConfig,
     launchClaudeCode,
     addEnvironment,
     updateEnvironment,
@@ -33,19 +34,18 @@ function App() {
   useEffect(() => {
     loadEnvironments().catch(() => {
       // Fallback to presets if Tauri is not available (dev mode)
-      const envs: Record<string, { ANTHROPIC_BASE_URL?: string; ANTHROPIC_MODEL?: string }> = {};
-      Object.entries(ENV_PRESETS).forEach(([name, config]) => {
-        envs[name] = {
-          ANTHROPIC_BASE_URL: config.ANTHROPIC_BASE_URL,
-          ANTHROPIC_MODEL: config.ANTHROPIC_MODEL,
-        };
-      });
+      const envList: Environment[] = Object.entries(ENV_PRESETS).map(([name, config]) => ({
+        name,
+        baseUrl: config.ANTHROPIC_BASE_URL || '',
+        model: config.ANTHROPIC_MODEL || '',
+      }));
       // Add official preset
-      envs['official'] = {
-        ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
-        ANTHROPIC_MODEL: 'claude-sonnet-4-5-20250929',
-      };
-      setEnvironments(envs);
+      envList.unshift({
+        name: 'official',
+        baseUrl: 'https://api.anthropic.com',
+        model: 'claude-sonnet-4-5-20250929',
+      });
+      setEnvironments(envList);
     });
     loadCurrentEnv().catch(() => {
       setCurrentEnv('official');
@@ -54,12 +54,25 @@ function App() {
     loadSessions().catch((err) => {
       console.error('Failed to load sessions:', err);
     });
+    // Load app config on mount
+    loadAppConfig().catch((err) => {
+      console.error('Failed to load app config:', err);
+    });
   }, []);
 
   // Handle launch
   const handleLaunch = async () => {
     try {
       await launchClaudeCode();
+    } catch (err) {
+      console.error('Launch failed:', err);
+    }
+  };
+
+  // Handle launch with specific directory
+  const handleLaunchWithDir = async (workingDir: string) => {
+    try {
+      await launchClaudeCode(workingDir);
     } catch (err) {
       console.error('Launch failed:', err);
     }
@@ -103,15 +116,9 @@ function App() {
 
   // Get editing environment for dialog
   const getEditingEnv = (): Environment | undefined => {
-    if (!editingEnvName || !environments[editingEnvName]) return undefined;
-    const env = environments[editingEnvName];
-    return {
-      name: editingEnvName,
-      baseUrl: env.ANTHROPIC_BASE_URL || '',
-      model: env.ANTHROPIC_MODEL || '',
-      apiKey: env.ANTHROPIC_API_KEY,
-      smallModel: env.ANTHROPIC_SMALL_FAST_MODEL,
-    };
+    if (!editingEnvName) return undefined;
+    const env = environments.find(e => e.name === editingEnvName);
+    return env;
   };
 
   // Render page based on active tab
@@ -122,6 +129,7 @@ function App() {
           <Dashboard
             onNavigate={setActiveTab}
             onLaunch={handleLaunch}
+            onLaunchWithDir={handleLaunchWithDir}
           />
         );
       case 'environments':
@@ -153,7 +161,7 @@ function App() {
       case 'settings':
         return <Settings />;
       default:
-        return <Dashboard onNavigate={setActiveTab} onLaunch={handleLaunch} />;
+        return <Dashboard onNavigate={setActiveTab} onLaunch={handleLaunch} onLaunchWithDir={handleLaunchWithDir} />;
     }
   };
 
@@ -171,6 +179,9 @@ function App() {
         environment={getEditingEnv()}
         onSave={handleSaveEnv}
       />
+
+      {/* Toast notifications */}
+      <Toaster position="top-center" richColors />
     </>
   );
 }

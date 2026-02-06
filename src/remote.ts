@@ -1,11 +1,22 @@
 import crypto from 'crypto';
 import chalk from 'chalk';
 import Conf from 'conf';
+import path from 'path';
+import os from 'os';
+import fs from 'fs';
 import type { EnvConfig } from './types.js';
 import { encrypt } from './utils.js';
 
+// 使用 ~/.ccem/ 作为配置目录，与 Desktop 保持一致
+const ccemDir = path.join(os.homedir(), '.ccem');
+if (!fs.existsSync(ccemDir)) {
+  fs.mkdirSync(ccemDir, { recursive: true });
+}
+
 const config = new Conf({
   projectName: 'claude-code-env-manager',
+  cwd: ccemDir,
+  configName: 'config',
 });
 
 /**

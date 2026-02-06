@@ -15,7 +15,30 @@ export interface Session {
   workingDir: string;
   pid?: number;
   startedAt: Date;
-  status: 'running' | 'stopped' | 'error';
+  status: 'running' | 'stopped' | 'interrupted' | 'error';
+  terminalType?: string;  // "iterm2" | "terminalapp"
+  windowId?: string;      // iTerm2 window ID
+}
+
+export interface FavoriteProject {
+  path: string;
+  name: string;
+}
+
+export interface RecentProject {
+  path: string;
+  lastUsed: string;
+}
+
+export interface VSCodeProject {
+  path: string;
+  syncedAt: string;
+}
+
+export interface JetBrainsProject {
+  path: string;
+  ide: string;
+  syncedAt: string;
 }
 
 interface AppState {
@@ -29,7 +52,9 @@ interface AppState {
 
   // Permission Mode
   permissionMode: PermissionModeName;
+  defaultMode: PermissionModeName | null;
   setPermissionMode: (mode: PermissionModeName) => void;
+  setDefaultMode: (mode: PermissionModeName | null) => void;
 
   // Sessions
   sessions: Session[];
@@ -37,6 +62,20 @@ interface AppState {
   addSession: (session: Session) => void;
   removeSession: (id: string) => void;
   updateSessionStatus: (id: string, status: Session['status']) => void;
+
+  // Projects
+  favorites: FavoriteProject[];
+  recent: RecentProject[];
+  vscodeProjects: VSCodeProject[];
+  jetbrainsProjects: JetBrainsProject[];
+  selectedWorkingDir: string | null;
+  setFavorites: (favorites: FavoriteProject[]) => void;
+  setRecent: (recent: RecentProject[]) => void;
+  setVSCodeProjects: (projects: VSCodeProject[]) => void;
+  setJetBrainsProjects: (projects: JetBrainsProject[]) => void;
+  addFavorite: (project: FavoriteProject) => void;
+  removeFavorite: (path: string) => void;
+  setSelectedWorkingDir: (dir: string | null) => void;
 
   // UI State
   isLoading: boolean;
@@ -60,7 +99,9 @@ export const useAppStore = create<AppState>((set) => ({
 
   // Permission Mode
   permissionMode: 'dev',
+  defaultMode: null,
   setPermissionMode: (mode) => set({ permissionMode: mode }),
+  setDefaultMode: (mode) => set({ defaultMode: mode }),
 
   // Sessions
   sessions: [],
@@ -77,6 +118,24 @@ export const useAppStore = create<AppState>((set) => ({
         s.id === id ? { ...s, status } : s
       ),
     })),
+
+  // Projects
+  favorites: [],
+  recent: [],
+  vscodeProjects: [],
+  jetbrainsProjects: [],
+  selectedWorkingDir: null,
+  setFavorites: (favorites) => set({ favorites }),
+  setRecent: (recent) => set({ recent }),
+  setVSCodeProjects: (projects) => set({ vscodeProjects: projects }),
+  setJetBrainsProjects: (projects) => set({ jetbrainsProjects: projects }),
+  addFavorite: (project) =>
+    set((state) => ({ favorites: [...state.favorites, project] })),
+  removeFavorite: (path) =>
+    set((state) => ({
+      favorites: state.favorites.filter((f) => f.path !== path),
+    })),
+  setSelectedWorkingDir: (dir) => set({ selectedWorkingDir: dir }),
 
   // UI State
   isLoading: false,

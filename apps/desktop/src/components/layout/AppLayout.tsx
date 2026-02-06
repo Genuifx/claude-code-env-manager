@@ -18,7 +18,7 @@ export function AppLayout({ children, activeTab, onTabChange }: AppLayoutProps) 
       </div>
 
       {/* Header */}
-      <header className="relative z-10 bg-white/70 dark:bg-slate-900/70 backdrop-blur-xl border-b border-slate-200/50 dark:border-slate-700/50 sticky top-0">
+      <header className="relative z-50 bg-white/70 dark:bg-slate-900/70 backdrop-blur-xl border-b border-slate-200/50 dark:border-slate-700/50 sticky top-0">
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             {/* Logo */}

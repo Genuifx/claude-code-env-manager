@@ -44,6 +44,48 @@ impl Default for CcemConfig {
     }
 }
 
+// ============================================================================
+// App Config (Desktop-only configuration for working directory management)
+// ============================================================================
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct FavoriteProject {
+    pub path: String,
+    pub name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RecentProject {
+    pub path: String,
+    #[serde(rename = "lastUsed")]
+    pub last_used: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct VSCodeProject {
+    pub path: String,
+    #[serde(rename = "syncedAt")]
+    pub synced_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct JetBrainsProject {
+    pub path: String,
+    pub ide: String,  // e.g., "WebStorm", "IntelliJ IDEA", "PyCharm"
+    #[serde(rename = "syncedAt")]
+    pub synced_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct AppConfig {
+    pub favorites: Vec<FavoriteProject>,
+    pub recent: Vec<RecentProject>,
+    #[serde(rename = "vscodeProjects")]
+    pub vscode_projects: Vec<VSCodeProject>,
+    #[serde(rename = "jetbrainsProjects", default)]
+    pub jetbrains_projects: Vec<JetBrainsProject>,
+}
+
 /// Get ~/.ccem/ directory path
 pub fn get_ccem_dir() -> PathBuf {
     let home = dirs::home_dir().expect("Could not find home directory");
@@ -132,6 +174,31 @@ pub fn write_config(config: &CcemConfig) -> Result<(), String> {
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
     fs::write(get_config_path(), content).map_err(|e| format!("Failed to write config: {}", e))
+}
+
+/// Read app config from ~/.ccem/app.json
+pub fn read_app_config() -> Result<AppConfig, String> {
+    let config_path = get_app_config_path();
+
+    if !config_path.exists() {
+        return Ok(AppConfig::default());
+    }
+
+    let content = fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read app config: {}", e))?;
+
+    serde_json::from_str(&content).map_err(|e| format!("Failed to parse app config: {}", e))
+}
+
+/// Write app config to ~/.ccem/app.json
+pub fn write_app_config(config: &AppConfig) -> Result<(), String> {
+    ensure_ccem_dir().map_err(|e| format!("Failed to create config dir: {}", e))?;
+
+    let content = serde_json::to_string_pretty(config)
+        .map_err(|e| format!("Failed to serialize app config: {}", e))?;
+
+    fs::write(get_app_config_path(), content)
+        .map_err(|e| format!("Failed to write app config: {}", e))
 }
 
 /// Get environment config with decrypted API key

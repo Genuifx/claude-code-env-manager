@@ -1,4 +1,4 @@
-import { useEnvStore } from '@/stores';
+import { useAppStore } from '@/store';
 import { Button } from '@/components/ui/button';
 
 interface CurrentEnvCardProps {
@@ -6,8 +6,8 @@ interface CurrentEnvCardProps {
 }
 
 export function CurrentEnvCard({ onSwitchEnv }: CurrentEnvCardProps) {
-  const { currentEnv, environments } = useEnvStore();
-  const env = environments[currentEnv];
+  const { currentEnv, environments } = useAppStore();
+  const env = environments.find(e => e.name === currentEnv);
 
   return (
     <div className="relative bg-white dark:bg-slate-800/50 rounded-2xl border border-slate-200/50 dark:border-slate-700/50 p-6 overflow-hidden">
@@ -33,19 +33,19 @@ export function CurrentEnvCard({ onSwitchEnv }: CurrentEnvCardProps) {
         <div className="flex items-center justify-between text-sm">
           <span className="text-slate-500 dark:text-slate-400">API 端点</span>
           <span className="text-slate-700 dark:text-slate-300 font-medium truncate max-w-[200px]">
-            {env?.ANTHROPIC_BASE_URL || 'api.anthropic.com'}
+            {env?.baseUrl || 'api.anthropic.com'}
           </span>
         </div>
         <div className="flex items-center justify-between text-sm">
           <span className="text-slate-500 dark:text-slate-400">模型</span>
           <span className="text-slate-700 dark:text-slate-300 font-medium">
-            {env?.ANTHROPIC_MODEL || 'claude-sonnet-4-5'}
+            {env?.model || 'claude-sonnet-4-5'}
           </span>
         </div>
         <div className="flex items-center justify-between text-sm">
           <span className="text-slate-500 dark:text-slate-400">API Key</span>
           <span className="text-emerald-500 font-medium">
-            {env?.ANTHROPIC_API_KEY ? '••••••••' : '已配置'}
+            {env?.apiKey ? '••••••••' : '已配置'}
           </span>
         </div>
       </div>
