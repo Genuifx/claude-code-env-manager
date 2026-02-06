@@ -1,137 +1,164 @@
+import { Rocket, FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { StatsCard, CurrentEnvCard, SessionsCard } from '@/components/dashboard';
+import { Card } from '@/components/ui/card';
 import { ProjectList } from '@/components/projects';
 import { useAppStore } from '@/store';
+import { useTauriCommands } from '@/hooks/useTauriCommands';
 
 interface DashboardProps {
-  onNavigate?: (tab: string) => void;
-  onLaunch?: () => void;
-  onLaunchWithDir?: (workingDir: string) => void;
+  onNavigate: (tab: string) => void;
+  onLaunch: () => void;
+  onLaunchWithDir: (dir: string) => void;
 }
 
 export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardProps) {
-  const { environments, sessions, permissionMode } = useAppStore();
-  const envCount = environments.length;
-  const runningSessions = sessions.filter((s) => s.status === 'running');
+  const {
+    currentEnv,
+    permissionMode,
+    selectedWorkingDir,
+    sessions,
+    usageStats,
+    setSelectedWorkingDir,
+  } = useAppStore();
+
+  const { openDirectoryPicker } = useTauriCommands();
+
+  const handleSelectDirectory = async () => {
+    try {
+      const dir = await openDirectoryPicker();
+      if (dir) {
+        setSelectedWorkingDir(dir);
+      }
+    } catch (err) {
+      console.error('Failed to open directory dialog:', err);
+    }
+  };
+
+  const handleLaunchClick = () => {
+    if (selectedWorkingDir) {
+      onLaunchWithDir(selectedWorkingDir);
+    } else {
+      onLaunch();
+    }
+  };
 
   return (
-    <div className="space-y-8">
-      {/* Welcome header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight">
-            你好，开发者 <span className="inline-block animate-bounce">👋</span>
-          </h2>
-          <p className="text-slate-500 dark:text-slate-400 mt-1">
-            选择环境和权限模式，开始使用 Claude Code
-          </p>
-        </div>
-        <div className="flex gap-3">
-          <Button
-            variant="outline"
-            className="bg-white dark:bg-slate-800"
-            onClick={() => onNavigate?.('environments')}
+    <div className="p-6 space-y-6">
+      {/* Status Bar */}
+      <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+        <span>当前环境</span>
+        <span className="px-2 py-1 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium">
+          {currentEnv}
+        </span>
+        <span>·</span>
+        <span>权限</span>
+        <span className="px-2 py-1 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 font-medium">
+          {permissionMode}
+        </span>
+        <span>·</span>
+        <span>{sessions.length} 个会话运行中</span>
+      </div>
+
+      {/* Launch Center */}
+      <div className="flex flex-col items-center justify-center py-12">
+        <Button
+          size="lg"
+          onClick={handleLaunchClick}
+          className="h-16 px-12 text-lg"
+        >
+          <Rocket className="w-6 h-6 mr-3" />
+          启动 Claude Code
+        </Button>
+
+        {/* Quick Actions */}
+        <div className="flex items-center gap-4 mt-6">
+          <select
+            value={currentEnv}
+            onChange={(e) => {
+              // TODO: Call setCurrentEnv Tauri command
+              console.log('Switch to:', e.target.value);
+            }}
+            className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
           >
-            <span className="mr-2">+</span>
-            添加环境
-          </Button>
-          <Button
-            className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white shadow-lg shadow-emerald-500/25 border-0"
-            onClick={onLaunch}
+            <option value="official">Official</option>
+            <option value="GLM-4">GLM-4</option>
+            <option value="DeepSeek">DeepSeek</option>
+          </select>
+
+          <select
+            value={permissionMode}
+            onChange={(e) => {
+              // TODO: Update permission mode
+              console.log('Switch permission:', e.target.value);
+            }}
+            className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
           >
-            <span className="mr-2">▶</span>
-            启动 Claude
+            <option value="yolo">yolo</option>
+            <option value="dev">dev</option>
+            <option value="safe">safe</option>
+            <option value="readonly">readonly</option>
+          </select>
+
+          <Button variant="outline" onClick={handleSelectDirectory}>
+            <FolderOpen className="w-4 h-4 mr-2" />
+            {selectedWorkingDir ? '更改目录' : '选择目录'}
           </Button>
         </div>
+
+        {selectedWorkingDir && (
+          <div className="mt-4 text-sm text-slate-600 dark:text-slate-400">
+            工作目录: {selectedWorkingDir}
+          </div>
+        )}
       </div>
 
-      {/* Stats grid */}
-      <div className="grid grid-cols-5 gap-4">
-        <StatsCard
-          icon="🌐"
-          value={envCount || 4}
-          label="环境数"
-          sublabel="已配置"
-          accentColor="emerald"
-        />
-        <StatsCard
-          icon="💰"
-          value="$18.50"
-          label="本月费用"
-          sublabel="12%"
-          trend="up"
-          accentColor="amber"
-        />
-        <StatsCard
-          icon="📊"
-          value="1.2M"
-          label="Tokens"
-          sublabel="本月用量"
-          accentColor="blue"
-        />
-        <StatsCard
-          icon="🚀"
-          value={runningSessions.length}
-          label="活跃会话"
-          sublabel="运行中"
-          accentColor="violet"
-        />
-        <StatsCard
-          icon="⚡"
-          value={permissionMode}
-          label="权限模式"
-          sublabel="当前模式"
-          accentColor="rose"
-        />
-      </div>
+      {/* Today's Usage Summary */}
+      {usageStats && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Card
+            className="p-4 cursor-pointer hover:shadow-md transition-shadow"
+            onClick={() => onNavigate('sessions')}
+          >
+            <div className="text-sm text-slate-600 dark:text-slate-400 mb-1">
+              运行中会话
+            </div>
+            <div className="text-2xl font-bold text-slate-900 dark:text-white">
+              💬 {sessions.length}
+            </div>
+          </Card>
 
-      {/* Main content grid */}
-      <div className="grid grid-cols-2 gap-6">
-        <CurrentEnvCard onSwitchEnv={() => onNavigate?.('environments')} />
-        <SessionsCard />
-      </div>
+          <Card
+            className="p-4 cursor-pointer hover:shadow-md transition-shadow"
+            onClick={() => onNavigate('analytics')}
+          >
+            <div className="text-sm text-slate-600 dark:text-slate-400 mb-1">
+              今日 Tokens
+            </div>
+            <div className="text-2xl font-bold text-slate-900 dark:text-white">
+              📊 {((usageStats.today.inputTokens + usageStats.today.outputTokens) / 1000).toFixed(1)}K
+            </div>
+          </Card>
 
-      {/* Project List */}
-      <ProjectList onLaunch={(dir) => onLaunchWithDir?.(dir)} />
+          <Card
+            className="p-4 cursor-pointer hover:shadow-md transition-shadow"
+            onClick={() => onNavigate('analytics')}
+          >
+            <div className="text-sm text-slate-600 dark:text-slate-400 mb-1">
+              今日消费
+            </div>
+            <div className="text-2xl font-bold text-slate-900 dark:text-white">
+              💰 ${usageStats.today.cost.toFixed(2)}
+            </div>
+          </Card>
+        </div>
+      )}
 
-      {/* Quick links */}
-      <div className="space-y-3">
-        <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-          快捷入口
+      {/* Recent Projects */}
+      <div>
+        <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
+          最近项目
         </h3>
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            className="group flex items-center justify-between p-4 bg-white dark:bg-slate-800/50 rounded-xl border border-slate-200/50 dark:border-slate-700/50 hover:border-emerald-300 dark:hover:border-emerald-700 hover:shadow-lg hover:shadow-emerald-500/10 transition-all"
-            onClick={() => onNavigate?.('environments')}
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-                <span>🌐</span>
-              </div>
-              <div className="text-left">
-                <div className="font-medium text-slate-900 dark:text-white">查看所有环境</div>
-                <div className="text-xs text-slate-500 dark:text-slate-400">管理 API 配置</div>
-              </div>
-            </div>
-            <span className="text-slate-400 group-hover:text-emerald-500 group-hover:translate-x-1 transition-all">→</span>
-          </button>
-
-          <button
-            className="group flex items-center justify-between p-4 bg-white dark:bg-slate-800/50 rounded-xl border border-slate-200/50 dark:border-slate-700/50 hover:border-blue-300 dark:hover:border-blue-700 hover:shadow-lg hover:shadow-blue-500/10 transition-all"
-            onClick={() => onNavigate?.('permissions')}
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                <span>🛡️</span>
-              </div>
-              <div className="text-left">
-                <div className="font-medium text-slate-900 dark:text-white">权限模式设置</div>
-                <div className="text-xs text-slate-500 dark:text-slate-400">配置安全策略</div>
-              </div>
-            </div>
-            <span className="text-slate-400 group-hover:text-blue-500 group-hover:translate-x-1 transition-all">→</span>
-          </button>
-        </div>
+        <ProjectList onLaunch={onLaunchWithDir} />
       </div>
     </div>
   );
