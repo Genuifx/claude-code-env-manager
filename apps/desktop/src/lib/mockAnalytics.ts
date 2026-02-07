@@ -119,6 +119,7 @@ export function generateMockUsageStats(): UsageStats {
 
 export function generateMockMilestones(): Milestone[] {
   return [
+    // Token milestones (5 total)
     {
       id: '1',
       type: 'tokens',
@@ -132,6 +133,16 @@ export function generateMockMilestones(): Milestone[] {
     {
       id: '2',
       type: 'tokens',
+      title: '500K Tokens',
+      description: '累计使用 500K tokens',
+      target: 500000,
+      current: 2480000,
+      achieved: true,
+      achievedAt: '2026-01-10T08:45:00Z',
+    },
+    {
+      id: '3',
+      type: 'tokens',
       title: '1M Tokens',
       description: '累计使用 1M tokens',
       target: 1000000,
@@ -140,7 +151,7 @@ export function generateMockMilestones(): Milestone[] {
       achievedAt: '2026-01-20T14:20:00Z',
     },
     {
-      id: '3',
+      id: '4',
       type: 'tokens',
       title: '5M Tokens',
       description: '累计使用 5M tokens',
@@ -149,7 +160,17 @@ export function generateMockMilestones(): Milestone[] {
       achieved: false,
     },
     {
-      id: '4',
+      id: '5',
+      type: 'tokens',
+      title: '10M Tokens',
+      description: '累计使用 10M tokens',
+      target: 10000000,
+      current: 2480000,
+      achieved: false,
+    },
+    // Cost milestones (4 total)
+    {
+      id: '6',
       type: 'cost',
       title: '第一个 $10',
       description: '累计消费 $10',
@@ -159,7 +180,16 @@ export function generateMockMilestones(): Milestone[] {
       achievedAt: '2025-12-20T09:15:00Z',
     },
     {
-      id: '5',
+      id: '7',
+      type: 'cost',
+      title: '$50',
+      description: '累计消费 $50',
+      target: 50,
+      current: 24.80,
+      achieved: false,
+    },
+    {
+      id: '8',
       type: 'cost',
       title: '$100',
       description: '累计消费 $100',
@@ -168,7 +198,17 @@ export function generateMockMilestones(): Milestone[] {
       achieved: false,
     },
     {
-      id: '6',
+      id: '9',
+      type: 'cost',
+      title: '$500',
+      description: '累计消费 $500',
+      target: 500,
+      current: 24.80,
+      achieved: false,
+    },
+    // Streak milestones (4 total)
+    {
+      id: '10',
       type: 'streak',
       title: '7天连续',
       description: '连续使用 7 天',
@@ -178,7 +218,7 @@ export function generateMockMilestones(): Milestone[] {
       achievedAt: '2025-12-25T00:00:00Z',
     },
     {
-      id: '7',
+      id: '11',
       type: 'streak',
       title: '30天连续',
       description: '连续使用 30 天',
@@ -188,12 +228,49 @@ export function generateMockMilestones(): Milestone[] {
       achievedAt: '2026-01-18T00:00:00Z',
     },
     {
-      id: '8',
+      id: '12',
       type: 'streak',
       title: '100天连续',
       description: '连续使用 100 天',
       target: 100,
       current: 42,
+      achieved: false,
+    },
+    {
+      id: '13',
+      type: 'streak',
+      title: '365天连续',
+      description: '连续使用 365 天',
+      target: 365,
+      current: 42,
+      achieved: false,
+    },
+    // Savings milestones (3 total)
+    {
+      id: '14',
+      type: 'savings',
+      title: '节省 $10',
+      description: '通过使用替代模型节省 $10',
+      target: 10,
+      current: 8.50,
+      achieved: false,
+    },
+    {
+      id: '15',
+      type: 'savings',
+      title: '节省 $50',
+      description: '通过使用替代模型节省 $50',
+      target: 50,
+      current: 8.50,
+      achieved: false,
+    },
+    {
+      id: '16',
+      type: 'savings',
+      title: '节省 $100',
+      description: '通过使用替代模型节省 $100',
+      target: 100,
+      current: 8.50,
       achieved: false,
     },
   ];
