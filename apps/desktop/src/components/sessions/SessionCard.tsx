@@ -73,7 +73,7 @@ export function SessionCard({ session, onFocus, onMinimize, onClose }: SessionCa
 
       <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mb-4 truncate">
         <FolderOpen className="w-3 h-3 flex-shrink-0" />
-        <span className="truncate" title={session.workingDir}>
+        <span className="truncate" title={`${session.workingDir}${session.pid ? ` · PID: ${session.pid}` : ''}`}>
           {session.workingDir}
         </span>
       </div>

@@ -1,5 +1,6 @@
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 
 interface Skill {
   name: string;
@@ -17,6 +18,10 @@ export function Skills() {
   const handleViewFile = (path: string) => {
     // TODO: Open file path via Tauri shell
     console.log('Open path:', path);
+  };
+
+  const handleUninstall = (name: string) => {
+    toast.info(`请在终端中运行: ccem skill rm ${name}`);
   };
 
   return (
@@ -105,6 +110,7 @@ export function Skills() {
                       variant="outline"
                       size="sm"
                       className="text-red-500 hover:text-red-600 hover:border-red-300 dark:hover:border-red-700"
+                      onClick={() => handleUninstall(skill.name)}
                     >
                       卸载
                     </Button>

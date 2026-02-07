@@ -71,7 +71,7 @@ export function SessionList({ sessions, onFocus, onMinimize, onClose }: SessionL
               </span>
               <span className="flex items-center gap-1 truncate">
                 <FolderOpen className="w-3 h-3 flex-shrink-0" />
-                <span className="truncate" title={session.workingDir}>
+                <span className="truncate" title={`${session.workingDir}${session.pid ? ` · PID: ${session.pid}` : ''}`}>
                   {session.workingDir}
                 </span>
               </span>

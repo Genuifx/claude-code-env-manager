@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
+import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 
 export function Settings() {
@@ -200,12 +201,11 @@ export function Settings() {
               onChange={(e) => setDefaultMode(e.target.value as PermissionModeName)}
               className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
             >
-              <option value="yolo">yolo - 完全开放，无限制</option>
-              <option value="dev">dev - 标准开发权限</option>
-              <option value="safe">safe - 保守权限</option>
-              <option value="readonly">readonly - 只读访问</option>
-              <option value="ci">ci - CI/CD 流水线权限</option>
-              <option value="audit">audit - 安全审计</option>
+              {Object.entries(PERMISSION_PRESETS).map(([key, preset]) => (
+                <option key={key} value={key}>
+                  {key} - {preset.description}
+                </option>
+              ))}
             </select>
             <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
               💡 启动 Claude 时默认使用此权限，可在 Home 页临时覆盖

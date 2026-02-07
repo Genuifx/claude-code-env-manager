@@ -1,5 +1,6 @@
 // apps/desktop/src/pages/Analytics.tsx
 import { useEffect, useState, useMemo } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import {
@@ -12,9 +13,8 @@ import { useAppStore } from '@/store';
 import {
   generateMockUsageStats,
   generateMockMilestones,
-  generateMockDailyActivity,
 } from '@/lib/mockAnalytics';
-import type { ChartDataPoint } from '@/types/analytics';
+import type { ChartDataPoint, DailyActivity, UsageStats } from '@/types/analytics';
 
 type TimeGranularity = 'hour' | 'day' | 'week' | 'month';
 
@@ -25,18 +25,73 @@ export function Analytics() {
   // Granularity state lives here and is passed down to TokenChart
   const [granularity, setGranularity] = useState<TimeGranularity>('day');
 
-  // TODO: Replace mock data with real Tauri commands (e.g., invoke('get_usage_stats'))
-  // Currently using mock data as fallback until analytics backend is wired up.
-  const isUsingMockData = true; // Set to false once real Tauri commands are integrated
+  // Dynamic mock indicator — true only when real data failed to load
+  const [isUsingMockData, setIsUsingMockData] = useState(false);
 
-  // Load mock data on mount (TODO: Replace with real Tauri commands)
+  // Load real data from Tauri backend, fall back to mock only if it fails
   useEffect(() => {
-    if (!usageStats) {
-      setUsageStats(generateMockUsageStats());
-      setMilestones(generateMockMilestones());
-      setContinuousUsageDays(42);
-    }
-  }, [usageStats, setUsageStats, setMilestones, setContinuousUsageDays]);
+    const loadRealData = async () => {
+      try {
+        const stats = await invoke<UsageStats>('get_usage_stats');
+        setUsageStats(stats);
+        setIsUsingMockData(false);
+
+        // Load continuous usage days
+        try {
+          const days = await invoke<number>('get_continuous_usage_days');
+          setContinuousUsageDays(days);
+        } catch {
+          setContinuousUsageDays(0);
+        }
+
+        // Generate milestones from real data
+        const totalTokens = stats.total.inputTokens + stats.total.outputTokens;
+        const totalCost = stats.total.cost;
+        setMilestones([
+          {
+            id: 'tokens-100k', type: 'tokens', title: '100K Tokens',
+            description: '累计使用 100K tokens', target: 100000,
+            current: totalTokens, achieved: totalTokens >= 100000,
+          },
+          {
+            id: 'tokens-1m', type: 'tokens', title: '1M Tokens',
+            description: '累计使用 1M tokens', target: 1000000,
+            current: totalTokens, achieved: totalTokens >= 1000000,
+          },
+          {
+            id: 'tokens-5m', type: 'tokens', title: '5M Tokens',
+            description: '累计使用 5M tokens', target: 5000000,
+            current: totalTokens, achieved: totalTokens >= 5000000,
+          },
+          {
+            id: 'cost-10', type: 'cost', title: '第一个 $10',
+            description: '累计消费 $10', target: 10,
+            current: totalCost, achieved: totalCost >= 10,
+          },
+          {
+            id: 'cost-100', type: 'cost', title: '$100 消费',
+            description: '累计消费 $100', target: 100,
+            current: totalCost, achieved: totalCost >= 100,
+          },
+          {
+            id: 'streak-7', type: 'streak', title: '7 天连续',
+            description: '连续使用 7 天', target: 7,
+            current: continuousUsageDays, achieved: continuousUsageDays >= 7,
+          },
+        ]);
+      } catch {
+        // Tauri backend not available — fall back to mock data
+        if (!usageStats) {
+          setUsageStats(generateMockUsageStats());
+          setMilestones(generateMockMilestones());
+          setContinuousUsageDays(42);
+          setIsUsingMockData(true);
+        }
+      }
+    };
+
+    loadRealData();
+  }, []);
 
   // ALL hooks must be called before any early return (Rules of Hooks)
   // Build chart data based on granularity (Bug #23 fix)
@@ -130,7 +185,10 @@ export function Analytics() {
     );
   }
 
-  const environments = ['official', 'GLM-4', 'DeepSeek'];
+  // Use real model names from byModel data, fall back to defaults
+  const environments = usageStats.byModel && Object.keys(usageStats.byModel).length > 0
+    ? Object.keys(usageStats.byModel).slice(0, 5) // Top 5 models
+    : ['official', 'GLM-4', 'DeepSeek'];
 
   // Bug #21 fix: Calculate real week-over-week change from dailyHistory data
   const computeWeekOverWeekChange = () => {
@@ -162,7 +220,30 @@ export function Analytics() {
 
   const { tokenPct: tokenChange, costPct: costChange } = computeWeekOverWeekChange();
 
-  const dailyActivities = generateMockDailyActivity();
+  // Build heatmap from real dailyHistory data instead of mock
+  const dailyActivities: DailyActivity[] = useMemo(() => {
+    if (!usageStats?.dailyHistory) return [];
+    const entries = Object.entries(usageStats.dailyHistory)
+      .sort(([a], [b]) => a.localeCompare(b));
+
+    if (entries.length === 0) return [];
+
+    // Find max tokens for level calculation
+    const tokenCounts = entries.map(([, u]) => u.inputTokens + u.outputTokens);
+    const maxTokens = Math.max(...tokenCounts, 1);
+
+    return entries.map(([date, usage]) => {
+      const tokens = usage.inputTokens + usage.outputTokens;
+      const ratio = tokens / maxTokens;
+      let level: 0 | 1 | 2 | 3 | 4 = 0;
+      if (ratio > 0.75) level = 4;
+      else if (ratio > 0.5) level = 3;
+      else if (ratio > 0.25) level = 2;
+      else if (tokens > 0) level = 1;
+
+      return { date, tokens, cost: usage.cost, level };
+    });
+  }, [usageStats]);
 
   // Bug #24 fix: Only show "新纪录!" if continuousUsageDays >= 30
   const streakLabel = continuousUsageDays >= 30
