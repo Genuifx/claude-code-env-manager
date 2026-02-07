@@ -79,8 +79,8 @@ function App() {
     };
   }, []);
 
-  // Initialize data on mount
-  useEffect(() => {
+  // Load all data from backend (reusable for both init and refresh)
+  const refreshData = async () => {
     loadEnvironments().catch(() => {
       // Fallback to presets if Tauri is not available (dev mode)
       const envList: Environment[] = Object.entries(ENV_PRESETS).map(([name, config]) => ({
@@ -88,7 +88,6 @@ function App() {
         baseUrl: config.ANTHROPIC_BASE_URL || '',
         model: config.ANTHROPIC_MODEL || '',
       }));
-      // Add official preset
       envList.unshift({
         name: 'official',
         baseUrl: 'https://api.anthropic.com',
@@ -99,27 +98,39 @@ function App() {
     loadCurrentEnv().catch(() => {
       setCurrentEnv('official');
     });
-    // Load sessions on mount
     loadSessions().catch((err) => {
       console.error('Failed to load sessions:', err);
     });
-    // Load app config on mount
     loadAppConfig().catch((err) => {
       console.error('Failed to load app config:', err);
     });
-    // Try to load usage stats
-    (async () => {
-      try {
-        const stats = await invoke('get_usage_stats');
-        if (stats) {
-          setUsageStats(stats as UsageStats);
-        }
-      } catch {
-        // Analytics backend not ready yet, stats will load when Analytics tab is visited
-        console.debug('Usage stats not available from backend, will use mock data when Analytics tab is opened');
+    try {
+      const stats = await invoke('get_usage_stats');
+      if (stats) {
+        setUsageStats(stats as UsageStats);
       }
-    })();
+    } catch {
+      console.debug('Usage stats not available from backend, will use mock data when Analytics tab is opened');
+    }
+  };
+
+  // Initialize data on mount
+  useEffect(() => {
+    refreshData();
   }, []);
+
+  // Re-sync with CLI config when window regains focus
+  // This ensures desktop stays in sync when user modifies env via `ccem add/del/use` in terminal
+  useEffect(() => {
+    const handleFocus = () => {
+      loadEnvironments().catch(() => {});
+      loadCurrentEnv().catch(() => {});
+      loadSessions().catch(() => {});
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [loadEnvironments, loadCurrentEnv, loadSessions]);
 
   // Handle launch
   const handleLaunch = async () => {

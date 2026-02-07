@@ -38,70 +38,60 @@ export function Analytics() {
     }
   }, [usageStats, setUsageStats, setMilestones, setContinuousUsageDays]);
 
-  if (!usageStats) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-slate-500 dark:text-slate-400">加载中...</div>
-      </div>
-    );
-  }
-
-  // Prepare all sorted daily history entries for chart data
-  const allSortedEntries = Object.entries(usageStats.dailyHistory)
-    .sort(([a], [b]) => a.localeCompare(b));
-
-  // Transform a list of [date, usage] entries into ChartDataPoint[]
-  const toChartPoints = (
-    entries: [string, { inputTokens: number; outputTokens: number }][],
-    dateFormat: Intl.DateTimeFormatOptions,
-  ): ChartDataPoint[] =>
-    entries.map(([date, usage]) => ({
-      date: new Date(date).toLocaleDateString('zh-CN', dateFormat),
-      // TODO: Per-env breakdown requires backend support (Bug #22). Using ratio split as placeholder.
-      official: Math.floor((usage.inputTokens + usage.outputTokens) * 0.6),
-      'GLM-4': Math.floor((usage.inputTokens + usage.outputTokens) * 0.25),
-      DeepSeek: Math.floor((usage.inputTokens + usage.outputTokens) * 0.15),
-    }));
-
-  // Aggregate entries by a grouping key and return aggregated entries
-  const aggregateEntries = (
-    entries: [string, { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; cost: number }][],
-    keyFn: (dateStr: string) => string,
-  ): [string, { inputTokens: number; outputTokens: number }][] => {
-    const grouped: Record<string, { inputTokens: number; outputTokens: number }> = {};
-    entries.forEach(([date, usage]) => {
-      const key = keyFn(date);
-      if (!grouped[key]) {
-        grouped[key] = { inputTokens: 0, outputTokens: 0 };
-      }
-      grouped[key].inputTokens += usage.inputTokens;
-      grouped[key].outputTokens += usage.outputTokens;
-    });
-    return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
-  };
-
+  // ALL hooks must be called before any early return (Rules of Hooks)
   // Build chart data based on granularity (Bug #23 fix)
   const chartData: ChartDataPoint[] = useMemo(() => {
+    if (!usageStats) return [];
+
+    const allSortedEntries = Object.entries(usageStats.dailyHistory)
+      .sort(([a], [b]) => a.localeCompare(b));
+
+    // Transform entries into ChartDataPoint[]
+    const toChartPoints = (
+      entries: [string, { inputTokens: number; outputTokens: number }][],
+      dateFormat: Intl.DateTimeFormatOptions,
+    ): ChartDataPoint[] =>
+      entries.map(([date, usage]) => ({
+        date: new Date(date).toLocaleDateString('zh-CN', dateFormat),
+        // TODO: Per-env breakdown requires backend support (Bug #22). Using ratio split as placeholder.
+        official: Math.floor((usage.inputTokens + usage.outputTokens) * 0.6),
+        'GLM-4': Math.floor((usage.inputTokens + usage.outputTokens) * 0.25),
+        DeepSeek: Math.floor((usage.inputTokens + usage.outputTokens) * 0.15),
+      }));
+
+    // Aggregate entries by a grouping key
+    const aggregateEntries = (
+      entries: [string, { inputTokens: number; outputTokens: number }][],
+      keyFn: (dateStr: string) => string,
+    ): [string, { inputTokens: number; outputTokens: number }][] => {
+      const grouped: Record<string, { inputTokens: number; outputTokens: number }> = {};
+      entries.forEach(([date, usage]) => {
+        const key = keyFn(date);
+        if (!grouped[key]) {
+          grouped[key] = { inputTokens: 0, outputTokens: 0 };
+        }
+        grouped[key].inputTokens += usage.inputTokens;
+        grouped[key].outputTokens += usage.outputTokens;
+      });
+      return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
+    };
+
     switch (granularity) {
       case 'hour':
-        // Show last 24 entries (simulating hourly view with available daily data)
         return toChartPoints(
           allSortedEntries.slice(-24) as [string, { inputTokens: number; outputTokens: number }][],
           { month: 'short', day: 'numeric' },
         );
       case 'day':
-        // Show last 7 days (default)
         return toChartPoints(
           allSortedEntries.slice(-7) as [string, { inputTokens: number; outputTokens: number }][],
           { month: 'short', day: 'numeric' },
         );
       case 'week': {
-        // Aggregate by ISO week, show last 4 weeks
         const weekEntries = aggregateEntries(
-          allSortedEntries as [string, { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; cost: number }][],
+          allSortedEntries as [string, { inputTokens: number; outputTokens: number }][],
           (dateStr) => {
             const d = new Date(dateStr);
-            // Get ISO week number
             const jan1 = new Date(d.getFullYear(), 0, 1);
             const weekNum = Math.ceil(((d.getTime() - jan1.getTime()) / 86400000 + jan1.getDay() + 1) / 7);
             return `${d.getFullYear()}-W${String(weekNum).padStart(2, '0')}`;
@@ -115,10 +105,9 @@ export function Analytics() {
         }));
       }
       case 'month': {
-        // Aggregate by month, show all available months
         const monthEntries = aggregateEntries(
-          allSortedEntries as [string, { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; cost: number }][],
-          (dateStr) => dateStr.slice(0, 7), // YYYY-MM
+          allSortedEntries as [string, { inputTokens: number; outputTokens: number }][],
+          (dateStr) => dateStr.slice(0, 7),
         );
         return monthEntries.map(([monthKey, usage]) => ({
           date: new Date(monthKey + '-01').toLocaleDateString('zh-CN', { year: 'numeric', month: 'short' }),
@@ -130,12 +119,20 @@ export function Analytics() {
       default:
         return [];
     }
-  }, [granularity, allSortedEntries]);
+  }, [granularity, usageStats]);
+
+  // Loading state — after all hooks
+  if (!usageStats) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-slate-500 dark:text-slate-400">加载中...</div>
+      </div>
+    );
+  }
 
   const environments = ['official', 'GLM-4', 'DeepSeek'];
 
   // Bug #21 fix: Calculate real week-over-week change from dailyHistory data
-  // instead of using fake multiplier-based percentages
   const computeWeekOverWeekChange = () => {
     const sorted = Object.entries(usageStats.dailyHistory)
       .sort(([a], [b]) => a.localeCompare(b));
@@ -153,7 +150,6 @@ export function Analytics() {
     const thisWeekCost = sumCost(thisWeekEntries);
     const prevWeekCost = sumCost(prevWeekEntries);
 
-    // If no previous week data, return null to indicate unavailable
     const tokenPct = prevWeekEntries.length > 0 && prevWeekTokens > 0
       ? ((thisWeekTokens - prevWeekTokens) / prevWeekTokens) * 100
       : null;
