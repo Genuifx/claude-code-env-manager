@@ -1,12 +1,14 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod analytics;
 mod config;
 mod crypto;
 mod session;
 mod terminal;
 mod tray;
 
+use analytics::{get_usage_stats, get_usage_history, get_continuous_usage_days};
 use config::{EnvConfig, get_env_with_decrypted_key, create_env_with_encrypted_key, AppConfig, FavoriteProject, RecentProject, VSCodeProject, JetBrainsProject};
 use session::{Session, SessionManager, start_session_monitor, cleanup_exit_file, cleanup_stale_exit_files};
 use std::sync::Arc;
@@ -641,7 +643,10 @@ fn main() {
             minimize_session,
             open_directory_dialog,
             sync_vscode_projects,
-            sync_jetbrains_projects
+            sync_jetbrains_projects,
+            get_usage_stats,
+            get_usage_history,
+            get_continuous_usage_days
         ])
         .setup(move |app| {
             // Clean up stale exit files from previous sessions
