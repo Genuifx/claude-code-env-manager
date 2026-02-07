@@ -4,7 +4,6 @@ import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useSessionUpdatedEvent, type SessionUpdatePayload } from '@/hooks/useTauriEvents';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { toast } from 'sonner';
 
 interface SessionsCardProps {
   onStopAll?: () => void;
@@ -35,26 +34,17 @@ export function SessionsCard({ onStopAll }: SessionsCardProps) {
 
   // Handle focus session
   const handleFocusSession = async (sessionId: string) => {
-    const error = await focusSession(sessionId);
-    if (error) {
-      toast.error(error);
-    }
+    await focusSession(sessionId);
   };
 
   // Handle minimize session
   const handleMinimizeSession = async (sessionId: string) => {
-    const error = await minimizeSession(sessionId);
-    if (error) {
-      toast.error(error);
-    }
+    await minimizeSession(sessionId);
   };
 
   // Handle close session (terminal window)
   const handleCloseSession = async (sessionId: string) => {
-    const error = await closeSession(sessionId);
-    if (error) {
-      toast.error(error);
-    }
+    await closeSession(sessionId);
   };
 
   // Handle remove session
