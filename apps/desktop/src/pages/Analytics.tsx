@@ -94,28 +94,26 @@ export function Analytics() {
   }, []);
 
   // ALL hooks must be called before any early return (Rules of Hooks)
-  // Build chart data based on granularity (Bug #23 fix)
+  // Build chart data based on granularity — uses real input/output token breakdown
   const chartData: ChartDataPoint[] = useMemo(() => {
     if (!usageStats) return [];
 
     const allSortedEntries = Object.entries(usageStats.dailyHistory)
       .sort(([a], [b]) => a.localeCompare(b));
 
-    // Transform entries into ChartDataPoint[]
+    // Transform entries into ChartDataPoint[] with real input/output breakdown
     const toChartPoints = (
       entries: [string, { inputTokens: number; outputTokens: number }][],
       dateFormat: Intl.DateTimeFormatOptions,
     ): ChartDataPoint[] =>
       entries.map(([date, usage]) => ({
         date: new Date(date).toLocaleDateString('zh-CN', dateFormat),
-        // TODO: Per-env breakdown requires backend support (Bug #22). Using ratio split as placeholder.
-        official: Math.floor((usage.inputTokens + usage.outputTokens) * 0.6),
-        'GLM-4': Math.floor((usage.inputTokens + usage.outputTokens) * 0.25),
-        DeepSeek: Math.floor((usage.inputTokens + usage.outputTokens) * 0.15),
+        'Input Tokens': usage.inputTokens,
+        'Output Tokens': usage.outputTokens,
       }));
 
     // Aggregate entries by a grouping key
-    const aggregateEntries = (
+    const aggregate = (
       entries: [string, { inputTokens: number; outputTokens: number }][],
       keyFn: (dateStr: string) => string,
     ): [string, { inputTokens: number; outputTokens: number }][] => {
@@ -131,6 +129,13 @@ export function Analytics() {
       return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
     };
 
+    const toPoint = (entries: [string, { inputTokens: number; outputTokens: number }][], labelFn: (key: string) => string): ChartDataPoint[] =>
+      entries.map(([key, usage]) => ({
+        date: labelFn(key),
+        'Input Tokens': usage.inputTokens,
+        'Output Tokens': usage.outputTokens,
+      }));
+
     switch (granularity) {
       case 'hour':
         return toChartPoints(
@@ -143,7 +148,7 @@ export function Analytics() {
           { month: 'short', day: 'numeric' },
         );
       case 'week': {
-        const weekEntries = aggregateEntries(
+        const weekEntries = aggregate(
           allSortedEntries as [string, { inputTokens: number; outputTokens: number }][],
           (dateStr) => {
             const d = new Date(dateStr);
@@ -152,24 +157,16 @@ export function Analytics() {
             return `${d.getFullYear()}-W${String(weekNum).padStart(2, '0')}`;
           },
         );
-        return weekEntries.slice(-4).map(([weekKey, usage]) => ({
-          date: weekKey,
-          official: Math.floor((usage.inputTokens + usage.outputTokens) * 0.6),
-          'GLM-4': Math.floor((usage.inputTokens + usage.outputTokens) * 0.25),
-          DeepSeek: Math.floor((usage.inputTokens + usage.outputTokens) * 0.15),
-        }));
+        return toPoint(weekEntries.slice(-4), (key) => key);
       }
       case 'month': {
-        const monthEntries = aggregateEntries(
+        const monthEntries = aggregate(
           allSortedEntries as [string, { inputTokens: number; outputTokens: number }][],
           (dateStr) => dateStr.slice(0, 7),
         );
-        return monthEntries.map(([monthKey, usage]) => ({
-          date: new Date(monthKey + '-01').toLocaleDateString('zh-CN', { year: 'numeric', month: 'short' }),
-          official: Math.floor((usage.inputTokens + usage.outputTokens) * 0.6),
-          'GLM-4': Math.floor((usage.inputTokens + usage.outputTokens) * 0.25),
-          DeepSeek: Math.floor((usage.inputTokens + usage.outputTokens) * 0.15),
-        }));
+        return toPoint(monthEntries, (key) =>
+          new Date(key + '-01').toLocaleDateString('zh-CN', { year: 'numeric', month: 'short' }),
+        );
       }
       default:
         return [];
@@ -185,10 +182,8 @@ export function Analytics() {
     );
   }
 
-  // Use real model names from byModel data, fall back to defaults
-  const environments = usageStats.byModel && Object.keys(usageStats.byModel).length > 0
-    ? Object.keys(usageStats.byModel).slice(0, 5) // Top 5 models
-    : ['official', 'GLM-4', 'DeepSeek'];
+  // Chart series keys — real input/output breakdown instead of fake env splits
+  const chartSeriesKeys = ['Input Tokens', 'Output Tokens'];
 
   // Bug #21 fix: Calculate real week-over-week change from dailyHistory data
   const computeWeekOverWeekChange = () => {
@@ -354,7 +349,7 @@ export function Analytics() {
         </h3>
         <TokenChart
           data={chartData}
-          environments={environments}
+          environments={chartSeriesKeys}
           granularity={granularity}
           onGranularityChange={setGranularity}
         />
