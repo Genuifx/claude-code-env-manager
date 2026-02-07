@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ENV_PRESETS } from '@ccem/core/browser';
 import { AppLayout } from '@/components/layout';
-import { Dashboard, Environments, Settings } from '@/pages';
+import { Dashboard, Environments, Sessions, Analytics, Settings } from '@/pages';
 import { useAppStore, type Environment } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { EnvironmentDialog } from '@/components/EnvironmentDialog';
@@ -132,6 +132,8 @@ function App() {
             onLaunchWithDir={handleLaunchWithDir}
           />
         );
+      case 'sessions':
+        return <Sessions onLaunch={handleLaunch} />;
       case 'environments':
         return (
           <Environments
@@ -140,6 +142,8 @@ function App() {
             onDeleteEnv={handleDeleteEnv}
           />
         );
+      case 'analytics':
+        return <Analytics />;
       case 'skills':
         return (
           <div className="flex flex-col items-center justify-center py-20 text-center">
