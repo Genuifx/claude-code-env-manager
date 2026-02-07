@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
+import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import { ENV_PRESETS } from '@ccem/core/browser';
 import { AppLayout } from '@/components/layout';
-import { Dashboard, Environments, Sessions, Analytics, Settings } from '@/pages';
+import { Dashboard, Environments, Sessions, Analytics, Settings, Skills } from '@/pages';
 import { useAppStore, type Environment } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { EnvironmentDialog } from '@/components/EnvironmentDialog';
-import { Toaster } from 'sonner';
+import { Toaster, toast } from 'sonner';
+import type { UsageStats } from '@/types/analytics';
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -16,7 +19,11 @@ function App() {
   const {
     setEnvironments,
     setCurrentEnv,
+    setPermissionMode,
+    setUsageStats,
     environments,
+    error,
+    setError,
   } = useAppStore();
 
   const {
@@ -29,6 +36,48 @@ function App() {
     updateEnvironment,
     deleteEnvironment,
   } = useTauriCommands();
+
+  // Show global errors as toast notifications
+  useEffect(() => {
+    if (error) {
+      toast.error(error);
+      // Clear error after showing toast to prevent re-triggering
+      setError(null);
+    }
+  }, [error, setError]);
+
+  // Listen for tray menu events
+  useEffect(() => {
+    const unlisteners: (() => void)[] = [];
+
+    const setupListeners = async () => {
+      try {
+        unlisteners.push(await listen('tray-launch-claude', () => {
+          handleLaunch();
+        }));
+
+        unlisteners.push(await listen('navigate-to-settings', () => {
+          setActiveTab('settings');
+        }));
+
+        unlisteners.push(await listen<{ env: string }>('env-changed', (event) => {
+          setCurrentEnv(event.payload.env);
+        }));
+
+        unlisteners.push(await listen<{ perm: string }>('perm-changed', (event) => {
+          setPermissionMode(event.payload.perm as any);
+        }));
+      } catch (err) {
+        console.error('Failed to setup tray event listeners:', err);
+      }
+    };
+
+    setupListeners();
+
+    return () => {
+      unlisteners.forEach(fn => fn());
+    };
+  }, []);
 
   // Initialize data on mount
   useEffect(() => {
@@ -58,6 +107,18 @@ function App() {
     loadAppConfig().catch((err) => {
       console.error('Failed to load app config:', err);
     });
+    // Try to load usage stats
+    (async () => {
+      try {
+        const stats = await invoke('get_usage_stats');
+        if (stats) {
+          setUsageStats(stats as UsageStats);
+        }
+      } catch {
+        // Analytics backend not ready yet, stats will load when Analytics tab is visited
+        console.debug('Usage stats not available from backend, will use mock data when Analytics tab is opened');
+      }
+    })();
   }, []);
 
   // Handle launch
@@ -145,17 +206,7 @@ function App() {
       case 'analytics':
         return <Analytics />;
       case 'skills':
-        return (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-violet-100 to-purple-100 dark:from-violet-900/30 dark:to-purple-900/30 flex items-center justify-center mb-4">
-              <span className="text-4xl">✦</span>
-            </div>
-            <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">Skills 功能</h3>
-            <p className="text-slate-500 dark:text-slate-400 max-w-sm">
-              管理 Claude Code 技能扩展，敬请期待...
-            </p>
-          </div>
-        );
+        return <Skills />;
       case 'settings':
         return <Settings />;
       default:

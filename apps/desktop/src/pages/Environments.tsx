@@ -111,6 +111,7 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
             <button
               key={name}
               className="group p-4 bg-white dark:bg-slate-800/50 rounded-xl border border-slate-200/50 dark:border-slate-700/50 hover:border-emerald-300 dark:hover:border-emerald-700 hover:shadow-lg hover:shadow-emerald-500/10 transition-all text-left"
+              onClick={() => onAddEnv?.()}
             >
               <div className="flex items-center gap-3 mb-2">
                 <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-600 flex items-center justify-center text-sm font-bold text-slate-500 dark:text-slate-400 group-hover:from-emerald-100 group-hover:to-teal-100 dark:group-hover:from-emerald-900/50 dark:group-hover:to-teal-900/50 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
@@ -126,25 +127,6 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
         </div>
       </div>
 
-      {/* Remote loading section */}
-      <div className="border-t border-slate-200 dark:border-slate-700 pt-8">
-        <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4">
-          从远程加载
-        </h3>
-        <div className="flex gap-3">
-          <input
-            type="text"
-            placeholder="输入配置 URL..."
-            className="flex-1 px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all text-slate-900 dark:text-white placeholder-slate-400"
-          />
-          <Button variant="outline" className="px-6">
-            加载
-          </Button>
-        </div>
-        <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">
-          支持加载加密的远程配置文件，需要正确的解密密钥
-        </p>
-      </div>
     </div>
   );
 }

@@ -145,6 +145,7 @@ function SessionItem({ session, onFocus, onMinimize, onClose, onRemove }: Sessio
 
   const statusConfig = {
     running: { color: 'bg-emerald-400', label: '运行中' },
+    idle: { color: 'bg-amber-400', label: '空闲' },
     stopped: { color: 'bg-slate-400', label: '已停止' },
     interrupted: { color: 'bg-amber-400', label: '已中断' },
     error: { color: 'bg-rose-400', label: '错误' },

@@ -3,6 +3,12 @@ import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
+function maskApiKey(key?: string): string {
+  if (!key) return '未设置';
+  if (key.length <= 7) return '****';
+  return key.slice(0, 4) + '***' + key.slice(-3);
+}
+
 interface EnvListProps {
   onEdit?: (name: string) => void;
   onDelete?: (name: string) => void;
@@ -95,18 +101,35 @@ function EnvCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardPro
           </div>
           <div className="space-y-1">
             <p className="text-sm text-slate-500 dark:text-slate-400 truncate">
-              <span className="text-slate-400 dark:text-slate-500">API:</span>{' '}
+              <span className="text-slate-400 dark:text-slate-500">Base URL:</span>{' '}
               {env.baseUrl || 'api.anthropic.com'}
             </p>
             <p className="text-sm text-slate-500 dark:text-slate-400">
               <span className="text-slate-400 dark:text-slate-500">Model:</span>{' '}
               {env.model || 'claude-sonnet-4-5'}
             </p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              <span className="text-slate-400 dark:text-slate-500">API Key:</span>{' '}
+              {maskApiKey(env.apiKey)}
+            </p>
           </div>
         </div>
 
         {/* Actions */}
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          {!isActive && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-3 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:text-emerald-300 dark:hover:bg-emerald-900/20"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelect();
+              }}
+            >
+              切换到此环境
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -118,7 +141,11 @@ function EnvCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardPro
           >
             编辑
           </Button>
-          {name !== 'official' && (
+          {name === 'official' ? (
+            <span className="h-8 px-3 inline-flex items-center text-xs font-medium text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-700/50 rounded-md cursor-not-allowed">
+              受保护
+            </span>
+          ) : (
             <Button
               variant="ghost"
               size="sm"

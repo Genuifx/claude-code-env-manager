@@ -13,62 +13,99 @@ const LEVEL_COLORS = {
   4: 'bg-green-800 dark:bg-green-500',
 };
 
-export function HeatmapCalendar({ activities }: HeatmapCalendarProps) {
-  // Group activities by week
-  const weeks: DailyActivity[][] = [];
-  let currentWeek: DailyActivity[] = [];
+const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-  activities.forEach((activity, index) => {
+export function HeatmapCalendar({ activities }: HeatmapCalendarProps) {
+  // Bug #25 fix: Group by actual weeks (columns) aligned to weekday (rows)
+  // Each column = one week, each row = a day of the week (Mon-Sun)
+  const weeks: (DailyActivity | null)[][] = [];
+  let currentWeek: (DailyActivity | null)[] = [];
+
+  // Pad the first week with nulls for days before the first activity
+  if (activities.length > 0) {
+    const firstDay = new Date(activities[0].date).getDay();
+    // Convert Sunday=0 to Monday-based: Mon=0, Tue=1, ..., Sun=6
+    const mondayBasedDay = firstDay === 0 ? 6 : firstDay - 1;
+    for (let i = 0; i < mondayBasedDay; i++) {
+      currentWeek.push(null);
+    }
+  }
+
+  activities.forEach((activity) => {
     currentWeek.push(activity);
-    if (currentWeek.length === 7 || index === activities.length - 1) {
+    if (currentWeek.length === 7) {
       weeks.push([...currentWeek]);
       currentWeek = [];
     }
   });
 
-  // Get month labels
-  const getMonthLabel = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('zh-CN', { month: 'short' });
-  };
+  // Pad the last week
+  if (currentWeek.length > 0) {
+    while (currentWeek.length < 7) {
+      currentWeek.push(null);
+    }
+    weeks.push(currentWeek);
+  }
 
-  const months = Array.from(
-    new Set(activities.map((a) => getMonthLabel(a.date)))
-  );
+  // Get month labels positioned at the correct week columns
+  const monthLabels: { label: string; weekIndex: number }[] = [];
+  let lastMonth = '';
+  weeks.forEach((week, weekIndex) => {
+    // Find the first non-null activity in this week
+    const firstActivity = week.find((a) => a !== null);
+    if (firstActivity) {
+      const month = new Date(firstActivity.date).toLocaleDateString('zh-CN', { month: 'short' });
+      if (month !== lastMonth) {
+        monthLabels.push({ label: month, weekIndex });
+        lastMonth = month;
+      }
+    }
+  });
 
   return (
     <div className="space-y-4">
       {/* Month Labels */}
-      <div className="flex gap-1 text-xs text-slate-600 dark:text-slate-400 pl-12">
-        {months.map((month, i) => (
-          <div key={i} className="flex-1 text-center">
-            {month}
+      <div className="flex gap-1 text-xs text-slate-600 dark:text-slate-400 pl-12 relative" style={{ height: '16px' }}>
+        {monthLabels.map(({ label, weekIndex }, i) => (
+          <div
+            key={i}
+            className="absolute text-xs"
+            style={{ left: `calc(48px + ${weekIndex} * (12px + 4px))` }}
+          >
+            {label}
           </div>
         ))}
       </div>
 
       {/* Calendar Grid */}
       <div className="flex gap-1">
-        {/* Day Labels */}
-        <div className="flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-400 justify-around">
-          <div>Mon</div>
-          <div>Wed</div>
-          <div>Fri</div>
+        {/* Day Labels — all 7 days (Mon through Sun) */}
+        <div className="flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-400 w-10 shrink-0">
+          {DAY_LABELS.map((label) => (
+            <div key={label} className="h-3 flex items-center">
+              {label}
+            </div>
+          ))}
         </div>
 
-        {/* Heatmap */}
+        {/* Heatmap — each week is a column, each row is a weekday */}
         <div className="flex gap-1 flex-1 overflow-x-auto">
           {weeks.map((week, weekIndex) => (
             <div key={weekIndex} className="flex flex-col gap-1">
-              {week.map((activity) => (
-                <div
-                  key={activity.date}
-                  className={`w-3 h-3 rounded-sm ${
-                    LEVEL_COLORS[activity.level]
-                  } hover:ring-2 hover:ring-slate-400 dark:hover:ring-slate-500 cursor-pointer transition-all`}
-                  title={`${activity.date}: ${activity.tokens.toLocaleString()} tokens, $${activity.cost.toFixed(3)}`}
-                />
-              ))}
+              {week.map((activity, dayIndex) =>
+                activity ? (
+                  <div
+                    key={activity.date}
+                    className={`w-3 h-3 rounded-sm ${
+                      LEVEL_COLORS[activity.level]
+                    } hover:ring-2 hover:ring-slate-400 dark:hover:ring-slate-500 cursor-pointer transition-all`}
+                    title={`${activity.date}: ${activity.tokens.toLocaleString()} tokens, $${activity.cost.toFixed(3)}`}
+                  />
+                ) : (
+                  // Invisible spacer for null padding cells
+                  <div key={`empty-${weekIndex}-${dayIndex}`} className="w-3 h-3" />
+                ),
+              )}
             </div>
           ))}
         </div>

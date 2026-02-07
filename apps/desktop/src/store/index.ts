@@ -16,7 +16,8 @@ export interface Session {
   workingDir: string;
   pid?: number;
   startedAt: Date;
-  status: 'running' | 'stopped' | 'interrupted' | 'error';
+  status: 'running' | 'stopped' | 'idle' | 'interrupted' | 'error';
+  permMode: string;
   terminalType?: string;  // "iterm2" | "terminalapp"
   windowId?: string;      // iTerm2 window ID
 }

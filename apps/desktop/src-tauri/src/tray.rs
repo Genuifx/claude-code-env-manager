@@ -161,19 +161,20 @@ fn build_tray_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
     let sessions_submenu = build_sessions_menu(app)?;
 
     // Today's stats (non-clickable, placeholder for now)
+    // TODO: Wire to real analytics data via update_tray_stats() when usage tracking is implemented
     let stats_item = MenuItem::with_id(
         app,
         "stats",
-        "Today: 0 tokens · $0.00",
+        "📊 今日: -- tokens · $--.--",
         false,
         None::<&str>,
     )?;
 
     // Main action items
-    let launch_item = MenuItem::with_id(app, "launch", "Launch Claude Code", true, None::<&str>)?;
-    let open_window_item = MenuItem::with_id(app, "open_window", "Open Window", true, None::<&str>)?;
-    let settings_item = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
-    let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let launch_item = MenuItem::with_id(app, "launch", "🚀 启动 Claude Code", true, None::<&str>)?;
+    let open_window_item = MenuItem::with_id(app, "open_window", "🏠 打开主窗口", true, None::<&str>)?;
+    let settings_item = MenuItem::with_id(app, "settings", "⚙️ 设置", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "quit", "❌ 退出", true, None::<&str>)?;
 
     // Build complete menu
     Menu::with_items(
@@ -264,7 +265,7 @@ pub fn rebuild_tray_menu(app: &AppHandle) -> Result<(), tauri::Error> {
 pub fn update_tray_icon(app: &AppHandle, has_error: bool) -> Result<(), tauri::Error> {
     let tray_id = TrayIconId::new(TRAY_ID);
 
-    if let Some(_tray) = app.tray_by_id(&tray_id) {
+    if let Some(tray) = app.tray_by_id(&tray_id) {
         let manager = app.try_state::<Arc<SessionManager>>();
         let has_running_sessions = manager
             .map(|m| m.list_sessions().iter().any(|s| s.status == "running"))
@@ -276,16 +277,15 @@ pub fn update_tray_icon(app: &AppHandle, has_error: bool) -> Result<(), tauri::E
         // - White/Default: no sessions
 
         // TODO: Implement icon switching when we have multiple icon assets
-        // For now, just log the state
-        let icon_state = if has_error {
-            "error"
+        // For now, use tooltip to indicate state
+        let tooltip = if has_error {
+            "CCEM - ⚠️ Error"
         } else if has_running_sessions {
-            "active"
+            "CCEM - 🟢 Running"
         } else {
-            "idle"
+            "CCEM"
         };
-
-        println!("Tray icon state: {}", icon_state);
+        tray.set_tooltip(Some(tooltip))?;
     }
 
     Ok(())

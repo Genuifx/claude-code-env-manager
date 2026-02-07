@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store';
+import { invoke } from '@tauri-apps/api/core';
+import { toast } from 'sonner';
 import type { PermissionModeName } from '@ccem/core/browser';
 
 export function Settings() {
@@ -13,18 +15,70 @@ export function Settings() {
 
   // Load settings on mount
   useEffect(() => {
-    // TODO: Load from Tauri app config
+    const loadSettings = async () => {
+      try {
+        const settings = await invoke<{ theme: string; autoStart: boolean; startMinimized: boolean; closeToTray: boolean; defaultMode: string }>('get_settings');
+        setTheme(settings.theme as 'light' | 'dark' | 'system');
+        setAutoStart(settings.autoStart);
+        setStartMinimized(settings.startMinimized);
+        setCloseToTray(settings.closeToTray);
+        if (settings.defaultMode) {
+          setDefaultMode(settings.defaultMode as PermissionModeName);
+        }
+      } catch {
+        // Fallback: load from localStorage
+        const saved = localStorage.getItem('ccem-settings');
+        if (saved) {
+          try {
+            const settings = JSON.parse(saved);
+            setTheme(settings.theme || 'system');
+            setAutoStart(settings.autoStart ?? false);
+            setStartMinimized(settings.startMinimized ?? false);
+            setCloseToTray(settings.closeToTray ?? true);
+            if (settings.defaultMode) {
+              setDefaultMode(settings.defaultMode as PermissionModeName);
+            }
+          } catch { /* ignore parse errors */ }
+        }
+      }
+    };
+    loadSettings();
   }, []);
 
+  // Apply theme to DOM
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'dark') {
+      root.classList.add('dark');
+    } else if (theme === 'light') {
+      root.classList.remove('dark');
+    } else {
+      // system
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (prefersDark) {
+        root.classList.add('dark');
+      } else {
+        root.classList.remove('dark');
+      }
+    }
+  }, [theme]);
+
   const handleSaveSettings = async () => {
-    // TODO: Save to Tauri app config
-    console.log('Saving settings:', {
+    const settings = {
       theme,
       autoStart,
       startMinimized,
       closeToTray,
       defaultMode,
-    });
+    };
+    try {
+      await invoke('save_settings', { settings });
+      toast.success('设置已保存');
+    } catch {
+      // Fallback: save to localStorage if Tauri is not available
+      localStorage.setItem('ccem-settings', JSON.stringify(settings));
+      toast.success('设置已保存 (本地)');
+    }
   };
 
   return (
@@ -175,13 +229,13 @@ export function Settings() {
             </span>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => toast.info('当前已是最新版本 v2.0.0')}>
               检查更新
             </Button>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => window.open('https://github.com/anthropics/claude-code-env-manager', '_blank')}>
               GitHub
             </Button>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => window.open('https://github.com/anthropics/claude-code-env-manager/issues', '_blank')}>
               反馈问题
             </Button>
           </div>

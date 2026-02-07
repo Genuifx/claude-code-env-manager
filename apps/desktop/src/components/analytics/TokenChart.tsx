@@ -15,13 +15,17 @@ import {
 import { Button } from '@/components/ui/button';
 import type { ChartDataPoint } from '@/types/analytics';
 
+type ChartType = 'line' | 'bar';
+type TimeGranularity = 'hour' | 'day' | 'week' | 'month';
+
 interface TokenChartProps {
   data: ChartDataPoint[];
   environments: string[];
+  /** Controlled granularity from parent (Bug #23 fix) */
+  granularity: TimeGranularity;
+  /** Callback when user changes granularity */
+  onGranularityChange: (g: TimeGranularity) => void;
 }
-
-type ChartType = 'line' | 'bar';
-type TimeGranularity = 'hour' | 'day' | 'week' | 'month';
 
 const COLORS = {
   official: '#3b82f6',
@@ -31,9 +35,8 @@ const COLORS = {
   MiniMax: '#ec4899',
 };
 
-export function TokenChart({ data, environments }: TokenChartProps) {
+export function TokenChart({ data, environments, granularity, onGranularityChange }: TokenChartProps) {
   const [chartType, setChartType] = useState<ChartType>('line');
-  const [granularity, setGranularity] = useState<TimeGranularity>('day');
 
   const Chart = chartType === 'line' ? LineChart : BarChart;
 
@@ -45,28 +48,28 @@ export function TokenChart({ data, environments }: TokenChartProps) {
           <Button
             size="sm"
             variant={granularity === 'hour' ? 'default' : 'outline'}
-            onClick={() => setGranularity('hour')}
+            onClick={() => onGranularityChange('hour')}
           >
             小时
           </Button>
           <Button
             size="sm"
             variant={granularity === 'day' ? 'default' : 'outline'}
-            onClick={() => setGranularity('day')}
+            onClick={() => onGranularityChange('day')}
           >
             日
           </Button>
           <Button
             size="sm"
             variant={granularity === 'week' ? 'default' : 'outline'}
-            onClick={() => setGranularity('week')}
+            onClick={() => onGranularityChange('week')}
           >
             周
           </Button>
           <Button
             size="sm"
             variant={granularity === 'month' ? 'default' : 'outline'}
-            onClick={() => setGranularity('month')}
+            onClick={() => onGranularityChange('month')}
           >
             月
           </Button>
