@@ -22,6 +22,23 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
     return parts[parts.length - 1] || path;
   };
 
+  // Format relative time
+  const formatRelativeTime = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffMins < 1) return '刚刚';
+    if (diffMins < 60) return `${diffMins} 分钟前`;
+    if (diffHours < 24) return `${diffHours} 小时前`;
+    if (diffDays === 1) return '昨天';
+    if (diffDays < 7) return `${diffDays} 天前`;
+    return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+  };
+
   // Truncate path for display
   const truncatePath = (path: string) => {
     const home = '/Users/';
@@ -134,6 +151,8 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
                     </div>
                     <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
                       {truncatePath(project.path)}
+                      {' · '}
+                      <span className="text-blue-500 dark:text-blue-400">{formatRelativeTime(project.lastUsed)}</span>
                     </div>
                   </div>
                 </div>
