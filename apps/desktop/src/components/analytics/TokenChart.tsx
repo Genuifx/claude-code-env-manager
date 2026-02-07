@@ -27,7 +27,11 @@ interface TokenChartProps {
   onGranularityChange: (g: TimeGranularity) => void;
 }
 
-const COLORS = {
+const COLORS: Record<string, string> = {
+  // Input/Output token breakdown (real data mode)
+  'Input Tokens': '#3b82f6',   // blue
+  'Output Tokens': '#10b981',  // green
+  // Legacy environment names (mock data fallback)
   official: '#3b82f6',
   'GLM-4': '#10b981',
   DeepSeek: '#8b5cf6',
@@ -111,7 +115,7 @@ export function TokenChart({ data, environments, granularity, onGranularityChang
           />
           <Legend />
           {environments.map((env) => {
-            const color = COLORS[env as keyof typeof COLORS] || '#6b7280';
+            const color = COLORS[env] || '#6b7280';
             return chartType === 'line' ? (
               <Line
                 key={env}
