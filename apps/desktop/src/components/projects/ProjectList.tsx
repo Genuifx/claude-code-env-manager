@@ -134,52 +134,56 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
         <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2 mb-3">
           <span>🕐</span> 最近使用
         </h3>
-        {recent.length === 0 ? (
-          <p className="text-sm text-slate-400 dark:text-slate-500 py-2">暂无最近使用记录</p>
-        ) : (
-          <div className="space-y-2">
-            {recent.map((project) => (
-              <div
-                key={project.path}
-                className="flex items-center justify-between p-3 bg-white dark:bg-slate-800/50 rounded-lg border border-slate-200/50 dark:border-slate-700/50 hover:border-blue-300 dark:hover:border-blue-700 transition-all"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className="text-lg">📁</span>
-                  <div className="min-w-0">
-                    <div className="font-medium text-slate-900 dark:text-white truncate">
-                      {getProjectName(project.path)}
-                    </div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                      {truncatePath(project.path)}
-                      {' · '}
-                      <span className="text-blue-500 dark:text-blue-400">{formatRelativeTime(project.lastUsed)}</span>
-                    </div>
+        <div className="space-y-2">
+          {recent.map((project) => (
+            <div
+              key={project.path}
+              className="flex items-center justify-between p-3 bg-white dark:bg-slate-800/50 rounded-lg border border-slate-200/50 dark:border-slate-700/50 hover:border-blue-300 dark:hover:border-blue-700 transition-all"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-lg">📁</span>
+                <div className="min-w-0">
+                  <div className="font-medium text-slate-900 dark:text-white truncate">
+                    {getProjectName(project.path)}
+                  </div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                    {truncatePath(project.path)}
+                    {' · '}
+                    <span className="text-blue-500 dark:text-blue-400">{formatRelativeTime(project.lastUsed)}</span>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
+                  onClick={() => handleLaunch(project.path)}
+                >
+                  ▶
+                </Button>
+                {!isFavorite(project.path) && (
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
-                    onClick={() => handleLaunch(project.path)}
+                    className="text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+                    onClick={() => handleAddToFavorites(project.path)}
                   >
-                    ▶
+                    ⭐
                   </Button>
-                  {!isFavorite(project.path) && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20"
-                      onClick={() => handleAddToFavorites(project.path)}
-                    >
-                      ⭐
-                    </Button>
-                  )}
-                </div>
+                )}
               </div>
-            ))}
-          </div>
-        )}
+            </div>
+          ))}
+          {/* "+ 添加" card — design §3.2 */}
+          <button
+            className="flex items-center justify-center gap-2 p-3 w-full bg-white dark:bg-slate-800/50 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-all text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400"
+            onClick={handleAddFavorite}
+          >
+            <span className="text-lg">+</span>
+            <span className="text-sm font-medium">添加项目</span>
+          </button>
+        </div>
       </div>
 
       {/* VS Code Section */}

@@ -18,9 +18,11 @@ pub struct EnvConfig {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CcemConfig {
+    #[serde(default)]
     pub registries: HashMap<String, EnvConfig>,
+    #[serde(default)]
     pub current: Option<String>,
-    #[serde(rename = "defaultMode")]
+    #[serde(rename = "defaultMode", default)]
     pub default_mode: Option<String>,
 }
 
