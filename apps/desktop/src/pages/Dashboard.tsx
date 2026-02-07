@@ -76,33 +76,39 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
 
         {/* Quick Actions */}
         <div className="flex items-center gap-4 mt-6">
-          <select
-            value={currentEnv}
-            onChange={(e) => {
-              switchEnvironment(e.target.value);
-            }}
-            className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-          >
-            {environments.length > 0 ? (
-              environments.map((env) => (
-                <option key={env.name} value={env.name}>{env.name}</option>
-              ))
-            ) : (
-              <option value={currentEnv}>{currentEnv}</option>
-            )}
-          </select>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-slate-500 dark:text-slate-400">环境</span>
+            <select
+              value={currentEnv}
+              onChange={(e) => {
+                switchEnvironment(e.target.value);
+              }}
+              className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+            >
+              {environments.length > 0 ? (
+                environments.map((env) => (
+                  <option key={env.name} value={env.name}>{env.name}</option>
+                ))
+              ) : (
+                <option value={currentEnv}>{currentEnv}</option>
+              )}
+            </select>
+          </div>
 
-          <select
-            value={permissionMode}
-            onChange={(e) => {
-              setPermissionMode(e.target.value as PermissionModeName);
-            }}
-            className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-          >
-            {Object.keys(PERMISSION_PRESETS).map((mode) => (
-              <option key={mode} value={mode}>{mode}</option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-slate-500 dark:text-slate-400">权限</span>
+            <select
+              value={permissionMode}
+              onChange={(e) => {
+                setPermissionMode(e.target.value as PermissionModeName);
+              }}
+              className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+            >
+              {Object.keys(PERMISSION_PRESETS).map((mode) => (
+                <option key={mode} value={mode}>{mode}</option>
+              ))}
+            </select>
+          </div>
 
           <Button variant="outline" onClick={handleSelectDirectory}>
             <FolderOpen className="w-4 h-4 mr-2" />
@@ -121,7 +127,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card
           className="p-4 cursor-pointer hover:shadow-md transition-shadow"
-          onClick={() => onNavigate('analytics')}
+          onClick={() => onNavigate('sessions')}
         >
           <div className="text-sm text-slate-600 dark:text-slate-400 mb-1">
             运行中会话
