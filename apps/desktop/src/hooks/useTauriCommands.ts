@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { useAppStore, type Environment, type Session } from '@/store';
 import { useCallback } from 'react';
+import { toast } from 'sonner';
 
 interface TauriEnvConfig {
   ANTHROPIC_BASE_URL?: string;
@@ -238,32 +239,29 @@ export function useTauriCommands() {
   const focusSession = useCallback(async (sessionId: string) => {
     try {
       await invoke('focus_session', { sessionId });
+      toast.success('Session focused successfully');
     } catch (err) {
-      // Return error message for toast display
-      return `${err}`;
+      toast.error(`Failed to focus session: ${err}`);
     }
-    return null;
   }, []);
 
   const closeSession = useCallback(async (sessionId: string) => {
     try {
       await invoke('close_session', { sessionId });
       removeSession(sessionId);
+      toast.success('Session closed successfully');
     } catch (err) {
-      // Return error message for toast display
-      return `${err}`;
+      toast.error(`Failed to close session: ${err}`);
     }
-    return null;
   }, [removeSession]);
 
   const minimizeSession = useCallback(async (sessionId: string) => {
     try {
       await invoke('minimize_session', { sessionId });
+      toast.success('Session minimized successfully');
     } catch (err) {
-      // Return error message for toast display
-      return `${err}`;
+      toast.error(`Failed to minimize session: ${err}`);
     }
-    return null;
   }, []);
 
   const loadAppConfig = useCallback(async () => {
