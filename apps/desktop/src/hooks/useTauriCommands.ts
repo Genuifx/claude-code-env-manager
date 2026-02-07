@@ -179,7 +179,8 @@ export function useTauriCommands() {
         workingDir: tauriSession.working_dir,
         pid: tauriSession.pid,
         startedAt: new Date(tauriSession.start_time),
-        status: tauriSession.status as 'running' | 'stopped' | 'interrupted' | 'error',
+        status: tauriSession.status as Session['status'],
+        permMode: tauriSession.perm_mode,
         terminalType: tauriSession.terminal_type,
         windowId: tauriSession.window_id,
       };
@@ -208,7 +209,8 @@ export function useTauriCommands() {
         workingDir: s.working_dir,
         pid: s.pid,
         startedAt: new Date(s.start_time),
-        status: s.status as 'running' | 'stopped' | 'interrupted' | 'error',
+        status: s.status as Session['status'],
+        permMode: s.perm_mode,
         terminalType: s.terminal_type,
         windowId: s.window_id,
       }));

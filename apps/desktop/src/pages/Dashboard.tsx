@@ -4,6 +4,8 @@ import { Card } from '@/components/ui/card';
 import { ProjectList } from '@/components/projects';
 import { useAppStore } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
+import { PERMISSION_PRESETS } from '@ccem/core/browser';
+import type { PermissionModeName } from '@ccem/core/browser';
 
 interface DashboardProps {
   onNavigate: (tab: string) => void;
@@ -14,14 +16,16 @@ interface DashboardProps {
 export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardProps) {
   const {
     currentEnv,
+    environments,
     permissionMode,
+    setPermissionMode,
     selectedWorkingDir,
     sessions,
     usageStats,
     setSelectedWorkingDir,
   } = useAppStore();
 
-  const { openDirectoryPicker } = useTauriCommands();
+  const { openDirectoryPicker, switchEnvironment } = useTauriCommands();
 
   const handleSelectDirectory = async () => {
     try {
@@ -75,28 +79,29 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
           <select
             value={currentEnv}
             onChange={(e) => {
-              // TODO: Call setCurrentEnv Tauri command
-              console.log('Switch to:', e.target.value);
+              switchEnvironment(e.target.value);
             }}
             className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
           >
-            <option value="official">Official</option>
-            <option value="GLM-4">GLM-4</option>
-            <option value="DeepSeek">DeepSeek</option>
+            {environments.length > 0 ? (
+              environments.map((env) => (
+                <option key={env.name} value={env.name}>{env.name}</option>
+              ))
+            ) : (
+              <option value={currentEnv}>{currentEnv}</option>
+            )}
           </select>
 
           <select
             value={permissionMode}
             onChange={(e) => {
-              // TODO: Update permission mode
-              console.log('Switch permission:', e.target.value);
+              setPermissionMode(e.target.value as PermissionModeName);
             }}
             className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
           >
-            <option value="yolo">yolo</option>
-            <option value="dev">dev</option>
-            <option value="safe">safe</option>
-            <option value="readonly">readonly</option>
+            {Object.keys(PERMISSION_PRESETS).map((mode) => (
+              <option key={mode} value={mode}>{mode}</option>
+            ))}
           </select>
 
           <Button variant="outline" onClick={handleSelectDirectory}>
@@ -113,45 +118,43 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
       </div>
 
       {/* Today's Usage Summary */}
-      {usageStats && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Card
-            className="p-4 cursor-pointer hover:shadow-md transition-shadow"
-            onClick={() => onNavigate('sessions')}
-          >
-            <div className="text-sm text-slate-600 dark:text-slate-400 mb-1">
-              运行中会话
-            </div>
-            <div className="text-2xl font-bold text-slate-900 dark:text-white">
-              💬 {sessions.length}
-            </div>
-          </Card>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card
+          className="p-4 cursor-pointer hover:shadow-md transition-shadow"
+          onClick={() => onNavigate('analytics')}
+        >
+          <div className="text-sm text-slate-600 dark:text-slate-400 mb-1">
+            运行中会话
+          </div>
+          <div className="text-2xl font-bold text-slate-900 dark:text-white">
+            💬 {sessions.length}
+          </div>
+        </Card>
 
-          <Card
-            className="p-4 cursor-pointer hover:shadow-md transition-shadow"
-            onClick={() => onNavigate('analytics')}
-          >
-            <div className="text-sm text-slate-600 dark:text-slate-400 mb-1">
-              今日 Tokens
-            </div>
-            <div className="text-2xl font-bold text-slate-900 dark:text-white">
-              📊 {((usageStats.today.inputTokens + usageStats.today.outputTokens) / 1000).toFixed(1)}K
-            </div>
-          </Card>
+        <Card
+          className="p-4 cursor-pointer hover:shadow-md transition-shadow"
+          onClick={() => onNavigate('analytics')}
+        >
+          <div className="text-sm text-slate-600 dark:text-slate-400 mb-1">
+            今日 Tokens
+          </div>
+          <div className="text-2xl font-bold text-slate-900 dark:text-white">
+            📊 {(((usageStats?.today.inputTokens ?? 0) + (usageStats?.today.outputTokens ?? 0)) / 1000).toFixed(1)}K
+          </div>
+        </Card>
 
-          <Card
-            className="p-4 cursor-pointer hover:shadow-md transition-shadow"
-            onClick={() => onNavigate('analytics')}
-          >
-            <div className="text-sm text-slate-600 dark:text-slate-400 mb-1">
-              今日消费
-            </div>
-            <div className="text-2xl font-bold text-slate-900 dark:text-white">
-              💰 ${usageStats.today.cost.toFixed(2)}
-            </div>
-          </Card>
-        </div>
-      )}
+        <Card
+          className="p-4 cursor-pointer hover:shadow-md transition-shadow"
+          onClick={() => onNavigate('analytics')}
+        >
+          <div className="text-sm text-slate-600 dark:text-slate-400 mb-1">
+            今日消费
+          </div>
+          <div className="text-2xl font-bold text-slate-900 dark:text-white">
+            💰 ${(usageStats?.today.cost ?? 0).toFixed(2)}
+          </div>
+        </Card>
+      </div>
 
       {/* Recent Projects */}
       <div>

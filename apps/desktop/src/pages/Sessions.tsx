@@ -40,6 +40,20 @@ export function Sessions({ onLaunch }: SessionsProps) {
     }
   };
 
+  const handleMinimizeAll = async () => {
+    for (const session of sessions.filter(s => s.status === 'running')) {
+      await minimizeSession(session.id);
+    }
+  };
+
+  const handleCloseAll = async () => {
+    if (confirm('确定要关闭所有会话吗？')) {
+      for (const session of sessions) {
+        await closeSession(session.id);
+      }
+    }
+  };
+
   return (
     <div className="p-6">
       {/* Header */}
@@ -127,14 +141,14 @@ export function Sessions({ onLaunch }: SessionsProps) {
             <Button size="sm" variant="outline" disabled>
               ⊞ 4分屏
             </Button>
-            <Button size="sm" variant="outline" disabled>
+            <Button size="sm" variant="outline" onClick={handleMinimizeAll}>
               — 全部最小化
             </Button>
-            <Button size="sm" variant="outline" disabled>
+            <Button size="sm" variant="outline" onClick={handleCloseAll}>
               ✕ 全部关闭
             </Button>
             <span className="text-xs text-slate-400 dark:text-slate-500 ml-2">
-              (未来功能)
+              (4分屏: 未来功能)
             </span>
           </div>
         </div>

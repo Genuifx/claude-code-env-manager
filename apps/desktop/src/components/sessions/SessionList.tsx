@@ -1,6 +1,5 @@
 import { Clock, FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useAppStore } from '@/store';
 import type { Session } from '@/store';
 
 interface SessionListProps {
@@ -11,16 +10,16 @@ interface SessionListProps {
 }
 
 export function SessionList({ sessions, onFocus, onMinimize, onClose }: SessionListProps) {
-  const { permissionMode } = useAppStore();
-
   const getStatusIcon = (status: Session['status']) => {
     switch (status) {
       case 'running':
         return '🟢';
       case 'stopped':
         return '⚫';
-      case 'interrupted':
+      case 'idle':
         return '🟡';
+      case 'interrupted':
+        return '⚠️';
       case 'error':
         return '🔴';
       default:
@@ -62,7 +61,7 @@ export function SessionList({ sessions, onFocus, onMinimize, onClose }: SessionL
                 {session.envName}
               </span>
               <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300">
-                {permissionMode}
+                {session.permMode}
               </span>
             </div>
             <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">

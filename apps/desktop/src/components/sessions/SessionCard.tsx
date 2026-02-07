@@ -18,8 +18,10 @@ export function SessionCard({ session, onFocus, onMinimize, onClose }: SessionCa
         return '🟢';
       case 'stopped':
         return '⚫';
-      case 'interrupted':
+      case 'idle':
         return '🟡';
+      case 'interrupted':
+        return '⚠️';
       case 'error':
         return '🔴';
       default:
@@ -56,6 +58,9 @@ export function SessionCard({ session, onFocus, onMinimize, onClose }: SessionCa
           <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
             <span className="px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
               {session.envName}
+            </span>
+            <span className="px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300">
+              {session.permMode}
             </span>
           </div>
         </div>
