@@ -32,6 +32,7 @@
     "closeAllTitle": "Close all sessions?",
     "closeAllDescription": "This will close {count} active sessions. This action cannot be undone.",
     "noActiveSessions": "No active sessions",
+    "detectionNote": "Session detection relies on process scanning. Some sessions may not appear.",
     "launchClaudeCode": "Launch Claude Code",
     "newSession": "New Session",
     "layoutControl": "Layout Control:",
@@ -62,7 +63,9 @@
     "currentlyActive": "Active",
     "default": "Default",
     "switchTo": "Switch to this environment",
-    "notSet": "Not set"
+    "notSet": "Not set",
+    "failedToLoad": "Failed to load environments",
+    "configCorrupt": "Environment configuration may be corrupt. Re-add environments to repair."
   },
   "analytics": {
     "subtitle": "Token usage statistics and cost analysis",
@@ -90,7 +93,9 @@
     "sevenDayTitle": "7-Day Streak",
     "sevenDayDesc": "Used for 7 consecutive days",
     "demoData": "Demo Data",
-    "demoDataHint": "Currently showing simulated data. Real statistics will be displayed after connecting to the Tauri backend."
+    "demoDataHint": "Currently showing simulated data. Real statistics will be displayed after connecting to the Tauri backend.",
+    "noDataYet": "No usage data yet. Launch Claude Code to start tracking.",
+    "failedToLoad": "Failed to load analytics data"
   },
   "skills": {
     "subtitle": "Manage Claude Code skill extensions",
