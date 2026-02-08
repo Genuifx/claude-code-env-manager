@@ -187,6 +187,15 @@
   border-color: hsl(var(--primary) / 0.3);
 }
 
+/* === Heatmap Fade-In === */
+.heatmap-enter {
+  animation: heatmapFadeIn var(--duration-slow) var(--ease-decelerate);
+}
+@keyframes heatmapFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 /* === Reduced Motion === */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
