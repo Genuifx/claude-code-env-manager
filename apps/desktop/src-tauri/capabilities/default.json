@@ -1,0 +1,13 @@
+{
+  "identifier": "default",
+  "description": "Default capabilities for CCEM Desktop",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open",
+    "shell:allow-execute",
+    "dialog:default",
+    "notification:default",
+    "mcp-bridge:default"
+  ]
+}
