@@ -1,3 +1,4 @@
+import { Globe } from 'lucide-react';
 import { useAppStore, type Environment } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { Button } from '@/components/ui/button';
@@ -22,7 +23,7 @@ export function EnvList({ onEdit, onDelete }: EnvListProps) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
         <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
-          <span className="text-3xl opacity-50">🌐</span>
+          <Globe className="w-8 h-8 text-muted-foreground/30" />
         </div>
         <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-1">暂无环境配置</h3>
         <p className="text-sm text-slate-500 dark:text-slate-400">添加你的第一个 API 环境开始使用</p>

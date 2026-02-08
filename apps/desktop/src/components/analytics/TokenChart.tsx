@@ -12,6 +12,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts';
+import { TrendingUp, BarChart3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { ChartDataPoint } from '@/types/analytics';
 
@@ -85,14 +86,14 @@ export function TokenChart({ data, environments, granularity, onGranularityChang
             variant={chartType === 'line' ? 'default' : 'outline'}
             onClick={() => setChartType('line')}
           >
-            📈 折线图
+            <TrendingUp className="w-4 h-4 mr-1" /> 折线图
           </Button>
           <Button
             size="sm"
             variant={chartType === 'bar' ? 'default' : 'outline'}
             onClick={() => setChartType('bar')}
           >
-            📊 柱状图
+            <BarChart3 className="w-4 h-4 mr-1" /> 柱状图
           </Button>
         </div>
       </div>

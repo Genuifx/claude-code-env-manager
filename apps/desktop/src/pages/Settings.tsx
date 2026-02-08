@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Moon, Sun, MonitorSmartphone, Lightbulb } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store';
@@ -109,19 +110,19 @@ export function Settings() {
                 variant={theme === 'dark' ? 'default' : 'outline'}
                 onClick={() => setTheme('dark')}
               >
-                ⚫ 深色
+                <Moon className="w-4 h-4 mr-1.5" /> 深色
               </Button>
               <Button
                 variant={theme === 'light' ? 'default' : 'outline'}
                 onClick={() => setTheme('light')}
               >
-                ⚪ 浅色
+                <Sun className="w-4 h-4 mr-1.5" /> 浅色
               </Button>
               <Button
                 variant={theme === 'system' ? 'default' : 'outline'}
                 onClick={() => setTheme('system')}
               >
-                🖥️ 跟随系统
+                <MonitorSmartphone className="w-4 h-4 mr-1.5" /> 跟随系统
               </Button>
             </div>
           </div>
@@ -209,7 +210,7 @@ export function Settings() {
               ))}
             </select>
             <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-              💡 启动 Claude 时默认使用此权限，可在 Home 页临时覆盖
+              <Lightbulb className="w-3.5 h-3.5 inline mr-1 text-primary" /> 启动 Claude 时默认使用此权限，可在 Home 页临时覆盖
             </p>
           </div>
         </div>

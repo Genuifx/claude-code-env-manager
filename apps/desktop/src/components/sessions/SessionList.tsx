@@ -10,20 +10,21 @@ interface SessionListProps {
 }
 
 export function SessionList({ sessions, onFocus, onMinimize, onClose }: SessionListProps) {
-  const getStatusIcon = (status: Session['status']) => {
+  const getStatusDot = (status: Session['status']) => {
+    const base = 'w-2.5 h-2.5 rounded-full inline-block';
     switch (status) {
       case 'running':
-        return '🟢';
+        return `${base} bg-success status-running`;
       case 'stopped':
-        return '⚫';
+        return `${base} bg-muted-foreground/40`;
       case 'idle':
-        return '🟡';
+        return `${base} bg-warning`;
       case 'interrupted':
-        return '⚠️';
+        return `${base} bg-warning`;
       case 'error':
-        return '🔴';
+        return `${base} bg-destructive status-error`;
       default:
-        return '⚫';
+        return `${base} bg-muted-foreground/40`;
     }
   };
 
@@ -50,7 +51,7 @@ export function SessionList({ sessions, onFocus, onMinimize, onClose }: SessionL
           key={session.id}
           className="flex items-center gap-4 p-3 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
         >
-          <span className="text-base">{getStatusIcon(session.status)}</span>
+          <span className={getStatusDot(session.status)} />
 
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
