@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LayoutGrid, List, Plus } from 'lucide-react';
+import { LayoutGrid, List, Plus, Terminal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SessionCard, SessionList } from '@/components/sessions';
 import { useAppStore } from '@/store';
@@ -55,7 +55,7 @@ export function Sessions({ onLaunch }: SessionsProps) {
   };
 
   return (
-    <div className="p-6">
+    <div className="page-transition-enter">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
@@ -95,20 +95,10 @@ export function Sessions({ onLaunch }: SessionsProps) {
 
       {/* Sessions Display */}
       {sessions.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-100 to-indigo-100 dark:from-blue-900/30 dark:to-indigo-900/30 flex items-center justify-center mb-4">
-            <span className="text-4xl">💬</span>
-          </div>
-          <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">
-            暂无运行中的会话
-          </h3>
-          <p className="text-slate-500 dark:text-slate-400 max-w-sm mb-4">
-            点击"新会话"按钮启动 Claude Code
-          </p>
-          <Button onClick={onLaunch}>
-            <Plus className="w-4 h-4 mr-2" />
-            启动 Claude Code
-          </Button>
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <Terminal className="w-12 h-12 text-muted-foreground/20 mb-4" />
+          <p className="text-sm text-muted-foreground mb-4">No active sessions</p>
+          <Button variant="outline" size="sm" onClick={onLaunch}>Launch Claude Code</Button>
         </div>
       ) : viewMode === 'card' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

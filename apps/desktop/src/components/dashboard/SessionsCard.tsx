@@ -1,4 +1,5 @@
 import { useEffect, useCallback } from 'react';
+import { Terminal, Moon } from 'lucide-react';
 import { useAppStore, type Session } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useSessionUpdatedEvent, type SessionUpdatePayload } from '@/hooks/useTauriEvents';
@@ -79,8 +80,8 @@ export function SessionsCard({ onStopAll }: SessionsCardProps) {
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
-            <span className="text-sm">📊</span>
+          <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+            <Terminal className="w-4 h-4 text-primary" />
           </div>
           <h3 className="font-semibold text-slate-900 dark:text-white">活跃会话</h3>
         </div>
@@ -95,7 +96,7 @@ export function SessionsCard({ onStopAll }: SessionsCardProps) {
       {sessions.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-8 text-center">
           <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center mb-3">
-            <span className="text-xl opacity-50">💤</span>
+            <Moon className="w-5 h-5 text-muted-foreground/50" />
           </div>
           <p className="text-sm text-slate-500 dark:text-slate-400">暂无活跃会话</p>
           <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">启动 Claude Code 后会显示在这里</p>

@@ -7,12 +7,12 @@ interface TabNavProps {
 }
 
 const tabs = [
-  { id: 'dashboard', label: '🏠 Home', icon: Home },
-  { id: 'sessions', label: '💬 Sessions', icon: Terminal },
-  { id: 'environments', label: '🌐 Environments', icon: Globe },
-  { id: 'analytics', label: '📊 Analytics', icon: BarChart3 },
-  { id: 'skills', label: '✦ Skills', icon: Sparkles },
-  { id: 'settings', label: '⚙️ Settings', icon: Settings },
+  { id: 'dashboard', label: 'Home', icon: Home },
+  { id: 'sessions', label: 'Sessions', icon: Terminal },
+  { id: 'environments', label: 'Environments', icon: Globe },
+  { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+  { id: 'skills', label: 'Skills', icon: Sparkles },
+  { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
 export function TabNav({ activeTab, onTabChange }: TabNavProps) {

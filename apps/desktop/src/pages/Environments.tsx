@@ -1,3 +1,4 @@
+import { Lightbulb } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EnvList } from '@/components/environments';
 import { ENV_PRESETS, PERMISSION_PRESETS } from '@ccem/core/browser';
@@ -15,7 +16,7 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
   const { permissionMode, defaultMode, setPermissionMode, setDefaultMode } = useAppStore();
 
   return (
-    <div className="space-y-8">
+    <div className="page-transition-enter space-y-8">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -95,7 +96,7 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
               ))}
             </div>
             <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-              💡 临时权限仅对下次启动生效，不改变默认设置
+              <Lightbulb className="w-3.5 h-3.5 inline mr-1 text-primary" /> 临时权限仅对下次启动生效，不改变默认设置
             </div>
           </div>
         </div>
