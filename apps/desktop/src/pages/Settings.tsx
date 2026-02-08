@@ -83,7 +83,8 @@ export function Settings() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="page-transition-enter space-y-6">
+      <div className="max-w-lg space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
           Settings
@@ -247,6 +248,7 @@ export function Settings() {
         <Button onClick={handleSaveSettings}>
           保存设置
         </Button>
+      </div>
       </div>
     </div>
   );
