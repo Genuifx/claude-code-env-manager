@@ -8,6 +8,7 @@ import { useAppStore, type Environment } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { EnvironmentDialog } from '@/components/EnvironmentDialog';
 import { Toaster, toast } from 'sonner';
+import { LocaleProvider } from '@/locales';
 import type { UsageStats } from '@/types/analytics';
 
 function App() {
@@ -237,7 +238,7 @@ function App() {
   };
 
   return (
-    <>
+    <LocaleProvider>
       <AppLayout activeTab={activeTab} onTabChange={setActiveTab} pageTitle={pageTitle}>
         <div key={activeTab}>
           {renderPage()}
@@ -255,7 +256,7 @@ function App() {
 
       {/* Toast notifications */}
       <Toaster position="top-center" richColors />
-    </>
+    </LocaleProvider>
   );
 }
 
