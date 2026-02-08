@@ -27,6 +27,12 @@
   "sessions": {
     "confirmClose": "确定要关闭此会话吗？",
     "confirmCloseAll": "确定要关闭所有会话吗？",
+    "confirmTerminate": "确定要终止此会话？",
+    "terminate": "终止",
+    "closeAllTitle": "关闭所有 Session？",
+    "closeAllDescription": "将关闭 {count} 个活跃会话，此操作不可撤销。",
+    "noActiveSessions": "没有活跃会话",
+    "launchClaudeCode": "启动 Claude Code",
     "newSession": "新会话",
     "layoutControl": "布局控制:",
     "quadSplit": "4分屏",

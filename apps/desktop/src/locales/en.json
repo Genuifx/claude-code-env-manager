@@ -27,6 +27,12 @@
   "sessions": {
     "confirmClose": "Are you sure you want to close this session?",
     "confirmCloseAll": "Are you sure you want to close all sessions?",
+    "confirmTerminate": "Terminate this session?",
+    "terminate": "Terminate",
+    "closeAllTitle": "Close all sessions?",
+    "closeAllDescription": "This will close {count} active sessions. This action cannot be undone.",
+    "noActiveSessions": "No active sessions",
+    "launchClaudeCode": "Launch Claude Code",
     "newSession": "New Session",
     "layoutControl": "Layout Control:",
     "quadSplit": "Quad Split",

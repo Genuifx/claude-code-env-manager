@@ -1,7 +1,8 @@
 // apps/desktop/src/components/sessions/SessionCard.tsx
-import { Clock, FolderOpen } from 'lucide-react';
+import { Clock, FolderOpen, Minus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { useLocale } from '../../locales';
 import type { Session } from '@/store';
 
 interface SessionCardProps {
@@ -9,9 +10,14 @@ interface SessionCardProps {
   onFocus: (id: string) => void;
   onMinimize: (id: string) => void;
   onClose: (id: string) => void;
+  confirmingClose?: boolean;
+  onCancelClose?: () => void;
+  onConfirmClose?: (id: string) => void;
 }
 
-export function SessionCard({ session, onFocus, onMinimize, onClose }: SessionCardProps) {
+export function SessionCard({ session, onFocus, onMinimize, onClose, confirmingClose, onCancelClose, onConfirmClose }: SessionCardProps) {
+  const { t } = useLocale();
+
   const getStatusDot = (status: Session['status']) => {
     switch (status) {
       case 'running':
@@ -34,9 +40,9 @@ export function SessionCard({ session, onFocus, onMinimize, onClose }: SessionCa
     const hours = Math.floor(minutes / 60);
 
     if (hours > 0) {
-      return `${hours} 小时 ${minutes % 60} 分钟`;
+      return `${hours}h ${minutes % 60}m`;
     }
-    return `${minutes} 分钟`;
+    return `${minutes}m`;
   };
 
   const getProjectName = (path: string) => {
@@ -49,11 +55,11 @@ export function SessionCard({ session, onFocus, onMinimize, onClose }: SessionCa
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-1">
             {getStatusDot(session.status)}
-            <h3 className="font-semibold text-slate-900 dark:text-white">
+            <h3 className="font-semibold text-foreground">
               {getProjectName(session.workingDir)}
             </h3>
           </div>
-          <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <span className="bg-muted rounded-md px-2 py-0.5 text-xs font-medium">
               {session.envName}
             </span>
@@ -64,45 +70,53 @@ export function SessionCard({ session, onFocus, onMinimize, onClose }: SessionCa
         </div>
       </div>
 
-      <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mb-3">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
         <Clock className="w-3 h-3" />
         <span>{formatDuration(session.startedAt)}</span>
       </div>
 
-      <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mb-4 truncate">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground mb-4 truncate">
         <FolderOpen className="w-3 h-3 flex-shrink-0" />
         <span className="truncate" title={`${session.workingDir}${session.pid ? ` · PID: ${session.pid}` : ''}`}>
           {session.workingDir}
         </span>
       </div>
 
-      <div className="flex gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => onFocus(session.id)}
-          disabled={session.status !== 'running'}
-          className="flex-1"
-        >
-          Focus
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => onMinimize(session.id)}
-          disabled={session.status !== 'running'}
-        >
-          —
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => onClose(session.id)}
-          className="text-red-600 hover:text-red-700"
-        >
-          ✕
-        </Button>
-      </div>
+      {confirmingClose ? (
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-destructive">{t('sessions.confirmTerminate')}</span>
+          <Button variant="ghost" size="sm" onClick={onCancelClose}>{t('common.cancel')}</Button>
+          <Button variant="destructive" size="sm" onClick={() => onConfirmClose?.(session.id)}>{t('sessions.terminate')}</Button>
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onFocus(session.id)}
+            disabled={session.status !== 'running'}
+            className="flex-1"
+          >
+            Focus
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onMinimize(session.id)}
+            disabled={session.status !== 'running'}
+          >
+            <Minus className="w-4 h-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onClose(session.id)}
+            className="text-destructive hover:text-destructive"
+          >
+            <X className="w-4 h-4" />
+          </Button>
+        </div>
+      )}
     </Card>
   );
 }
