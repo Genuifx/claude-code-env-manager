@@ -50,7 +50,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
   };
 
   return (
-    <div className="page-transition-enter space-y-6">
+    <div className="page-transition-enter space-y-5">
       {/* Status Bar */}
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <span>{t('dashboard.currentEnv')}</span>
@@ -67,7 +67,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
       </div>
 
       {/* Launch Center */}
-      <div className="flex flex-col items-center justify-center py-12">
+      <div className="flex flex-col items-center justify-center py-6">
         <Button
           size="xl"
           onClick={handleLaunchClick}
@@ -126,7 +126,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
       </div>
 
       {/* Today's Usage Summary */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-3 gap-4">
         <Card
           className="p-4 cursor-pointer hover:shadow-md transition-shadow"
           onClick={() => onNavigate('sessions')}

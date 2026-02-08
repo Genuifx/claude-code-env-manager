@@ -32,9 +32,9 @@ export function Skills() {
     source === 'local' ? t('common.local') : t('skills.official');
 
   return (
-    <div className="page-transition-enter space-y-8">
+    <div className="page-transition-enter grid grid-cols-1 lg:grid-cols-3 gap-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between lg:col-span-3">
         <div>
           <h2 className="text-2xl font-bold text-foreground tracking-tight">
             Skills
@@ -54,13 +54,13 @@ export function Skills() {
       </div>
 
       {/* Installed Skills List */}
-      <div>
+      <div className="lg:col-span-2">
         <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-4">
           {t('skills.installedSkills')}
         </h3>
         <div className="space-y-3">
           {mockSkills.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="flex flex-col items-center justify-center py-8 text-center">
               <Sparkles className="w-12 h-12 text-muted-foreground/20 mb-4" />
               <p className="text-sm text-muted-foreground mb-4">{t('skills.noSkills')}</p>
               <Button variant="outline" size="sm">{t('skills.addFirstSkill')}</Button>
@@ -141,7 +141,7 @@ export function Skills() {
       </div>
 
       {/* CLI Hint Section */}
-      <Card className="p-6 bg-muted/50 border-border">
+      <Card className="p-6 bg-muted/50 border-border lg:col-span-1">
         <div className="text-sm text-muted-foreground space-y-2">
           <div className="font-medium text-foreground mb-3 flex items-center gap-2">
             <Lightbulb className="w-4 h-4" />

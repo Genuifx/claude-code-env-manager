@@ -18,7 +18,7 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
   const { t } = useLocale();
 
   return (
-    <div className="page-transition-enter space-y-8">
+    <div className="page-transition-enter space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
