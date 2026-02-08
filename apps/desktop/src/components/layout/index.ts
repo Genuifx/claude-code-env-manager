@@ -1,2 +1,3 @@
 export { AppLayout } from './AppLayout';
-export { TabNav } from './TabNav';
+export { SideRail } from './SideRail';
+export { PageHeader } from './PageHeader';

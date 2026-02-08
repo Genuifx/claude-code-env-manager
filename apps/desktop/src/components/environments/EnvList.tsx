@@ -1,3 +1,4 @@
+import { Globe } from 'lucide-react';
 import { useAppStore, type Environment } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { Button } from '@/components/ui/button';
@@ -22,7 +23,7 @@ export function EnvList({ onEdit, onDelete }: EnvListProps) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
         <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
-          <span className="text-3xl opacity-50">🌐</span>
+          <Globe className="w-8 h-8 text-muted-foreground/30" />
         </div>
         <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-1">暂无环境配置</h3>
         <p className="text-sm text-slate-500 dark:text-slate-400">添加你的第一个 API 环境开始使用</p>
@@ -62,7 +63,7 @@ function EnvCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardPro
       className={cn(
         'group relative p-5 rounded-2xl border transition-all duration-200 cursor-pointer',
         isActive
-          ? 'bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 border-emerald-200 dark:border-emerald-800 shadow-lg shadow-emerald-500/10'
+          ? 'ring-1 ring-primary/40 border-primary/40 bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 shadow-lg shadow-emerald-500/10'
           : 'bg-white dark:bg-slate-800/50 border-slate-200/50 dark:border-slate-700/50 hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-md'
       )}
       onClick={onSelect}

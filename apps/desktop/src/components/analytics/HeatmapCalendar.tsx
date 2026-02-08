@@ -6,11 +6,11 @@ interface HeatmapCalendarProps {
 }
 
 const LEVEL_COLORS = {
-  0: 'bg-slate-100 dark:bg-slate-800',
-  1: 'bg-green-200 dark:bg-green-900/40',
-  2: 'bg-green-400 dark:bg-green-700/60',
-  3: 'bg-green-600 dark:bg-green-600/80',
-  4: 'bg-green-800 dark:bg-green-500',
+  0: 'bg-transparent',
+  1: 'bg-primary/15',
+  2: 'bg-primary/40',
+  3: 'bg-primary/70',
+  4: 'bg-primary',
 };
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -63,7 +63,7 @@ export function HeatmapCalendar({ activities }: HeatmapCalendarProps) {
   });
 
   return (
-    <div className="space-y-4">
+    <div className="page-transition-enter space-y-4">
       {/* Month Labels */}
       <div className="flex gap-1 text-xs text-slate-600 dark:text-slate-400 pl-12 relative" style={{ height: '16px' }}>
         {monthLabels.map(({ label, weekIndex }, i) => (

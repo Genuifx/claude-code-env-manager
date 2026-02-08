@@ -1,3 +1,4 @@
+import { Star, Clock, Monitor, Brain, RefreshCw, FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
@@ -79,7 +80,7 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
       <div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2">
-            <span>⭐</span> 收藏项目
+            <Star className="w-4 h-4 text-primary" /> 收藏项目
           </h3>
           <Button variant="ghost" size="sm" onClick={handleAddFavorite}>
             <span className="mr-1">+</span> 添加收藏
@@ -95,7 +96,7 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
                 className="flex items-center justify-between p-3 bg-white dark:bg-slate-800/50 rounded-lg border border-slate-200/50 dark:border-slate-700/50 hover:border-emerald-300 dark:hover:border-emerald-700 transition-all"
               >
                 <div className="flex items-center gap-3 min-w-0">
-                  <span className="text-lg">📁</span>
+                  <FolderOpen className="w-5 h-5 text-primary/60 flex-shrink-0" />
                   <div className="min-w-0">
                     <div className="font-medium text-slate-900 dark:text-white truncate">
                       {project.name}
@@ -109,7 +110,7 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
+                    className="text-primary hover:text-primary hover:bg-primary/10"
                     onClick={() => handleLaunch(project.path)}
                   >
                     ▶
@@ -117,7 +118,7 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
                     onClick={() => removeFavoriteProject(project.path)}
                   >
                     ×
@@ -132,7 +133,7 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
       {/* Recent Section */}
       <div>
         <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2 mb-3">
-          <span>🕐</span> 最近使用
+          <Clock className="w-4 h-4 text-muted-foreground" /> 最近使用
         </h3>
         <div className="space-y-2">
           {recent.map((project) => (
@@ -141,7 +142,7 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
               className="flex items-center justify-between p-3 bg-white dark:bg-slate-800/50 rounded-lg border border-slate-200/50 dark:border-slate-700/50 hover:border-blue-300 dark:hover:border-blue-700 transition-all"
             >
               <div className="flex items-center gap-3 min-w-0">
-                <span className="text-lg">📁</span>
+                <FolderOpen className="w-5 h-5 text-muted-foreground/60 flex-shrink-0" />
                 <div className="min-w-0">
                   <div className="font-medium text-slate-900 dark:text-white truncate">
                     {getProjectName(project.path)}
@@ -149,7 +150,7 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
                   <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
                     {truncatePath(project.path)}
                     {' · '}
-                    <span className="text-blue-500 dark:text-blue-400">{formatRelativeTime(project.lastUsed)}</span>
+                    <span className="text-primary">{formatRelativeTime(project.lastUsed)}</span>
                   </div>
                 </div>
               </div>
@@ -166,18 +167,18 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+                    className="text-primary hover:text-primary hover:bg-primary/10"
                     onClick={() => handleAddToFavorites(project.path)}
                   >
-                    ⭐
+                    <Star className="w-4 h-4" />
                   </Button>
                 )}
               </div>
             </div>
           ))}
-          {/* "+ 添加" card — design §3.2 */}
+          {/* "+ 添加" card */}
           <button
-            className="flex items-center justify-center gap-2 p-3 w-full bg-white dark:bg-slate-800/50 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-all text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400"
+            className="flex items-center justify-center gap-2 p-3 w-full rounded-lg border border-dashed border-border hover:border-primary/40 hover:bg-primary/5 transition-all text-muted-foreground hover:text-primary"
             onClick={handleAddFavorite}
           >
             <span className="text-lg">+</span>
@@ -190,10 +191,10 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
       <div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2">
-            <span>💻</span> VS Code 项目
+            <Monitor className="w-4 h-4 text-muted-foreground" /> VS Code 项目
           </h3>
           <Button variant="ghost" size="sm" onClick={syncVSCodeProjects}>
-            <span className="mr-1">🔄</span> 同步
+            <RefreshCw className="w-3.5 h-3.5 mr-1" /> 同步
           </Button>
         </div>
         {vscodeProjects.length === 0 ? (
@@ -206,7 +207,7 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
                 className="flex items-center justify-between p-3 bg-white dark:bg-slate-800/50 rounded-lg border border-slate-200/50 dark:border-slate-700/50 hover:border-violet-300 dark:hover:border-violet-700 transition-all"
               >
                 <div className="flex items-center gap-3 min-w-0">
-                  <span className="text-lg">📁</span>
+                  <FolderOpen className="w-5 h-5 text-muted-foreground/60 flex-shrink-0" />
                   <div className="min-w-0">
                     <div className="font-medium text-slate-900 dark:text-white truncate">
                       {getProjectName(project.path)}
@@ -220,7 +221,7 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
+                    className="text-primary hover:text-primary hover:bg-primary/10"
                     onClick={() => handleLaunch(project.path)}
                   >
                     ▶
@@ -229,10 +230,10 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+                      className="text-primary hover:text-primary hover:bg-primary/10"
                       onClick={() => handleAddToFavorites(project.path)}
                     >
-                      ⭐
+                      <Star className="w-4 h-4" />
                     </Button>
                   )}
                 </div>
@@ -246,10 +247,10 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
       <div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2">
-            <span>🧠</span> JetBrains 项目
+            <Brain className="w-4 h-4 text-muted-foreground" /> JetBrains 项目
           </h3>
           <Button variant="ghost" size="sm" onClick={syncJetBrainsProjects}>
-            <span className="mr-1">🔄</span> 同步
+            <RefreshCw className="w-3.5 h-3.5 mr-1" /> 同步
           </Button>
         </div>
         {jetbrainsProjects.length === 0 ? (
@@ -262,7 +263,7 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
                 className="flex items-center justify-between p-3 bg-white dark:bg-slate-800/50 rounded-lg border border-slate-200/50 dark:border-slate-700/50 hover:border-orange-300 dark:hover:border-orange-700 transition-all"
               >
                 <div className="flex items-center gap-3 min-w-0">
-                  <span className="text-lg">📁</span>
+                  <FolderOpen className="w-5 h-5 text-muted-foreground/60 flex-shrink-0" />
                   <div className="min-w-0">
                     <div className="font-medium text-slate-900 dark:text-white truncate">
                       {getProjectName(project.path)}
@@ -278,7 +279,7 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
+                    className="text-primary hover:text-primary hover:bg-primary/10"
                     onClick={() => handleLaunch(project.path)}
                   >
                     ▶
@@ -287,10 +288,10 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+                      className="text-primary hover:text-primary hover:bg-primary/10"
                       onClick={() => handleAddToFavorites(project.path)}
                     >
-                      ⭐
+                      <Star className="w-4 h-4" />
                     </Button>
                   )}
                 </div>

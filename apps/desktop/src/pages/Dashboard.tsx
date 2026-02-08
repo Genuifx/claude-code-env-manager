@@ -47,7 +47,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="page-transition-enter space-y-6">
       {/* Status Bar */}
       <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
         <span>当前环境</span>
@@ -66,9 +66,9 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
       {/* Launch Center */}
       <div className="flex flex-col items-center justify-center py-12">
         <Button
-          size="lg"
+          size="xl"
           onClick={handleLaunchClick}
-          className="h-16 px-12 text-lg"
+          className="h-13 px-8 text-lg font-semibold rounded-xl shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 hover:-translate-y-0.5 active:translate-y-0 active:shadow-md transition-all duration-150"
         >
           <Rocket className="w-6 h-6 mr-3" />
           启动 Claude Code
@@ -133,7 +133,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
             运行中会话
           </div>
           <div className="text-2xl font-bold text-slate-900 dark:text-white">
-            💬 {sessions.length}
+            {sessions.length}
           </div>
         </Card>
 
@@ -145,7 +145,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
             今日 Tokens
           </div>
           <div className="text-2xl font-bold text-slate-900 dark:text-white">
-            📊 {(((usageStats?.today.inputTokens ?? 0) + (usageStats?.today.outputTokens ?? 0)) / 1000).toFixed(1)}K
+            {(((usageStats?.today.inputTokens ?? 0) + (usageStats?.today.outputTokens ?? 0)) / 1000).toFixed(1)}K
           </div>
         </Card>
 
@@ -157,7 +157,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
             今日消费
           </div>
           <div className="text-2xl font-bold text-slate-900 dark:text-white">
-            💰 ${(usageStats?.today.cost ?? 0).toFixed(2)}
+            ${(usageStats?.today.cost ?? 0).toFixed(2)}
           </div>
         </Card>
       </div>

@@ -1,5 +1,6 @@
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Skill {
@@ -25,7 +26,7 @@ export function Skills() {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="page-transition-enter space-y-8">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -52,6 +53,13 @@ export function Skills() {
           已安装的技能
         </h3>
         <div className="space-y-3">
+          {mockSkills.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <Sparkles className="w-12 h-12 text-muted-foreground/20 mb-4" />
+              <p className="text-sm text-muted-foreground mb-4">No skills installed</p>
+              <Button variant="outline" size="sm">Add your first skill</Button>
+            </div>
+          ) : null}
           {mockSkills.map((skill) => (
             <Card key={skill.name} className="p-4">
               <div className="flex items-center justify-between">

@@ -242,15 +242,14 @@ export function Analytics() {
 
   // Bug #24 fix: Only show "新纪录!" if continuousUsageDays >= 30
   const streakLabel = continuousUsageDays >= 30
-    ? '🎉 新纪录!'
+    ? '新纪录!'
     : '继续保持!';
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="page-transition-enter space-y-6">
       {/* Demo data banner (Bugs #20, #26) */}
       {isUsingMockData && (
-        <div className="rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-800 dark:text-amber-300 flex items-center gap-2">
-          <span>📊</span>
+        <div className="rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
           <span>
             <strong>Demo 数据</strong> — 当前显示的是模拟数据。连接 Tauri 后端后将展示真实统计信息。
           </span>
@@ -334,7 +333,7 @@ export function Analytics() {
             连续使用
           </div>
           <div className="text-3xl font-bold text-slate-900 dark:text-white mb-1">
-            🔥 {continuousUsageDays} 天
+            {continuousUsageDays} 天
           </div>
           <div className="text-xs text-green-600 dark:text-green-400">
             {streakLabel}

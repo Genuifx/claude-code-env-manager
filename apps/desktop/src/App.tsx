@@ -193,6 +193,17 @@ function App() {
     return env;
   };
 
+  // Derive page title from active tab
+  const pageTitleMap: Record<string, string> = {
+    dashboard: 'Home',
+    sessions: 'Sessions',
+    environments: 'Environments',
+    analytics: 'Analytics',
+    skills: 'Skills',
+    settings: 'Settings',
+  };
+  const pageTitle = pageTitleMap[activeTab] || 'Home';
+
   // Render page based on active tab
   const renderPage = () => {
     switch (activeTab) {
@@ -227,8 +238,10 @@ function App() {
 
   return (
     <>
-      <AppLayout activeTab={activeTab} onTabChange={setActiveTab}>
-        {renderPage()}
+      <AppLayout activeTab={activeTab} onTabChange={setActiveTab} pageTitle={pageTitle}>
+        <div key={activeTab}>
+          {renderPage()}
+        </div>
       </AppLayout>
 
       {/* Environment Dialog */}
