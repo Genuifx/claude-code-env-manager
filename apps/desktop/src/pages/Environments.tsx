@@ -4,6 +4,7 @@ import { EnvList } from '@/components/environments';
 import { ENV_PRESETS, PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { useAppStore } from '@/store';
+import { useLocale } from '../locales';
 
 interface EnvironmentsProps {
   onAddEnv?: () => void;
@@ -14,51 +15,52 @@ interface EnvironmentsProps {
 export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsProps) {
   const presetNames = Object.keys(ENV_PRESETS);
   const { permissionMode, defaultMode, setPermissionMode, setDefaultMode } = useAppStore();
+  const { t } = useLocale();
 
   return (
     <div className="page-transition-enter space-y-8">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
-            环境管理
+          <h2 className="text-2xl font-bold text-foreground tracking-tight">
+            {t('environments.title')}
           </h2>
-          <p className="text-slate-500 dark:text-slate-400 mt-1">
-            配置和管理你的 API 环境
+          <p className="text-muted-foreground mt-1">
+            {t('environments.description')}
           </p>
         </div>
         <Button
-          className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white shadow-lg shadow-emerald-500/25 border-0"
+          className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg border-0"
           onClick={onAddEnv}
         >
           <span className="mr-2">+</span>
-          添加环境
+          {t('environments.addEnv')}
         </Button>
       </div>
 
       {/* Environment list */}
       <div>
-        <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4">
-          已配置的环境
+        <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-4">
+          {t('environments.configuredEnvs')}
         </h3>
         <EnvList onEdit={onEditEnv} onDelete={onDeleteEnv} />
       </div>
 
       {/* Permission Mode Section */}
-      <div className="border-t border-slate-200 dark:border-slate-700 pt-8">
-        <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
-          权限模式
+      <div className="border-t border-border pt-8">
+        <h3 className="text-lg font-semibold text-foreground mb-4">
+          {t('environments.permissionMode')}
         </h3>
 
         <div className="space-y-4">
           {/* Default Permission Setting */}
-          <div className="flex items-center justify-between p-4 rounded-lg bg-slate-50 dark:bg-slate-800/50">
+          <div className="flex items-center justify-between p-4 rounded-lg bg-muted">
             <div>
-              <div className="font-medium text-slate-900 dark:text-white mb-1">
-                默认权限
+              <div className="font-medium text-foreground mb-1">
+                {t('environments.defaultPermission')}
               </div>
-              <div className="text-sm text-slate-600 dark:text-slate-400">
-                用户级别，所有环境通用
+              <div className="text-sm text-muted-foreground">
+                {t('environments.userLevelHint')}
               </div>
             </div>
             <select
@@ -68,7 +70,7 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
                 setDefaultMode(mode);
                 setPermissionMode(mode);
               }}
-              className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+              className="px-3 py-2 rounded-lg border border-border bg-card text-foreground"
             >
               {Object.entries(PERMISSION_PRESETS).map(([key, preset]) => (
                 <option key={key} value={key}>
@@ -80,8 +82,8 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
 
           {/* Quick Switch (Temporary) */}
           <div>
-            <div className="text-sm font-medium text-slate-900 dark:text-white mb-2">
-              快速切换 (临时)
+            <div className="text-sm font-medium text-foreground mb-2">
+              {t('environments.quickSwitch')}
             </div>
             <div className="flex flex-wrap gap-2">
               {Object.keys(PERMISSION_PRESETS).map((mode) => (
@@ -95,33 +97,33 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
                 </Button>
               ))}
             </div>
-            <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-              <Lightbulb className="w-3.5 h-3.5 inline mr-1 text-primary" /> 临时权限仅对下次启动生效，不改变默认设置
+            <div className="mt-2 text-xs text-muted-foreground">
+              <Lightbulb className="w-3.5 h-3.5 inline mr-1 text-primary" /> {t('environments.tempPermissionHint')}
             </div>
           </div>
         </div>
       </div>
 
       {/* Presets section */}
-      <div className="border-t border-slate-200 dark:border-slate-700 pt-8">
-        <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4">
-          从预设添加
+      <div className="border-t border-border pt-8">
+        <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-4">
+          {t('environments.addFromPreset')}
         </h3>
         <div className="grid grid-cols-4 gap-3">
           {presetNames.map((name) => (
             <button
               key={name}
-              className="group p-4 bg-white dark:bg-slate-800/50 rounded-xl border border-slate-200/50 dark:border-slate-700/50 hover:border-emerald-300 dark:hover:border-emerald-700 hover:shadow-lg hover:shadow-emerald-500/10 transition-all text-left"
+              className="group p-4 bg-card rounded-xl border border-border/50 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10 transition-all text-left"
               onClick={() => onAddEnv?.()}
             >
               <div className="flex items-center gap-3 mb-2">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-600 flex items-center justify-center text-sm font-bold text-slate-500 dark:text-slate-400 group-hover:from-emerald-100 group-hover:to-teal-100 dark:group-hover:from-emerald-900/50 dark:group-hover:to-teal-900/50 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
+                <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center text-sm font-bold text-muted-foreground group-hover:bg-primary/15 group-hover:text-primary transition-colors">
                   {name.charAt(0).toUpperCase()}
                 </div>
-                <span className="font-medium text-slate-900 dark:text-white">{name}</span>
+                <span className="font-medium text-foreground">{name}</span>
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">
-                {getPresetDescription(name)}
+              <p className="text-xs text-muted-foreground line-clamp-2">
+                {getPresetDescription(name, t)}
               </p>
             </button>
           ))}
@@ -132,12 +134,14 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
   );
 }
 
-function getPresetDescription(name: string): string {
-  const descriptions: Record<string, string> = {
-    GLM: '智谱 AI GLM 系列模型',
-    KIMI: '月之暗面 Kimi 对话模型',
-    MiniMax: 'MiniMax 大模型服务',
-    DeepSeek: 'DeepSeek AI 深度求索',
+function getPresetDescription(name: string, t: (key: string) => string): string {
+  const keyMap: Record<string, string> = {
+    GLM: 'environments.presetGLM',
+    KIMI: 'environments.presetKIMI',
+    MiniMax: 'environments.presetMiniMax',
+    DeepSeek: 'environments.presetDeepSeek',
   };
-  return descriptions[name] || `${name} API 配置`;
+  const key = keyMap[name];
+  if (key) return t(key);
+  return t('environments.presetDefault').replace('{name}', name);
 }
