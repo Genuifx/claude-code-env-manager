@@ -1,5 +1,6 @@
-import { Clock, FolderOpen } from 'lucide-react';
+import { Clock, FolderOpen, Minus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useLocale } from '../../locales';
 import type { Session } from '@/store';
 
 interface SessionListProps {
@@ -7,9 +8,14 @@ interface SessionListProps {
   onFocus: (id: string) => void;
   onMinimize: (id: string) => void;
   onClose: (id: string) => void;
+  confirmingId?: string | null;
+  onCancelClose?: () => void;
+  onConfirmClose?: (id: string) => void;
 }
 
-export function SessionList({ sessions, onFocus, onMinimize, onClose }: SessionListProps) {
+export function SessionList({ sessions, onFocus, onMinimize, onClose, confirmingId, onCancelClose, onConfirmClose }: SessionListProps) {
+  const { t } = useLocale();
+
   const getStatusDot = (status: Session['status']) => {
     const base = 'w-2.5 h-2.5 rounded-full inline-block';
     switch (status) {
@@ -49,23 +55,23 @@ export function SessionList({ sessions, onFocus, onMinimize, onClose }: SessionL
       {sessions.map((session) => (
         <div
           key={session.id}
-          className="flex items-center gap-4 p-3 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+          className="flex items-center gap-4 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors"
         >
           <span className={getStatusDot(session.status)} />
 
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
-              <span className="font-medium text-slate-900 dark:text-white">
+              <span className="font-medium text-foreground">
                 {getProjectName(session.workingDir)}
               </span>
-              <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+              <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                 {session.envName}
               </span>
-              <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300">
+              <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                 {session.permMode}
               </span>
             </div>
-            <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
               <span className="flex items-center gap-1">
                 <Clock className="w-3 h-3" />
                 {formatDuration(session.startedAt)}
@@ -79,32 +85,40 @@ export function SessionList({ sessions, onFocus, onMinimize, onClose }: SessionL
             </div>
           </div>
 
-          <div className="flex gap-2 flex-shrink-0">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => onFocus(session.id)}
-              disabled={session.status !== 'running'}
-            >
-              Focus
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => onMinimize(session.id)}
-              disabled={session.status !== 'running'}
-            >
-              —
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => onClose(session.id)}
-              className="text-red-600 hover:text-red-700"
-            >
-              ✕
-            </Button>
-          </div>
+          {confirmingId === session.id ? (
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <span className="text-sm text-destructive">{t('sessions.confirmTerminate')}</span>
+              <Button variant="ghost" size="sm" onClick={onCancelClose}>{t('common.cancel')}</Button>
+              <Button variant="destructive" size="sm" onClick={() => onConfirmClose?.(session.id)}>{t('sessions.terminate')}</Button>
+            </div>
+          ) : (
+            <div className="flex gap-2 flex-shrink-0">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onFocus(session.id)}
+                disabled={session.status !== 'running'}
+              >
+                Focus
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onMinimize(session.id)}
+                disabled={session.status !== 'running'}
+              >
+                <Minus className="w-4 h-4" />
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onClose(session.id)}
+                className="text-destructive hover:text-destructive"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+          )}
         </div>
       ))}
     </div>

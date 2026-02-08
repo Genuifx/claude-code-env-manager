@@ -1,16 +1,20 @@
 import { useState } from 'react';
-import { LayoutGrid, List, Plus, Terminal } from 'lucide-react';
+import { LayoutGrid, List, Minimize2, Plus, Terminal, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SessionCard, SessionList } from '@/components/sessions';
 import { useAppStore } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
+import { useLocale } from '../locales';
 
 interface SessionsProps {
   onLaunch: () => void;
 }
 
 export function Sessions({ onLaunch }: SessionsProps) {
+  const { t } = useLocale();
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [showCloseAllDialog, setShowCloseAllDialog] = useState(false);
   const { sessions } = useAppStore();
   const { focusSession, minimizeSession, closeSession } = useTauriCommands();
 
@@ -30,13 +34,21 @@ export function Sessions({ onLaunch }: SessionsProps) {
     }
   };
 
-  const handleClose = async (id: string) => {
-    if (confirm('确定要关闭此会话吗？')) {
-      try {
-        await closeSession(id);
-      } catch (err) {
-        console.error('Failed to close session:', err);
-      }
+  const handleRequestClose = (id: string) => {
+    setConfirmingId(id);
+  };
+
+  const handleCancelClose = () => {
+    setConfirmingId(null);
+  };
+
+  const handleConfirmClose = async (id: string) => {
+    try {
+      await closeSession(id);
+    } catch (err) {
+      console.error('Failed to close session:', err);
+    } finally {
+      setConfirmingId(null);
     }
   };
 
@@ -47,10 +59,9 @@ export function Sessions({ onLaunch }: SessionsProps) {
   };
 
   const handleCloseAll = async () => {
-    if (confirm('确定要关闭所有会话吗？')) {
-      for (const session of sessions) {
-        await closeSession(session.id);
-      }
+    setShowCloseAllDialog(false);
+    for (const session of sessions) {
+      await closeSession(session.id);
     }
   };
 
@@ -59,14 +70,14 @@ export function Sessions({ onLaunch }: SessionsProps) {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
-          <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
+          <h2 className="text-2xl font-bold text-foreground">
             Sessions ({sessions.length})
           </h2>
         </div>
 
         <div className="flex items-center gap-2">
           {/* View Mode Toggle */}
-          <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800">
+          <div className="flex items-center gap-1 p-1 rounded-lg bg-muted">
             <Button
               size="sm"
               variant={viewMode === 'card' ? 'default' : 'ghost'}
@@ -88,7 +99,7 @@ export function Sessions({ onLaunch }: SessionsProps) {
           {/* New Session Button */}
           <Button onClick={onLaunch}>
             <Plus className="w-4 h-4 mr-2" />
-            新会话
+            {t('sessions.newSession')}
           </Button>
         </div>
       </div>
@@ -97,8 +108,8 @@ export function Sessions({ onLaunch }: SessionsProps) {
       {sessions.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <Terminal className="w-12 h-12 text-muted-foreground/20 mb-4" />
-          <p className="text-sm text-muted-foreground mb-4">No active sessions</p>
-          <Button variant="outline" size="sm" onClick={onLaunch}>Launch Claude Code</Button>
+          <p className="text-sm text-muted-foreground mb-4">{t('sessions.noActiveSessions')}</p>
+          <Button variant="outline" size="sm" onClick={onLaunch}>{t('sessions.launchClaudeCode')}</Button>
         </div>
       ) : viewMode === 'card' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -108,7 +119,10 @@ export function Sessions({ onLaunch }: SessionsProps) {
               session={session}
               onFocus={handleFocus}
               onMinimize={handleMinimize}
-              onClose={handleClose}
+              onClose={handleRequestClose}
+              confirmingClose={confirmingId === session.id}
+              onCancelClose={handleCancelClose}
+              onConfirmClose={handleConfirmClose}
             />
           ))}
         </div>
@@ -117,29 +131,61 @@ export function Sessions({ onLaunch }: SessionsProps) {
           sessions={sessions}
           onFocus={handleFocus}
           onMinimize={handleMinimize}
-          onClose={handleClose}
+          onClose={handleRequestClose}
+          confirmingId={confirmingId}
+          onCancelClose={handleCancelClose}
+          onConfirmClose={handleConfirmClose}
         />
       )}
 
-      {/* Layout Controls (Future Feature) */}
+      {/* Layout Controls */}
       {sessions.length > 0 && (
-        <div className="mt-6 pt-6 border-t border-slate-200 dark:border-slate-700">
+        <div className="mt-6 pt-6 border-t border-border">
           <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-600 dark:text-slate-400">
-              布局控制:
+            <span className="text-sm text-muted-foreground">
+              {t('sessions.layoutControl')}
             </span>
             <Button size="sm" variant="outline" disabled>
-              ⊞ 4分屏
+              <LayoutGrid className="w-4 h-4 mr-1" />
+              {t('sessions.quadSplit')}
             </Button>
             <Button size="sm" variant="outline" onClick={handleMinimizeAll}>
-              — 全部最小化
+              <Minimize2 className="w-4 h-4 mr-1" />
+              {t('sessions.minimizeAll')}
             </Button>
-            <Button size="sm" variant="outline" onClick={handleCloseAll}>
-              ✕ 全部关闭
+            <Button size="sm" variant="outline" onClick={() => setShowCloseAllDialog(true)}>
+              <X className="w-4 h-4 mr-1" />
+              {t('sessions.closeAll')}
             </Button>
-            <span className="text-xs text-slate-400 dark:text-slate-500 ml-2">
-              (4分屏: 未来功能)
+            <span className="text-xs text-muted-foreground ml-2">
+              {t('sessions.quadSplitFuture')}
             </span>
+          </div>
+        </div>
+      )}
+
+      {/* Close All Dialog */}
+      {showCloseAllDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setShowCloseAllDialog(false)}
+          />
+          <div className="relative bg-card border border-border rounded-lg shadow-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold text-foreground mb-2">
+              {t('sessions.closeAllTitle')}
+            </h3>
+            <p className="text-sm text-muted-foreground mb-6">
+              {t('sessions.closeAllDescription').replace('{count}', String(sessions.length))}
+            </p>
+            <div className="flex justify-end gap-3">
+              <Button variant="ghost" onClick={() => setShowCloseAllDialog(false)}>
+                {t('common.cancel')}
+              </Button>
+              <Button variant="destructive" onClick={handleCloseAll}>
+                {t('sessions.closeAll')}
+              </Button>
+            </div>
           </div>
         </div>
       )}
