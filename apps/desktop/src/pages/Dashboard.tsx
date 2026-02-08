@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -44,6 +44,19 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
     () => localStorage.getItem('ccem-ftue-launched') === 'true'
   );
 
+  // Launch success feedback — "Launched ✓" for 1 second
+  const [launched, setLaunched] = useState(false);
+  const launchedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear launch feedback timer on unmount
+  useEffect(() => {
+    return () => {
+      if (launchedTimerRef.current) {
+        clearTimeout(launchedTimerRef.current);
+      }
+    };
+  }, []);
+
   // Whether to show the "Add more environments" link
   // Reactive via Zustand (environments.length), with localStorage as fallback
   const showAddEnvsLink = environments.length <= 1 && !localStorage.getItem('ccem-ftue-envs-added');
@@ -59,7 +72,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
     }
   };
 
-  const handleLaunchClick = () => {
+  const handleLaunchClick = useCallback(() => {
     if (selectedWorkingDir) {
       onLaunchWithDir(selectedWorkingDir);
     } else {
@@ -68,7 +81,18 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
     // Set FTUE launched flag
     localStorage.setItem('ccem-ftue-launched', 'true');
     setHasLaunched(true);
-  };
+
+    // Show "Launched ✓" feedback for 1 second
+    // Clear any existing timer to avoid stale state
+    if (launchedTimerRef.current) {
+      clearTimeout(launchedTimerRef.current);
+    }
+    setLaunched(true);
+    launchedTimerRef.current = setTimeout(() => {
+      setLaunched(false);
+      launchedTimerRef.current = null;
+    }, 1000);
+  }, [selectedWorkingDir, onLaunch, onLaunchWithDir]);
 
   // Show skeleton when environments or stats are loading
   if (isLoadingEnvs || isLoadingStats) {
@@ -100,9 +124,9 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
         <Button
           size="xl"
           onClick={handleLaunchClick}
-          className="h-13 px-8 text-lg font-semibold rounded-xl shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 hover:-translate-y-0.5 active:translate-y-0 active:shadow-md transition-all duration-150"
+          className="h-13 px-8 text-lg font-semibold rounded-xl shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-md transition-all duration-150"
         >
-          {t('dashboard.launch')}
+          {launched ? t('dashboard.launched') : t('dashboard.launch')}
         </Button>
 
         {/* Quick Actions */}

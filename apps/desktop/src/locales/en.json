@@ -15,6 +15,7 @@
     "permissions": "Permission",
     "sessionsRunning": "sessions running",
     "launch": "Launch Claude Code",
+    "launched": "Launched ✓",
     "environment": "Environment",
     "changeDir": "Change Directory",
     "selectDir": "Select Directory",

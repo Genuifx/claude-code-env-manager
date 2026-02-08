@@ -15,6 +15,7 @@
     "permissions": "权限",
     "sessionsRunning": "个会话运行中",
     "launch": "启动 Claude Code",
+    "launched": "已启动 ✓",
     "environment": "环境",
     "changeDir": "更改目录",
     "selectDir": "选择目录",
