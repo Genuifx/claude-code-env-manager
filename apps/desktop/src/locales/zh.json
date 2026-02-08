@@ -22,7 +22,8 @@
     "runningSessions": "运行中会话",
     "todayTokens": "今日 Tokens",
     "todayCost": "今日消费",
-    "recentProjects": "最近项目"
+    "recentProjects": "最近项目",
+    "addMoreEnvs": "添加更多环境 →"
   },
   "sessions": {
     "confirmClose": "确定要关闭此会话吗？",

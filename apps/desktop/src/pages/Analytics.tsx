@@ -46,8 +46,9 @@ export function Analytics() {
       setIsUsingMockData(false);
 
       // Load continuous usage days
+      let days = 0;
       try {
-        const days = await invoke<number>('get_continuous_usage_days');
+        days = await invoke<number>('get_continuous_usage_days');
         setContinuousUsageDays(days);
       } catch {
         setContinuousUsageDays(0);
@@ -85,7 +86,7 @@ export function Analytics() {
         {
           id: 'streak-7', type: 'streak', title: t('analytics.sevenDayTitle'),
           description: t('analytics.sevenDayDesc'), target: 7,
-          current: continuousUsageDays, achieved: continuousUsageDays >= 7,
+          current: days, achieved: days >= 7,
         },
       ]);
     } catch (err) {
@@ -104,6 +105,11 @@ export function Analytics() {
 
   useEffect(() => {
     loadRealData();
+  }, []);
+
+  // FTUE: mark analytics as seen on first visit
+  useEffect(() => {
+    localStorage.setItem('ccem-ftue-analytics-seen', 'true');
   }, []);
 
   // ALL hooks must be called before any early return (Rules of Hooks)

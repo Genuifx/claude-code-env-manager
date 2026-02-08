@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -8,6 +9,11 @@ import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { useLocale } from '../locales';
 import { DashboardSkeleton } from '@/components/ui/skeleton-states';
+
+function AmberDot({ value, hasLaunched }: { value: number; hasLaunched: boolean }) {
+  if (value !== 0 || hasLaunched) return null;
+  return <span className="w-1 h-1 bg-primary rounded-full inline-block ml-1.5 align-middle" />;
+}
 
 interface DashboardProps {
   onNavigate: (tab: string) => void;
@@ -33,6 +39,15 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
 
   const { openDirectoryPicker, switchEnvironment } = useTauriCommands();
 
+  // FTUE flags — read synchronously from localStorage at mount
+  const [hasLaunched, setHasLaunched] = useState(
+    () => localStorage.getItem('ccem-ftue-launched') === 'true'
+  );
+
+  // Whether to show the "Add more environments" link
+  // Reactive via Zustand (environments.length), with localStorage as fallback
+  const showAddEnvsLink = environments.length <= 1 && !localStorage.getItem('ccem-ftue-envs-added');
+
   const handleSelectDirectory = async () => {
     try {
       const dir = await openDirectoryPicker();
@@ -50,12 +65,18 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
     } else {
       onLaunch();
     }
+    // Set FTUE launched flag
+    localStorage.setItem('ccem-ftue-launched', 'true');
+    setHasLaunched(true);
   };
 
   // Show skeleton when environments or stats are loading
   if (isLoadingEnvs || isLoadingStats) {
     return <DashboardSkeleton />;
   }
+
+  const todayTokensRaw = (usageStats?.today.inputTokens ?? 0) + (usageStats?.today.outputTokens ?? 0);
+  const todayCostRaw = usageStats?.today.cost ?? 0;
 
   return (
     <div className="page-transition-enter space-y-5">
@@ -131,6 +152,16 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
             {t('dashboard.workingDir')} {selectedWorkingDir}
           </div>
         )}
+
+        {/* FTUE: Add more environments link */}
+        {showAddEnvsLink && (
+          <button
+            className="mt-3 text-sm text-primary hover:underline cursor-pointer bg-transparent border-0 p-0"
+            onClick={() => onNavigate('environments')}
+          >
+            {t('dashboard.addMoreEnvs')}
+          </button>
+        )}
       </div>
 
       {/* Today's Usage Summary */}
@@ -144,6 +175,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
           </div>
           <div className="text-2xl font-bold text-foreground">
             {sessions.length}
+            <AmberDot value={sessions.length} hasLaunched={hasLaunched} />
           </div>
         </Card>
 
@@ -155,7 +187,8 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
             {t('dashboard.todayTokens')}
           </div>
           <div className="text-2xl font-bold text-foreground">
-            {(((usageStats?.today.inputTokens ?? 0) + (usageStats?.today.outputTokens ?? 0)) / 1000).toFixed(1)}K
+            {(todayTokensRaw / 1000).toFixed(1)}K
+            <AmberDot value={todayTokensRaw} hasLaunched={hasLaunched} />
           </div>
         </Card>
 
@@ -167,7 +200,8 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
             {t('dashboard.todayCost')}
           </div>
           <div className="text-2xl font-bold text-foreground">
-            ${(usageStats?.today.cost ?? 0).toFixed(2)}
+            ${todayCostRaw.toFixed(2)}
+            <AmberDot value={todayCostRaw} hasLaunched={hasLaunched} />
           </div>
         </Card>
       </div>

@@ -1,4 +1,5 @@
-import { Lightbulb } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Lightbulb, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ErrorBanner } from '@/components/ui/EmptyState';
 import { EnvList } from '@/components/environments';
@@ -17,9 +18,25 @@ interface EnvironmentsProps {
 
 export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsProps) {
   const presetNames = Object.keys(ENV_PRESETS);
-  const { permissionMode, defaultMode, setPermissionMode, setDefaultMode, isLoadingEnvs, error } = useAppStore();
+  const { environments, permissionMode, defaultMode, setPermissionMode, setDefaultMode, isLoadingEnvs, error } = useAppStore();
   const { t } = useLocale();
   const { loadEnvironments } = useTauriCommands();
+
+  // FTUE: read flag synchronously at mount
+  const [hasAddedEnvs, setHasAddedEnvs] = useState(
+    () => localStorage.getItem('ccem-ftue-envs-added') === 'true'
+  );
+
+  // FTUE: set flag when environments.length > 1
+  useEffect(() => {
+    if (environments.length > 1 && !hasAddedEnvs) {
+      localStorage.setItem('ccem-ftue-envs-added', 'true');
+      setHasAddedEnvs(true);
+    }
+  }, [environments.length, hasAddedEnvs]);
+
+  // Whether to show the ghost card
+  const showGhostCard = !hasAddedEnvs && environments.length <= 1;
 
   // Show skeleton when environments are loading
   if (isLoadingEnvs) {
@@ -62,6 +79,23 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
           {t('environments.configuredEnvs')}
         </h3>
         <EnvList onEdit={onEditEnv} onDelete={onDeleteEnv} />
+
+        {/* FTUE: Ghost card for adding first environment */}
+        {showGhostCard && (
+          <button
+            type="button"
+            className="w-full border border-dashed border-border/50 rounded-xl p-4 flex flex-col items-center
+              justify-center cursor-pointer hover:border-primary/30 gap-2 min-h-[120px]
+              transition-colors duration-150 group bg-transparent mt-4"
+            onClick={() => onAddEnv?.()}
+          >
+            <Plus className="w-5 h-5 text-muted-foreground/40 group-hover:text-muted-foreground/60" />
+            <span className="text-sm text-muted-foreground">{t('environments.addEnv')}</span>
+            <span className="text-xs text-muted-foreground/40 group-hover:text-muted-foreground/60 transition-colors duration-150">
+              {Object.keys(ENV_PRESETS).join(' · ')}
+            </span>
+          </button>
+        )}
       </div>
 
       {/* Permission Mode Section */}
