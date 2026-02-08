@@ -14,11 +14,13 @@ import {
   generateMockUsageStats,
   generateMockMilestones,
 } from '@/lib/mockAnalytics';
+import { useLocale } from '../locales';
 import type { ChartDataPoint, DailyActivity, UsageStats } from '@/types/analytics';
 
 type TimeGranularity = 'hour' | 'day' | 'week' | 'month';
 
 export function Analytics() {
+  const { t, lang } = useLocale();
   const { usageStats, milestones, continuousUsageDays, setUsageStats, setMilestones, setContinuousUsageDays } =
     useAppStore();
 
@@ -27,6 +29,9 @@ export function Analytics() {
 
   // Dynamic mock indicator — true only when real data failed to load
   const [isUsingMockData, setIsUsingMockData] = useState(false);
+
+  // Dynamic date locale based on current language
+  const dateLocale = lang === 'zh' ? 'zh-CN' : 'en-US';
 
   // Load real data from Tauri backend, fall back to mock only if it fails
   useEffect(() => {
@@ -49,33 +54,33 @@ export function Analytics() {
         const totalCost = stats.total.cost;
         setMilestones([
           {
-            id: 'tokens-100k', type: 'tokens', title: '100K Tokens',
-            description: '累计使用 100K tokens', target: 100000,
+            id: 'tokens-100k', type: 'tokens', title: t('analytics.milestone100kTitle'),
+            description: t('analytics.milestone100kDesc'), target: 100000,
             current: totalTokens, achieved: totalTokens >= 100000,
           },
           {
-            id: 'tokens-1m', type: 'tokens', title: '1M Tokens',
-            description: '累计使用 1M tokens', target: 1000000,
+            id: 'tokens-1m', type: 'tokens', title: t('analytics.milestone1mTitle'),
+            description: t('analytics.milestone1mDesc'), target: 1000000,
             current: totalTokens, achieved: totalTokens >= 1000000,
           },
           {
-            id: 'tokens-5m', type: 'tokens', title: '5M Tokens',
-            description: '累计使用 5M tokens', target: 5000000,
+            id: 'tokens-5m', type: 'tokens', title: t('analytics.milestone5mTitle'),
+            description: t('analytics.milestone5mDesc'), target: 5000000,
             current: totalTokens, achieved: totalTokens >= 5000000,
           },
           {
-            id: 'cost-10', type: 'cost', title: '第一个 $10',
-            description: '累计消费 $10', target: 10,
+            id: 'cost-10', type: 'cost', title: t('analytics.firstTenTitle'),
+            description: t('analytics.firstTenDesc'), target: 10,
             current: totalCost, achieved: totalCost >= 10,
           },
           {
-            id: 'cost-100', type: 'cost', title: '$100 消费',
-            description: '累计消费 $100', target: 100,
+            id: 'cost-100', type: 'cost', title: t('analytics.hundredTitle'),
+            description: t('analytics.hundredDesc'), target: 100,
             current: totalCost, achieved: totalCost >= 100,
           },
           {
-            id: 'streak-7', type: 'streak', title: '7 天连续',
-            description: '连续使用 7 天', target: 7,
+            id: 'streak-7', type: 'streak', title: t('analytics.sevenDayTitle'),
+            description: t('analytics.sevenDayDesc'), target: 7,
             current: continuousUsageDays, achieved: continuousUsageDays >= 7,
           },
         ]);
@@ -107,7 +112,7 @@ export function Analytics() {
       dateFormat: Intl.DateTimeFormatOptions,
     ): ChartDataPoint[] =>
       entries.map(([date, usage]) => ({
-        date: new Date(date).toLocaleDateString('zh-CN', dateFormat),
+        date: new Date(date).toLocaleDateString(dateLocale, dateFormat),
         'Input Tokens': usage.inputTokens,
         'Output Tokens': usage.outputTokens,
       }));
@@ -165,19 +170,22 @@ export function Analytics() {
           (dateStr) => dateStr.slice(0, 7),
         );
         return toPoint(monthEntries, (key) =>
-          new Date(key + '-01').toLocaleDateString('zh-CN', { year: 'numeric', month: 'short' }),
+          new Date(key + '-01').toLocaleDateString(dateLocale, { year: 'numeric', month: 'short' }),
         );
       }
       default:
         return [];
     }
-  }, [granularity, usageStats]);
+  }, [granularity, usageStats, dateLocale]);
 
-  // Loading state — after all hooks
+  // Loading state — skeleton screen, never spinners (taste spec)
   if (!usageStats) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-slate-500 dark:text-slate-400">加载中...</div>
+      <div className="animate-pulse space-y-6">
+        <div className="grid grid-cols-3 gap-4">
+          {[1,2,3].map(i => <div key={i} className="h-24 bg-muted rounded-xl" />)}
+        </div>
+        <div className="h-64 bg-muted rounded-xl" />
       </div>
     );
   }
@@ -240,29 +248,24 @@ export function Analytics() {
     });
   }, [usageStats]);
 
-  // Bug #24 fix: Only show "新纪录!" if continuousUsageDays >= 30
-  const streakLabel = continuousUsageDays >= 30
-    ? '新纪录!'
-    : '继续保持!';
-
   return (
     <div className="page-transition-enter space-y-6">
-      {/* Demo data banner (Bugs #20, #26) */}
-      {isUsingMockData && (
+      {/* Demo data banner — only visible in dev mode */}
+      {import.meta.env.DEV && isUsingMockData && (
         <div className="rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
           <span>
-            <strong>Demo 数据</strong> — 当前显示的是模拟数据。连接 Tauri 后端后将展示真实统计信息。
+            <strong>{t('analytics.demoData')}</strong> — {t('analytics.demoDataHint')}
           </span>
         </div>
       )}
 
       {/* Header */}
       <div>
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
+        <h2 className="text-2xl font-bold text-foreground mb-2">
           Analytics
         </h2>
-        <p className="text-sm text-slate-600 dark:text-slate-400">
-          Token 使用统计和成本分析
+        <p className="text-sm text-muted-foreground">
+          {t('analytics.subtitle')}
         </p>
       </div>
 
@@ -270,8 +273,8 @@ export function Analytics() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="p-6">
           <div className="flex items-start justify-between mb-2">
-            <div className="text-sm text-slate-600 dark:text-slate-400">
-              Token (本周)
+            <div className="text-sm text-muted-foreground">
+              {t('analytics.tokenThisWeek')}
             </div>
             {tokenChange !== null ? (
               <div
@@ -287,21 +290,21 @@ export function Analytics() {
                 {Math.abs(tokenChange).toFixed(1)}%
               </div>
             ) : (
-              <div className="text-xs text-slate-400">—</div>
+              <div className="text-xs text-muted-foreground">&mdash;</div>
             )}
           </div>
-          <div className="text-3xl font-bold text-slate-900 dark:text-white mb-1">
+          <div className="text-3xl font-bold text-foreground mb-1">
             {((usageStats.week.inputTokens + usageStats.week.outputTokens) / 1000).toFixed(1)}K
           </div>
-          <div className="text-xs text-slate-500 dark:text-slate-400">
-            较上周
+          <div className="text-xs text-muted-foreground">
+            {t('analytics.vsLastWeek')}
           </div>
         </Card>
 
         <Card className="p-6">
           <div className="flex items-start justify-between mb-2">
-            <div className="text-sm text-slate-600 dark:text-slate-400">
-              费用 (本周)
+            <div className="text-sm text-muted-foreground">
+              {t('analytics.costThisWeek')}
             </div>
             {costChange !== null ? (
               <div
@@ -317,34 +320,31 @@ export function Analytics() {
                 {Math.abs(costChange).toFixed(1)}%
               </div>
             ) : (
-              <div className="text-xs text-slate-400">—</div>
+              <div className="text-xs text-muted-foreground">&mdash;</div>
             )}
           </div>
-          <div className="text-3xl font-bold text-slate-900 dark:text-white mb-1">
+          <div className="text-3xl font-bold text-foreground mb-1">
             ${usageStats.week.cost.toFixed(2)}
           </div>
-          <div className="text-xs text-slate-500 dark:text-slate-400">
-            较上周
+          <div className="text-xs text-muted-foreground">
+            {t('analytics.vsLastWeek')}
           </div>
         </Card>
 
         <Card className="p-6">
-          <div className="text-sm text-slate-600 dark:text-slate-400 mb-2">
-            连续使用
+          <div className="text-sm text-muted-foreground mb-2">
+            {t('analytics.streak')}
           </div>
-          <div className="text-3xl font-bold text-slate-900 dark:text-white mb-1">
-            {continuousUsageDays} 天
-          </div>
-          <div className="text-xs text-green-600 dark:text-green-400">
-            {streakLabel}
+          <div className="text-3xl font-bold text-foreground mb-1">
+            {continuousUsageDays} {t('analytics.days')}
           </div>
         </Card>
       </div>
 
       {/* Token Consumption Chart */}
       <Card className="p-6">
-        <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
-          Token 消耗分布
+        <h3 className="text-lg font-semibold text-foreground mb-4">
+          {t('analytics.tokenDistribution')}
         </h3>
         <TokenChart
           data={chartData}
@@ -356,24 +356,24 @@ export function Analytics() {
 
       {/* Model Distribution */}
       <Card className="p-6">
-        <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
-          模型分布
+        <h3 className="text-lg font-semibold text-foreground mb-4">
+          {t('analytics.modelDistribution')}
         </h3>
         <ModelDistribution byModel={usageStats.byModel} />
       </Card>
 
       {/* Activity Heatmap */}
       <Card className="p-6">
-        <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
-          活跃热力图 (按日历)
+        <h3 className="text-lg font-semibold text-foreground mb-4">
+          {t('analytics.heatmap')}
         </h3>
         <HeatmapCalendar activities={dailyActivities} />
       </Card>
 
       {/* Milestones */}
       <div>
-        <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
-          里程碑
+        <h3 className="text-lg font-semibold text-foreground mb-4">
+          {t('analytics.milestones')}
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {milestones.map((milestone) => (
