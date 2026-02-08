@@ -92,6 +92,18 @@ interface AppState {
   setLoading: (loading: boolean) => void;
   error: string | null;
   setError: (error: string | null) => void;
+
+  // Per-domain loading flags (skeleton screens, never spinners)
+  isLoadingEnvs: boolean;
+  isLoadingSessions: boolean;
+  isLoadingStats: boolean;
+  isLoadingSkills: boolean;
+  isLoadingSettings: boolean;
+  setLoadingEnvs: (loading: boolean) => void;
+  setLoadingSessions: (loading: boolean) => void;
+  setLoadingStats: (loading: boolean) => void;
+  setLoadingSkills: (loading: boolean) => void;
+  setLoadingSettings: (loading: boolean) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -160,4 +172,16 @@ export const useAppStore = create<AppState>((set) => ({
   setLoading: (loading) => set({ isLoading: loading }),
   error: null,
   setError: (error) => set({ error }),
+
+  // Per-domain loading flags (skeleton screens, never spinners)
+  isLoadingEnvs: false,
+  isLoadingSessions: false,
+  isLoadingStats: false,
+  isLoadingSkills: false,
+  isLoadingSettings: false,
+  setLoadingEnvs: (loading) => set({ isLoadingEnvs: loading }),
+  setLoadingSessions: (loading) => set({ isLoadingSessions: loading }),
+  setLoadingStats: (loading) => set({ isLoadingStats: loading }),
+  setLoadingSkills: (loading) => set({ isLoadingSkills: loading }),
+  setLoadingSettings: (loading) => set({ isLoadingSettings: loading }),
 }));

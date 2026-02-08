@@ -7,6 +7,7 @@ import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { useLocale } from '../locales';
+import { DashboardSkeleton } from '@/components/ui/skeleton-states';
 
 interface DashboardProps {
   onNavigate: (tab: string) => void;
@@ -26,6 +27,8 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
     sessions,
     usageStats,
     setSelectedWorkingDir,
+    isLoadingEnvs,
+    isLoadingStats,
   } = useAppStore();
 
   const { openDirectoryPicker, switchEnvironment } = useTauriCommands();
@@ -48,6 +51,11 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
       onLaunch();
     }
   };
+
+  // Show skeleton when environments or stats are loading
+  if (isLoadingEnvs || isLoadingStats) {
+    return <DashboardSkeleton />;
+  }
 
   return (
     <div className="page-transition-enter space-y-5">

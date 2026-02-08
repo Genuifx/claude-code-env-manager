@@ -3,6 +3,8 @@ import { Button } from '@/components/ui/button';
 import { Package, Wrench, Lightbulb, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { useLocale } from '../locales';
+import { useAppStore } from '@/store';
+import { SkillsSkeleton } from '@/components/ui/skeleton-states';
 
 interface Skill {
   name: string;
@@ -18,6 +20,7 @@ const mockSkills: Skill[] = [
 
 export function Skills() {
   const { t } = useLocale();
+  const { isLoadingSkills } = useAppStore();
 
   const handleViewFile = (path: string) => {
     // TODO: Open file path via Tauri shell
@@ -30,6 +33,11 @@ export function Skills() {
 
   const sourceLabel = (source: Skill['source']) =>
     source === 'local' ? t('common.local') : t('skills.official');
+
+  // Show skeleton when skills are loading
+  if (isLoadingSkills) {
+    return <SkillsSkeleton />;
+  }
 
   return (
     <div className="page-transition-enter grid grid-cols-1 lg:grid-cols-3 gap-6">

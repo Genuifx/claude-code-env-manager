@@ -15,13 +15,14 @@ import {
   generateMockMilestones,
 } from '@/lib/mockAnalytics';
 import { useLocale } from '../locales';
+import { AnalyticsSkeleton } from '@/components/ui/skeleton-states';
 import type { ChartDataPoint, DailyActivity, UsageStats } from '@/types/analytics';
 
 type TimeGranularity = 'hour' | 'day' | 'week' | 'month';
 
 export function Analytics() {
   const { t, lang } = useLocale();
-  const { usageStats, milestones, continuousUsageDays, setUsageStats, setMilestones, setContinuousUsageDays } =
+  const { usageStats, milestones, continuousUsageDays, isLoadingStats, setUsageStats, setMilestones, setContinuousUsageDays } =
     useAppStore();
 
   // Granularity state lives here and is passed down to TokenChart
@@ -179,15 +180,8 @@ export function Analytics() {
   }, [granularity, usageStats, dateLocale]);
 
   // Loading state — skeleton screen, never spinners (taste spec)
-  if (!usageStats) {
-    return (
-      <div className="animate-pulse space-y-6">
-        <div className="grid grid-cols-3 gap-4">
-          {[1,2,3].map(i => <div key={i} className="h-24 bg-muted rounded-xl" />)}
-        </div>
-        <div className="h-64 bg-muted rounded-xl" />
-      </div>
-    );
+  if (isLoadingStats || !usageStats) {
+    return <AnalyticsSkeleton />;
   }
 
   // Chart series keys — real input/output breakdown instead of fake env splits

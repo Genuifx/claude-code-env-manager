@@ -8,9 +8,10 @@ import { toast } from 'sonner';
 import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { useLocale } from '../locales';
+import { SettingsSkeleton } from '@/components/ui/skeleton-states';
 
 export function Settings() {
-  const { defaultMode, setDefaultMode } = useAppStore();
+  const { defaultMode, setDefaultMode, isLoadingSettings } = useAppStore();
   const { t, lang, setLang } = useLocale();
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
   const [autoStart, setAutoStart] = useState(false);
@@ -81,6 +82,11 @@ export function Settings() {
       }
     })();
   }, [theme, autoStart, startMinimized, closeToTray, defaultMode]);
+
+  // Delayed skeleton — only shows if settings load takes >200ms
+  if (isLoadingSettings) {
+    return <SettingsSkeleton />;
+  }
 
   return (
     <div className="page-transition-enter space-y-6">

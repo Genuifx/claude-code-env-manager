@@ -5,6 +5,7 @@ import { SessionCard, SessionList } from '@/components/sessions';
 import { useAppStore } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useLocale } from '../locales';
+import { SessionsSkeleton } from '@/components/ui/skeleton-states';
 
 interface SessionsProps {
   onLaunch: () => void;
@@ -15,7 +16,7 @@ export function Sessions({ onLaunch }: SessionsProps) {
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [showCloseAllDialog, setShowCloseAllDialog] = useState(false);
-  const { sessions } = useAppStore();
+  const { sessions, isLoadingSessions } = useAppStore();
   const { focusSession, minimizeSession, closeSession } = useTauriCommands();
 
   const handleFocus = async (id: string) => {
@@ -64,6 +65,11 @@ export function Sessions({ onLaunch }: SessionsProps) {
       await closeSession(session.id);
     }
   };
+
+  // Show skeleton when sessions are loading
+  if (isLoadingSessions) {
+    return <SessionsSkeleton />;
+  }
 
   return (
     <div className="page-transition-enter">

@@ -5,6 +5,7 @@ import { ENV_PRESETS, PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { useAppStore } from '@/store';
 import { useLocale } from '../locales';
+import { EnvironmentsSkeleton } from '@/components/ui/skeleton-states';
 
 interface EnvironmentsProps {
   onAddEnv?: () => void;
@@ -14,8 +15,13 @@ interface EnvironmentsProps {
 
 export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsProps) {
   const presetNames = Object.keys(ENV_PRESETS);
-  const { permissionMode, defaultMode, setPermissionMode, setDefaultMode } = useAppStore();
+  const { permissionMode, defaultMode, setPermissionMode, setDefaultMode, isLoadingEnvs } = useAppStore();
   const { t } = useLocale();
+
+  // Show skeleton when environments are loading
+  if (isLoadingEnvs) {
+    return <EnvironmentsSkeleton />;
+  }
 
   return (
     <div className="page-transition-enter space-y-6">

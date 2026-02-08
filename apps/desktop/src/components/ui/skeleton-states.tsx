@@ -1,0 +1,326 @@
+// Skeleton loading states — "Skeleton screens, never spinners" (taste spec)
+// Each skeleton matches the layout shape of the page it represents so users
+// get spatial context while data loads.
+
+import { useState, useEffect } from 'react';
+import { Card } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
+
+/* ─── Reusable skeleton block ──────────────────────────────────────── */
+
+function Bone({ className }: { className?: string }) {
+  return <div className={cn('bg-muted rounded-xl', className)} />;
+}
+
+/* ─── Dashboard ────────────────────────────────────────────────────── */
+
+export function DashboardSkeleton() {
+  return (
+    <div className="animate-pulse space-y-5">
+      {/* Status bar */}
+      <Bone className="h-6 w-72" />
+
+      {/* Launch center */}
+      <div className="flex flex-col items-center justify-center py-6 gap-4">
+        <Bone className="h-13 w-48 rounded-xl" />
+        <div className="flex items-center gap-4">
+          <Bone className="h-10 w-40" />
+          <Bone className="h-10 w-40" />
+          <Bone className="h-10 w-36" />
+        </div>
+      </div>
+
+      {/* Stat cards — grid-cols-3 */}
+      <div className="grid grid-cols-3 gap-4">
+        {[1, 2, 3].map((i) => (
+          <Card key={i} className="p-4">
+            <Bone className="h-4 w-24 mb-2" />
+            <Bone className="h-8 w-16" />
+          </Card>
+        ))}
+      </div>
+
+      {/* Recent projects */}
+      <div>
+        <Bone className="h-5 w-40 mb-4" />
+        <div className="space-y-2">
+          {[1, 2, 3].map((i) => (
+            <Bone key={i} className="h-12 w-full" />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Sessions ─────────────────────────────────────────────────────── */
+
+export function SessionsSkeleton() {
+  return (
+    <div className="animate-pulse">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <Bone className="h-8 w-48" />
+        <div className="flex items-center gap-2">
+          <Bone className="h-8 w-20" />
+          <Bone className="h-9 w-32" />
+        </div>
+      </div>
+
+      {/* 2x2 session card grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {[1, 2, 3, 4].map((i) => (
+          <Card key={i} className="p-4">
+            <div className="flex items-center gap-3 mb-3">
+              {/* Status dot */}
+              <Bone className="h-3 w-3 rounded-full" />
+              {/* Name */}
+              <Bone className="h-5 w-32" />
+            </div>
+            {/* Badges */}
+            <div className="flex gap-2 mb-3">
+              <Bone className="h-5 w-16 rounded-full" />
+              <Bone className="h-5 w-20 rounded-full" />
+            </div>
+            {/* Path */}
+            <Bone className="h-4 w-full mb-3" />
+            {/* Action buttons */}
+            <div className="flex gap-2">
+              <Bone className="h-8 w-20" />
+              <Bone className="h-8 w-20" />
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Environments ─────────────────────────────────────────────────── */
+
+export function EnvironmentsSkeleton() {
+  return (
+    <div className="animate-pulse space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <Bone className="h-8 w-48 mb-2" />
+          <Bone className="h-4 w-72" />
+        </div>
+        <Bone className="h-10 w-36" />
+      </div>
+
+      {/* Section label */}
+      <Bone className="h-4 w-40" />
+
+      {/* 3 stacked env cards */}
+      <div className="space-y-3">
+        {[1, 2, 3].map((i) => (
+          <Card key={i} className="p-4" style={{ minHeight: 120 }}>
+            <div className="flex items-center justify-between">
+              <div className="space-y-2 flex-1">
+                {/* Name */}
+                <Bone className="h-5 w-32" />
+                {/* URL */}
+                <Bone className="h-4 w-64" />
+                {/* Key block */}
+                <Bone className="h-4 w-40" />
+              </div>
+              <div className="flex gap-2">
+                <Bone className="h-8 w-16" />
+                <Bone className="h-8 w-16" />
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Analytics ────────────────────────────────────────────────────── */
+
+export function AnalyticsSkeleton() {
+  return (
+    <div className="animate-pulse space-y-6">
+      {/* Header */}
+      <div>
+        <Bone className="h-8 w-32 mb-2" />
+        <Bone className="h-4 w-64" />
+      </div>
+
+      {/* 3 stat cards — grid-cols-3 */}
+      <div className="grid grid-cols-3 gap-4">
+        {[1, 2, 3].map((i) => (
+          <Card key={i} className="p-4">
+            <div className="flex items-start justify-between mb-2">
+              <Bone className="h-4 w-24" />
+              <Bone className="h-4 w-12" />
+            </div>
+            <Bone className="h-8 w-20 mb-1" />
+            <Bone className="h-3 w-16" />
+          </Card>
+        ))}
+      </div>
+
+      {/* Chart — h-64 */}
+      <Card className="p-4">
+        <Bone className="h-5 w-40 mb-4" />
+        <Bone className="h-64 w-full" />
+      </Card>
+
+      {/* Distribution + Heatmap side by side */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Card className="p-4">
+          <Bone className="h-5 w-36 mb-4" />
+          <Bone className="h-40 w-full" />
+        </Card>
+        <Card className="p-4">
+          <Bone className="h-5 w-32 mb-4" />
+          <Bone className="h-40 w-full" />
+        </Card>
+      </div>
+
+      {/* Milestones */}
+      <div>
+        <Bone className="h-5 w-28 mb-4" />
+        <div className="flex gap-3">
+          {[1, 2, 3].map((i) => (
+            <Bone key={i} className="h-24 w-[200px] flex-shrink-0" />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Skills ───────────────────────────────────────────────────────── */
+
+export function SkillsSkeleton() {
+  return (
+    <div className="animate-pulse grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Header */}
+      <div className="flex items-center justify-between lg:col-span-3">
+        <div>
+          <Bone className="h-8 w-20 mb-2" />
+          <Bone className="h-4 w-56" />
+        </div>
+        <Bone className="h-10 w-28" />
+      </div>
+
+      {/* 2 compact skill cards */}
+      <div className="lg:col-span-2">
+        <Bone className="h-4 w-32 mb-4" />
+        <div className="space-y-3">
+          {[1, 2].map((i) => (
+            <Card key={i} className="p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <Bone className="h-10 w-10 rounded-lg" />
+                  <div className="space-y-1.5">
+                    <Bone className="h-5 w-36" />
+                    <Bone className="h-3 w-24" />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Bone className="h-8 w-20" />
+                  <Bone className="h-8 w-20" />
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      </div>
+
+      {/* CLI hint sidebar */}
+      <Card className="p-6 lg:col-span-1">
+        <Bone className="h-5 w-32 mb-4" />
+        <div className="space-y-2">
+          <Bone className="h-4 w-full" />
+          <Bone className="h-4 w-full" />
+          <Bone className="h-4 w-3/4" />
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+/* ─── Settings (delayed skeleton — only shows if load takes >200ms) ─ */
+
+/**
+ * useDelayedShow: returns true only after `delayMs` has elapsed.
+ * Prevents skeleton flash for fast loads.
+ */
+function useDelayedShow(delayMs = 200): boolean {
+  const [show, setShow] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setShow(true), delayMs);
+    return () => clearTimeout(timer);
+  }, [delayMs]);
+
+  return show;
+}
+
+export function SettingsSkeleton() {
+  const show = useDelayedShow(200);
+
+  if (!show) return null;
+
+  return (
+    <div className="animate-pulse space-y-6">
+      <div className="max-w-lg space-y-6">
+        {/* Header */}
+        <div>
+          <Bone className="h-8 w-24 mb-2" />
+          <Bone className="h-4 w-56" />
+        </div>
+
+        {/* Appearance card */}
+        <Card className="p-6">
+          <Bone className="h-6 w-28 mb-4" />
+          <div className="space-y-4">
+            <div>
+              <Bone className="h-4 w-16 mb-2" />
+              <div className="flex gap-2">
+                <Bone className="h-10 w-24" />
+                <Bone className="h-10 w-24" />
+                <Bone className="h-10 w-24" />
+              </div>
+            </div>
+            <div>
+              <Bone className="h-4 w-32 mb-2" />
+              <div className="flex gap-4">
+                <Bone className="h-5 w-16" />
+                <Bone className="h-5 w-16" />
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        {/* Application card */}
+        <Card className="p-6">
+          <Bone className="h-6 w-28 mb-4" />
+          <div className="space-y-4">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center gap-3">
+                <Bone className="h-4 w-4 rounded" />
+                <div>
+                  <Bone className="h-4 w-36 mb-1" />
+                  <Bone className="h-3 w-52" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        {/* Permission card */}
+        <Card className="p-6">
+          <Bone className="h-6 w-40 mb-4" />
+          <Bone className="h-10 w-full mb-2" />
+          <Bone className="h-3 w-64" />
+        </Card>
+      </div>
+    </div>
+  );
+}
