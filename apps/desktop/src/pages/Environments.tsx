@@ -15,7 +15,7 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
   const { permissionMode, defaultMode, setPermissionMode, setDefaultMode } = useAppStore();
 
   return (
-    <div className="space-y-8">
+    <div className="page-transition-enter space-y-8">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
