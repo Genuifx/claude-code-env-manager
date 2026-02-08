@@ -179,6 +179,14 @@
   animation: shimmer 1.5s var(--ease-default) infinite;
 }
 
+/* === Interactive Card === */
+.interactive-card {
+  transition: border-color var(--duration-fast) var(--ease-default);
+}
+.interactive-card:hover {
+  border-color: hsl(var(--primary) / 0.3);
+}
+
 /* === Reduced Motion === */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
