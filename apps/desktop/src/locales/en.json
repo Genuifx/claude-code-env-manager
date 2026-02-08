@@ -24,7 +24,8 @@
     "todayTokens": "Today's Tokens",
     "todayCost": "Today's Cost",
     "recentProjects": "Recent Projects",
-    "addMoreEnvs": "Add more environments →"
+    "addMoreEnvs": "Add more environments →",
+    "launchShortcut": "Launch (⌘Enter)"
   },
   "sessions": {
     "confirmClose": "Are you sure you want to close this session?",

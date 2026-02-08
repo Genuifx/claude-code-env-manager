@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -9,6 +9,7 @@ import { useCountUp } from '@/hooks/useCountUp';
 import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { useLocale } from '../locales';
+import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { DashboardSkeleton } from '@/components/ui/skeleton-states';
 
 function AmberDot({ value, hasLaunched }: { value: number; hasLaunched: boolean }) {
@@ -62,7 +63,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
   // Reactive via Zustand (environments.length), with localStorage as fallback
   const showAddEnvsLink = environments.length <= 1 && !localStorage.getItem('ccem-ftue-envs-added');
 
-  const handleSelectDirectory = async () => {
+  const handleSelectDirectory = useCallback(async () => {
     try {
       const dir = await openDirectoryPicker();
       if (dir) {
@@ -71,7 +72,14 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
     } catch (err) {
       console.error('Failed to open directory dialog:', err);
     }
-  };
+  }, [openDirectoryPicker, setSelectedWorkingDir]);
+
+  // Dashboard-specific keyboard shortcuts (Cmd+O for directory picker)
+  const dashboardShortcuts = useMemo(() => ({
+    'meta+o': () => handleSelectDirectory(),
+  }), [handleSelectDirectory]);
+
+  useKeyboardShortcuts(dashboardShortcuts);
 
   // Compute raw stat values before skeleton check so useCountUp hooks can be called unconditionally
   const todayTokensRaw = (usageStats?.today.inputTokens ?? 0) + (usageStats?.today.outputTokens ?? 0);
@@ -131,6 +139,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
         <Button
           size="xl"
           onClick={handleLaunchClick}
+          title={t('dashboard.launchShortcut')}
           className="h-13 px-8 text-lg font-semibold rounded-xl shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-md transition-all duration-150"
         >
           {launched ? t('dashboard.launched') : t('dashboard.launch')}

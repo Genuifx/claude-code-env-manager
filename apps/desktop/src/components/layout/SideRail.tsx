@@ -6,16 +6,24 @@ interface SideRailProps {
   onTabChange: (tab: string) => void;
 }
 
-const navItems = [
-  { id: 'dashboard', label: 'Home', icon: Home },
-  { id: 'sessions', label: 'Sessions', icon: Terminal },
-  { id: 'environments', label: 'Envs', icon: Globe },
-  { id: 'analytics', label: 'Stats', icon: BarChart3 },
-  { id: 'skills', label: 'Skills', icon: Sparkles },
+interface NavItem {
+  id: string;
+  label: string;
+  icon: typeof Home;
+  shortcut: string;
+  tooltipLabel?: string;
+}
+
+const navItems: NavItem[] = [
+  { id: 'dashboard', label: 'Home', icon: Home, shortcut: '1' },
+  { id: 'sessions', label: 'Sessions', icon: Terminal, shortcut: '2' },
+  { id: 'environments', label: 'Envs', icon: Globe, shortcut: '3', tooltipLabel: 'Environments' },
+  { id: 'analytics', label: 'Stats', icon: BarChart3, shortcut: '4', tooltipLabel: 'Analytics' },
+  { id: 'skills', label: 'Skills', icon: Sparkles, shortcut: '5' },
 ];
 
-const bottomItems = [
-  { id: 'settings', label: 'Settings', icon: Settings },
+const bottomItems: NavItem[] = [
+  { id: 'settings', label: 'Settings', icon: Settings, shortcut: '6' },
 ];
 
 function NavButton({
@@ -23,7 +31,7 @@ function NavButton({
   isActive,
   onClick,
 }: {
-  item: (typeof navItems)[number];
+  item: NavItem;
   isActive: boolean;
   onClick: () => void;
 }) {
@@ -31,6 +39,7 @@ function NavButton({
   return (
     <button
       onClick={onClick}
+      title={`${item.tooltipLabel || item.label} (\u2318${item.shortcut})`}
       className={cn(
         'w-11 h-11 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors duration-150',
         isActive

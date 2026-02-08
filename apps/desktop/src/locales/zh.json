@@ -24,7 +24,8 @@
     "todayTokens": "今日 Tokens",
     "todayCost": "今日消费",
     "recentProjects": "最近项目",
-    "addMoreEnvs": "添加更多环境 →"
+    "addMoreEnvs": "添加更多环境 →",
+    "launchShortcut": "启动 (⌘Enter)"
   },
   "sessions": {
     "confirmClose": "确定要关闭此会话吗？",

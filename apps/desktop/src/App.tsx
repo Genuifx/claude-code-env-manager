@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { ENV_PRESETS } from '@ccem/core/browser';
@@ -6,6 +6,7 @@ import { AppLayout } from '@/components/layout';
 import { Dashboard, Environments, Sessions, Analytics, Settings, Skills } from '@/pages';
 import { useAppStore, type Environment } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
+import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { EnvironmentDialog } from '@/components/EnvironmentDialog';
 import { Toaster, toast } from 'sonner';
 import { LocaleProvider } from '@/locales';
@@ -134,13 +135,28 @@ function App() {
   }, [loadEnvironments, loadCurrentEnv, loadSessions]);
 
   // Handle launch
-  const handleLaunch = async () => {
+  const handleLaunch = useCallback(async () => {
     try {
       await launchClaudeCode();
     } catch (err) {
       console.error('Launch failed:', err);
     }
-  };
+  }, [launchClaudeCode]);
+
+  // Global keyboard shortcuts (Cmd+1..6 for tabs, Cmd+Enter/N for launch, Cmd+, for settings)
+  const globalShortcuts = useMemo(() => ({
+    'meta+1': () => setActiveTab('dashboard'),
+    'meta+2': () => setActiveTab('sessions'),
+    'meta+3': () => setActiveTab('environments'),
+    'meta+4': () => setActiveTab('analytics'),
+    'meta+5': () => setActiveTab('skills'),
+    'meta+6': () => setActiveTab('settings'),
+    'meta+enter': () => handleLaunch(),
+    'meta+n': () => handleLaunch(),
+    'meta+,': () => setActiveTab('settings'),
+  }), [handleLaunch]);
+
+  useKeyboardShortcuts(globalShortcuts);
 
   // Handle launch with specific directory
   const handleLaunchWithDir = async (workingDir: string) => {
