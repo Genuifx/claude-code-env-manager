@@ -1,5 +1,6 @@
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Package, Wrench, Lightbulb, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { useLocale } from '../locales';
@@ -68,11 +69,12 @@ export function Skills() {
         </h3>
         <div className="space-y-3">
           {mockSkills.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-8 text-center">
-              <Sparkles className="w-12 h-12 text-muted-foreground/20 mb-4" />
-              <p className="text-sm text-muted-foreground mb-4">{t('skills.noSkills')}</p>
-              <Button variant="outline" size="sm">{t('skills.addFirstSkill')}</Button>
-            </div>
+            <EmptyState
+              icon={Sparkles}
+              message={t('skills.noSkills')}
+              action={t('skills.addFirstSkill')}
+              onAction={() => toast.info(t('skills.addSkillCLIHint'))}
+            />
           ) : null}
           {mockSkills.map((skill) => (
             <Card key={skill.name} className="p-4">

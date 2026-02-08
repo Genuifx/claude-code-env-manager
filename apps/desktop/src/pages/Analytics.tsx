@@ -1,8 +1,9 @@
 // apps/desktop/src/pages/Analytics.tsx
 import { useEffect, useState, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { TrendingUp, TrendingDown } from 'lucide-react';
+import { TrendingUp, TrendingDown, BarChart3 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
+import { EmptyState, ErrorBanner } from '@/components/ui/EmptyState';
 import {
   TokenChart,
   ModelDistribution,
@@ -31,71 +32,77 @@ export function Analytics() {
   // Dynamic mock indicator — true only when real data failed to load
   const [isUsingMockData, setIsUsingMockData] = useState(false);
 
+  // Error state for failed data load
+  const [loadError, setLoadError] = useState(false);
+
   // Dynamic date locale based on current language
   const dateLocale = lang === 'zh' ? 'zh-CN' : 'en-US';
 
   // Load real data from Tauri backend, fall back to mock only if it fails
-  useEffect(() => {
-    const loadRealData = async () => {
+  const loadRealData = async () => {
+    try {
+      const stats = await invoke<UsageStats>('get_usage_stats');
+      setUsageStats(stats);
+      setIsUsingMockData(false);
+
+      // Load continuous usage days
       try {
-        const stats = await invoke<UsageStats>('get_usage_stats');
-        setUsageStats(stats);
-        setIsUsingMockData(false);
-
-        // Load continuous usage days
-        try {
-          const days = await invoke<number>('get_continuous_usage_days');
-          setContinuousUsageDays(days);
-        } catch {
-          setContinuousUsageDays(0);
-        }
-
-        // Generate milestones from real data
-        const totalTokens = stats.total.inputTokens + stats.total.outputTokens;
-        const totalCost = stats.total.cost;
-        setMilestones([
-          {
-            id: 'tokens-100k', type: 'tokens', title: t('analytics.milestone100kTitle'),
-            description: t('analytics.milestone100kDesc'), target: 100000,
-            current: totalTokens, achieved: totalTokens >= 100000,
-          },
-          {
-            id: 'tokens-1m', type: 'tokens', title: t('analytics.milestone1mTitle'),
-            description: t('analytics.milestone1mDesc'), target: 1000000,
-            current: totalTokens, achieved: totalTokens >= 1000000,
-          },
-          {
-            id: 'tokens-5m', type: 'tokens', title: t('analytics.milestone5mTitle'),
-            description: t('analytics.milestone5mDesc'), target: 5000000,
-            current: totalTokens, achieved: totalTokens >= 5000000,
-          },
-          {
-            id: 'cost-10', type: 'cost', title: t('analytics.firstTenTitle'),
-            description: t('analytics.firstTenDesc'), target: 10,
-            current: totalCost, achieved: totalCost >= 10,
-          },
-          {
-            id: 'cost-100', type: 'cost', title: t('analytics.hundredTitle'),
-            description: t('analytics.hundredDesc'), target: 100,
-            current: totalCost, achieved: totalCost >= 100,
-          },
-          {
-            id: 'streak-7', type: 'streak', title: t('analytics.sevenDayTitle'),
-            description: t('analytics.sevenDayDesc'), target: 7,
-            current: continuousUsageDays, achieved: continuousUsageDays >= 7,
-          },
-        ]);
+        const days = await invoke<number>('get_continuous_usage_days');
+        setContinuousUsageDays(days);
       } catch {
-        // Tauri backend not available — fall back to mock data
-        if (!usageStats) {
-          setUsageStats(generateMockUsageStats());
-          setMilestones(generateMockMilestones());
-          setContinuousUsageDays(42);
-          setIsUsingMockData(true);
-        }
+        setContinuousUsageDays(0);
       }
-    };
 
+      // Generate milestones from real data
+      const totalTokens = stats.total.inputTokens + stats.total.outputTokens;
+      const totalCost = stats.total.cost;
+      setMilestones([
+        {
+          id: 'tokens-100k', type: 'tokens', title: t('analytics.milestone100kTitle'),
+          description: t('analytics.milestone100kDesc'), target: 100000,
+          current: totalTokens, achieved: totalTokens >= 100000,
+        },
+        {
+          id: 'tokens-1m', type: 'tokens', title: t('analytics.milestone1mTitle'),
+          description: t('analytics.milestone1mDesc'), target: 1000000,
+          current: totalTokens, achieved: totalTokens >= 1000000,
+        },
+        {
+          id: 'tokens-5m', type: 'tokens', title: t('analytics.milestone5mTitle'),
+          description: t('analytics.milestone5mDesc'), target: 5000000,
+          current: totalTokens, achieved: totalTokens >= 5000000,
+        },
+        {
+          id: 'cost-10', type: 'cost', title: t('analytics.firstTenTitle'),
+          description: t('analytics.firstTenDesc'), target: 10,
+          current: totalCost, achieved: totalCost >= 10,
+        },
+        {
+          id: 'cost-100', type: 'cost', title: t('analytics.hundredTitle'),
+          description: t('analytics.hundredDesc'), target: 100,
+          current: totalCost, achieved: totalCost >= 100,
+        },
+        {
+          id: 'streak-7', type: 'streak', title: t('analytics.sevenDayTitle'),
+          description: t('analytics.sevenDayDesc'), target: 7,
+          current: continuousUsageDays, achieved: continuousUsageDays >= 7,
+        },
+      ]);
+    } catch (err) {
+      console.error('Failed to load analytics data:', err);
+      if (import.meta.env.DEV && !usageStats) {
+        // Dev-only fallback to mock data
+        setUsageStats(generateMockUsageStats());
+        setMilestones(generateMockMilestones());
+        setContinuousUsageDays(42);
+        setIsUsingMockData(true);
+      } else {
+        setLoadError(true);
+      }
+    }
+  };
+
+  useEffect(() => {
     loadRealData();
   }, []);
 
@@ -244,6 +251,18 @@ export function Analytics() {
 
   return (
     <div className="page-transition-enter space-y-6">
+      {/* Error banner — inline, never full-page */}
+      {loadError && !isUsingMockData && (
+        <ErrorBanner
+          message={t('analytics.failedToLoad')}
+          retryLabel={t('common.retry')}
+          onRetry={() => {
+            setLoadError(false);
+            loadRealData();
+          }}
+        />
+      )}
+
       {/* Demo data banner — only visible in dev mode */}
       {import.meta.env.DEV && isUsingMockData && (
         <div className="rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
@@ -340,12 +359,16 @@ export function Analytics() {
         <h3 className="text-lg font-semibold text-foreground mb-4">
           {t('analytics.tokenDistribution')}
         </h3>
-        <TokenChart
-          data={chartData}
-          environments={chartSeriesKeys}
-          granularity={granularity}
-          onGranularityChange={setGranularity}
-        />
+        {chartData.length === 0 ? (
+          <EmptyState icon={BarChart3} message={t('analytics.noDataYet')} />
+        ) : (
+          <TokenChart
+            data={chartData}
+            environments={chartSeriesKeys}
+            granularity={granularity}
+            onGranularityChange={setGranularity}
+          />
+        )}
       </Card>
 
       {/* Model Distribution + Activity Heatmap side-by-side */}

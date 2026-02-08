@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { LayoutGrid, List, Minimize2, Plus, Terminal, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { SessionCard, SessionList } from '@/components/sessions';
 import { useAppStore } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
@@ -112,11 +113,17 @@ export function Sessions({ onLaunch }: SessionsProps) {
 
       {/* Sessions Display */}
       {sessions.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <Terminal className="w-12 h-12 text-muted-foreground/20 mb-4" />
-          <p className="text-sm text-muted-foreground mb-4">{t('sessions.noActiveSessions')}</p>
-          <Button variant="outline" size="sm" onClick={onLaunch}>{t('sessions.launchClaudeCode')}</Button>
-        </div>
+        <>
+          <EmptyState
+            icon={Terminal}
+            message={t('sessions.noActiveSessions')}
+            action={t('sessions.launchClaudeCode')}
+            onAction={onLaunch}
+          />
+          <p className="text-xs text-muted-foreground text-center -mt-8">
+            {t('sessions.detectionNote')}
+          </p>
+        </>
       ) : viewMode === 'card' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {sessions.map((session) => (

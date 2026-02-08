@@ -1,9 +1,11 @@
 import { Lightbulb } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ErrorBanner } from '@/components/ui/EmptyState';
 import { EnvList } from '@/components/environments';
 import { ENV_PRESETS, PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { useAppStore } from '@/store';
+import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useLocale } from '../locales';
 import { EnvironmentsSkeleton } from '@/components/ui/skeleton-states';
 
@@ -15,8 +17,9 @@ interface EnvironmentsProps {
 
 export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsProps) {
   const presetNames = Object.keys(ENV_PRESETS);
-  const { permissionMode, defaultMode, setPermissionMode, setDefaultMode, isLoadingEnvs } = useAppStore();
+  const { permissionMode, defaultMode, setPermissionMode, setDefaultMode, isLoadingEnvs, error } = useAppStore();
   const { t } = useLocale();
+  const { loadEnvironments } = useTauriCommands();
 
   // Show skeleton when environments are loading
   if (isLoadingEnvs) {
@@ -25,6 +28,15 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
 
   return (
     <div className="page-transition-enter space-y-6">
+      {/* Error banner — inline, never full-page */}
+      {error && error.includes('environment') && (
+        <ErrorBanner
+          message={t('environments.failedToLoad')}
+          onRetry={loadEnvironments}
+          retryLabel={t('common.retry')}
+        />
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

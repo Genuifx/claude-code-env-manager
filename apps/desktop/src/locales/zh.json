@@ -32,6 +32,7 @@
     "closeAllTitle": "关闭所有 Session？",
     "closeAllDescription": "将关闭 {count} 个活跃会话，此操作不可撤销。",
     "noActiveSessions": "没有活跃会话",
+    "detectionNote": "会话检测依赖进程扫描，部分会话可能未显示。",
     "launchClaudeCode": "启动 Claude Code",
     "newSession": "新会话",
     "layoutControl": "布局控制:",
@@ -62,7 +63,9 @@
     "currentlyActive": "当前使用",
     "default": "默认",
     "switchTo": "切换到此环境",
-    "notSet": "未设置"
+    "notSet": "未设置",
+    "failedToLoad": "加载环境配置失败",
+    "configCorrupt": "环境配置可能已损坏。重新添加环境以修复。"
   },
   "analytics": {
     "subtitle": "Token 使用统计和成本分析",
@@ -90,7 +93,9 @@
     "sevenDayTitle": "7 天连续",
     "sevenDayDesc": "连续使用 7 天",
     "demoData": "Demo 数据",
-    "demoDataHint": "当前显示的是模拟数据。连接 Tauri 后端后将展示真实统计信息。"
+    "demoDataHint": "当前显示的是模拟数据。连接 Tauri 后端后将展示真实统计信息。",
+    "noDataYet": "暂无使用数据。启动 Claude Code 开始记录。",
+    "failedToLoad": "加载分析数据失败"
   },
   "skills": {
     "subtitle": "管理 Claude Code 技能扩展",
