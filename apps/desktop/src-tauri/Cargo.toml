@@ -25,6 +25,7 @@ rand = "0.8"
 hex = "0.4"
 urlencoding = "2"
 quick-xml = "0.31"
+tauri-plugin-mcp-bridge = "0.8"
 
 [features]
 default = ["custom-protocol"]

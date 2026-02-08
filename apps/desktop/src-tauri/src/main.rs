@@ -614,10 +614,17 @@ fn main() {
     // Create SessionManager wrapped in Arc for sharing with monitor
     let session_manager = Arc::new(SessionManager::default());
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_notification::init());
+
+    #[cfg(debug_assertions)]
+    {
+        builder = builder.plugin(tauri_plugin_mcp_bridge::init());
+    }
+
+    builder
         .manage(session_manager.clone())
         .invoke_handler(tauri::generate_handler![
             greet,

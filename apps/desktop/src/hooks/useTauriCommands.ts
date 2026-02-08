@@ -190,6 +190,7 @@ export function useTauriCommands() {
       // Add to recent projects if a working directory was used
       if (workDir) {
         await invoke('add_recent', { path: workDir });
+        await loadAppConfig(); // Refresh store so UI shows the new recent entry
       }
 
       setError(null);
