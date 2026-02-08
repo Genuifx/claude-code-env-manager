@@ -104,7 +104,10 @@
     "cliHintAdd": "Add skill",
     "cliHintList": "List installed",
     "cliHintRemove": "Remove skill",
-    "uninstallToast": "Please run in terminal: ccem skill rm {name}"
+    "uninstallToast": "Please run in terminal: ccem skill rm {name}",
+    "official": "Official",
+    "noSkills": "No skills installed",
+    "addFirstSkill": "Add your first skill"
   },
   "settings": {
     "subtitle": "App configuration and preferences",

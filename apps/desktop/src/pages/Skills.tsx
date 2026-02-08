@@ -1,63 +1,69 @@
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Sparkles } from 'lucide-react';
+import { Package, Wrench, Lightbulb, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
+import { useLocale } from '../locales';
 
 interface Skill {
   name: string;
   path: string;
-  source: string;
+  source: 'local' | 'official';
   type: 'skill' | 'mcp';
 }
 
 const mockSkills: Skill[] = [
-  { name: 'product-designer', path: '.claude/skills/product-design/', source: '本地', type: 'skill' },
-  { name: 'chrome-devtools', path: '', source: 'Official', type: 'mcp' },
+  { name: 'product-designer', path: '.claude/skills/product-design/', source: 'local', type: 'skill' },
+  { name: 'chrome-devtools', path: '', source: 'official', type: 'mcp' },
 ];
 
 export function Skills() {
+  const { t } = useLocale();
+
   const handleViewFile = (path: string) => {
     // TODO: Open file path via Tauri shell
     console.log('Open path:', path);
   };
 
   const handleUninstall = (name: string) => {
-    toast.info(`请在终端中运行: ccem skill rm ${name}`);
+    toast.info(t('skills.uninstallToast').replace('{name}', name));
   };
+
+  const sourceLabel = (source: Skill['source']) =>
+    source === 'local' ? t('common.local') : t('skills.official');
 
   return (
     <div className="page-transition-enter space-y-8">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
+          <h2 className="text-2xl font-bold text-foreground tracking-tight">
             Skills
           </h2>
-          <p className="text-slate-500 dark:text-slate-400 mt-1">
-            管理 Claude Code 技能扩展
+          <p className="text-muted-foreground mt-1">
+            {t('skills.subtitle')}
           </p>
         </div>
         <Button
           disabled
-          title="使用 CLI: ccem skill add"
-          className="bg-gradient-to-r from-violet-500 to-purple-500 hover:from-violet-600 hover:to-purple-600 text-white shadow-lg shadow-violet-500/25 border-0 disabled:opacity-50 disabled:cursor-not-allowed"
+          title={t('skills.addSkillCLIHint')}
+          className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/25 border-0 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <span className="mr-2">+</span>
-          添加技能
+          {t('skills.addSkill')}
         </Button>
       </div>
 
       {/* Installed Skills List */}
       <div>
-        <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4">
-          已安装的技能
+        <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-4">
+          {t('skills.installedSkills')}
         </h3>
         <div className="space-y-3">
           {mockSkills.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <Sparkles className="w-12 h-12 text-muted-foreground/20 mb-4" />
-              <p className="text-sm text-muted-foreground mb-4">No skills installed</p>
-              <Button variant="outline" size="sm">Add your first skill</Button>
+              <p className="text-sm text-muted-foreground mb-4">{t('skills.noSkills')}</p>
+              <Button variant="outline" size="sm">{t('skills.addFirstSkill')}</Button>
             </div>
           ) : null}
           {mockSkills.map((skill) => (
@@ -65,21 +71,25 @@ export function Skills() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   {/* Icon */}
-                  <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-600 flex items-center justify-center text-lg">
-                    {skill.type === 'skill' ? '\u{1F4E6}' : '\u{1F527}'}
+                  <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
+                    {skill.type === 'skill' ? (
+                      <Package className="w-5 h-5 text-muted-foreground" />
+                    ) : (
+                      <Wrench className="w-5 h-5 text-muted-foreground" />
+                    )}
                   </div>
 
                   {/* Info */}
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold text-slate-900 dark:text-white">
+                      <span className="font-semibold text-foreground">
                         {skill.name}
                       </span>
-                      <span className="px-2 py-0.5 text-xs rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
-                        {skill.source}
+                      <span className="px-2 py-0.5 text-xs rounded-full bg-muted text-muted-foreground">
+                        {sourceLabel(skill.source)}
                       </span>
                     </div>
-                    <div className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+                    <div className="text-sm text-muted-foreground mt-0.5">
                       {skill.type === 'skill' ? (
                         skill.path ? (
                           <span className="font-mono text-xs">{skill.path}</span>
@@ -101,17 +111,17 @@ export function Skills() {
                       size="sm"
                       onClick={() => handleViewFile(skill.path)}
                     >
-                      查看文件
+                      {t('skills.viewFile')}
                     </Button>
                   )}
-                  {skill.source === 'Official' ? (
+                  {skill.source === 'official' ? (
                     <Button
                       variant="outline"
                       size="sm"
                       disabled
-                      title="官方技能不可卸载"
+                      title={t('skills.officialProtected')}
                     >
-                      受保护
+                      {t('common.protected')}
                     </Button>
                   ) : (
                     <Button
@@ -120,7 +130,7 @@ export function Skills() {
                       className="text-red-500 hover:text-red-600 hover:border-red-300 dark:hover:border-red-700"
                       onClick={() => handleUninstall(skill.name)}
                     >
-                      卸载
+                      {t('skills.uninstall')}
                     </Button>
                   )}
                 </div>
@@ -131,23 +141,24 @@ export function Skills() {
       </div>
 
       {/* CLI Hint Section */}
-      <Card className="p-6 bg-slate-50 dark:bg-slate-800/50 border-slate-200/50 dark:border-slate-700/50">
-        <div className="text-sm text-slate-600 dark:text-slate-400 space-y-2">
-          <div className="font-medium text-slate-900 dark:text-white mb-3">
-            {'\u{1F4A1}'} 提示: 更多技能管理请使用 CLI
+      <Card className="p-6 bg-muted/50 border-border">
+        <div className="text-sm text-muted-foreground space-y-2">
+          <div className="font-medium text-foreground mb-3 flex items-center gap-2">
+            <Lightbulb className="w-4 h-4" />
+            {t('skills.cliHintTitle')}
           </div>
           <div className="font-mono text-xs space-y-1.5 pl-4">
             <div className="flex gap-4">
-              <span className="text-violet-600 dark:text-violet-400 w-48 shrink-0">ccem skill add &lt;name&gt;</span>
-              <span className="text-slate-500 dark:text-slate-400">添加技能</span>
+              <span className="text-primary w-48 shrink-0">ccem skill add &lt;name&gt;</span>
+              <span className="text-muted-foreground">{t('skills.cliHintAdd')}</span>
             </div>
             <div className="flex gap-4">
-              <span className="text-violet-600 dark:text-violet-400 w-48 shrink-0">ccem skill ls</span>
-              <span className="text-slate-500 dark:text-slate-400">列出已安装</span>
+              <span className="text-primary w-48 shrink-0">ccem skill ls</span>
+              <span className="text-muted-foreground">{t('skills.cliHintList')}</span>
             </div>
             <div className="flex gap-4">
-              <span className="text-violet-600 dark:text-violet-400 w-48 shrink-0">ccem skill rm &lt;name&gt;</span>
-              <span className="text-slate-500 dark:text-slate-400">移除技能</span>
+              <span className="text-primary w-48 shrink-0">ccem skill rm &lt;name&gt;</span>
+              <span className="text-muted-foreground">{t('skills.cliHintRemove')}</span>
             </div>
           </div>
         </div>

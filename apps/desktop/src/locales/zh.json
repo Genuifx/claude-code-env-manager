@@ -104,7 +104,10 @@
     "cliHintAdd": "添加技能",
     "cliHintList": "列出已安装",
     "cliHintRemove": "移除技能",
-    "uninstallToast": "请在终端中运行: ccem skill rm {name}"
+    "uninstallToast": "请在终端中运行: ccem skill rm {name}",
+    "official": "官方",
+    "noSkills": "暂无已安装技能",
+    "addFirstSkill": "添加第一个技能"
   },
   "settings": {
     "subtitle": "应用配置和偏好设置",
