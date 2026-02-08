@@ -22,7 +22,8 @@
     "runningSessions": "Running Sessions",
     "todayTokens": "Today's Tokens",
     "todayCost": "Today's Cost",
-    "recentProjects": "Recent Projects"
+    "recentProjects": "Recent Projects",
+    "addMoreEnvs": "Add more environments →"
   },
   "sessions": {
     "confirmClose": "Are you sure you want to close this session?",
