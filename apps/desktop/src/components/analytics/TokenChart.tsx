@@ -28,15 +28,15 @@ interface TokenChartProps {
 }
 
 const COLORS: Record<string, string> = {
-  // Input/Output token breakdown (real data mode)
-  'Input Tokens': '#3b82f6',   // blue
-  'Output Tokens': '#10b981',  // green
+  // Input/Output token breakdown (real data mode) — using CSS chart variables
+  'Input Tokens': 'hsl(var(--chart-1))',
+  'Output Tokens': 'hsl(var(--chart-2))',
   // Legacy environment names (mock data fallback)
-  official: '#3b82f6',
-  'GLM-4': '#10b981',
-  DeepSeek: '#8b5cf6',
-  KIMI: '#f59e0b',
-  MiniMax: '#ec4899',
+  official: 'hsl(var(--chart-1))',
+  'GLM-4': 'hsl(var(--chart-2))',
+  DeepSeek: 'hsl(var(--chart-3))',
+  KIMI: 'hsl(var(--chart-4))',
+  MiniMax: 'hsl(var(--chart-5))',
 };
 
 export function TokenChart({ data, environments, granularity, onGranularityChange }: TokenChartProps) {

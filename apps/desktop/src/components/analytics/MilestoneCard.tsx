@@ -1,4 +1,4 @@
-import { Check } from 'lucide-react';
+import { Check, BarChart3, DollarSign, Flame, Gem } from 'lucide-react';
 import type { Milestone } from '@/types/analytics';
 
 interface MilestoneCardProps {
@@ -6,34 +6,36 @@ interface MilestoneCardProps {
 }
 
 const MILESTONE_ICONS = {
-  tokens: '📊',
-  cost: '💰',
-  streak: '🔥',
-  savings: '💎',
+  tokens: BarChart3,
+  cost: DollarSign,
+  streak: Flame,
+  savings: Gem,
 };
 
 export function MilestoneCard({ milestone }: MilestoneCardProps) {
   const progress = (milestone.current / milestone.target) * 100;
   const clampedProgress = Math.min(progress, 100);
 
+  const Icon = MILESTONE_ICONS[milestone.type];
+
   return (
     <div
       className={`relative p-4 rounded-lg border ${
         milestone.achieved
-          ? 'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20'
-          : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800/50'
+          ? 'bg-primary/15 text-primary border-primary/30 milestone-achieved'
+          : 'text-muted-foreground border border-dashed border-border'
       }`}
     >
       {milestone.achieved && (
         <div className="absolute top-2 right-2">
-          <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center">
-            <Check className="w-4 h-4 text-white" />
+          <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center">
+            <Check className="w-4 h-4 text-primary-foreground" />
           </div>
         </div>
       )}
 
       <div className="flex items-start gap-3">
-        <div className="text-2xl">{MILESTONE_ICONS[milestone.type]}</div>
+        <Icon className="w-6 h-6 shrink-0 mt-0.5" />
         <div className="flex-1">
           <h4 className="font-semibold text-slate-900 dark:text-white mb-1">
             {milestone.title}
