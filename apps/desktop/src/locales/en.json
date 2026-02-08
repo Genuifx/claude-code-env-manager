@@ -56,7 +56,13 @@
     "presetKIMI": "Moonshot Kimi Conversational Model",
     "presetMiniMax": "MiniMax LLM Service",
     "presetDeepSeek": "DeepSeek AI",
-    "presetDefault": "{name} API Configuration"
+    "presetDefault": "{name} API Configuration",
+    "noEnvTitle": "No Environments Configured",
+    "noEnvHint": "Add your first API environment to get started",
+    "currentlyActive": "Active",
+    "default": "Default",
+    "switchTo": "Switch to this environment",
+    "notSet": "Not set"
   },
   "analytics": {
     "subtitle": "Token usage statistics and cost analysis",

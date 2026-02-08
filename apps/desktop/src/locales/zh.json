@@ -56,7 +56,13 @@
     "presetKIMI": "月之暗面 Kimi 对话模型",
     "presetMiniMax": "MiniMax 大模型服务",
     "presetDeepSeek": "DeepSeek AI 深度求索",
-    "presetDefault": "{name} API 配置"
+    "presetDefault": "{name} API 配置",
+    "noEnvTitle": "暂无环境配置",
+    "noEnvHint": "添加你的第一个 API 环境开始使用",
+    "currentlyActive": "当前使用",
+    "default": "默认",
+    "switchTo": "切换到此环境",
+    "notSet": "未设置"
   },
   "analytics": {
     "subtitle": "Token 使用统计和成本分析",
