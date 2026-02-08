@@ -1,5 +1,6 @@
 import { Check, BarChart3, DollarSign, Flame, Gem } from 'lucide-react';
 import type { Milestone } from '@/types/analytics';
+import { useLocale } from '@/locales';
 
 interface MilestoneCardProps {
   milestone: Milestone;
@@ -13,6 +14,7 @@ const MILESTONE_ICONS = {
 };
 
 export function MilestoneCard({ milestone }: MilestoneCardProps) {
+  const { t, lang } = useLocale();
   const progress = (milestone.current / milestone.target) * 100;
   const clampedProgress = Math.min(progress, 100);
 
@@ -37,22 +39,22 @@ export function MilestoneCard({ milestone }: MilestoneCardProps) {
       <div className="flex items-start gap-3">
         <Icon className="w-6 h-6 shrink-0 mt-0.5" />
         <div className="flex-1">
-          <h4 className="font-semibold text-slate-900 dark:text-white mb-1">
+          <h4 className="font-semibold text-foreground mb-1">
             {milestone.title}
           </h4>
-          <p className="text-sm text-slate-600 dark:text-slate-400 mb-3">
+          <p className="text-sm text-muted-foreground mb-3">
             {milestone.description}
           </p>
 
           {!milestone.achieved && (
             <>
-              <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden mb-2">
+              <div className="h-2 bg-muted rounded-full overflow-hidden mb-2">
                 <div
-                  className="h-full bg-blue-500 transition-all duration-500"
+                  className="h-full bg-primary transition-all duration-500"
                   style={{ width: `${clampedProgress}%` }}
                 />
               </div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">
+              <div className="text-xs text-muted-foreground">
                 {milestone.current.toLocaleString()} / {milestone.target.toLocaleString()}
                 {' '}({clampedProgress.toFixed(1)}%)
               </div>
@@ -60,8 +62,8 @@ export function MilestoneCard({ milestone }: MilestoneCardProps) {
           )}
 
           {milestone.achieved && milestone.achievedAt && (
-            <div className="text-xs text-green-600 dark:text-green-400">
-              达成于 {new Date(milestone.achievedAt).toLocaleDateString('zh-CN')}
+            <div className="text-xs text-primary">
+              {t('analytics.achievedAt').replace('{date}', new Date(milestone.achievedAt).toLocaleDateString(lang === 'zh' ? 'zh-CN' : 'en-US'))}
             </div>
           )}
         </div>

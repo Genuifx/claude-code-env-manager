@@ -2,6 +2,7 @@ import { Star, Clock, Monitor, Brain, RefreshCw, FolderOpen } from 'lucide-react
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
+import { useLocale } from '@/locales';
 
 interface ProjectListProps {
   onLaunch: (workingDir: string) => void;
@@ -16,6 +17,7 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
     syncVSCodeProjects,
     syncJetBrainsProjects
   } = useTauriCommands();
+  const { t } = useLocale();
 
   // Get project name from path
   const getProjectName = (path: string) => {
@@ -32,12 +34,12 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
     const diffHours = Math.floor(diffMins / 60);
     const diffDays = Math.floor(diffHours / 24);
 
-    if (diffMins < 1) return '刚刚';
-    if (diffMins < 60) return `${diffMins} 分钟前`;
-    if (diffHours < 24) return `${diffHours} 小时前`;
-    if (diffDays === 1) return '昨天';
-    if (diffDays < 7) return `${diffDays} 天前`;
-    return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays === 1) return 'yesterday';
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   };
 
   // Truncate path for display
@@ -79,29 +81,29 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
       {/* Favorites Section */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2">
-            <Star className="w-4 h-4 text-primary" /> 收藏项目
+          <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+            <Star className="w-4 h-4 text-primary" /> {t('dashboard.recentProjects')}
           </h3>
           <Button variant="ghost" size="sm" onClick={handleAddFavorite}>
-            <span className="mr-1">+</span> 添加收藏
+            <span className="mr-1">+</span> {t('common.save')}
           </Button>
         </div>
         {favorites.length === 0 ? (
-          <p className="text-sm text-slate-400 dark:text-slate-500 py-2">暂无收藏项目</p>
+          <p className="text-sm text-muted-foreground/70 py-2">{t('sessions.noActiveSessions')}</p>
         ) : (
           <div className="space-y-2">
             {favorites.map((project) => (
               <div
                 key={project.path}
-                className="flex items-center justify-between p-3 bg-white dark:bg-slate-800/50 rounded-lg border border-slate-200/50 dark:border-slate-700/50 hover:border-emerald-300 dark:hover:border-emerald-700 transition-all"
+                className="flex items-center justify-between p-3 bg-card rounded-lg border border-border hover:border-primary/40 transition-all"
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <FolderOpen className="w-5 h-5 text-primary/60 flex-shrink-0" />
                   <div className="min-w-0">
-                    <div className="font-medium text-slate-900 dark:text-white truncate">
+                    <div className="font-medium text-foreground truncate">
                       {project.name}
                     </div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                    <div className="text-xs text-muted-foreground truncate">
                       {truncatePath(project.path)}
                     </div>
                   </div>
@@ -132,22 +134,22 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
 
       {/* Recent Section */}
       <div>
-        <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2 mb-3">
-          <Clock className="w-4 h-4 text-muted-foreground" /> 最近使用
+        <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2 mb-3">
+          <Clock className="w-4 h-4 text-muted-foreground" /> Recent
         </h3>
         <div className="space-y-2">
           {recent.map((project) => (
             <div
               key={project.path}
-              className="flex items-center justify-between p-3 bg-white dark:bg-slate-800/50 rounded-lg border border-slate-200/50 dark:border-slate-700/50 hover:border-blue-300 dark:hover:border-blue-700 transition-all"
+              className="flex items-center justify-between p-3 bg-card rounded-lg border border-border hover:border-primary/40 transition-all"
             >
               <div className="flex items-center gap-3 min-w-0">
                 <FolderOpen className="w-5 h-5 text-muted-foreground/60 flex-shrink-0" />
                 <div className="min-w-0">
-                  <div className="font-medium text-slate-900 dark:text-white truncate">
+                  <div className="font-medium text-foreground truncate">
                     {getProjectName(project.path)}
                   </div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                  <div className="text-xs text-muted-foreground truncate">
                     {truncatePath(project.path)}
                     {' · '}
                     <span className="text-primary">{formatRelativeTime(project.lastUsed)}</span>
@@ -158,7 +160,7 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
+                  className="text-primary hover:text-primary hover:bg-primary/10"
                   onClick={() => handleLaunch(project.path)}
                 >
                   ▶
@@ -176,13 +178,13 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
               </div>
             </div>
           ))}
-          {/* "+ 添加" card */}
+          {/* "+ Add" card */}
           <button
             className="flex items-center justify-center gap-2 p-3 w-full rounded-lg border border-dashed border-border hover:border-primary/40 hover:bg-primary/5 transition-all text-muted-foreground hover:text-primary"
             onClick={handleAddFavorite}
           >
             <span className="text-lg">+</span>
-            <span className="text-sm font-medium">添加项目</span>
+            <span className="text-sm font-medium">{t('environments.addEnv')}</span>
           </button>
         </div>
       </div>
@@ -190,29 +192,29 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
       {/* VS Code Section */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2">
-            <Monitor className="w-4 h-4 text-muted-foreground" /> VS Code 项目
+          <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+            <Monitor className="w-4 h-4 text-muted-foreground" /> VS Code
           </h3>
           <Button variant="ghost" size="sm" onClick={syncVSCodeProjects}>
-            <RefreshCw className="w-3.5 h-3.5 mr-1" /> 同步
+            <RefreshCw className="w-3.5 h-3.5 mr-1" /> Sync
           </Button>
         </div>
         {vscodeProjects.length === 0 ? (
-          <p className="text-sm text-slate-400 dark:text-slate-500 py-2">点击同步按钮获取 VS Code 项目</p>
+          <p className="text-sm text-muted-foreground/70 py-2">Click sync to load VS Code projects</p>
         ) : (
           <div className="space-y-2">
             {vscodeProjects.map((project) => (
               <div
                 key={project.path}
-                className="flex items-center justify-between p-3 bg-white dark:bg-slate-800/50 rounded-lg border border-slate-200/50 dark:border-slate-700/50 hover:border-violet-300 dark:hover:border-violet-700 transition-all"
+                className="flex items-center justify-between p-3 bg-card rounded-lg border border-border hover:border-primary/40 transition-all"
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <FolderOpen className="w-5 h-5 text-muted-foreground/60 flex-shrink-0" />
                   <div className="min-w-0">
-                    <div className="font-medium text-slate-900 dark:text-white truncate">
+                    <div className="font-medium text-foreground truncate">
                       {getProjectName(project.path)}
                     </div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                    <div className="text-xs text-muted-foreground truncate">
                       {truncatePath(project.path)}
                     </div>
                   </div>
@@ -246,30 +248,30 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
       {/* JetBrains Section */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2">
-            <Brain className="w-4 h-4 text-muted-foreground" /> JetBrains 项目
+          <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+            <Brain className="w-4 h-4 text-muted-foreground" /> JetBrains
           </h3>
           <Button variant="ghost" size="sm" onClick={syncJetBrainsProjects}>
-            <RefreshCw className="w-3.5 h-3.5 mr-1" /> 同步
+            <RefreshCw className="w-3.5 h-3.5 mr-1" /> Sync
           </Button>
         </div>
         {jetbrainsProjects.length === 0 ? (
-          <p className="text-sm text-slate-400 dark:text-slate-500 py-2">点击同步按钮获取 JetBrains IDE 项目</p>
+          <p className="text-sm text-muted-foreground/70 py-2">Click sync to load JetBrains projects</p>
         ) : (
           <div className="space-y-2">
             {jetbrainsProjects.map((project) => (
               <div
                 key={project.path}
-                className="flex items-center justify-between p-3 bg-white dark:bg-slate-800/50 rounded-lg border border-slate-200/50 dark:border-slate-700/50 hover:border-orange-300 dark:hover:border-orange-700 transition-all"
+                className="flex items-center justify-between p-3 bg-card rounded-lg border border-border hover:border-primary/40 transition-all"
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <FolderOpen className="w-5 h-5 text-muted-foreground/60 flex-shrink-0" />
                   <div className="min-w-0">
-                    <div className="font-medium text-slate-900 dark:text-white truncate">
+                    <div className="font-medium text-foreground truncate">
                       {getProjectName(project.path)}
                     </div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                      <span className="text-orange-500 dark:text-orange-400">{project.ide}</span>
+                    <div className="text-xs text-muted-foreground truncate">
+                      <span className="text-chart-5">{project.ide}</span>
                       {' · '}
                       {truncatePath(project.path)}
                     </div>

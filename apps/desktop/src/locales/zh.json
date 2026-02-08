@@ -98,7 +98,10 @@
     "demoData": "Demo 数据",
     "demoDataHint": "当前显示的是模拟数据。连接 Tauri 后端后将展示真实统计信息。",
     "noDataYet": "暂无使用数据。启动 Claude Code 开始记录。",
-    "failedToLoad": "加载分析数据失败"
+    "failedToLoad": "加载分析数据失败",
+    "legendLow": "少量",
+    "legendHigh": "大量",
+    "achievedAt": "达成于 {date}"
   },
   "skills": {
     "subtitle": "管理 Claude Code 技能扩展",

@@ -98,7 +98,10 @@
     "demoData": "Demo Data",
     "demoDataHint": "Currently showing simulated data. Real statistics will be displayed after connecting to the Tauri backend.",
     "noDataYet": "No usage data yet. Launch Claude Code to start tracking.",
-    "failedToLoad": "Failed to load analytics data"
+    "failedToLoad": "Failed to load analytics data",
+    "legendLow": "Low",
+    "legendHigh": "High",
+    "achievedAt": "Achieved on {date}"
   },
   "skills": {
     "subtitle": "Manage Claude Code skill extensions",

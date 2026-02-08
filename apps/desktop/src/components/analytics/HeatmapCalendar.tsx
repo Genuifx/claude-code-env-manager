@@ -23,7 +23,7 @@ function formatTokens(tokens: number): string {
 }
 
 export function HeatmapCalendar({ activities }: HeatmapCalendarProps) {
-  const { lang } = useLocale();
+  const { lang, t } = useLocale();
   const dateLocale = lang === 'zh' ? 'zh-CN' : 'en-US';
 
   const formatTooltip = (activity: DailyActivity): string => {
@@ -85,7 +85,7 @@ export function HeatmapCalendar({ activities }: HeatmapCalendarProps) {
   return (
     <div className="heatmap-enter space-y-4">
       {/* Month Labels */}
-      <div className="flex gap-1 text-xs text-slate-600 dark:text-slate-400 pl-12 relative" style={{ height: '16px' }}>
+      <div className="flex gap-1 text-xs text-muted-foreground pl-12 relative" style={{ height: '16px' }}>
         {monthLabels.map(({ label, weekIndex }, i) => (
           <div
             key={i}
@@ -100,7 +100,7 @@ export function HeatmapCalendar({ activities }: HeatmapCalendarProps) {
       {/* Calendar Grid */}
       <div className="flex gap-1">
         {/* Day Labels — all 7 days (Mon through Sun) */}
-        <div className="flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-400 w-10 shrink-0">
+        <div className="flex flex-col gap-1 text-xs text-muted-foreground w-10 shrink-0">
           {DAY_LABELS.map((label) => (
             <div key={label} className="h-3 flex items-center">
               {label}
@@ -132,8 +132,8 @@ export function HeatmapCalendar({ activities }: HeatmapCalendarProps) {
       </div>
 
       {/* Legend */}
-      <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
-        <span>少量</span>
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <span>{t('analytics.legendLow')}</span>
         {[0, 1, 2, 3, 4].map((level) => (
           <div
             key={level}
@@ -142,7 +142,7 @@ export function HeatmapCalendar({ activities }: HeatmapCalendarProps) {
             }`}
           />
         ))}
-        <span>大量</span>
+        <span>{t('analytics.legendHigh')}</span>
       </div>
     </div>
   );

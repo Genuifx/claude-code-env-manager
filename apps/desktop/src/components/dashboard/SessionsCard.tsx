@@ -5,6 +5,7 @@ import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useSessionUpdatedEvent, type SessionUpdatePayload } from '@/hooks/useTauriEvents';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { useLocale } from '@/locales';
 
 interface SessionsCardProps {
   onStopAll?: () => void;
@@ -13,6 +14,7 @@ interface SessionsCardProps {
 export function SessionsCard({ onStopAll }: SessionsCardProps) {
   const { sessions, updateSessionStatus } = useAppStore();
   const { loadSessions, deleteSession, focusSession, closeSession, minimizeSession } = useTauriCommands();
+  const { t } = useLocale();
 
   // Load sessions on mount
   useEffect(() => {
@@ -73,9 +75,9 @@ export function SessionsCard({ onStopAll }: SessionsCardProps) {
   const runningSessions = sessions.filter((s) => s.status === 'running');
 
   return (
-    <div className="relative bg-white dark:bg-slate-800/50 rounded-2xl border border-slate-200/50 dark:border-slate-700/50 p-6 overflow-hidden">
+    <div className="relative bg-card rounded-2xl border border-border p-6 overflow-hidden">
       {/* Background decoration */}
-      <div className="absolute bottom-0 left-0 w-32 h-32 bg-gradient-to-tr from-blue-500/10 to-indigo-500/10 rounded-full blur-2xl translate-y-1/2 -translate-x-1/2" />
+      <div className="absolute bottom-0 left-0 w-32 h-32 bg-gradient-to-tr from-chart-3/10 to-chart-4/10 rounded-full blur-2xl translate-y-1/2 -translate-x-1/2" />
 
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
@@ -83,11 +85,11 @@ export function SessionsCard({ onStopAll }: SessionsCardProps) {
           <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
             <Terminal className="w-4 h-4 text-primary" />
           </div>
-          <h3 className="font-semibold text-slate-900 dark:text-white">活跃会话</h3>
+          <h3 className="font-semibold text-foreground">{t('dashboard.runningSessions')}</h3>
         </div>
         {runningSessions.length > 0 && (
-          <span className="text-xs font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 px-2.5 py-1 rounded-full">
-            {runningSessions.length} 运行中
+          <span className="text-xs font-medium bg-primary/10 text-primary px-2.5 py-1 rounded-full">
+            {runningSessions.length} {t('dashboard.sessionsRunning')}
           </span>
         )}
       </div>
@@ -95,11 +97,11 @@ export function SessionsCard({ onStopAll }: SessionsCardProps) {
       {/* Sessions list */}
       {sessions.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-8 text-center">
-          <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center mb-3">
+          <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center mb-3">
             <Moon className="w-5 h-5 text-muted-foreground/50" />
           </div>
-          <p className="text-sm text-slate-500 dark:text-slate-400">暂无活跃会话</p>
-          <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">启动 Claude Code 后会显示在这里</p>
+          <p className="text-sm text-muted-foreground">{t('sessions.noActiveSessions')}</p>
+          <p className="text-xs text-muted-foreground/70 mt-1">{t('sessions.detectionNote')}</p>
         </div>
       ) : (
         <div className="space-y-2 max-h-[200px] overflow-y-auto">
@@ -120,10 +122,10 @@ export function SessionsCard({ onStopAll }: SessionsCardProps) {
       {runningSessions.length > 0 && (
         <Button
           variant="outline"
-          className="w-full mt-4 border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20"
+          className="w-full mt-4 border-destructive/30 text-destructive hover:bg-destructive/10"
           onClick={handleStopAll}
         >
-          一键停止全部
+          {t('sessions.closeAll')}
         </Button>
       )}
     </div>
@@ -145,11 +147,11 @@ function SessionItem({ session, onFocus, onMinimize, onClose, onRemove }: Sessio
   });
 
   const statusConfig = {
-    running: { color: 'bg-emerald-400', label: '运行中' },
-    idle: { color: 'bg-amber-400', label: '空闲' },
-    stopped: { color: 'bg-slate-400', label: '已停止' },
-    interrupted: { color: 'bg-amber-400', label: '已中断' },
-    error: { color: 'bg-rose-400', label: '错误' },
+    running: { color: 'bg-primary', label: 'Running' },
+    idle: { color: 'bg-chart-5', label: 'Idle' },
+    stopped: { color: 'bg-muted-foreground', label: 'Stopped' },
+    interrupted: { color: 'bg-chart-5', label: 'Interrupted' },
+    error: { color: 'bg-destructive', label: 'Error' },
   };
 
   const status = statusConfig[session.status] || statusConfig.stopped;
@@ -158,7 +160,7 @@ function SessionItem({ session, onFocus, onMinimize, onClose, onRemove }: Sessio
   const workingDirName = session.workingDir.split('/').pop() || session.workingDir;
 
   return (
-    <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700/50 hover:border-slate-200 dark:hover:border-slate-600 transition-colors group">
+    <div className="flex items-center justify-between p-3 bg-muted/50 rounded-xl border border-border/50 hover:border-border transition-colors group">
       <div className="flex items-center gap-3 min-w-0 flex-1">
         <div className={cn(
           'w-2 h-2 rounded-full flex-shrink-0',
@@ -166,10 +168,10 @@ function SessionItem({ session, onFocus, onMinimize, onClose, onRemove }: Sessio
           session.status === 'running' && 'animate-pulse'
         )} />
         <div className="min-w-0 flex-1">
-          <div className="font-medium text-sm text-slate-900 dark:text-white truncate">
+          <div className="font-medium text-sm text-foreground truncate">
             {session.envName}
           </div>
-          <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
+          <div className="text-xs text-muted-foreground truncate">
             {startTime} · {workingDirName}
           </div>
         </div>
@@ -180,39 +182,39 @@ function SessionItem({ session, onFocus, onMinimize, onClose, onRemove }: Sessio
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 px-2 text-xs text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+              className="h-7 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
               onClick={onFocus}
-              title="聚焦窗口"
+              title="Focus"
             >
-              聚焦
+              Focus
             </Button>
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 px-2 text-xs text-slate-500 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700"
+              className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted"
               onClick={onMinimize}
-              title="最小化"
+              title="Minimize"
             >
-              最小化
+              Min
             </Button>
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 px-2 text-xs text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20"
+              className="h-7 px-2 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
               onClick={onClose}
-              title="关闭会话"
+              title="Close"
             >
-              关闭
+              Close
             </Button>
           </>
         ) : (
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 px-2 text-xs text-slate-500 hover:text-slate-600"
+            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
             onClick={onRemove}
           >
-            移除
+            Remove
           </Button>
         )}
       </div>
