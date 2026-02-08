@@ -1,5 +1,6 @@
 // apps/desktop/src/components/analytics/HeatmapCalendar.tsx
 import type { DailyActivity } from '@/types/analytics';
+import { useLocale } from '@/locales';
 
 interface HeatmapCalendarProps {
   activities: DailyActivity[];
@@ -15,7 +16,26 @@ const LEVEL_COLORS = {
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+function formatTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}K`;
+  return tokens.toString();
+}
+
 export function HeatmapCalendar({ activities }: HeatmapCalendarProps) {
+  const { lang } = useLocale();
+  const dateLocale = lang === 'zh' ? 'zh-CN' : 'en-US';
+
+  const formatTooltip = (activity: DailyActivity): string => {
+    const date = new Date(activity.date).toLocaleDateString(dateLocale, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+    const tokens = formatTokens(activity.tokens);
+    const cost = `$${activity.cost.toFixed(2)}`;
+    return `${date} — ${tokens} tokens — ${cost}`;
+  };
   // Bug #25 fix: Group by actual weeks (columns) aligned to weekday (rows)
   // Each column = one week, each row = a day of the week (Mon-Sun)
   const weeks: (DailyActivity | null)[][] = [];
@@ -54,7 +74,7 @@ export function HeatmapCalendar({ activities }: HeatmapCalendarProps) {
     // Find the first non-null activity in this week
     const firstActivity = week.find((a) => a !== null);
     if (firstActivity) {
-      const month = new Date(firstActivity.date).toLocaleDateString('zh-CN', { month: 'short' });
+      const month = new Date(firstActivity.date).toLocaleDateString(dateLocale, { month: 'short' });
       if (month !== lastMonth) {
         monthLabels.push({ label: month, weekIndex });
         lastMonth = month;
@@ -63,7 +83,7 @@ export function HeatmapCalendar({ activities }: HeatmapCalendarProps) {
   });
 
   return (
-    <div className="page-transition-enter space-y-4">
+    <div className="heatmap-enter space-y-4">
       {/* Month Labels */}
       <div className="flex gap-1 text-xs text-slate-600 dark:text-slate-400 pl-12 relative" style={{ height: '16px' }}>
         {monthLabels.map(({ label, weekIndex }, i) => (
@@ -98,8 +118,8 @@ export function HeatmapCalendar({ activities }: HeatmapCalendarProps) {
                     key={activity.date}
                     className={`w-3 h-3 rounded-sm ${
                       LEVEL_COLORS[activity.level]
-                    } hover:ring-2 hover:ring-slate-400 dark:hover:ring-slate-500 cursor-pointer transition-all`}
-                    title={`${activity.date}: ${activity.tokens.toLocaleString()} tokens, $${activity.cost.toFixed(3)}`}
+                    } hover:brightness-110 hover:ring-2 hover:ring-primary/40 cursor-pointer transition-[filter,box-shadow] duration-150`}
+                    title={formatTooltip(activity)}
                   />
                 ) : (
                   // Invisible spacer for null padding cells
