@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/card';
 import { ProjectList } from '@/components/projects';
 import { useAppStore } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
+import { useCountUp } from '@/hooks/useCountUp';
 import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { useLocale } from '../locales';
@@ -72,6 +73,15 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
     }
   };
 
+  // Compute raw stat values before skeleton check so useCountUp hooks can be called unconditionally
+  const todayTokensRaw = (usageStats?.today.inputTokens ?? 0) + (usageStats?.today.outputTokens ?? 0);
+  const todayCostRaw = usageStats?.today.cost ?? 0;
+
+  // Count-up animation for stat card values (hooks must be called before conditional returns)
+  const animatedSessions = useCountUp(sessions.length);
+  const animatedTokens = useCountUp(todayTokensRaw);
+  const animatedCostCents = useCountUp(Math.round(todayCostRaw * 100));
+
   const handleLaunchClick = useCallback(() => {
     if (selectedWorkingDir) {
       onLaunchWithDir(selectedWorkingDir);
@@ -98,9 +108,6 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
   if (isLoadingEnvs || isLoadingStats) {
     return <DashboardSkeleton />;
   }
-
-  const todayTokensRaw = (usageStats?.today.inputTokens ?? 0) + (usageStats?.today.outputTokens ?? 0);
-  const todayCostRaw = usageStats?.today.cost ?? 0;
 
   return (
     <div className="page-transition-enter space-y-5">
@@ -198,7 +205,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
             {t('dashboard.runningSessions')}
           </div>
           <div className="text-2xl font-bold text-foreground">
-            {sessions.length}
+            {animatedSessions}
             <AmberDot value={sessions.length} hasLaunched={hasLaunched} />
           </div>
         </Card>
@@ -211,7 +218,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
             {t('dashboard.todayTokens')}
           </div>
           <div className="text-2xl font-bold text-foreground">
-            {(todayTokensRaw / 1000).toFixed(1)}K
+            {(animatedTokens / 1000).toFixed(1)}K
             <AmberDot value={todayTokensRaw} hasLaunched={hasLaunched} />
           </div>
         </Card>
@@ -224,7 +231,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
             {t('dashboard.todayCost')}
           </div>
           <div className="text-2xl font-bold text-foreground">
-            ${todayCostRaw.toFixed(2)}
+            ${(animatedCostCents / 100).toFixed(2)}
             <AmberDot value={todayCostRaw} hasLaunched={hasLaunched} />
           </div>
         </Card>
