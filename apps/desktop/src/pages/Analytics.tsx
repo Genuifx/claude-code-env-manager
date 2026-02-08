@@ -270,8 +270,8 @@ export function Analytics() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="p-6">
+      <div className="grid grid-cols-3 gap-4">
+        <Card className="p-4">
           <div className="flex items-start justify-between mb-2">
             <div className="text-sm text-muted-foreground">
               {t('analytics.tokenThisWeek')}
@@ -293,7 +293,7 @@ export function Analytics() {
               <div className="text-xs text-muted-foreground">&mdash;</div>
             )}
           </div>
-          <div className="text-3xl font-bold text-foreground mb-1">
+          <div className="text-2xl font-bold text-foreground mb-1">
             {((usageStats.week.inputTokens + usageStats.week.outputTokens) / 1000).toFixed(1)}K
           </div>
           <div className="text-xs text-muted-foreground">
@@ -301,7 +301,7 @@ export function Analytics() {
           </div>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-4">
           <div className="flex items-start justify-between mb-2">
             <div className="text-sm text-muted-foreground">
               {t('analytics.costThisWeek')}
@@ -323,7 +323,7 @@ export function Analytics() {
               <div className="text-xs text-muted-foreground">&mdash;</div>
             )}
           </div>
-          <div className="text-3xl font-bold text-foreground mb-1">
+          <div className="text-2xl font-bold text-foreground mb-1">
             ${usageStats.week.cost.toFixed(2)}
           </div>
           <div className="text-xs text-muted-foreground">
@@ -331,18 +331,18 @@ export function Analytics() {
           </div>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-4">
           <div className="text-sm text-muted-foreground mb-2">
             {t('analytics.streak')}
           </div>
-          <div className="text-3xl font-bold text-foreground mb-1">
+          <div className="text-2xl font-bold text-foreground mb-1">
             {continuousUsageDays} {t('analytics.days')}
           </div>
         </Card>
       </div>
 
       {/* Token Consumption Chart */}
-      <Card className="p-6">
+      <Card className="p-4">
         <h3 className="text-lg font-semibold text-foreground mb-4">
           {t('analytics.tokenDistribution')}
         </h3>
@@ -354,30 +354,33 @@ export function Analytics() {
         />
       </Card>
 
-      {/* Model Distribution */}
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold text-foreground mb-4">
-          {t('analytics.modelDistribution')}
-        </h3>
-        <ModelDistribution byModel={usageStats.byModel} />
-      </Card>
+      {/* Model Distribution + Activity Heatmap side-by-side */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Card className="p-4">
+          <h3 className="text-lg font-semibold text-foreground mb-4">
+            {t('analytics.modelDistribution')}
+          </h3>
+          <ModelDistribution byModel={usageStats.byModel} />
+        </Card>
 
-      {/* Activity Heatmap */}
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold text-foreground mb-4">
-          {t('analytics.heatmap')}
-        </h3>
-        <HeatmapCalendar activities={dailyActivities} />
-      </Card>
+        <Card className="p-4">
+          <h3 className="text-lg font-semibold text-foreground mb-4">
+            {t('analytics.heatmap')}
+          </h3>
+          <HeatmapCalendar activities={dailyActivities} />
+        </Card>
+      </div>
 
       {/* Milestones */}
       <div>
         <h3 className="text-lg font-semibold text-foreground mb-4">
           {t('analytics.milestones')}
         </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="flex gap-3 overflow-x-auto">
           {milestones.map((milestone) => (
-            <MilestoneCard key={milestone.id} milestone={milestone} />
+            <div key={milestone.id} className="min-w-[200px] flex-shrink-0">
+              <MilestoneCard milestone={milestone} />
+            </div>
           ))}
         </div>
       </div>
