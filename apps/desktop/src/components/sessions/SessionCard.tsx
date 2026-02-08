@@ -12,20 +12,18 @@ interface SessionCardProps {
 }
 
 export function SessionCard({ session, onFocus, onMinimize, onClose }: SessionCardProps) {
-  const getStatusIcon = (status: Session['status']) => {
+  const getStatusDot = (status: Session['status']) => {
     switch (status) {
       case 'running':
-        return '🟢';
-      case 'stopped':
-        return '⚫';
-      case 'idle':
-        return '🟡';
-      case 'interrupted':
-        return '⚠️';
+        return <span className="inline-block w-2 h-2 rounded-full bg-success status-running" />;
       case 'error':
-        return '🔴';
+        return <span className="inline-block w-2 h-2 rounded-full bg-destructive status-error" />;
+      case 'interrupted':
+        return <span className="inline-block w-2 h-2 rounded-full bg-destructive status-error" />;
+      case 'idle':
+      case 'stopped':
       default:
-        return '⚫';
+        return <span className="inline-block w-2 h-2 rounded-full bg-muted-foreground/40" />;
     }
   };
 
@@ -50,16 +48,16 @@ export function SessionCard({ session, onFocus, onMinimize, onClose }: SessionCa
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-lg">{getStatusIcon(session.status)}</span>
+            {getStatusDot(session.status)}
             <h3 className="font-semibold text-slate-900 dark:text-white">
               {getProjectName(session.workingDir)}
             </h3>
           </div>
           <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
-            <span className="px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+            <span className="bg-muted rounded-md px-2 py-0.5 text-xs font-medium">
               {session.envName}
             </span>
-            <span className="px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300">
+            <span className="bg-muted rounded-md px-2 py-0.5 text-xs font-medium">
               {session.permMode}
             </span>
           </div>

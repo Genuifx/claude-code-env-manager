@@ -62,7 +62,7 @@ function EnvCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardPro
       className={cn(
         'group relative p-5 rounded-2xl border transition-all duration-200 cursor-pointer',
         isActive
-          ? 'bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 border-emerald-200 dark:border-emerald-800 shadow-lg shadow-emerald-500/10'
+          ? 'ring-1 ring-primary/40 border-primary/40 bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 shadow-lg shadow-emerald-500/10'
           : 'bg-white dark:bg-slate-800/50 border-slate-200/50 dark:border-slate-700/50 hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-md'
       )}
       onClick={onSelect}
