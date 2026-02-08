@@ -17,6 +17,7 @@ import {
 } from '@/lib/mockAnalytics';
 import { useLocale } from '../locales';
 import { AnalyticsSkeleton } from '@/components/ui/skeleton-states';
+import { useCountUp } from '@/hooks/useCountUp';
 import type { ChartDataPoint, DailyActivity, UsageStats } from '@/types/analytics';
 
 type TimeGranularity = 'hour' | 'day' | 'week' | 'month';
@@ -111,6 +112,15 @@ export function Analytics() {
   useEffect(() => {
     localStorage.setItem('ccem-ftue-analytics-seen', 'true');
   }, []);
+
+  // Count-up animation for stat card values (hooks must be called before conditional returns)
+  const weeklyTokensRaw = usageStats ? (usageStats.week.inputTokens + usageStats.week.outputTokens) : 0;
+  const weeklyCostRaw = usageStats?.week.cost ?? 0;
+  const streakDays = continuousUsageDays ?? 0;
+
+  const animatedWeeklyTokens = useCountUp(weeklyTokensRaw);
+  const animatedWeeklyCostCents = useCountUp(Math.round(weeklyCostRaw * 100));
+  const animatedStreakDays = useCountUp(streakDays);
 
   // ALL hooks must be called before any early return (Rules of Hooks)
   // Build chart data based on granularity — uses real input/output token breakdown
@@ -313,7 +323,7 @@ export function Analytics() {
             )}
           </div>
           <div className="text-2xl font-bold text-foreground mb-1">
-            {((usageStats.week.inputTokens + usageStats.week.outputTokens) / 1000).toFixed(1)}K
+            {(animatedWeeklyTokens / 1000).toFixed(1)}K
           </div>
           <div className="text-xs text-muted-foreground">
             {t('analytics.vsLastWeek')}
@@ -343,7 +353,7 @@ export function Analytics() {
             )}
           </div>
           <div className="text-2xl font-bold text-foreground mb-1">
-            ${usageStats.week.cost.toFixed(2)}
+            ${(animatedWeeklyCostCents / 100).toFixed(2)}
           </div>
           <div className="text-xs text-muted-foreground">
             {t('analytics.vsLastWeek')}
@@ -355,7 +365,7 @@ export function Analytics() {
             {t('analytics.streak')}
           </div>
           <div className="text-2xl font-bold text-foreground mb-1">
-            {continuousUsageDays} {t('analytics.days')}
+            {animatedStreakDays} {t('analytics.days')}
           </div>
         </Card>
       </div>
