@@ -101,12 +101,12 @@ export function TokenChart({ data, environments, granularity, onGranularityChang
       {/* Chart */}
       <ResponsiveContainer width="100%" height={300}>
         <Chart data={data}>
-          <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+          <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
           <XAxis
             dataKey="date"
-            className="text-xs text-slate-600 dark:text-slate-400"
+            className="text-xs text-muted-foreground"
           />
-          <YAxis className="text-xs text-slate-600 dark:text-slate-400" />
+          <YAxis className="text-xs text-muted-foreground" />
           <Tooltip
             contentStyle={{
               backgroundColor: 'rgba(255, 255, 255, 0.95)',

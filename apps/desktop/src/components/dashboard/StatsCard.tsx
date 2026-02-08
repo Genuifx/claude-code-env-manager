@@ -10,19 +10,19 @@ interface StatsCardProps {
 }
 
 const accentColors = {
-  emerald: 'from-emerald-400 to-teal-500',
-  blue: 'from-blue-400 to-indigo-500',
-  amber: 'from-amber-400 to-orange-500',
-  rose: 'from-rose-400 to-pink-500',
-  violet: 'from-violet-400 to-purple-500',
+  emerald: 'from-chart-1 to-chart-2',
+  blue: 'from-chart-3 to-chart-4',
+  amber: 'from-primary to-chart-5',
+  rose: 'from-destructive to-chart-5',
+  violet: 'from-chart-4 to-chart-3',
 };
 
 const accentBg = {
-  emerald: 'bg-emerald-500/10',
-  blue: 'bg-blue-500/10',
-  amber: 'bg-amber-500/10',
-  rose: 'bg-rose-500/10',
-  violet: 'bg-violet-500/10',
+  emerald: 'bg-chart-1/10',
+  blue: 'bg-chart-3/10',
+  amber: 'bg-primary/10',
+  rose: 'bg-destructive/10',
+  violet: 'bg-chart-4/10',
 };
 
 export function StatsCard({
@@ -34,7 +34,7 @@ export function StatsCard({
   accentColor = 'emerald'
 }: StatsCardProps) {
   return (
-    <div className="group relative bg-white dark:bg-slate-800/50 rounded-2xl border border-slate-200/50 dark:border-slate-700/50 p-5 hover:shadow-xl hover:shadow-slate-200/50 dark:hover:shadow-slate-900/50 transition-all duration-300 hover:-translate-y-0.5 overflow-hidden">
+    <div className="group relative bg-card rounded-2xl border border-border p-5 hover:shadow-xl hover:shadow-foreground/5 transition-all duration-300 hover:-translate-y-0.5 overflow-hidden">
       {/* Gradient accent line */}
       <div className={cn(
         'absolute top-0 left-0 right-0 h-1 bg-gradient-to-r opacity-0 group-hover:opacity-100 transition-opacity',
@@ -50,12 +50,12 @@ export function StatsCard({
       </div>
 
       {/* Value */}
-      <div className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
+      <div className="text-2xl font-bold text-foreground tracking-tight">
         {value}
       </div>
 
       {/* Label */}
-      <div className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+      <div className="text-sm text-muted-foreground mt-0.5">
         {label}
       </div>
 
@@ -63,9 +63,9 @@ export function StatsCard({
       {sublabel && (
         <div className={cn(
           'text-xs mt-2 font-medium',
-          trend === 'up' && 'text-emerald-500',
-          trend === 'down' && 'text-rose-500',
-          trend === 'neutral' && 'text-slate-400'
+          trend === 'up' && 'text-primary',
+          trend === 'down' && 'text-destructive',
+          trend === 'neutral' && 'text-muted-foreground'
         )}>
           {trend === 'up' && '↑ '}
           {trend === 'down' && '↓ '}
