@@ -4,107 +4,112 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Claude Code Environment Manager (ccem) is a CLI tool for managing multiple API configurations for Claude Code. It allows switching between different model providers (official Anthropic, GLM, Kimi, MiniMax, DeepSeek) with encrypted API key storage. It also provides permission mode shortcuts for quickly configuring Claude Code's permissions.
+Claude Code Environment Manager (ccem) — a monorepo containing a CLI tool and a Tauri desktop app for managing multiple API configurations for Claude Code. Supports switching between model providers (Anthropic, GLM, Kimi, MiniMax, DeepSeek) with encrypted API key storage, permission mode shortcuts, usage analytics, and skill management.
+
+## Monorepo Structure
+
+```
+apps/cli/          # CLI tool (ccem) — commander + inquirer + ink
+apps/desktop/      # Tauri 2.0 desktop app — React + Rust
+packages/core/     # Shared logic — presets, types, encryption (used by both)
+docs/plans/        # Design documents
+```
+
+Managed with pnpm workspaces (`pnpm-workspace.yaml`).
 
 ## Commands
 
 ```bash
-# Build (ESM output to dist/)
-pnpm run build
+# Monorepo-wide
+pnpm run build          # Build all packages and apps
+pnpm run dev            # Dev mode for all (parallel)
+pnpm test               # Run all tests (vitest)
 
-# Watch mode for development
-pnpm run dev
+# Core package (must build before desktop dev)
+pnpm --filter @ccem/core build
 
-# Run locally
-pnpm run start
-node dist/index.js
+# CLI only
+pnpm --filter @ccem/cli build
+pnpm --filter @ccem/cli dev
+pnpm --filter @ccem/cli test
+pnpm --filter @ccem/cli test -- --run src/__tests__/usage.test.ts  # single test file
+
+# Desktop app
+cd apps/desktop && pnpm tauri dev    # Start Tauri dev (Vite + Rust cargo)
+cd apps/desktop && pnpm tauri build  # Production build (dmg/app)
 ```
+
+**Important**: The desktop app imports `@ccem/core/browser`. If you get "Failed to resolve import @ccem/core/browser", run `pnpm --filter @ccem/core build` first.
 
 ## Architecture
 
-ESM-based modular CLI application using:
-- **commander** - CLI command parsing
-- **conf** - Persistent JSON config storage (stored in OS config directory)
-- **inquirer** - Interactive prompts
-- **ink/react** - Terminal UI components (Tab selector for skill groups)
-- **chalk/cli-table3** - Terminal formatting
+### Core Package (`@ccem/core`)
 
-### Source Files
+Two entry points — Node.js (`index.js`) and browser-safe (`browser.js`, no Node crypto):
+- `ENV_PRESETS` / `PERMISSION_PRESETS` — built-in configurations
+- Encryption utilities (AES-256-CBC, obfuscation-level)
+- Shared TypeScript types
+- Desktop app imports via `@ccem/core/browser`; CLI imports via `@ccem/core`
 
-```
-src/
-├── index.ts           # Main entry, CLI commands
-├── types.ts           # TypeScript type definitions
-├── utils.ts           # Utility functions (encryption, project root detection)
-├── presets.ts         # Environment presets and permission presets
-├── permissions.ts     # Permission management core logic
-├── ui.ts              # UI components (menus, panels, formatting)
-├── usage.ts           # Usage statistics tracking and cost calculation
-├── setup.ts           # Claude Code initialization (onboarding, privacy, MCP tools)
-├── skills.ts          # Skill management (presets, install methods, GitHub download)
-└── components/
-    ├── index.tsx      # Ink render entry point (runSkillSelector)
-    └── SkillSelector.tsx  # Tab-based skill group selector component
-```
+### CLI App (`apps/cli`)
 
-### Key Components
+ESM-based, built with tsup. Key libraries:
+- **commander** — CLI command parsing
+- **conf** — Persistent JSON config (OS config directory)
+- **inquirer** — Interactive prompts
+- **ink/react** — Terminal UI (SkillSelector tab component)
 
-- **Config storage**: Uses `conf` package with project name `claude-code-env-manager`. Stores registries (environments) and current selection.
-- **Encryption**: API keys encrypted with AES-256-CBC before storage (obfuscation, not secure storage - key is derived from hardcoded secret).
-- **Environment Presets**: Built-in configurations for GLM, KIMI, MiniMax, DeepSeek defined in `ENV_PRESETS`.
-- **Permission Presets**: Built-in permission modes (yolo, dev, readonly, safe, ci, audit) defined in `PERMISSION_PRESETS`.
-- **Skill Groups**: Three categories (official, featured, others) with different install methods:
-  - `preset`: Official anthropics/skills via git sparse-checkout
-  - `github`: Direct GitHub URL installation
-  - `plugin`: Claude Plugin Marketplace installation
-- **Usage Statistics**: Parses Claude's JSONL logs from `~/.claude/projects/` to track token usage and costs. Uses incremental caching in `~/.ccem/usage-cache.json`. Prices fetched from LiteLLM with local fallback.
-- **Environment variables managed**: `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`
+Config stored via `conf` package with project name `claude-code-env-manager`. API keys encrypted with AES-256-CBC before storage. Config migrated to `~/.ccem/` path.
 
-### CLI Commands
+CLI detects TTY vs piped output (`process.stdout.isTTY`): TTY shows tables/colors, piped outputs raw export commands for `eval $(ccem env)`.
 
-#### Environment Management
-- `ccem` (no args) - Interactive menu loop
-- `ccem ls` - List environments
-- `ccem use <name>` - Switch environment
-- `ccem add <name>` - Add new environment (with preset selection)
-- `ccem del <name>` - Delete environment (cannot delete 'official')
-- `ccem current` - Show current environment name
-- `ccem env [--json]` - Output export commands for shell eval
-- `ccem run <command...>` - Run command with environment variables injected
+### Desktop App (`apps/desktop`)
 
-#### Permission Management (Temporary Mode)
-- `ccem yolo` - Apply YOLO mode temporarily, auto-restore on exit
-- `ccem dev` - Apply dev mode temporarily
-- `ccem readonly` - Apply readonly mode temporarily
-- `ccem safe` - Apply safe mode temporarily
-- `ccem ci` - Apply CI/CD mode temporarily
-- `ccem audit` - Apply audit mode temporarily
-- `ccem --mode` - Show current permission mode
-- `ccem --list-modes` - List all available permission modes
+**Frontend** (React 18 + TypeScript):
+- **Vite** dev server on port 1420
+- **Tailwind CSS** with CSS custom properties (HSL format) for theming — "Volcanic Amber" design system
+- **Zustand** store (`src/store/index.ts`) — single store for environments, sessions, permissions, analytics, projects, plus per-domain loading flags (`isLoadingEnvs`, `isLoadingSessions`, `isLoadingStats`, `isLoadingSkills`, `isLoadingSettings`)
+- **shadcn/ui pattern** — Radix UI primitives + `cva` (class-variance-authority) in `src/components/ui/`
+- **Lucide React** — all icons (no emoji in UI)
+- **Recharts** — token usage charts
+- **sonner** — toast notifications
+- Layout: AppShell pattern with `SideRail` (64px vertical nav) + `PageHeader` (48px sticky) + scrolling main content
+- Pages: Dashboard, Sessions, Environments, Analytics, Skills, Settings
 
-#### Permission Management (Permanent Mode)
-- `ccem setup perms --yolo` - Permanently apply YOLO mode
-- `ccem setup perms --dev` - Permanently apply dev mode
-- `ccem setup perms --readonly` - Permanently apply readonly mode
-- `ccem setup perms --safe` - Permanently apply safe mode
-- `ccem setup perms --ci` - Permanently apply CI/CD mode
-- `ccem setup perms --audit` - Permanently apply audit mode
-- `ccem setup perms --reset` - Reset permission configuration
+**Frontend data flow**: `App.tsx` → `useTauriCommands` hook → `invoke()` (Tauri IPC) → Rust backend. The hook maps Rust snake_case responses to TypeScript camelCase and updates the Zustand store.
 
-#### Default Mode Settings
-- `ccem setup default-mode --dev` - Set default permission mode for interactive menu
-- `ccem setup default-mode --reset` - Clear default mode setting
-- `ccem setup default-mode` - Show current default mode
+**i18n**: `src/locales/index.tsx` provides `LocaleProvider` + `useLocale()` hook. Two JSON locale files (`zh.json`, `en.json`). Default language is Chinese (`zh`). Persisted in `localStorage` under key `ccem-locale`. All user-facing strings use `t('namespace.key')` — never hardcode Chinese or English in components.
 
-#### Skill Management
-- `ccem skill add` - Interactive Tab-based skill selector (Tab to switch groups, arrows to select)
-- `ccem skill add <name>` - Add skill by preset name
-- `ccem skill add <github-url>` - Add skill from GitHub URL
-- `ccem skill ls` - List installed skills
-- `ccem skill rm <name>` - Remove installed skill
+**Custom Hooks** (`src/hooks/`):
+- `useTauriCommands` — wraps all Tauri `invoke()` calls with snake_case→camelCase mapping
+- `useTauriEvents` — Tauri event listeners for backend→frontend communication
+- `useCountUp` — number count-up animation with requestAnimationFrame + decelerate easing
+- `useKeyboardShortcuts` — registers keyboard shortcuts from a `Record<string, () => void>` map
 
-#### Setup & Initialization
-- `ccem setup init` - Initialize Claude Code (sets onboarding, disables telemetry, installs chrome-devtools MCP)
+**UI State Patterns**:
+- **Skeleton loading**: Per-domain skeleton components in `src/components/ui/skeleton-states.tsx` (never spinners). Each page checks its own `isLoading*` flag from Zustand.
+- **Empty states**: Shared `EmptyState` component (muted icon + text + optional action) in `src/components/ui/EmptyState.tsx`
+- **Error states**: Shared `ErrorBanner` component (inline `bg-destructive/10` banner with retry, `role="alert"`)
+- **FTUE**: localStorage flags (`ccem-ftue-launched`, `ccem-ftue-envs-added`, `ccem-ftue-analytics-seen`) drive amber dots and ghost cards for first-time users
+
+**Keyboard Shortcuts**: Global shortcuts in `App.tsx` (Cmd+1–6 for tabs, Cmd+Enter/N for launch, Cmd+, for settings). Page-specific shortcuts added via `useKeyboardShortcuts` in individual pages.
+
+**Backend** (Rust, `src-tauri/`):
+- `main.rs` — Tauri command handlers (`#[tauri::command]` functions)
+- `config.rs` — reads/writes CLI's `conf` JSON config directly (shared config with CLI)
+- `crypto.rs` — AES-256-CBC matching CLI's encryption
+- `session.rs` — session lifecycle management
+- `analytics.rs` — parses Claude's JSONL logs from `~/.claude/projects/`, incremental caching in `~/.ccem/usage-cache.json`
+- `tray.rs` — system tray with environment/permission menus
+- `terminal.rs` — terminal detection (iTerm2/Terminal.app)
+- Uses `tauri-plugin-shell` for launching Claude Code and `tauri-plugin-mcp-bridge` for MCP tool connectivity
+
+**Key Tauri commands** (invoked from frontend via `invoke()`):
+`get_environments`, `set_current_env`, `add_environment`, `delete_environment`, `launch_claude_code`, `get_sessions`, `get_usage_stats`, `get_continuous_usage_days`, `get_app_config`, `save_settings`
+
+### Environment Variables Managed
+
+`ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`
 
 ### Permission Modes
 
@@ -117,8 +122,15 @@ src/
 | ci | Permissions suitable for CI/CD pipelines |
 | audit | Read and search only for security analysis |
 
-### Output Modes
+## Design System (Desktop)
 
-The CLI detects TTY vs piped output (`process.stdout.isTTY`) to adjust behavior:
-- TTY: Shows tables and colored output
-- Piped: Outputs raw export commands for `eval $(ccem env)`
+The desktop app uses a custom "Volcanic Amber" theme with CSS custom properties in `src/index.css`:
+- Primary color: `#E5922E` (amber)
+- Neutrals: warm brown-gray scale
+- Semantic tokens: `--surface-raised`, `--surface-overlay`, `--sidebar-*`, `--chart-1` through `--chart-5`
+- Motion tokens: `--duration-instant` (80ms) through `--duration-extended` (800ms)
+- Fonts: Inter (UI) + JetBrains Mono (code) via Google Fonts
+- All colors defined as HSL in `:root` and `.dark` blocks, consumed via Tailwind config extensions
+- `prefers-reduced-motion` media query disables all animations globally
+
+When adding new UI components, use the existing color tokens (`text-primary`, `bg-surface-raised`, etc.) rather than hardcoded Tailwind colors like `text-emerald-600`. Use Lucide icons, not emoji. Use `t()` for all strings, not hardcoded text.
