@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useLocale } from '@/locales';
+import { getProjectName, truncatePath, formatRelativeTime } from '@/lib/utils';
 
 interface ProjectListProps {
   onLaunch: (workingDir: string) => void;
@@ -18,42 +19,6 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
     syncJetBrainsProjects
   } = useTauriCommands();
   const { t } = useLocale();
-
-  // Get project name from path
-  const getProjectName = (path: string) => {
-    const parts = path.split('/');
-    return parts[parts.length - 1] || path;
-  };
-
-  // Format relative time
-  const formatRelativeTime = (dateStr: string) => {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
-
-    if (diffMins < 1) return 'just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays === 1) return 'yesterday';
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  };
-
-  // Truncate path for display
-  const truncatePath = (path: string) => {
-    const home = '/Users/';
-    if (path.startsWith(home)) {
-      const afterHome = path.substring(home.length);
-      const firstSlash = afterHome.indexOf('/');
-      if (firstSlash > 0) {
-        return '~/' + afterHome.substring(firstSlash + 1);
-      }
-    }
-    return path.length > 40 ? '...' + path.slice(-37) : path;
-  };
 
   const handleAddFavorite = async () => {
     const path = await openDirectoryPicker();
