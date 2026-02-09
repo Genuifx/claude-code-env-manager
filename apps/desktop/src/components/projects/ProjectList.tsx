@@ -1,0 +1,307 @@
+import { Star, Clock, Monitor, Brain, RefreshCw, FolderOpen } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { useAppStore } from '@/store';
+import { useTauriCommands } from '@/hooks/useTauriCommands';
+import { useLocale } from '@/locales';
+
+interface ProjectListProps {
+  onLaunch: (workingDir: string) => void;
+}
+
+export function ProjectList({ onLaunch }: ProjectListProps) {
+  const { favorites, recent, vscodeProjects, jetbrainsProjects, setSelectedWorkingDir } = useAppStore();
+  const {
+    addFavoriteProject,
+    removeFavoriteProject,
+    openDirectoryPicker,
+    syncVSCodeProjects,
+    syncJetBrainsProjects
+  } = useTauriCommands();
+  const { t } = useLocale();
+
+  // Get project name from path
+  const getProjectName = (path: string) => {
+    const parts = path.split('/');
+    return parts[parts.length - 1] || path;
+  };
+
+  // Format relative time
+  const formatRelativeTime = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays === 1) return 'yesterday';
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  };
+
+  // Truncate path for display
+  const truncatePath = (path: string) => {
+    const home = '/Users/';
+    if (path.startsWith(home)) {
+      const afterHome = path.substring(home.length);
+      const firstSlash = afterHome.indexOf('/');
+      if (firstSlash > 0) {
+        return '~/' + afterHome.substring(firstSlash + 1);
+      }
+    }
+    return path.length > 40 ? '...' + path.slice(-37) : path;
+  };
+
+  const handleAddFavorite = async () => {
+    const path = await openDirectoryPicker();
+    if (path) {
+      const name = getProjectName(path);
+      await addFavoriteProject(path, name);
+    }
+  };
+
+  const handleLaunch = (path: string) => {
+    setSelectedWorkingDir(path);
+    onLaunch(path);
+  };
+
+  const handleAddToFavorites = async (path: string) => {
+    const name = getProjectName(path);
+    await addFavoriteProject(path, name);
+  };
+
+  // Check if path is already in favorites
+  const isFavorite = (path: string) => favorites.some(f => f.path === path);
+
+  return (
+    <div className="space-y-6">
+      {/* Favorites Section */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+            <Star className="w-4 h-4 text-primary" /> {t('dashboard.recentProjects')}
+          </h3>
+          <Button variant="ghost" size="sm" onClick={handleAddFavorite}>
+            <span className="mr-1">+</span> {t('common.save')}
+          </Button>
+        </div>
+        {favorites.length === 0 ? (
+          <p className="text-sm text-muted-foreground/70 py-2">{t('sessions.noActiveSessions')}</p>
+        ) : (
+          <div className="space-y-2">
+            {favorites.map((project) => (
+              <div
+                key={project.path}
+                className="flex items-center justify-between p-3 bg-card rounded-lg border border-border hover:border-primary/40 transition-all"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <FolderOpen className="w-5 h-5 text-primary/60 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <div className="font-medium text-foreground truncate">
+                      {project.name}
+                    </div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {truncatePath(project.path)}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-primary hover:text-primary hover:bg-primary/10"
+                    onClick={() => handleLaunch(project.path)}
+                  >
+                    ▶
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                    onClick={() => removeFavoriteProject(project.path)}
+                  >
+                    ×
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Recent Section */}
+      <div>
+        <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2 mb-3">
+          <Clock className="w-4 h-4 text-muted-foreground" /> Recent
+        </h3>
+        <div className="space-y-2">
+          {recent.map((project) => (
+            <div
+              key={project.path}
+              className="flex items-center justify-between p-3 bg-card rounded-lg border border-border hover:border-primary/40 transition-all"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <FolderOpen className="w-5 h-5 text-muted-foreground/60 flex-shrink-0" />
+                <div className="min-w-0">
+                  <div className="font-medium text-foreground truncate">
+                    {getProjectName(project.path)}
+                  </div>
+                  <div className="text-xs text-muted-foreground truncate">
+                    {truncatePath(project.path)}
+                    {' · '}
+                    <span className="text-primary">{formatRelativeTime(project.lastUsed)}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-primary hover:text-primary hover:bg-primary/10"
+                  onClick={() => handleLaunch(project.path)}
+                >
+                  ▶
+                </Button>
+                {!isFavorite(project.path) && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-primary hover:text-primary hover:bg-primary/10"
+                    onClick={() => handleAddToFavorites(project.path)}
+                  >
+                    <Star className="w-4 h-4" />
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+          {/* "+ Add" card */}
+          <button
+            className="flex items-center justify-center gap-2 p-3 w-full rounded-lg border border-dashed border-border hover:border-primary/40 hover:bg-primary/5 transition-all text-muted-foreground hover:text-primary"
+            onClick={handleAddFavorite}
+          >
+            <span className="text-lg">+</span>
+            <span className="text-sm font-medium">{t('environments.addEnv')}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* VS Code Section */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+            <Monitor className="w-4 h-4 text-muted-foreground" /> VS Code
+          </h3>
+          <Button variant="ghost" size="sm" onClick={syncVSCodeProjects}>
+            <RefreshCw className="w-3.5 h-3.5 mr-1" /> Sync
+          </Button>
+        </div>
+        {vscodeProjects.length === 0 ? (
+          <p className="text-sm text-muted-foreground/70 py-2">Click sync to load VS Code projects</p>
+        ) : (
+          <div className="space-y-2">
+            {vscodeProjects.map((project) => (
+              <div
+                key={project.path}
+                className="flex items-center justify-between p-3 bg-card rounded-lg border border-border hover:border-primary/40 transition-all"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <FolderOpen className="w-5 h-5 text-muted-foreground/60 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <div className="font-medium text-foreground truncate">
+                      {getProjectName(project.path)}
+                    </div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {truncatePath(project.path)}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-primary hover:text-primary hover:bg-primary/10"
+                    onClick={() => handleLaunch(project.path)}
+                  >
+                    ▶
+                  </Button>
+                  {!isFavorite(project.path) && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-primary hover:text-primary hover:bg-primary/10"
+                      onClick={() => handleAddToFavorites(project.path)}
+                    >
+                      <Star className="w-4 h-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* JetBrains Section */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+            <Brain className="w-4 h-4 text-muted-foreground" /> JetBrains
+          </h3>
+          <Button variant="ghost" size="sm" onClick={syncJetBrainsProjects}>
+            <RefreshCw className="w-3.5 h-3.5 mr-1" /> Sync
+          </Button>
+        </div>
+        {jetbrainsProjects.length === 0 ? (
+          <p className="text-sm text-muted-foreground/70 py-2">Click sync to load JetBrains projects</p>
+        ) : (
+          <div className="space-y-2">
+            {jetbrainsProjects.map((project) => (
+              <div
+                key={project.path}
+                className="flex items-center justify-between p-3 bg-card rounded-lg border border-border hover:border-primary/40 transition-all"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <FolderOpen className="w-5 h-5 text-muted-foreground/60 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <div className="font-medium text-foreground truncate">
+                      {getProjectName(project.path)}
+                    </div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      <span className="text-chart-5">{project.ide}</span>
+                      {' · '}
+                      {truncatePath(project.path)}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-primary hover:text-primary hover:bg-primary/10"
+                    onClick={() => handleLaunch(project.path)}
+                  >
+                    ▶
+                  </Button>
+                  {!isFavorite(project.path) && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-primary hover:text-primary hover:bg-primary/10"
+                      onClick={() => handleAddToFavorites(project.path)}
+                    >
+                      <Star className="w-4 h-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
