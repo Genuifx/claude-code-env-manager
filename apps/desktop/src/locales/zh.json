@@ -25,7 +25,20 @@
     "todayCost": "今日消费",
     "recentProjects": "最近项目",
     "addMoreEnvs": "添加更多环境 →",
-    "launchShortcut": "启动 (⌘Enter)"
+    "launchShortcut": "启动 (⌘Enter)",
+    "launchBtn": "启动",
+    "launchBtnDone": "已启动 ✓",
+    "selectDirPlaceholder": "选择目录...",
+    "continueWork": "继续工作",
+    "noProjects": "还没有项目记录",
+    "selectDirToStart": "选择一个目录开始",
+    "viewAll": "查看全部 →",
+    "tokensToday": "tokens",
+    "costToday": "today",
+    "sessionsActive": "sessions active",
+    "details": "详情 →",
+    "heroRunning": "运行中",
+    "heroSessions": "个会话"
   },
   "sessions": {
     "confirmClose": "确定要关闭此会话吗？",

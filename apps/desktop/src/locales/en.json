@@ -25,7 +25,20 @@
     "todayCost": "Today's Cost",
     "recentProjects": "Recent Projects",
     "addMoreEnvs": "Add more environments →",
-    "launchShortcut": "Launch (⌘Enter)"
+    "launchShortcut": "Launch (⌘Enter)",
+    "launchBtn": "Launch",
+    "launchBtnDone": "Launched ✓",
+    "selectDirPlaceholder": "Select directory...",
+    "continueWork": "Continue",
+    "noProjects": "No projects yet",
+    "selectDirToStart": "Select a directory to start",
+    "viewAll": "View all →",
+    "tokensToday": "tokens",
+    "costToday": "today",
+    "sessionsActive": "sessions active",
+    "details": "Details →",
+    "heroRunning": "running",
+    "heroSessions": "sessions"
   },
   "sessions": {
     "confirmClose": "Are you sure you want to close this session?",
