@@ -43,7 +43,12 @@
     "streakDays": "天",
     "streakKeepGoing": "保持势头!",
     "weekTotal": "本周合计",
-    "launchToStart": "启动你的第一个会话"
+    "launchToStart": "启动你的第一个会话",
+    "recentHistory": "最近使用",
+    "syncProjects": "同步",
+    "syncHintVSCode": "点击同步以加载 VS Code 项目",
+    "syncHintJetBrains": "点击同步以加载 JetBrains 项目",
+    "favorites": "收藏项目"
   },
   "sessions": {
     "confirmClose": "确定要关闭此会话吗？",
