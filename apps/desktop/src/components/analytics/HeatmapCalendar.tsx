@@ -7,12 +7,12 @@ interface HeatmapCalendarProps {
   compact?: boolean;
 }
 
-const LEVEL_COLORS = {
-  0: 'bg-muted/50',
-  1: 'bg-primary/15',
-  2: 'bg-primary/40',
-  3: 'bg-primary/70',
-  4: 'bg-primary',
+const LEVEL_STYLES: Record<number, React.CSSProperties> = {
+  0: { backgroundColor: 'hsl(var(--heatmap-0))' },
+  1: { backgroundColor: 'hsl(var(--heatmap-1))' },
+  2: { backgroundColor: 'hsl(var(--heatmap-2))' },
+  3: { backgroundColor: 'hsl(var(--heatmap-3))' },
+  4: { backgroundColor: 'hsl(var(--heatmap-4))' },
 };
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -83,8 +83,8 @@ export function HeatmapCalendar({ activities, compact = false }: HeatmapCalendar
     }
   });
 
-  const cellSize = compact ? 'w-2.5 h-2.5' : 'w-3 h-3';
-  const gapClass = compact ? 'gap-0.5' : 'gap-1';
+  const cellSize = compact ? 'w-3 h-3' : 'w-3 h-3';
+  const gapClass = compact ? 'gap-[3px]' : 'gap-1';
   const displayWeeks = compact ? weeks.slice(-12) : weeks;
 
   return (
@@ -125,9 +125,8 @@ export function HeatmapCalendar({ activities, compact = false }: HeatmapCalendar
                 activity ? (
                   <div
                     key={activity.date}
-                    className={`${cellSize} rounded-sm ${
-                      LEVEL_COLORS[activity.level]
-                    } hover:brightness-110 hover:ring-2 hover:ring-primary/40 cursor-pointer transition-[filter,box-shadow] duration-150`}
+                    className={`${cellSize} rounded-sm hover:brightness-110 hover:ring-2 hover:ring-primary/40 cursor-pointer transition-[filter,box-shadow] duration-150`}
+                    style={LEVEL_STYLES[activity.level]}
                     title={formatTooltip(activity)}
                   />
                 ) : (
@@ -147,9 +146,8 @@ export function HeatmapCalendar({ activities, compact = false }: HeatmapCalendar
           {[0, 1, 2, 3, 4].map((level) => (
             <div
               key={level}
-              className={`w-3 h-3 rounded-sm ${
-                LEVEL_COLORS[level as keyof typeof LEVEL_COLORS]
-              }`}
+              className="w-3 h-3 rounded-sm"
+              style={LEVEL_STYLES[level]}
             />
           ))}
           <span>{t('analytics.legendHigh')}</span>

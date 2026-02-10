@@ -100,6 +100,20 @@
     --ambient-2: 260 70% 50%;
     --ambient-3: 180 60% 40%;
     --ambient-opacity: 0.18;
+
+    /* Content area background opacity (1 = opaque, <1 = ambient bleeds through) */
+    --content-bg-opacity: 1;
+
+    /* Segmented control — selected pill */
+    --seg-active-bg: 0 0% 100% / 0.14;
+    --seg-hover-bg: 0 0% 100% / 0.07;
+
+    /* Heatmap level colors (dark mode) */
+    --heatmap-0: 222 11% 20%;
+    --heatmap-1: 211 100% 50% / 0.20;
+    --heatmap-2: 211 100% 50% / 0.45;
+    --heatmap-3: 211 100% 50% / 0.70;
+    --heatmap-4: 211 100% 50%;
   }
 
   /* === Light Mode — Frosted Glass / macOS Sequoia === */
@@ -166,22 +180,36 @@
     --glass-blur: 40px;
     --glass-saturate: 190%;
     --glass-bg: 0 0% 100%;
-    --glass-bg-opacity: 0.42;
+    --glass-bg-opacity: 0.38;
     --glass-sidebar-bg: 220 15% 98%;
-    --glass-sidebar-opacity: 0.45;
+    --glass-sidebar-opacity: 0.35;
     --glass-sidebar-blur: 56px;
     --glass-sidebar-saturate: 200%;
     --glass-border-light: 0 0% 100%;
-    --glass-border-opacity: 0.45;
-    --glass-border-hover-opacity: 0.6;
+    --glass-border-opacity: 0.55;
+    --glass-border-hover-opacity: 0.7;
     --glass-inset-highlight: 0 0% 100%;
-    --glass-inset-opacity: 0.85;
+    --glass-inset-opacity: 0.9;
     --glass-shadow-base: 222 15% 20%;
-    --glass-noise-opacity: 0.025;
+    --glass-noise-opacity: 0.03;
     --ambient-1: 211 100% 68%;
     --ambient-2: 270 80% 72%;
     --ambient-3: 170 75% 58%;
-    --ambient-opacity: 0.35;
+    --ambient-opacity: 0.45;
+
+    /* Content area — semi-transparent so ambient orbs bleed through */
+    --content-bg-opacity: 0.82;
+
+    /* Segmented control — selected pill */
+    --seg-active-bg: 0 0% 100% / 0.60;
+    --seg-hover-bg: 0 0% 100% / 0.30;
+
+    /* Heatmap level colors (light mode) */
+    --heatmap-0: 220 10% 87%;
+    --heatmap-1: 211 100% 45% / 0.22;
+    --heatmap-2: 211 100% 45% / 0.48;
+    --heatmap-3: 211 100% 45% / 0.72;
+    --heatmap-4: 211 100% 45%;
   }
 }
 
@@ -445,6 +473,7 @@
 .stat-card {
   position: relative;
   overflow: hidden;
+  border-radius: var(--radius-2xl);
   background:
     linear-gradient(165deg,
       hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) + 0.08)) 0%,
@@ -473,6 +502,19 @@
   );
   pointer-events: none;
   border-radius: inherit;
+}
+.light .stat-card::before {
+  background: linear-gradient(135deg,
+    hsl(var(--glass-inset-highlight) / 0.18) 0%,
+    transparent 60%
+  );
+}
+.light .stat-card {
+  box-shadow:
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / var(--glass-inset-opacity)),
+    inset 0 0 0 0.5px hsl(var(--glass-border-light) / calc(var(--glass-border-opacity) * 0.5)),
+    0 2px 8px hsl(var(--glass-shadow-base) / 0.08),
+    0 8px 24px hsl(var(--glass-shadow-base) / 0.06);
 }
 
 /* === Gradient Text (for stat numbers) === */
@@ -582,6 +624,18 @@
     0 12px 36px hsl(var(--glass-shadow-base) / 0.08);
   transform: translateY(-1px);
 }
+.light .glass-card {
+  box-shadow:
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / var(--glass-inset-opacity)),
+    0 1px 3px hsl(var(--glass-shadow-base) / 0.06),
+    0 4px 16px hsl(var(--glass-shadow-base) / 0.05);
+}
+.light .glass-card:hover {
+  box-shadow:
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) + 0.05)),
+    0 4px 16px hsl(var(--glass-shadow-base) / 0.1),
+    0 12px 36px hsl(var(--glass-shadow-base) / 0.07);
+}
 
 /* --- Subtle Glass (light frost for secondary surfaces) --- */
 .glass-subtle {
@@ -614,6 +668,7 @@
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   border-bottom: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
   box-shadow:
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / var(--glass-inset-opacity)),
     inset 0 -0.5px 0 0 hsl(var(--glass-shadow-base) / 0.06),
     0 1px 4px hsl(var(--glass-shadow-base) / 0.06);
 }
@@ -646,6 +701,26 @@
   z-index: 2;
 }
 
+/* --- Segmented Control (macOS-style pill toggle) --- */
+/* Active pill — floats above the track like a glass chip */
+.seg-active {
+  background: hsl(var(--seg-active-bg));
+  box-shadow:
+    0 1px 4px hsl(var(--glass-shadow-base) / 0.10),
+    0 0.5px 1px hsl(var(--glass-shadow-base) / 0.06),
+    inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / 0.3);
+  font-weight: 600;
+}
+.light .seg-active {
+  box-shadow:
+    0 1px 4px hsl(var(--glass-shadow-base) / 0.12),
+    0 0.5px 1px hsl(var(--glass-shadow-base) / 0.08),
+    inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / 0.5);
+}
+.seg-hover:hover {
+  background: hsl(var(--seg-hover-bg));
+}
+
 /* --- Nav Button Glass Active Pill --- */
 .glass-nav-active {
   background: hsl(var(--sidebar-active) / 0.12);
@@ -661,16 +736,16 @@
   user-select: none;
 }
 .sidebar-nav-active {
-  background: hsl(var(--sidebar-active));
+  background: hsl(var(--sidebar-active) / 0.12);
   box-shadow:
-    inset 0 0.5px 0 0 hsl(0 0% 100% / 0.15),
-    0 0.5px 1.5px hsl(var(--glass-shadow-base) / 0.2);
+    inset 0 0.5px 0 0 hsl(0 0% 100% / 0.08),
+    0 0.5px 1.5px hsl(var(--glass-shadow-base) / 0.08);
 }
 .light .sidebar-nav-active {
-  background: hsl(var(--sidebar-active));
+  background: hsl(var(--sidebar-active) / 0.10);
   box-shadow:
-    inset 0 0.5px 0 0 hsl(0 0% 100% / 0.25),
-    0 0.5px 2px hsl(var(--glass-shadow-base) / 0.15);
+    inset 0 0.5px 0 0 hsl(0 0% 100% / 0.4),
+    0 0.5px 2px hsl(var(--glass-shadow-base) / 0.06);
 }
 
 /* === Hero Ambient Gradient (glass + ambient color bleed) === */

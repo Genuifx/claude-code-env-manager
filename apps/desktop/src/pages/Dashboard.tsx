@@ -163,7 +163,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
           <div className="relative">
             <button
               onClick={(e) => { e.stopPropagation(); setEnvDropdownOpen(!envDropdownOpen); setPermDropdownOpen(false); }}
-              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-chart-2/15 text-chart-2 border border-chart-2/30 hover:bg-chart-2/25 transition-colors"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-chart-2/15 text-chart-2 border border-chart-2/30 hover:bg-chart-2/25 transition-colors"
             >
               <span className="w-2 h-2 rounded-full bg-chart-2" />
               <span className="font-semibold text-sm">{currentEnv}</span>
@@ -191,7 +191,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
           <div className="relative">
             <button
               onClick={(e) => { e.stopPropagation(); setPermDropdownOpen(!permDropdownOpen); setEnvDropdownOpen(false); }}
-              className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-colors hover:opacity-80 ${permColorClass}`}
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors hover:opacity-80 ${permColorClass}`}
             >
               <Shield className="w-3.5 h-3.5" />
               <span className="font-semibold text-sm">{permissionMode}</span>
@@ -218,7 +218,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
           {/* Active Sessions Indicator */}
           <button
             onClick={() => onNavigate('sessions')}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-surface-raised hover:bg-surface-overlay transition-colors"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-raised hover:bg-surface-overlay transition-colors"
           >
             {activeSessions > 0 && (
               <span className="w-2 h-2 rounded-full bg-success status-running" />
@@ -249,7 +249,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
         <Button
           onClick={handleLaunchClick}
           title={t('dashboard.launchShortcut')}
-          className={`gap-2 px-6 font-semibold rounded-xl shadow-md transition-all duration-150 ${
+          className={`gap-2 px-6 font-semibold rounded-lg shadow-md transition-all duration-150 ${
             launched
               ? 'bg-success hover:bg-success ripple-success'
               : 'hover:shadow-lg hover:-translate-y-0.5 active:scale-95'

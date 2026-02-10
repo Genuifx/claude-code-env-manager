@@ -1,10 +1,10 @@
 // apps/desktop/src/pages/Analytics.tsx
 import { useEffect, useState, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { TrendingUp, TrendingDown, BarChart3, DollarSign, Flame } from 'lucide-react';
+import { TrendingUp, TrendingDown, BarChart3, DollarSign, Flame, RefreshCw } from 'lucide-react';
 import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { EmptyState, ErrorBanner } from '@/components/ui/EmptyState';
+import { cn } from '@/lib/utils';
 import {
   TokenChart,
   ModelDistribution,
@@ -95,13 +95,16 @@ export function Analytics() {
     useAppStore();
 
   // Granularity state lives here and is passed down to TokenChart
-  const [granularity, setGranularity] = useState<TimeGranularity>('day');
+  const [granularity, setGranularity] = useState<TimeGranularity>('hour');
 
   // Dynamic mock indicator — true only when real data failed to load
   const [isUsingMockData, setIsUsingMockData] = useState(false);
 
   // Error state for failed data load
   const [loadError, setLoadError] = useState(false);
+
+  // Refreshing state for the manual refresh button
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Dynamic date locale based on current language
   const dateLocale = lang === 'zh' ? 'zh-CN' : 'en-US';
@@ -171,6 +174,12 @@ export function Analytics() {
     }
   };
 
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await loadRealData();
+    setIsRefreshing(false);
+  };
+
   useEffect(() => {
     loadRealData();
   }, []);
@@ -237,11 +246,26 @@ export function Analytics() {
       }));
 
     switch (granularity) {
-      case 'hour':
-        return toChartPoints(
-          allSortedEntries.slice(-24) as [string, TokenUsageWithCost][],
-          { month: 'short', day: 'numeric' },
-        );
+      case 'hour': {
+        // Use real hourly data (key: YYYY-MM-DDTHH) — show last 24 hours
+        const hourlyEntries = Object.entries(usageStats.hourlyHistory ?? {})
+          .sort(([a], [b]) => a.localeCompare(b))
+          .slice(-24) as [string, TokenUsageWithCost][];
+        let prevDate = '';
+        return hourlyEntries.map(([key, usage]) => {
+          const datePart = key.slice(5, 10); // "MM-DD"
+          const hourPart = key.slice(11);    // "HH"
+          // Show date on first point or when day changes
+          let label: string;
+          if (prevDate !== datePart) {
+            label = `${datePart} ${hourPart}:00`;
+            prevDate = datePart;
+          } else {
+            label = `${hourPart}:00`;
+          }
+          return { date: label, Tokens: sumTokens(usage) };
+        });
+      }
       case 'day':
         return toChartPoints(
           allSortedEntries.slice(-7) as [string, TokenUsageWithCost][],
@@ -282,7 +306,7 @@ export function Analytics() {
   const chartSeriesKeys = ['Tokens'];
 
   // Bug #21 fix: Calculate real week-over-week change from dailyHistory data
-  const computeWeekOverWeekChange = () => {
+  const tokenChange = useMemo(() => {
     const sorted = Object.entries(usageStats.dailyHistory)
       .sort(([a], [b]) => a.localeCompare(b));
 
@@ -295,17 +319,13 @@ export function Analytics() {
     const thisWeekTokens = sumTokens(thisWeekEntries);
     const prevWeekTokens = sumTokens(prevWeekEntries);
 
-    const tokenPct = prevWeekEntries.length > 0 && prevWeekTokens > 0
+    return prevWeekEntries.length > 0 && prevWeekTokens > 0
       ? ((thisWeekTokens - prevWeekTokens) / prevWeekTokens) * 100
       : null;
-
-    return { tokenPct };
-  };
-
-  const { tokenPct: tokenChange } = computeWeekOverWeekChange();
+  }, [usageStats]);
 
   // Build heatmap from real dailyHistory data — fill last 90 days up to today
-  const dailyActivities: DailyActivity[] = (() => {
+  const dailyActivities: DailyActivity[] = useMemo(() => {
     if (!usageStats?.dailyHistory) return [];
     const entries = Object.entries(usageStats.dailyHistory);
 
@@ -343,14 +363,14 @@ export function Analytics() {
     }
 
     return result;
-  })();
+  }, [usageStats]);
 
-  const granularityOptions: { key: TimeGranularity; label: string }[] = [
+  const granularityOptions = useMemo<{ key: TimeGranularity; label: string }[]>(() => [
     { key: 'hour', label: t('analytics.hour') },
     { key: 'day', label: t('analytics.day') },
     { key: 'week', label: t('analytics.week') },
     { key: 'month', label: t('analytics.month') },
-  ];
+  ], [t]);
 
   return (
     <div className="page-transition-enter space-y-6">
@@ -375,24 +395,10 @@ export function Analytics() {
         </div>
       )}
 
-      {/* Granularity controls — right-aligned */}
-      <div className="flex items-center justify-end gap-2">
-        {granularityOptions.map(({ key, label }) => (
-          <Button
-            key={key}
-            size="sm"
-            variant={granularity === key ? 'default' : 'outline'}
-            onClick={() => setGranularity(key)}
-          >
-            {label}
-          </Button>
-        ))}
-      </div>
-
       {/* Hero Stats Card */}
-      <div className="stat-card glass-noise p-6">
-        {/* Hero number */}
-        <div className="mb-1">
+      <div className="stat-card glass-noise px-5 py-4">
+        {/* Top: Hero number + trend (inline) */}
+        <div className="flex items-baseline gap-3 mb-3">
           <div
             className="text-4xl font-bold"
             style={{
@@ -403,13 +409,6 @@ export function Analytics() {
           >
             {animatedTotalTokens.toLocaleString()}
           </div>
-          <div className="text-sm text-muted-foreground mt-1">
-            {t('analytics.totalTokens')}
-          </div>
-        </div>
-
-        {/* Week-over-week trend */}
-        <div className="mb-4">
           {tokenChange !== null ? (
             <div
               className={`flex items-center gap-1 text-sm ${
@@ -417,15 +416,13 @@ export function Analytics() {
               }`}
             >
               {tokenChange >= 0 ? (
-                <TrendingUp className="w-4 h-4" />
+                <TrendingUp className="w-3.5 h-3.5" />
               ) : (
-                <TrendingDown className="w-4 h-4" />
+                <TrendingDown className="w-3.5 h-3.5" />
               )}
-              {Math.abs(tokenChange).toFixed(1)}% {t('analytics.weeklyChange')}
+              {Math.abs(tokenChange).toFixed(1)}%
             </div>
-          ) : (
-            <div className="text-sm text-muted-foreground">&mdash;</div>
-          )}
+          ) : null}
         </div>
 
         {/* Bottom section: cost + streak | compact heatmap */}
@@ -465,9 +462,36 @@ export function Analytics() {
 
       {/* Token Consumption Area Chart */}
       <Card className="p-4">
-        <h3 className="text-lg font-semibold text-foreground mb-4">
-          {t('analytics.tokenDistribution')}
-        </h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-foreground">
+            {t('analytics.tokenDistribution')}
+          </h3>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-0.5 p-0.5 rounded-lg glass-subtle">
+              {granularityOptions.map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => setGranularity(key)}
+                  className={cn(
+                    'px-3 h-7 text-xs rounded-md transition-all duration-150',
+                    granularity === key
+                      ? 'seg-active text-foreground'
+                      : 'text-muted-foreground seg-hover hover:text-foreground'
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button
+              disabled={isRefreshing}
+              onClick={handleRefresh}
+              className="seg-hover h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
+        </div>
         {chartData.length === 0 ? (
           <EmptyState icon={BarChart3} message={t('analytics.noDataYet')} />
         ) : (

@@ -83,7 +83,7 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
         {showGhostCard && (
           <button
             type="button"
-            className="w-full border border-dashed border-border/50 rounded-xl p-4 flex flex-col items-center
+            className="w-full border border-dashed border-border/50 rounded-2xl p-4 flex flex-col items-center
               justify-center cursor-pointer hover:border-primary/30 gap-2 min-h-[120px]
               transition-colors duration-150 group bg-transparent mt-4"
             onClick={() => onAddEnv?.()}
@@ -129,7 +129,7 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
                     setDefaultMode(mode);
                     setPermissionMode(mode);
                   }}
-                  className={`text-left p-4 rounded-xl transition-all duration-200 cursor-pointer ${
+                  className={`text-left p-4 rounded-lg transition-all duration-200 cursor-pointer ${
                     isActive
                       ? 'ring-2 ring-primary bg-primary/5 border border-transparent scale-[1.02]'
                       : 'border border-border hover:border-primary/40'

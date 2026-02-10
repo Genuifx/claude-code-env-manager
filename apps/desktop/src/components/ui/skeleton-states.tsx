@@ -59,7 +59,7 @@ export function SessionsSkeleton() {
   return (
     <div className="animate-pulse space-y-6">
       {/* Hero Card */}
-      <div className="stat-card glass-noise rounded-2xl p-5">
+      <div className="stat-card glass-noise p-5">
         <div className="flex items-center justify-between">
           <div>
             <Bone className="h-8 w-32 mb-1.5" />

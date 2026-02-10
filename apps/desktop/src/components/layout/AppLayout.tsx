@@ -20,8 +20,8 @@ export function AppLayout({ children, activeTab, onTabChange, pageTitle, pageAct
         <SideRail activeTab={activeTab} onTabChange={onTabChange} />
       </div>
 
-      {/* Main content area — opaque, covers vibrancy with its own background */}
-      <div className="flex-1 flex flex-col min-w-0 relative z-10 bg-background overflow-hidden">
+      {/* Main content area — semi-transparent so ambient orbs bleed through glass panels */}
+      <div className="flex-1 flex flex-col min-w-0 relative z-10 overflow-hidden" style={{ background: 'hsl(var(--background) / var(--content-bg-opacity, 1))' }}>
         {/* Ambient background — lives inside content area only */}
         <div className="ambient-bg" aria-hidden="true">
           <div className="ambient-orb-3" />

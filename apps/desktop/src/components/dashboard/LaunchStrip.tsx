@@ -41,7 +41,7 @@ export function LaunchStrip({
   const { t } = useLocale();
 
   return (
-    <div className="h-14 flex items-center gap-0 rounded-xl bg-card border border-border overflow-hidden">
+    <div className="h-14 flex items-center gap-0 rounded-lg bg-card border border-border overflow-hidden">
       {/* Environment color bar */}
       <div className={`w-[3px] self-stretch ${getEnvColorClass(currentEnv)}`} />
 
