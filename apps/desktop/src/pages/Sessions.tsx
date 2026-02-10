@@ -1,8 +1,8 @@
 import { useState, useCallback } from 'react';
-import { LayoutGrid, List, Minimize2, Plus, Terminal, X, ChevronDown, Loader2, Check } from 'lucide-react';
+import { LayoutGrid, List, Minimize2, Plus, Terminal, X, ChevronDown, Loader2, Check, FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { SessionCard, SessionList, ArrangeBanner } from '@/components/sessions';
+import { SessionCard, SessionList, ArrangeBanner, SessionLauncherPopover } from '@/components/sessions';
 import { LayoutPopover } from '@/components/sessions/LayoutPopover';
 import { useAppStore, type ArrangeLayout } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
@@ -13,9 +13,10 @@ import { toast } from 'sonner';
 
 interface SessionsProps {
   onLaunch: () => void;
+  onLaunchWithDir: (dir: string) => void;
 }
 
-export function Sessions({ onLaunch }: SessionsProps) {
+export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   const { t } = useLocale();
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
@@ -23,8 +24,10 @@ export function Sessions({ onLaunch }: SessionsProps) {
   const [isArranging, setIsArranging] = useState(false);
   const [arrangeStatus, setArrangeStatus] = useState<'normal' | 'loading' | 'success'>('normal');
   const [popoverOpen, setPopoverOpen] = useState(false);
-  const { sessions, isLoadingSessions, arrangeLayout, setArrangeLayout } = useAppStore();
-  const { focusSession, minimizeSession, closeSession, arrangeSessions } = useTauriCommands();
+  const [launcherOpen, setLauncherOpen] = useState(false);
+  const [isMultiLaunching, setIsMultiLaunching] = useState(false);
+  const { sessions, isLoadingSessions, arrangeLayout, setArrangeLayout, selectedWorkingDir } = useAppStore();
+  const { focusSession, minimizeSession, closeSession, arrangeSessions, launchClaudeCode, openDirectoryPicker } = useTauriCommands();
 
   const runningSessions = sessions.filter(s => s.status === 'running');
   const runningCount = runningSessions.length;
@@ -73,10 +76,71 @@ export function Sessions({ onLaunch }: SessionsProps) {
     }
   }, [runningCount, isArranging, getSmartLayout, runningSessions, arrangeSessions, t]);
 
-  // Register Cmd+Shift+L shortcut for arrange
+  // Multi-session launch: serially launch N sessions, then auto-arrange
+  const handleMultiLaunch = useCallback(async (dirs: string[], layout: ArrangeLayout) => {
+    if (dirs.length === 0 || isMultiLaunching) return;
+
+    setIsMultiLaunching(true);
+    let successCount = 0;
+
+    for (const dir of dirs) {
+      try {
+        await launchClaudeCode(dir);
+        successCount++;
+      } catch (err) {
+        console.error(`Failed to launch session for ${dir}:`, err);
+      }
+    }
+
+    // Wait for terminal windows to be ready before arranging
+    if (successCount >= 2) {
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      try {
+        const allRunning = useAppStore.getState().sessions.filter(s => s.status === 'running');
+        await arrangeSessions(allRunning.map(s => s.id), layout);
+        toast.success(
+          t('sessions.multiLaunchSuccess').replace('{count}', String(successCount))
+        );
+      } catch (err) {
+        // Sessions launched but arrange failed — still a partial success
+        toast.success(
+          t('sessions.multiLaunchPartial')
+            .replace('{success}', String(successCount))
+            .replace('{total}', String(dirs.length))
+        );
+      }
+    } else if (successCount > 0) {
+      toast.success(
+        t('sessions.multiLaunchPartial')
+          .replace('{success}', String(successCount))
+          .replace('{total}', String(dirs.length))
+      );
+    }
+
+    setIsMultiLaunching(false);
+  }, [isMultiLaunching, launchClaudeCode, arrangeSessions, t]);
+
+  // Browse directory and launch single session
+  const handleBrowseAndLaunch = useCallback(async () => {
+    const path = await openDirectoryPicker();
+    if (path) {
+      onLaunchWithDir(path);
+    }
+  }, [openDirectoryPicker, onLaunchWithDir]);
+
+  // Truncate directory path for display
+  const launchDirDisplay = selectedWorkingDir
+    ? selectedWorkingDir.replace(/^\/Users\/[^/]+/, '~').split('/').slice(-2).join('/')
+    : '~';
+
+  // Register keyboard shortcuts
   useKeyboardShortcuts({
     'meta+shift+l': () => {
       if (runningCount >= 2) handleArrange();
+    },
+    'meta+shift+n': () => {
+      setLauncherOpen(true);
     },
   });
 
@@ -163,11 +227,37 @@ export function Sessions({ onLaunch }: SessionsProps) {
             </Button>
           </div>
 
-          {/* New Session Button */}
-          <Button onClick={onLaunch}>
-            <Plus className="w-4 h-4 mr-2" />
-            {t('sessions.newSession')}
-          </Button>
+          {/* New Session Split Button with directory hint */}
+            <div className="relative group">
+              <div className="absolute -top-9 right-0 opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none">
+                <div className="glass-subtle glass-noise rounded-lg px-2.5 py-1 flex items-center gap-1.5 whitespace-nowrap shadow-elevation-1">
+                  <FolderOpen className="w-3 h-3 text-muted-foreground shrink-0" />
+                  <span className="text-2xs text-muted-foreground" title={selectedWorkingDir || '~'}>
+                    {launchDirDisplay}
+                  </span>
+                </div>
+                <div className="absolute -bottom-1 right-6 w-2 h-2 glass-subtle rotate-45" />
+              </div>
+              <div className="flex items-center">
+                <Button onClick={onLaunch} className="rounded-r-none">
+                  <Plus className="w-4 h-4 mr-2" />
+                  {t('sessions.newSession')}
+                </Button>
+                <SessionLauncherPopover
+                  open={launcherOpen}
+                  onOpenChange={setLauncherOpen}
+                  onLaunchSingle={onLaunchWithDir}
+                  onLaunchMulti={handleMultiLaunch}
+                  onBrowseAndLaunch={handleBrowseAndLaunch}
+                  isLaunching={isMultiLaunching}
+                  trigger={
+                    <Button className="rounded-l-none border-l-0 px-1.5">
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    </Button>
+                  }
+                />
+              </div>
+            </div>
         </div>
       </div>
 
