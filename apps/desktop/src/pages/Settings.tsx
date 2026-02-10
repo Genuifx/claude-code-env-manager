@@ -265,7 +265,7 @@ export function Settings() {
                     navigator.clipboard.writeText(t('settings.cliInstallCmd'));
                     toast.success(t('settings.cliInstallCmd'));
                   }}
-                  className="inline-flex items-center gap-1 text-[11px] font-mono text-primary hover:text-primary/80 bg-primary/10 px-2 py-0.5 rounded-md transition-colors"
+                  className="inline-flex items-center gap-1 text-[11px] font-mono text-primary hover:text-primary/80 glass-btn-outline px-2 py-0.5 rounded-md"
                 >
                   <Copy className="w-3 h-3" />
                   {t('settings.cliInstallCmd')}

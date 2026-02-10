@@ -14,7 +14,7 @@ export function EmptyState({ icon: Icon, message, action, onAction }: EmptyState
       <Icon className="w-12 h-12 text-muted-foreground/20 mb-4" />
       <p className="text-sm text-muted-foreground mb-4">{message}</p>
       {action && onAction && (
-        <Button variant="outline" size="sm" onClick={onAction}>
+        <Button variant="outline" size="sm" className="glass-btn-outline" onClick={onAction}>
           {action}
         </Button>
       )}
@@ -30,10 +30,10 @@ interface ErrorBannerProps {
 
 export function ErrorBanner({ message, onRetry, retryLabel }: ErrorBannerProps) {
   return (
-    <div role="alert" className="flex items-center justify-between gap-4 bg-destructive/10 border border-destructive/20 rounded-lg p-4">
+    <div role="alert" className="flex items-center justify-between gap-4 bg-destructive/10 rounded-lg p-4" style={{ border: '1px solid hsl(var(--destructive) / 0.25)' }}>
       <p className="text-sm text-destructive">{message}</p>
       {onRetry && (
-        <Button variant="outline" size="sm" onClick={onRetry} className="shrink-0 border-destructive/30 text-destructive hover:bg-destructive/10">
+        <Button variant="outline" size="sm" onClick={onRetry} className="shrink-0 glass-btn-outline text-destructive hover:text-destructive hover:bg-destructive/10">
           {retryLabel}
         </Button>
       )}

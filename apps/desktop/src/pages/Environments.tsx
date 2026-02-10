@@ -83,21 +83,9 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
         {showGhostCard && (
           <button
             type="button"
-            className="w-full border border-dashed rounded-2xl p-4 flex flex-col items-center
+            className="w-full rounded-2xl p-4 flex flex-col items-center
               justify-center cursor-pointer gap-2 min-h-[120px]
-              transition-all duration-150 group mt-4"
-            style={{
-              borderColor: 'hsl(var(--glass-border-light) / 0.2)',
-              background: 'transparent',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = 'hsl(var(--primary) / 0.3)';
-              e.currentTarget.style.background = 'hsl(var(--glass-bg) / 0.15)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = 'hsl(var(--glass-border-light) / 0.2)';
-              e.currentTarget.style.background = 'transparent';
-            }}
+              glass-ghost-card group mt-4"
             onClick={() => onAddEnv?.()}
           >
             <Plus className="w-5 h-5 text-muted-foreground/50 group-hover:text-muted-foreground/70 transition-colors" />
