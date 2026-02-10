@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use std::process::Command;
 use tauri::State;
-use terminal::{TerminalInfo, TerminalType};
+use terminal::{TerminalInfo, TerminalType, ArrangeLayout, ArrangeSessionInfo};
 use tray::create_tray;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
@@ -273,10 +273,10 @@ fn launch_claude_code(
         &session_id,
     );
 
-    let window_id = match &launch_result {
-        Ok(id) => {
-            println!("Terminal launch SUCCESS, window_id: {:?}", id);
-            id.clone()
+    let (window_id, iterm_session_id) = match &launch_result {
+        Ok((wid, sid)) => {
+            println!("Terminal launch SUCCESS, window_id: {:?}, iterm_session_id: {:?}", wid, sid);
+            (wid.clone(), sid.clone())
         }
         Err(e) => {
             println!("Terminal launch FAILED: {}", e);
@@ -300,6 +300,7 @@ fn launch_claude_code(
         status: "running".to_string(),
         terminal_type: Some(terminal_type_str.to_string()),
         window_id,  // Store window ID for later operations
+        iterm_session_id, // Store iTerm2 session unique ID for arrange
     };
 
     state.add_session(session.clone());
@@ -409,8 +410,106 @@ fn minimize_session(state: State<Arc<SessionManager>>, session_id: String) -> Re
 }
 
 // ============================================
-// Directory & VS Code Sync Commands
+// Arrange Windows Commands
 // ============================================
+
+#[derive(Debug, serde::Deserialize)]
+struct ArrangeRequest {
+    session_ids: Vec<String>,
+    layout: ArrangeLayout,
+}
+
+#[tauri::command]
+fn arrange_sessions(
+    state: State<Arc<SessionManager>>,
+    request: ArrangeRequest,
+) -> Result<String, String> {
+    let sessions = state.list_sessions();
+
+    // Collect the requested sessions, verify they're running
+    let mut arrange_infos: Vec<ArrangeSessionInfo> = Vec::new();
+    let mut terminal_type: Option<TerminalType> = None;
+
+    for sid in &request.session_ids {
+        let session = sessions.iter().find(|s| &s.id == sid)
+            .ok_or_else(|| format!("Session not found: {}", sid))?;
+
+        if session.status != "running" {
+            return Err(format!("Session {} is not running", sid));
+        }
+
+        let term_type_str = session.terminal_type.as_ref()
+            .ok_or_else(|| format!("Session {} has no terminal type", sid))?;
+        let term_type = match term_type_str.as_str() {
+            "iterm2" => TerminalType::ITerm2,
+            "terminalapp" => TerminalType::TerminalApp,
+            _ => return Err(format!("Unknown terminal type: {}", term_type_str)),
+        };
+
+        // All sessions must be the same terminal type
+        if let Some(ref expected) = terminal_type {
+            if *expected != term_type {
+                return Err("Cannot arrange sessions from different terminal types".to_string());
+            }
+        } else {
+            terminal_type = Some(term_type);
+        }
+
+        let window_id = session.window_id.clone()
+            .ok_or_else(|| format!("Session {} has no window ID", sid))?;
+
+        // For iTerm2, try to get session ID (backfill if missing)
+        let iterm_session_id = if term_type == TerminalType::ITerm2 {
+            match &session.iterm_session_id {
+                Some(id) => Some(id.clone()),
+                None => {
+                    // Try to backfill from iTerm2
+                    match terminal::get_iterm_session_id(&window_id) {
+                        Ok(id) => {
+                            // Update the session manager with the backfilled ID
+                            state.update_session_iterm_id(sid, &id);
+                            Some(id)
+                        }
+                        Err(e) => {
+                            eprintln!("Warning: could not backfill iTerm2 session ID for {}: {}", sid, e);
+                            None
+                        }
+                    }
+                }
+            }
+        } else {
+            None
+        };
+
+        arrange_infos.push(ArrangeSessionInfo {
+            window_id,
+            iterm_session_id,
+        });
+    }
+
+    let term = terminal_type.ok_or("No sessions to arrange")?;
+
+    // Perform the arrangement
+    let result = terminal::arrange_sessions(term, &arrange_infos, &request.layout)?;
+
+    // For iTerm2, update all sessions with the new shared window ID
+    if term == TerminalType::ITerm2 && result != "arranged" {
+        for sid in &request.session_ids {
+            state.update_session_window_id(sid, &result);
+        }
+    }
+
+    Ok(result)
+}
+
+#[tauri::command]
+fn check_arrange_support() -> Result<bool, String> {
+    terminal::check_arrange_support()
+}
+
+// ============================================
+// Directory & VS Code Sync Commands
+// ======================================================
 
 #[tauri::command]
 async fn open_directory_dialog(app: tauri::AppHandle) -> Result<Option<String>, String> {
@@ -811,7 +910,9 @@ fn main() {
             get_usage_history,
             get_continuous_usage_days,
             check_ccem_installed,
-            load_from_remote
+            load_from_remote,
+            arrange_sessions,
+            check_arrange_support
         ])
         .setup(move |app| {
             // Clean up stale exit files from previous sessions
