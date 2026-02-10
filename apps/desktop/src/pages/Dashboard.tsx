@@ -4,7 +4,6 @@ import {
   Play,
   ChevronDown,
   TrendingUp,
-  TrendingDown,
   Zap,
   DollarSign,
   Flame,
@@ -236,7 +235,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
       {/* ══ Zone 2: Quick Action Bar ══ */}
       <Card className="flex items-center justify-between p-3 shadow-elevation-1">
         <div className="flex items-center gap-3">
-          <Button variant="outline" size="sm" onClick={handleSelectDirectory} className="gap-2 glass-outline-btn border-0">
+          <Button variant="outline" size="sm" onClick={handleSelectDirectory} className="gap-2">
             <FolderOpen className="w-4 h-4" />
             {dirDisplay ? (
               <span className="font-mono text-xs max-w-[180px] truncate">{dirDisplay}</span>
@@ -272,8 +271,8 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
       {/* ══ Zone 3: Metrics Bento Grid ══ */}
       <div className="grid grid-cols-4 grid-rows-2 gap-4">
         {/* Sessions — Hero Card (tall left) */}
-        <Card
-          className="stat-card glass-noise p-8 cursor-pointer interactive-card card-stagger col-span-2 row-span-2"
+        <div
+          className="stat-card glass-noise text-card-foreground p-8 cursor-pointer interactive-card card-stagger col-span-2 row-span-2"
           onClick={() => onNavigate('sessions')}
         >
           <div className="flex items-center gap-1.5 mb-4">
@@ -288,11 +287,11 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
           {!hasLaunched && sessions.length === 0 && (
             <p className="text-sm text-muted-foreground mt-4">{t('dashboard.launchToStart')}</p>
           )}
-        </Card>
+        </div>
 
         {/* Tokens Today — Wide top-right */}
-        <Card
-          className="stat-card glass-noise p-5 cursor-pointer interactive-card card-stagger col-span-2"
+        <div
+          className="stat-card glass-noise text-card-foreground p-5 cursor-pointer interactive-card card-stagger col-span-2"
           onClick={() => onNavigate('analytics')}
         >
           <div className="flex items-center gap-1.5 mb-3">
@@ -311,11 +310,11 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
               <span>{t('dashboard.weekTotal')}: {(weekTokensRaw / 1000).toFixed(0)}K</span>
             </div>
           )}
-        </Card>
+        </div>
 
         {/* Cost Today — Bottom-middle */}
-        <Card
-          className="stat-card glass-noise p-5 cursor-pointer interactive-card card-stagger col-span-1"
+        <div
+          className="stat-card glass-noise text-card-foreground p-5 cursor-pointer interactive-card card-stagger col-span-1"
           onClick={() => onNavigate('analytics')}
         >
           <div className="flex items-center gap-1.5 mb-3">
@@ -332,11 +331,11 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
               <span>{t('dashboard.weekTotal')}: ${weekCostRaw.toFixed(2)}</span>
             </div>
           )}
-        </Card>
+        </div>
 
         {/* Streak — Bottom-right */}
-        <Card
-          className="stat-card glass-noise p-5 cursor-pointer interactive-card card-stagger col-span-1"
+        <div
+          className="stat-card glass-noise text-card-foreground p-5 cursor-pointer interactive-card card-stagger col-span-1"
           onClick={() => onNavigate('analytics')}
         >
           <div className="flex items-center gap-1.5 mb-3">
@@ -357,7 +356,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
               <span>{t('dashboard.streakKeepGoing')}</span>
             </div>
           )}
-        </Card>
+        </div>
       </div>
 
       {/* ══ Zone 4: Recent Projects ══ */}

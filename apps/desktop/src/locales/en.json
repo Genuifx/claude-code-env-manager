@@ -43,7 +43,12 @@
     "streakDays": "days",
     "streakKeepGoing": "Keep it up!",
     "weekTotal": "This week",
-    "launchToStart": "Launch your first session"
+    "launchToStart": "Launch your first session",
+    "recentHistory": "Recent",
+    "syncProjects": "Sync",
+    "syncHintVSCode": "Click sync to load VS Code projects",
+    "syncHintJetBrains": "Click sync to load JetBrains projects",
+    "favorites": "Favorites"
   },
   "sessions": {
     "confirmClose": "Are you sure you want to close this session?",

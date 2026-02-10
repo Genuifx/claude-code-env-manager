@@ -47,7 +47,7 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
       <div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-            <Star className="w-4 h-4 text-primary" /> {t('dashboard.recentProjects')}
+            <Star className="w-4 h-4 text-primary" /> {t('dashboard.favorites')}
           </h3>
           <Button variant="ghost" size="sm" onClick={handleAddFavorite}>
             <Plus className="w-3.5 h-3.5 mr-1" /> {t('common.save')}
@@ -100,7 +100,7 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
       {/* Recent Section */}
       <div>
         <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2 mb-3">
-          <Clock className="w-4 h-4 text-muted-foreground" /> Recent
+          <Clock className="w-4 h-4 text-muted-foreground" /> {t('dashboard.recentHistory')}
         </h3>
         <div className="space-y-2">
           {recent.map((project) => (
@@ -161,11 +161,11 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
             <Monitor className="w-4 h-4 text-muted-foreground" /> VS Code
           </h3>
           <Button variant="ghost" size="sm" onClick={syncVSCodeProjects}>
-            <RefreshCw className="w-3.5 h-3.5 mr-1" /> Sync
+            <RefreshCw className="w-3.5 h-3.5 mr-1" /> {t('dashboard.syncProjects')}
           </Button>
         </div>
         {vscodeProjects.length === 0 ? (
-          <p className="text-sm text-muted-foreground/70 py-2">Click sync to load VS Code projects</p>
+          <p className="text-sm text-muted-foreground/70 py-2">{t('dashboard.syncHintVSCode')}</p>
         ) : (
           <div className="space-y-2">
             {vscodeProjects.map((project) => (
@@ -217,11 +217,11 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
             <Brain className="w-4 h-4 text-muted-foreground" /> JetBrains
           </h3>
           <Button variant="ghost" size="sm" onClick={syncJetBrainsProjects}>
-            <RefreshCw className="w-3.5 h-3.5 mr-1" /> Sync
+            <RefreshCw className="w-3.5 h-3.5 mr-1" /> {t('dashboard.syncProjects')}
           </Button>
         </div>
         {jetbrainsProjects.length === 0 ? (
-          <p className="text-sm text-muted-foreground/70 py-2">Click sync to load JetBrains projects</p>
+          <p className="text-sm text-muted-foreground/70 py-2">{t('dashboard.syncHintJetBrains')}</p>
         ) : (
           <div className="space-y-2">
             {jetbrainsProjects.map((project) => (
