@@ -1,4 +1,4 @@
-import { Globe } from 'lucide-react';
+import { Globe, Check, Circle } from 'lucide-react';
 import { useAppStore, type Environment } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { Button } from '@/components/ui/button';
@@ -26,8 +26,8 @@ export function EnvList({ onEdit, onDelete }: EnvListProps) {
   if (environments.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
-        <div className="w-16 h-16 rounded-lg bg-muted flex items-center justify-center mb-4">
-          <Globe className="w-8 h-8 text-muted-foreground/30" />
+        <div className="w-16 h-16 rounded-lg glass-icon-container flex items-center justify-center mb-4">
+          <Globe className="w-8 h-8 text-muted-foreground/40" />
         </div>
         <h3 className="text-lg font-medium text-foreground mb-1">{t('environments.noEnvTitle')}</h3>
         <p className="text-sm text-muted-foreground">{t('environments.noEnvHint')}</p>
@@ -67,22 +67,24 @@ function EnvCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardPro
   return (
     <div
       className={cn(
-        'group relative p-5 rounded-2xl border transition-all duration-200 cursor-pointer',
-        isActive
-          ? 'ring-1 ring-primary/40 border-primary/40 bg-primary/5 shadow-lg shadow-primary/10'
-          : 'bg-card border-border/50 hover:border-muted-foreground/30 hover:shadow-md'
+        'group relative p-5 rounded-2xl cursor-pointer glass-noise glass-env-card',
+        isActive && 'active'
       )}
       onClick={onSelect}
     >
       <div className="flex items-start gap-4">
         {/* Icon */}
         <div className={cn(
-          'w-12 h-12 rounded-lg flex items-center justify-center text-xl shrink-0',
+          'w-12 h-12 rounded-lg flex items-center justify-center shrink-0',
           isActive
-            ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
-            : 'bg-muted'
-        )}>
-          {isActive ? '\u2713' : '\u25CB'}
+            ? 'bg-primary/15 text-primary'
+            : 'glass-icon-container text-muted-foreground'
+        )}
+          style={isActive ? {
+            boxShadow: '0 0 16px hsl(var(--primary) / 0.15), 0 0 4px hsl(var(--primary) / 0.2)',
+          } : undefined}
+        >
+          {isActive ? <Check className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
         </div>
 
         {/* Content */}
@@ -90,22 +92,22 @@ function EnvCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardPro
           <div className="flex items-center gap-2 mb-1">
             <h3 className="text-lg font-semibold text-foreground">{name}</h3>
             {name === 'official' && (
-              <span className="text-[10px] font-medium bg-muted text-muted-foreground px-2 py-0.5 rounded-full uppercase">
+              <span className="text-[10px] font-medium glass-badge text-muted-foreground px-2 py-0.5 rounded-full uppercase">
                 {t('environments.default')}
               </span>
             )}
           </div>
           <div className="space-y-1">
             <p className="text-sm text-muted-foreground truncate">
-              <span className="text-muted-foreground/70">Base URL:</span>{' '}
+              <span className="text-muted-foreground/80">Base URL:</span>{' '}
               {env.baseUrl || 'api.anthropic.com'}
             </p>
             <p className="text-sm text-muted-foreground">
-              <span className="text-muted-foreground/70">Model:</span>{' '}
+              <span className="text-muted-foreground/80">Model:</span>{' '}
               {env.model || 'claude-sonnet-4-5'}
             </p>
             <p className="text-sm text-muted-foreground">
-              <span className="text-muted-foreground/70">API Key:</span>{' '}
+              <span className="text-muted-foreground/80">API Key:</span>{' '}
               {maskApiKey(env.apiKey, t('environments.notSet'))}
             </p>
           </div>
@@ -147,14 +149,14 @@ function EnvCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardPro
             {t('common.edit')}
           </Button>
           {name === 'official' ? (
-            <span className="h-8 px-3 inline-flex items-center text-xs font-medium text-muted-foreground bg-muted rounded-md cursor-not-allowed">
+            <span className="h-8 px-3 inline-flex items-center text-xs font-medium text-muted-foreground glass-badge rounded-md cursor-not-allowed">
               {t('common.protected')}
             </span>
           ) : (
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 px-3 text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 opacity-0 group-hover:opacity-100 transition-opacity"
+              className="h-8 px-3 text-destructive hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
               onClick={(e) => {
                 e.stopPropagation();
                 onDelete();

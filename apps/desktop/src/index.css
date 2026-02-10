@@ -794,6 +794,170 @@
     0 0 4px hsl(var(--primary-glow) / 0.3);
 }
 
+/* === Permission Mode Card (glass selection card) === */
+.glass-mode-card {
+  position: relative;
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.45));
+  backdrop-filter: blur(16px) saturate(170%);
+  -webkit-backdrop-filter: blur(16px) saturate(170%);
+  border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
+  box-shadow: inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.6));
+  transition:
+    background var(--duration-fast) var(--ease-default),
+    border-color var(--duration-fast) var(--ease-default),
+    box-shadow var(--duration-fast) var(--ease-default),
+    transform var(--duration-fast) var(--ease-default);
+}
+.glass-mode-card:hover {
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.55));
+  border-color: hsl(var(--glass-border-light) / var(--glass-border-hover-opacity));
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.8)),
+    0 2px 8px hsl(var(--glass-shadow-base) / 0.08);
+}
+.glass-mode-card.active {
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.6));
+  border-color: hsl(var(--primary) / 0.35);
+  transform: scale(1.02);
+  box-shadow:
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / var(--glass-inset-opacity)),
+    0 0 0 1px hsl(var(--primary) / 0.15),
+    0 4px 16px hsl(var(--primary) / 0.10),
+    0 1px 4px hsl(var(--glass-shadow-base) / 0.06);
+}
+
+/* === Environment Card (glass env card) === */
+.glass-env-card {
+  position: relative;
+  background: hsl(var(--glass-bg) / var(--glass-bg-opacity));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
+  box-shadow:
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / var(--glass-inset-opacity)),
+    0 2px 8px hsl(var(--glass-shadow-base) / 0.08);
+  transition:
+    background var(--duration-fast) var(--ease-default),
+    border-color var(--duration-fast) var(--ease-default),
+    box-shadow var(--duration-fast) var(--ease-default),
+    transform var(--duration-fast) var(--ease-default);
+}
+.glass-env-card:hover {
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) + 0.06));
+  border-color: hsl(var(--glass-border-light) / var(--glass-border-hover-opacity));
+  box-shadow:
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) + 0.04)),
+    0 4px 16px hsl(var(--glass-shadow-base) / 0.12),
+    0 8px 24px hsl(var(--glass-shadow-base) / 0.06);
+  transform: translateY(-1px);
+}
+.glass-env-card.active {
+  border-color: hsl(var(--primary) / 0.35);
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) + 0.04));
+  box-shadow:
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / var(--glass-inset-opacity)),
+    0 0 0 1px hsl(var(--primary) / 0.12),
+    0 4px 16px hsl(var(--primary) / 0.08),
+    0 8px 24px hsl(var(--glass-shadow-base) / 0.06);
+}
+
+/* === Glass Toggle Switch === */
+.glass-toggle {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.6));
+  border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
+  box-shadow: inset 0 1px 3px hsl(var(--glass-shadow-base) / 0.12);
+  transition: background var(--duration-fast) var(--ease-default),
+    border-color var(--duration-fast) var(--ease-default);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.glass-toggle::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: hsl(var(--foreground) / 0.6);
+  box-shadow: 0 1px 2px hsl(var(--glass-shadow-base) / 0.15);
+  transition: transform var(--duration-fast) var(--ease-default),
+    background var(--duration-fast) var(--ease-default);
+}
+.glass-toggle.checked {
+  background: hsl(var(--primary) / 0.25);
+  border-color: hsl(var(--primary) / 0.4);
+}
+.glass-toggle.checked::after {
+  transform: translateX(16px);
+  background: hsl(var(--primary));
+  box-shadow: 0 0 8px hsl(var(--primary) / 0.3), 0 1px 2px hsl(var(--glass-shadow-base) / 0.15);
+}
+
+/* === Glass Select (dropdown) === */
+.glass-select {
+  position: relative;
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.5));
+  backdrop-filter: blur(16px) saturate(170%);
+  -webkit-backdrop-filter: blur(16px) saturate(170%);
+  border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
+  box-shadow: inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.5));
+  color: hsl(var(--foreground));
+  transition: border-color var(--duration-fast) var(--ease-default),
+    box-shadow var(--duration-fast) var(--ease-default);
+}
+.glass-select:focus {
+  border-color: hsl(var(--primary) / 0.5);
+  box-shadow:
+    inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.5)),
+    0 0 0 2px hsl(var(--primary) / 0.15);
+  outline: none;
+}
+
+/* === Glass Divider (white highlight instead of gray) === */
+.glass-divider {
+  border-color: hsl(var(--glass-border-light) / var(--glass-border-opacity));
+}
+
+/* === Glass Icon Container (subtle frost for icon backgrounds) === */
+.glass-icon-container {
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.45));
+  backdrop-filter: blur(8px) saturate(150%);
+  -webkit-backdrop-filter: blur(8px) saturate(150%);
+  border: 1px solid hsl(var(--glass-border-light) / calc(var(--glass-border-opacity) * 0.5));
+  box-shadow: inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.5));
+}
+
+/* === Glass Badge (semi-transparent pill) === */
+.glass-badge {
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.5));
+  border: 1px solid hsl(var(--glass-border-light) / calc(var(--glass-border-opacity) * 0.6));
+  box-shadow: inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.3));
+}
+
+/* === Glass Outline Button (for outline buttons in glass context) === */
+.glass-btn-outline {
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.3));
+  border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
+  box-shadow: inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.4));
+  transition:
+    background var(--duration-fast) var(--ease-default),
+    border-color var(--duration-fast) var(--ease-default),
+    box-shadow var(--duration-fast) var(--ease-default);
+}
+.glass-btn-outline:hover {
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.45));
+  border-color: hsl(var(--glass-border-light) / var(--glass-border-hover-opacity));
+  box-shadow:
+    inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.6)),
+    0 2px 8px hsl(var(--glass-shadow-base) / 0.08);
+}
+
 /* === Reduced Motion === */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
