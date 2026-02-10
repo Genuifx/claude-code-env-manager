@@ -100,6 +100,12 @@ export default {
         'elevation-2': 'var(--shadow-md)',
         'elevation-3': 'var(--shadow-lg)',
         'elevation-4': 'var(--shadow-xl)',
+        'glass': '0 4px 16px hsl(var(--glass-shadow-base) / 0.08), inset 0 0.5px 0 0 hsl(var(--glass-border-light) / var(--glass-inset-opacity))',
+        'glass-hover': '0 8px 28px hsl(var(--glass-shadow-base) / 0.12), inset 0 0.5px 0 0 hsl(var(--glass-border-light) / var(--glass-border-hover-opacity))',
+      },
+      backdropBlur: {
+        'glass': 'var(--glass-blur)',
+        'glass-heavy': 'var(--glass-sidebar-blur)',
       },
     },
   },
