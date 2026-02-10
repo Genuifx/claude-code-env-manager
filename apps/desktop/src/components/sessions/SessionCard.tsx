@@ -21,11 +21,11 @@ export function SessionCard({ session, onFocus, onMinimize, onClose, confirmingC
   const getStatusDot = (status: Session['status']) => {
     switch (status) {
       case 'running':
-        return <span className="inline-block w-2 h-2 rounded-full bg-success status-running" />;
+        return <span className="inline-block w-2 h-2 rounded-full bg-success status-running" style={{ boxShadow: '0 0 6px hsl(var(--success) / 0.4)' }} />;
       case 'error':
-        return <span className="inline-block w-2 h-2 rounded-full bg-destructive status-error" />;
+        return <span className="inline-block w-2 h-2 rounded-full bg-destructive status-error" style={{ boxShadow: '0 0 6px hsl(var(--destructive) / 0.4)' }} />;
       case 'interrupted':
-        return <span className="inline-block w-2 h-2 rounded-full bg-destructive status-error" />;
+        return <span className="inline-block w-2 h-2 rounded-full bg-destructive status-error" style={{ boxShadow: '0 0 6px hsl(var(--destructive) / 0.4)' }} />;
       case 'idle':
       case 'stopped':
       default:
@@ -70,13 +70,13 @@ export function SessionCard({ session, onFocus, onMinimize, onClose, confirmingC
         </div>
       </div>
 
-      <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
-        <Clock className="w-3 h-3" />
+      <div className="flex items-center gap-2 text-xs text-muted-foreground/80 mb-3">
+        <Clock className="w-3.5 h-3.5" />
         <span>{formatDuration(session.startedAt)}</span>
       </div>
 
-      <div className="flex items-center gap-2 text-xs text-muted-foreground mb-4 truncate">
-        <FolderOpen className="w-3 h-3 flex-shrink-0" />
+      <div className="flex items-center gap-2 text-xs text-muted-foreground/80 mb-4 truncate">
+        <FolderOpen className="w-3.5 h-3.5 flex-shrink-0" />
         <span className="truncate" title={`${session.workingDir}${session.pid ? ` · PID: ${session.pid}` : ''}`}>
           {session.workingDir}
         </span>
@@ -84,34 +84,35 @@ export function SessionCard({ session, onFocus, onMinimize, onClose, confirmingC
 
       {confirmingClose ? (
         <div className="flex items-center gap-2">
-          <span className="text-sm text-destructive">{t('sessions.confirmTerminate')}</span>
-          <Button variant="ghost" size="sm" onClick={onCancelClose}>{t('common.cancel')}</Button>
-          <Button variant="destructive" size="sm" onClick={() => onConfirmClose?.(session.id)}>{t('sessions.terminate')}</Button>
+          <span className="text-sm text-destructive font-medium">{t('sessions.confirmTerminate')}</span>
+          <Button variant="ghost" size="sm" onClick={onCancelClose} className="hover:bg-[hsl(var(--glass-border-light)/0.08)]">{t('common.cancel')}</Button>
+          <Button size="sm" onClick={() => onConfirmClose?.(session.id)} className="bg-destructive/80 text-destructive-foreground hover:bg-destructive/90 backdrop-blur-sm">{t('sessions.terminate')}</Button>
         </div>
       ) : (
         <div className="flex gap-2">
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             onClick={() => onFocus(session.id)}
             disabled={session.status !== 'running'}
-            className="flex-1"
+            className="flex-1 border border-[hsl(var(--glass-border-light)/var(--glass-border-opacity))] hover:border-[hsl(var(--glass-border-light)/var(--glass-border-hover-opacity))] hover:bg-[hsl(var(--glass-border-light)/0.06)] bg-transparent"
           >
             {t('sessions.focus')}
           </Button>
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             onClick={() => onMinimize(session.id)}
             disabled={session.status !== 'running'}
+            className="border border-[hsl(var(--glass-border-light)/var(--glass-border-opacity))] hover:border-[hsl(var(--glass-border-light)/var(--glass-border-hover-opacity))] hover:bg-[hsl(var(--glass-border-light)/0.06)] bg-transparent"
           >
             <Minus className="w-4 h-4" />
           </Button>
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             onClick={() => onClose(session.id)}
-            className="text-destructive hover:text-destructive"
+            className="border border-[hsl(var(--glass-border-light)/var(--glass-border-opacity))] hover:border-[hsl(var(--destructive)/0.3)] hover:bg-[hsl(var(--destructive)/0.08)] text-destructive hover:text-destructive bg-transparent"
           >
             <X className="w-4 h-4" />
           </Button>

@@ -17,20 +17,18 @@ export function SessionList({ sessions, onFocus, onMinimize, onClose, confirming
   const { t } = useLocale();
 
   const getStatusDot = (status: Session['status']) => {
-    const base = 'w-2.5 h-2.5 rounded-full inline-block';
     switch (status) {
       case 'running':
-        return `${base} bg-success status-running`;
-      case 'stopped':
-        return `${base} bg-muted-foreground/40`;
-      case 'idle':
-        return `${base} bg-warning`;
-      case 'interrupted':
-        return `${base} bg-warning`;
+        return { className: 'w-2.5 h-2.5 rounded-full inline-block bg-success status-running', glow: '0 0 6px hsl(var(--success) / 0.4)' };
       case 'error':
-        return `${base} bg-destructive status-error`;
+        return { className: 'w-2.5 h-2.5 rounded-full inline-block bg-destructive status-error', glow: '0 0 6px hsl(var(--destructive) / 0.4)' };
+      case 'interrupted':
+        return { className: 'w-2.5 h-2.5 rounded-full inline-block bg-warning', glow: '0 0 6px hsl(var(--warning) / 0.4)' };
+      case 'idle':
+        return { className: 'w-2.5 h-2.5 rounded-full inline-block bg-warning', glow: '0 0 6px hsl(var(--warning) / 0.4)' };
+      case 'stopped':
       default:
-        return `${base} bg-muted-foreground/40`;
+        return { className: 'w-2.5 h-2.5 rounded-full inline-block bg-muted-foreground/40', glow: undefined };
     }
   };
 
@@ -51,76 +49,81 @@ export function SessionList({ sessions, onFocus, onMinimize, onClose, confirming
   };
 
   return (
-    <div className="space-y-2">
-      {sessions.map((session) => (
-        <div
-          key={session.id}
-          className="flex items-center gap-4 p-3 rounded-lg glass-subtle hover:bg-surface-raised/50 transition-colors"
-        >
-          <span className={getStatusDot(session.status)} />
+    <div className="space-y-1.5">
+      {sessions.map((session) => {
+        const dot = getStatusDot(session.status);
+        return (
+          <div
+            key={session.id}
+            className="flex items-center gap-4 p-3 rounded-lg glass-subtle hover:bg-[hsl(var(--glass-border-light)/0.06)] transition-all duration-150"
+          >
+            <span className={dot.className} style={dot.glow ? { boxShadow: dot.glow } : undefined} />
 
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="font-medium text-foreground">
-                {getProjectName(session.workingDir)}
-              </span>
-              <span className="text-xs px-1.5 py-0.5 glass-subtle rounded-md font-medium">
-                {session.envName}
-              </span>
-              <span className="text-xs px-1.5 py-0.5 glass-subtle rounded-md font-medium">
-                {session.permMode}
-              </span>
-            </div>
-            <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <Clock className="w-3 h-3" />
-                {formatDuration(session.startedAt)}
-              </span>
-              <span className="flex items-center gap-1 truncate">
-                <FolderOpen className="w-3 h-3 flex-shrink-0" />
-                <span className="truncate" title={`${session.workingDir}${session.pid ? ` · PID: ${session.pid}` : ''}`}>
-                  {session.workingDir}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="font-medium text-foreground">
+                  {getProjectName(session.workingDir)}
                 </span>
-              </span>
+                <span className="text-xs px-1.5 py-0.5 glass-subtle rounded-md font-medium">
+                  {session.envName}
+                </span>
+                <span className="text-xs px-1.5 py-0.5 glass-subtle rounded-md font-medium">
+                  {session.permMode}
+                </span>
+              </div>
+              <div className="flex items-center gap-3 text-xs text-muted-foreground/80">
+                <span className="flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5" />
+                  {formatDuration(session.startedAt)}
+                </span>
+                <span className="flex items-center gap-1 truncate">
+                  <FolderOpen className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span className="truncate" title={`${session.workingDir}${session.pid ? ` · PID: ${session.pid}` : ''}`}>
+                    {session.workingDir}
+                  </span>
+                </span>
+              </div>
             </div>
-          </div>
 
-          {confirmingId === session.id ? (
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <span className="text-sm text-destructive">{t('sessions.confirmTerminate')}</span>
-              <Button variant="ghost" size="sm" onClick={onCancelClose}>{t('common.cancel')}</Button>
-              <Button variant="destructive" size="sm" onClick={() => onConfirmClose?.(session.id)}>{t('sessions.terminate')}</Button>
-            </div>
-          ) : (
-            <div className="flex gap-2 flex-shrink-0">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => onFocus(session.id)}
-                disabled={session.status !== 'running'}
-              >
-                {t('sessions.focus')}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => onMinimize(session.id)}
-                disabled={session.status !== 'running'}
-              >
-                <Minus className="w-4 h-4" />
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => onClose(session.id)}
-                className="text-destructive hover:text-destructive"
-              >
-                <X className="w-4 h-4" />
-              </Button>
-            </div>
-          )}
-        </div>
-      ))}
+            {confirmingId === session.id ? (
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <span className="text-sm text-destructive font-medium">{t('sessions.confirmTerminate')}</span>
+                <Button variant="ghost" size="sm" onClick={onCancelClose} className="hover:bg-[hsl(var(--glass-border-light)/0.08)]">{t('common.cancel')}</Button>
+                <Button size="sm" onClick={() => onConfirmClose?.(session.id)} className="bg-destructive/80 text-destructive-foreground hover:bg-destructive/90 backdrop-blur-sm">{t('sessions.terminate')}</Button>
+              </div>
+            ) : (
+              <div className="flex gap-2 flex-shrink-0">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => onFocus(session.id)}
+                  disabled={session.status !== 'running'}
+                  className="border border-[hsl(var(--glass-border-light)/var(--glass-border-opacity))] hover:border-[hsl(var(--glass-border-light)/var(--glass-border-hover-opacity))] hover:bg-[hsl(var(--glass-border-light)/0.06)] bg-transparent"
+                >
+                  {t('sessions.focus')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => onMinimize(session.id)}
+                  disabled={session.status !== 'running'}
+                  className="border border-[hsl(var(--glass-border-light)/var(--glass-border-opacity))] hover:border-[hsl(var(--glass-border-light)/var(--glass-border-hover-opacity))] hover:bg-[hsl(var(--glass-border-light)/0.06)] bg-transparent"
+                >
+                  <Minus className="w-4 h-4" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => onClose(session.id)}
+                  className="border border-[hsl(var(--glass-border-light)/var(--glass-border-opacity))] hover:border-[hsl(var(--destructive)/0.3)] hover:bg-[hsl(var(--destructive)/0.08)] text-destructive hover:text-destructive bg-transparent"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
