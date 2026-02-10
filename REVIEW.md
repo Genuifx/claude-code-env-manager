@@ -1,145 +1,78 @@
-# Glassmorphism Theme Contest Review
+# Analytics Glassmorphism Contest -- Review Report
 
-**Reviewer**: Critic (Glass Judge)
+**Reviewer**: Arbiter (Critic)
 **Date**: 2026-02-10
-**Baseline**: Midnight Sapphire (`apps/desktop/src/index.css` on `main`)
+**Scope**: Analytics page glassmorphism overhaul -- three competing worktree branches
 
 ---
 
-## Proposal A: Frosted Glass (macOS Sequoia)
+## Review Summary
 
-### Strengths
-
-- **Best-in-class glass token system.** Introduces a complete set of CSS custom properties (`--glass-blur`, `--glass-bg-opacity`, `--glass-saturate`, `--glass-sidebar-bg`, `--glass-sidebar-opacity`, `--glass-border-light`, `--glass-border-opacity`, `--glass-border-hover-opacity`, `--glass-inset-opacity`, `--glass-shadow-base`) with separate dark and light mode values. This is the only proposal that makes glass parameters fully configurable via tokens.
-
-- **Three-tier blur hierarchy is architecturally sound.** Sidebar at 40px, cards at 20px, subtle surfaces at 12px. This creates real spatial depth without all glass surfaces competing for attention. The `saturate()` values also decrease with each tier (200% / 190% / 160%), which shows deep understanding of how Apple implements vibrancy.
-
-- **The 0.5px inset top-edge highlight is the single most impactful detail.** `inset 0 0.5px 0 0 rgba(255, 255, 255, 0.1)` appears on every glass surface and is the hallmark of professional glassmorphism. This technique separates real macOS-caliber glass from amateur implementations.
-
-- **Six distinct glass utility classes** (`.glass`, `.glass-sidebar`, `.glass-card`, `.glass-subtle`, `.frosted-panel`, `.glass-shimmer`) provide a complete toolkit for building UI with glass as a material system. Each class has a clear purpose in the hierarchy.
-
-- **Dark/light mode glass differentiation is correct.** Dark mode uses lower opacity (0.55) to reveal depth beneath; light mode uses higher opacity (0.72) because light-on-light glass needs more substance. Border sources switch from white-at-8% (dark) to black-at-6% (light). This is exactly how Apple does it.
-
-- **Shadows use the glass token `--glass-shadow-base`** (blue-tinted in dark, neutral in light), so elevation shadows feel cohesive with the glass surface material.
-
-- **`.glass-nav-active` class** provides a dedicated active-state treatment that is distinctly glass-native: tinted primary background at 10% opacity, blue-tinted inset highlight, and a soft 12px glow halo. This feels like a real frosted pill, not a flat color swap.
-
-- **Tailwind config extended** with `glass` and `glass-hover` box-shadow utilities and `backdropBlur` extensions (`glass` and `glass-heavy`), making the glass system accessible from Tailwind utility classes.
-
-### Weaknesses
-
-- **Visually conservative.** The "quiet confidence" approach means less immediate visual impact compared to the other two proposals. The System Blue primary is safe and familiar, but perhaps lacks a distinctive identity that separates this app from generic macOS UI.
-
-- **The 8-second glass shimmer animation** (`glass-shimmer::after`) could become distracting over extended use. While the 8s duration helps, ambient shimmer on functional UI is a subtle usability concern.
-
-- **Color palette is close to the Midnight Sapphire baseline** (shifted from hue 222 to 220). The improvement is measurable but subtle -- users familiar with the baseline may not perceive a dramatic change.
+Three solutions competed to refactor the Analytics page away from off-brand hardcoded amber colors toward the project's Frosted Glass / macOS Sequoia design system. The baseline had three key violations: (1) hardcoded `AMBER`/`AMBER_LIGHT` HSL constants in `TokenChart.tsx` (line 18-19: `hsl(38 92% 50%)`, `hsl(45 93% 58%)`), (2) `text-orange-500` Tailwind class on Flame icons in `Analytics.tsx` (line 437), and (3) six hardcoded amber Tailwind classes on the dev-mode demo data banner (line 371: `border-amber-300`, `bg-amber-50`, `text-amber-800`, etc.). All three solutions successfully eliminated the TokenChart amber constants. They diverge significantly on how thoroughly they addressed the remaining violations and how creatively they expressed the glass hierarchy.
 
 ---
 
-## Proposal B: Aurora Ice (Aurora Borealis)
+## Scheme Scores
 
-### Strengths
+### Aurora
 
-- **Most creative color concept.** The aurora spectrum (cyan-teal 168, ice blue 195, green 140, violet 280, rose 330) creates a distinctive identity that is immediately recognizable. Chart colors map directly to aurora phenomena, which is cohesive and beautiful.
-
-- **`mask-composite: exclude` gradient border** (`.aurora-border`) is a technically impressive CSS technique. It creates a genuine gradient border that flows through the full aurora spectrum without overlapping content -- this is not easy to implement correctly.
-
-- **Multi-color nav-active-bar gradient** (green to cyan to blue to violet, with dual-layer glow) is the most visually striking active indicator of all three proposals. The use of `box-shadow` with two different color glows creates real depth.
-
-- **Aurora logo glow cycling** through three colors (cyan, ice blue, violet) on a 6-second loop is a tasteful animated accent that gives the app personality.
-
-- **Destructive color** uses rose-pink (`340 65% 55%`) instead of harsh red, which is a subtle but intelligent choice that integrates with the aurora palette.
-
-### Weaknesses
-
-- **No glass token system.** The `.glass` class uses hardcoded values: `background: hsl(var(--surface-overlay) / 0.7)`, `backdrop-filter: blur(32px) saturate(200%)`. There are no `--glass-*` custom properties, making it impossible to adjust glass parameters across dark/light modes or for different surface levels.
-
-- **Sidebar does not use any glass effect.** `SideRail.tsx` uses `bg-sidebar` -- a flat solid background. For a glassmorphism theme contest, the sidebar (the most visible persistent surface) having no glass treatment is a significant miss.
-
-- **Tailwind config is unchanged from baseline.** No glass-specific shadows, no backdrop-blur utilities. The glass system exists only in raw CSS classes, not in the Tailwind design token layer.
-
-- **`hue-rotate` animation on `.aurora-flow`** is a blunt instrument. When applied to a container, it affects ALL descendant colors -- text, icons, borders -- which can cause unexpected visual artifacts. The hue-rotate approach is less precise than the `@property` technique in Proposal C.
-
-- **Light mode glass treatment is absent.** The `.glass` class has no light-mode-specific adjustments. The hardcoded 200% saturation and 0.7 opacity will behave differently on light backgrounds without any adaptation.
-
-- **The deep space indigo (232 35% 6%) background** leans more toward a "space UI" or gaming aesthetic than macOS Sequoia. This is a deliberate creative choice, but it reduces macOS consistency.
+| Dimension | Score | Comments |
+|------|------|------|
+| Design System Compliance | 5/10 | Replaced TokenChart amber with `--chart-1`/`--chart-2` CSS vars (good). However, **did not fix** `text-orange-500` on the Flame icon (Analytics.tsx line 455) -- a direct violation of "never hardcoded Tailwind colors." **Did not fix** the demo banner's six amber Tailwind classes (line 375: `border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300`). The HeatmapCalendar rework **abandoned** the bespoke `--heatmap-*` CSS variable tokens (defined in `index.css` lines 104-109) in favor of generic `bg-primary/20` Tailwind opacity classes -- this is a regression from a more specific, theme-aware token system to a less precise one. |
+| Glassmorphism Effect Quality | 7/10 | Good use of `stat-card glass-noise` on hero card. Cards via `<Card>` inherit `glass-card glass-noise`. The `LEVEL_GLOW` map (HeatmapCalendar.tsx lines 19-25) applying `--primary-glow` box-shadow halos to heatmap cells at levels 2-4 is a genuinely creative aurora-themed enhancement. Three-stop vertical gradient fill + horizontal stroke gradient on TokenChart creates visual depth. Missing `glass-shimmer` on hero card. No glass panel wrapping for the milestone section, breaking the 3-tier hierarchy opportunity. |
+| Visual Consistency | 6/10 | Chart colors use system blue-cyan spectrum (`--chart-1`/`--chart-2`), but the surviving `text-orange-500` on the Flame icon creates a jarring warm accent against the cool palette. The amber demo banner (when visible in dev mode) further breaks the blue unity. The aurora gradient on DailyTokenBar matches TokenChart well. |
+| Code Quality | 7/10 | Clean, focused changes. Interfaces preserved. No type issues. The granularity controls were moved out of the Card header into a standalone row (line 383-394) -- a layout change that was not strictly required and alters the baseline UI structure. Removing `LEVEL_STYLES` inline styles in favor of `LEVEL_COLORS` Tailwind classes is an unnecessary refactor that discards a working, token-based pattern. |
+| Creativity & Detail | 8/10 | The aurora theme is well-expressed: three-stop fill gradient simulating aurora curtains (TokenChart.tsx lines 35-39), horizontal stroke gradient for color sweep (lines 40-43), `LEVEL_GLOW` halo effects on active heatmap cells (HeatmapCalendar.tsx lines 19-25). The milestone progress bar enhancement with `linear-gradient(90deg, --chart-1, --chart-2)` and `--primary-glow` box-shadow (Analytics.tsx lines 82-83) is a thoughtful luminous touch. The most creatively ambitious heatmap treatment of the three solutions. |
+| **Weighted Total** | **6.30/10** | (5x0.30 + 7x0.25 + 6x0.20 + 7x0.15 + 8x0.10) = 1.50+1.75+1.20+1.05+0.80 |
 
 ---
 
-## Proposal C: Liquid Crystal (Liquid Metal)
+### Prism
 
-### Strengths
-
-- **Most technically innovative.** Uses CSS `@property` for `--liquid-angle` (angle type) and `--crystal-hue` (number type), enabling smooth gradient-angle rotation and hue-shift animations that are impossible with standard CSS. This is cutting-edge CSS engineering.
-
-- **`.glass-morphing` hover transition** is a genuinely novel interaction: blur increases from 24px to 48px on hover, with saturation ramping from 130% to 160% and brightness adding 1.08x. This creates the illusion of a crystal lens focusing, which is unique among all three proposals.
-
-- **Richest effect library.** Seven new effect classes (`.liquid-gradient`, `.crystal-refraction`, `.metallic-strip`, `.glass-morphing`, `.liquid-border`, `.crystal-pulse`, `.liquid-shimmer`, `.crystal-ambient`). Each serves a distinct purpose and contributes to the liquid metal metaphor.
-
-- **Dual-edge inset shadows** (`inset 0 0.5px 0` top + `inset 0 -0.5px 0` bottom) in `.liquid-border` simulate mercury meniscus light-catching. This is more nuanced than a single top-edge highlight.
-
-- **`@property` gradient angle animation** in `.liquid-gradient` creates continuous 360-degree gradient rotation. This would be impossible with standard CSS keyframes and demonstrates advanced CSS knowledge.
-
-- **Tailwind config additions are meaningful:** `shadow-crystal` (glow + inset) and `shadow-liquid-metal` (three-layer inset) are well-designed utility shadows. The `backdropBlur` extensions (crystal: 40px, deep: 60px) are practical.
-
-### Weaknesses
-
-- **Inline style in SideRail.tsx** (`style={{ background: 'linear-gradient(180deg, ...)' }}`) is a maintainability anti-pattern. This hardcoded gradient bypasses the CSS variable system and will not adapt to light mode. It should be a CSS class or use CSS custom properties.
-
-- **No glass token system.** Like Aurora Ice, the `.glass` class uses hardcoded values (`blur(40px) saturate(150%) brightness(1.05)`). No `--glass-*` custom properties exist.
-
-- **`brightness(1.05)` in the `.glass` class** can wash out content in light mode. Without separate light-mode glass parameters, this is a readability concern.
-
-- **SideRail is over-decorated.** Every NavButton receives `liquid-border` (metallic shadow treatment), active buttons get `crystal-refraction` (overlay pseudo-element), the sidebar itself has `glass-morphing` (hover blur transition), and there are two `metallic-strip` separators. The accumulation of effects may create visual noise rather than clarity.
-
-- **The liquid metal / sci-fi aesthetic** diverges significantly from macOS conventions. While creative, it reads more like a premium audio app or a game launcher than a developer tool.
-
-- **Chart colors are monotone.** The crystal spectrum (205, 190, 170, 240, 210, 225) stays entirely in the cool-blue range. Chart-5 at `210 14% 64%` is very close to the accent color, which could cause confusion in data visualization. Aurora Ice's full-spectrum charts are more practical.
+| Dimension | Score | Comments |
+|------|------|------|
+| Design System Compliance | 7/10 | Fully removed TokenChart amber constants. **Fixed** `text-orange-500` by replacing with `text-chart-4` (Analytics.tsx lines 58, 451) -- system purple (`--chart-4: 250 45% 60%`), staying within the chart color palette. Heatmap tokens correctly left untouched (baseline already compliant with `--heatmap-*` vars). However, **did not fix** the demo banner amber Tailwind classes (line 371). Tooltip shadow uses hardcoded `hsl(0 0% 0% / 0.15)` in both TokenChart.tsx (line 59) and DailyTokenBar.tsx (line 77) instead of the proper `--glass-shadow-base` token -- a minor but real token violation. All `t()` i18n usage maintained. |
+| Glassmorphism Effect Quality | 9/10 | **Best glass hierarchy** of all three solutions. Hero card uses `stat-card glass-noise glass-shimmer` (line 393: heaviest frost + ambient light sweep animation). Chart cards use `<Card>` (`glass-card glass-noise`, medium frost + hover lift). Milestone section wrapped in `glass-subtle glass-noise rounded-xl p-4` (line 499: lightest frost). This is a textbook 3-tier glass stack: heavy -> medium -> light. Individual `card-stagger` on each Card element (lines 467, 483, 490) produces correct staggered entrance animations. The `glass-shimmer` addition on the hero card adds a premium ambient light sweep that neither of the other solutions included. |
+| Visual Consistency | 7/10 | Three-color prism gradient (`--chart-1` -> `--chart-2` -> `--chart-3`, blue -> cyan -> green) creates a wider but still cool-tone spectrum sweep across charts. The per-bar color interpolation in DailyTokenBar (lines 26-40) echoes the prism refraction theme. `text-chart-4` for streak icons is within the chart palette but introduces purple, which is a slight departure from pure blue. The surviving amber demo banner is the sole warm-tone holdout. |
+| Code Quality | 8/10 | The `getBarColor()` utility function (DailyTokenBar.tsx lines 32-40) is cleanly isolated and well-typed. The `Cell` import from recharts for per-bar coloring is the correct API for this pattern. `card-stagger` applied to individual `<Card>` elements rather than the grid container produces more correct stagger timing. The `glass-subtle glass-noise` wrapper on NextMilestone (line 499) is well-scoped. All component interfaces preserved. No unnecessary structural changes. |
+| Creativity & Detail | 9/10 | The prism metaphor is thoroughly executed: three-color refraction gradient on the area chart fill AND stroke (TokenChart.tsx lines 32-42), per-bar color sweep across 14 days in DailyTokenBar creating a left-to-right spectral gradient (lines 85-90), `glass-shimmer` ambient light sweep on the hero card, and a deliberate 3-tier glass hierarchy. The `getBarColor()` interpolation function is a creative approach to per-bar coloring that avoids SVG gradient limitations in recharts Bar components. |
+| **Weighted Total** | **7.85/10** | (7x0.30 + 9x0.25 + 7x0.20 + 8x0.15 + 9x0.10) = 2.10+2.25+1.40+1.20+0.90 |
 
 ---
 
-## Scoring
+### Glacier
 
-| Dimension | Weight | A: Frosted Glass | B: Aurora Ice | C: Liquid Crystal |
-|-----------|--------|:-:|:-:|:-:|
-| Design Aesthetics | 25% | 8.5 | 8.0 | 7.5 |
-| macOS Consistency | 20% | 9.0 | 6.0 | 6.5 |
-| Code Quality | 20% | 9.0 | 7.0 | 7.0 |
-| Glass Depth | 15% | 9.0 | 7.0 | 8.5 |
-| Creativity & Effects | 10% | 7.0 | 9.0 | 9.5 |
-| Usability | 10% | 9.0 | 7.5 | 7.0 |
-| **Weighted Total** | **100%** | **8.68** | **7.30** | **7.50** |
-
-### Score Breakdown
-
-**A: Frosted Glass** = (8.5 x 0.25) + (9.0 x 0.20) + (9.0 x 0.20) + (9.0 x 0.15) + (7.0 x 0.10) + (9.0 x 0.10) = 2.125 + 1.80 + 1.80 + 1.35 + 0.70 + 0.90 = **8.68**
-
-**B: Aurora Ice** = (8.0 x 0.25) + (6.0 x 0.20) + (7.0 x 0.20) + (7.0 x 0.15) + (9.0 x 0.10) + (7.5 x 0.10) = 2.00 + 1.20 + 1.40 + 1.05 + 0.90 + 0.75 = **7.30**
-
-**C: Liquid Crystal** = (7.5 x 0.25) + (6.5 x 0.20) + (7.0 x 0.20) + (8.5 x 0.15) + (9.5 x 0.10) + (7.0 x 0.10) = 1.875 + 1.30 + 1.40 + 1.275 + 0.95 + 0.70 = **7.50**
+| Dimension | Score | Comments |
+|------|------|------|
+| Design System Compliance | 9/10 | **Most thorough compliance fix.** Removed TokenChart amber constants. **Fixed** `text-orange-500` by replacing the Flame icon entirely with `Zap` using `text-primary` (Analytics.tsx line 58, line 451). **Fixed the demo banner** -- the only solution to do so -- replacing all six amber Tailwind classes with `glass-subtle glass-noise` and `border: 1px solid hsl(var(--glass-border-light) / 0.3)` inline style (line 371). Tooltip glass treatment uses ALL correct design tokens: `--glass-bg` for background, `--glass-border-light` for border, `--glass-shadow-base` for shadow (TokenChart.tsx lines 50-55) -- not hardcoded black like Prism. Only minor deduction: the demo banner's inline `style={{ border: ... }}` could have relied on `glass-subtle`'s own border rule. |
+| Glassmorphism Effect Quality | 6/10 | `stat-card glass-noise` on hero card is correct but baseline-level. Cards via `<Card>` provide `glass-card glass-noise`. Tooltip has the **strongest glass treatment** of all three: `blur(24px) saturate(200%)` with proper `--glass-bg` opacity and `--glass-border-light` border. However, the chart area gradient uses ultra-low opacity (0.15 -> 0.03, TokenChart.tsx line 35-36), making the fill nearly invisible -- this prioritizes translucency over visual impact. No `glass-shimmer` on the hero card. The milestone section has **no glass wrapping** at all (line 499), missing the opportunity for a 3-tier hierarchy. Only 2 tiers exist: stat-card -> glass-card. |
+| Visual Consistency | 9/10 | **Most consistent color palette.** Everything is glacier blue: mono-blue hero gradient (`--chart-1` to `--chart-1/0.7`, line 399), mono-blue chart stroke and fill, `text-primary` for the streak icon, `glass-subtle` for the demo banner. The Zap icon with `text-primary` matches the blue spectrum perfectly. No warm accents anywhere on the entire page. The demo banner fix means even dev mode maintains visual consistency. Minor risk: the mono-blue approach may feel monotonous across a full page of analytics content with multiple chart types. |
+| Code Quality | 8/10 | Minimal, surgical changes. DailyTokenBar only changed the tooltip styling (bar fill was already compliant at baseline). The Flame -> Zap icon swap is a semantic change (fire -> lightning) that could be debated -- the "streak" concept is traditionally associated with fire/flame iconography, and changing the icon changes the user metaphor. The milestone bar thinning (`h-2` -> `h-1`, `bg-muted` -> `bg-muted/40`, `bg-primary` -> `bg-primary/80`, line 77-81) is a considered minimalist detail. All component interfaces preserved. |
+| Creativity & Detail | 7/10 | The "ice-clear" mono-blue aesthetic is a coherent artistic vision. The ultra-low-opacity chart gradient creates a genuine translucent ice effect. The demo banner transformation from amber to `glass-subtle` is the most impactful single change across all solutions -- it demonstrates deep understanding of the design system's intent. The thinner milestone bar at reduced opacity is a refined minimalist touch. Less visually striking than Aurora's glow effects or Prism's spectral sweep, but more architecturally pure. |
+| **Weighted Total** | **7.90/10** | (9x0.30 + 6x0.25 + 9x0.20 + 8x0.15 + 7x0.10) = 2.70+1.50+1.80+1.20+0.70 |
 
 ---
 
 ## Final Ranking
 
-### 1st Place: Proposal A -- Frosted Glass (8.68/10)
+1. **Glacier** -- 7.90/10
+2. **Prism** -- 7.85/10
+3. **Aurora** -- 6.30/10
 
-The clear winner. Frosted Glass is the only proposal that treats glassmorphism as a **material system** rather than a collection of visual effects. The comprehensive glass token architecture (`--glass-*` custom properties with dark/light variants), the three-tier blur hierarchy, and the discipline of the 0.5px inset highlight technique all demonstrate mastery of how Apple implements vibrancy in macOS Sequoia. It is also the only proposal whose code quality fully supports long-term maintenance: every glass parameter is configurable, dark/light modes are properly differentiated, and the Tailwind config is extended with glass-specific utilities. What it lacks in creative flair it more than compensates for in architectural completeness.
-
-### 2nd Place: Proposal C -- Liquid Crystal (7.50/10)
-
-The most technically ambitious entry. The use of CSS `@property` for gradient angle animation is genuinely innovative and demonstrates frontier-level CSS knowledge. The `.glass-morphing` hover interaction is a unique contribution that none of the other proposals attempted. However, the liquid metal aesthetic strays from macOS conventions, the inline style in SideRail.tsx is a code quality concern, and the lack of a glass token system (shared with Aurora Ice) means the glass effects are not configurable across modes. The over-decoration of the SideRail (four layered effects on every button) risks visual noise.
-
-### 3rd Place: Proposal B -- Aurora Ice (7.30/10)
-
-The most creative conceptual vision. The aurora color palette is genuinely beautiful, the `mask-composite` gradient border is technically impressive, and the multi-color active indicator is the most visually striking detail of any proposal. However, it falls short on execution: the sidebar has no glass treatment at all, there is no glass token system, the Tailwind config is unmodified, and the light mode glass behavior is unaddressed. For a glassmorphism contest specifically, having the most prominent UI surface (the sidebar) use a flat `bg-sidebar` is a critical omission that significantly impacts the glass depth score.
+Glacier and Prism are separated by only 0.05 points. Glacier wins on design system compliance (the only solution to fix ALL three baseline violations including the demo banner) and visual consistency (zero warm-tone holdouts anywhere on the page). Prism wins decisively on glassmorphism effect quality (best 3-tier hierarchy with `glass-shimmer`) and creativity (prism refraction gradients, per-bar Cell coloring). Aurora finishes third due to leaving two of three design system violations unfixed and regressing the heatmap from bespoke `--heatmap-*` CSS variable tokens to generic Tailwind opacity classes.
 
 ---
 
-## Recommendation
+## Recommendations & Fusion Strategy
 
-**Adopt Proposal A (Frosted Glass)** as the glassmorphism theme. Its glass token system provides the foundation for future theme variants, and its macOS Sequoia alignment is the most appropriate direction for a developer tool running on macOS.
+The ideal final implementation would fuse elements from all three:
 
-Consider cherry-picking from the other proposals:
-- From **Liquid Crystal**: The CSS `@property` gradient angle technique could enhance the glass shimmer animation
-- From **Aurora Ice**: The `mask-composite` gradient border technique could be offered as an optional decorative class
+1. **From Glacier**: Take the demo banner fix (`glass-subtle glass-noise` replacing amber classes) and the comprehensive tooltip glass treatment using `--glass-bg`, `--glass-border-light`, and `--glass-shadow-base` tokens. Also take the Flame -> Zap icon swap with `text-primary` for complete amber elimination.
+
+2. **From Prism**: Take the 3-tier glass hierarchy (`stat-card glass-noise glass-shimmer` -> `glass-card glass-noise` via `<Card>` -> `glass-subtle glass-noise`) and the `glass-shimmer` on the hero card. Take the `glass-subtle glass-noise rounded-xl p-4` wrapper around the NextMilestone section. Take the individual `card-stagger` on each Card element for proper staggered animation.
+
+3. **From Aurora**: Take the `LEVEL_GLOW` heatmap glow halos (but keep the baseline `--heatmap-*` CSS variable tokens instead of Aurora's `bg-primary` Tailwind classes). Take the milestone progress bar gradient enhancement with `--primary-glow` glow shadow.
+
+4. **Color palette**: Use Prism's multi-color approach (`--chart-1` through `--chart-3`) for the TokenChart area gradient and stroke, as it provides more visual richness than Glacier's mono-blue while staying within the cool spectrum. For DailyTokenBar, Aurora's gradient fill is simpler and has less runtime overhead than Prism's per-bar Cell approach.
+
+5. **Unfixed in all three**: None of the solutions addressed the baseline HeatmapCalendar's use of the English-only `DAY_LABELS = ['Mon', 'Tue', ...]` constant, which should arguably use `t()` for i18n compliance. This is a pre-existing issue in the baseline, not a regression introduced by any solution.
