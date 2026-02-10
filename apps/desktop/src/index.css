@@ -794,6 +794,160 @@
     0 0 4px hsl(var(--primary-glow) / 0.3);
 }
 
+/* ============================================================ */
+/* === Dashboard Glass Utilities                              === */
+/* ============================================================ */
+
+/* --- Glass Dropdown (popover menus on glass surfaces) --- */
+.glass-dropdown {
+  position: relative;
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) + 0.12));
+  backdrop-filter: blur(48px) saturate(var(--glass-sidebar-saturate));
+  -webkit-backdrop-filter: blur(48px) saturate(var(--glass-sidebar-saturate));
+  border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
+  box-shadow:
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / var(--glass-inset-opacity)),
+    0 8px 32px hsl(var(--glass-shadow-base) / 0.18),
+    0 2px 8px hsl(var(--glass-shadow-base) / 0.10);
+}
+.light .glass-dropdown {
+  box-shadow:
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / var(--glass-inset-opacity)),
+    0 8px 32px hsl(var(--glass-shadow-base) / 0.12),
+    0 2px 8px hsl(var(--glass-shadow-base) / 0.06);
+}
+
+/* Dropdown item hover — semi-transparent white, not solid surface */
+.glass-dropdown-item {
+  transition: background var(--duration-fast) var(--ease-default);
+}
+.glass-dropdown-item:hover {
+  background: hsl(var(--glass-border-light) / 0.07);
+}
+.light .glass-dropdown-item:hover {
+  background: hsl(var(--glass-border-light) / 0.35);
+}
+
+/* --- Glass List Item (project rows on glass surfaces) --- */
+.glass-list-item {
+  position: relative;
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.5));
+  border: 1px solid hsl(var(--glass-border-light) / calc(var(--glass-border-opacity) * 0.7));
+  backdrop-filter: blur(16px) saturate(170%);
+  -webkit-backdrop-filter: blur(16px) saturate(170%);
+  box-shadow:
+    inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.5));
+  transition:
+    background var(--duration-fast) var(--ease-default),
+    border-color var(--duration-fast) var(--ease-default),
+    box-shadow var(--duration-fast) var(--ease-default),
+    transform var(--duration-fast) var(--ease-default);
+}
+.glass-list-item:hover {
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.7));
+  border-color: hsl(var(--glass-border-light) / var(--glass-border-hover-opacity));
+  box-shadow:
+    inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.6)),
+    0 2px 8px hsl(var(--glass-shadow-base) / 0.08);
+  transform: translateY(-0.5px);
+}
+
+/* --- Glass Badge (status badges on hero panel) --- */
+:root {
+  --badge-bg-opacity: 0.12;
+  --badge-border-opacity: 0.18;
+}
+.light {
+  --badge-bg-opacity: 0.15;
+  --badge-border-opacity: 0.25;
+}
+
+/* --- Glass Session Indicator (active sessions button) --- */
+.glass-indicator {
+  position: relative;
+  background: hsl(var(--glass-border-light) / 0.07);
+  border: 1px solid hsl(var(--glass-border-light) / calc(var(--glass-border-opacity) * 0.8));
+  transition:
+    background var(--duration-fast) var(--ease-default),
+    border-color var(--duration-fast) var(--ease-default);
+}
+.glass-indicator:hover {
+  background: hsl(var(--glass-border-light) / 0.12);
+  border-color: hsl(var(--glass-border-light) / var(--glass-border-hover-opacity));
+}
+.light .glass-indicator {
+  background: hsl(var(--glass-border-light) / 0.35);
+}
+.light .glass-indicator:hover {
+  background: hsl(var(--glass-border-light) / 0.50);
+}
+
+/* --- Glass Add Button (dashed border add card) --- */
+.glass-add-btn {
+  position: relative;
+  border: 1px dashed hsl(var(--glass-border-light) / calc(var(--glass-border-opacity) * 1.2));
+  background: transparent;
+  transition:
+    background var(--duration-fast) var(--ease-default),
+    border-color var(--duration-fast) var(--ease-default),
+    color var(--duration-fast) var(--ease-default);
+}
+.glass-add-btn:hover {
+  background: hsl(var(--primary) / 0.06);
+  border-color: hsl(var(--primary) / 0.30);
+  color: hsl(var(--primary));
+}
+.light .glass-add-btn:hover {
+  background: hsl(var(--primary) / 0.08);
+  border-color: hsl(var(--primary) / 0.35);
+}
+
+/* --- Glass Outline Button (outline buttons on glass surfaces) --- */
+.glass-outline-btn {
+  position: relative;
+  background: hsl(var(--glass-border-light) / 0.05);
+  border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
+  box-shadow: inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.4));
+  transition:
+    background var(--duration-fast) var(--ease-default),
+    border-color var(--duration-fast) var(--ease-default);
+}
+.glass-outline-btn:hover {
+  background: hsl(var(--glass-border-light) / 0.10);
+  border-color: hsl(var(--glass-border-light) / var(--glass-border-hover-opacity));
+}
+.light .glass-outline-btn {
+  background: hsl(var(--glass-border-light) / 0.30);
+}
+.light .glass-outline-btn:hover {
+  background: hsl(var(--glass-border-light) / 0.50);
+}
+
+/* --- Launch CTA Button (primary action with glass-aware glow) --- */
+.glass-launch-btn {
+  box-shadow:
+    0 2px 8px hsl(var(--primary) / 0.25),
+    0 0 0 1px hsl(var(--primary) / 0.15);
+  transition:
+    box-shadow var(--duration-fast) var(--ease-default),
+    transform var(--duration-fast) var(--ease-default);
+}
+.glass-launch-btn:hover {
+  box-shadow:
+    0 4px 16px hsl(var(--primary) / 0.35),
+    0 0 0 1px hsl(var(--primary) / 0.20);
+}
+.light .glass-launch-btn {
+  box-shadow:
+    0 2px 8px hsl(var(--primary) / 0.20),
+    0 0 0 1px hsl(var(--primary) / 0.12);
+}
+.light .glass-launch-btn:hover {
+  box-shadow:
+    0 4px 16px hsl(var(--primary) / 0.30),
+    0 0 0 1px hsl(var(--primary) / 0.18);
+}
+
 /* === Reduced Motion === */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
