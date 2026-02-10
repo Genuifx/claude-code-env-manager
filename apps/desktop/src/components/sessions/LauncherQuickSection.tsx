@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { FolderOpen, Star, Clock, Check, Loader2 } from 'lucide-react';
+import { FolderOpen, Star, Clock, Check, Loader2, Columns2, LayoutGrid } from 'lucide-react';
 import { useLocale } from '@/locales';
 import { useAppStore, type ArrangeLayout } from '@/store';
+import { Button } from '@/components/ui/button';
 
 interface LauncherQuickSectionProps {
   onLaunchMulti: (dirs: string[], layout: ArrangeLayout) => void;
@@ -63,32 +64,34 @@ export function LauncherQuickSection({ onLaunchMulti, onBrowse, isLaunching }: L
   };
 
   return (
-    <div>
+    <div className="space-y-3">
       {/* Header */}
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-muted-foreground">
           {count > 0
             ? t('sessions.selectDirs').replace('{count}', String(count))
             : t('sessions.quickLaunch')
           }
         </span>
-        <button
-          type="button"
+        <Button
+          variant="link"
+          size="sm"
           onClick={onBrowse}
-          className="text-2xs text-primary hover:text-primary/80 transition-colors font-medium"
+          className="text-2xs h-auto p-0"
         >
+          <FolderOpen className="w-3 h-3" />
           {t('sessions.browseDir')}
-        </button>
+        </Button>
       </div>
 
       {/* Project list */}
       {projects.length === 0 ? (
-        <div className="py-4 text-center">
-          <FolderOpen className="w-5 h-5 text-muted-foreground/40 mx-auto mb-1.5" />
-          <p className="text-2xs text-muted-foreground">{t('sessions.noRecentProjects')}</p>
+        <div className="py-6 text-center">
+          <FolderOpen className="w-6 h-6 text-muted-foreground/30 mx-auto mb-2" />
+          <p className="text-xs text-muted-foreground">{t('sessions.noRecentProjects')}</p>
         </div>
       ) : (
-        <div className="space-y-0.5">
+        <div className="space-y-0.5 -mx-1">
           {projects.map((project) => {
             const isSelected = selected.has(project.path);
             return (
@@ -97,35 +100,41 @@ export function LauncherQuickSection({ onLaunchMulti, onBrowse, isLaunching }: L
                 type="button"
                 onClick={() => toggleSelect(project.path)}
                 className={`
-                  w-full flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors group text-left
+                  w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left
+                  transition-all duration-150 cursor-pointer
                   ${isSelected
-                    ? 'bg-primary/10 ring-1 ring-primary/30'
-                    : 'hover:bg-surface-raised'
+                    ? 'glass-subtle ring-1 ring-primary/40'
+                    : 'hover:bg-accent/50'
                   }
                 `}
               >
-                {/* Checkbox area */}
+                {/* Checkbox */}
                 <div className={`
-                  w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors
+                  w-3.5 h-3.5 rounded-[4px] border flex items-center justify-center shrink-0 transition-colors
                   ${isSelected
                     ? 'bg-primary border-primary text-primary-foreground'
-                    : 'border-muted-foreground/30 group-hover:border-muted-foreground/60'
+                    : 'border-muted-foreground/25'
                   }
                 `}>
-                  {isSelected && <Check className="w-3 h-3" />}
+                  {isSelected && <Check className="w-2.5 h-2.5" />}
                 </div>
 
+                {/* Icon */}
                 {project.isFavorite ? (
-                  <Star className="w-3 h-3 text-amber-400 shrink-0" />
+                  <Star className="w-3.5 h-3.5 text-warning shrink-0" />
                 ) : (
-                  <Clock className="w-3 h-3 text-muted-foreground shrink-0" />
+                  <Clock className="w-3.5 h-3.5 text-muted-foreground/50 shrink-0" />
                 )}
-                <span className="text-sm text-foreground truncate flex-1">
-                  {project.name}
-                </span>
-                <span className="text-2xs text-muted-foreground truncate max-w-[100px]">
-                  {truncatePath(project.path)}
-                </span>
+
+                {/* Name + path stacked */}
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-foreground truncate leading-tight">
+                    {project.name}
+                  </div>
+                  <div className="text-2xs text-muted-foreground/70 truncate leading-tight">
+                    {truncatePath(project.path)}
+                  </div>
+                </div>
               </button>
             );
           })}
@@ -134,61 +143,41 @@ export function LauncherQuickSection({ onLaunchMulti, onBrowse, isLaunching }: L
 
       {/* Action buttons — visible when 1+ selected */}
       {count >= 1 && (
-        <>
-          <div className="border-t border-[--glass-border-light] mt-3 pt-3" />
-          <div className="flex items-center gap-2">
-            {isLaunching ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground w-full justify-center py-1">
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                {t('sessions.launching')}
+        <div className="border-t border-[hsl(var(--glass-border-light)/0.08)] pt-3">
+          {isLaunching ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground w-full justify-center py-2">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              {t('sessions.launching')}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-2xs text-muted-foreground">
+                {t('sessions.launchCount').replace('{count}', String(count))}
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleLayoutLaunch('horizontal2')}
+                  className="flex-1 glass-subtle border-[--glass-border-light] bg-transparent gap-1.5"
+                >
+                  <Columns2 className="w-3.5 h-3.5" />
+                  {t('sessions.layoutHorizontal2')}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleLayoutLaunch('grid4')}
+                  className="flex-1 glass-subtle border-[--glass-border-light] bg-transparent gap-1.5"
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  {t('sessions.layoutGrid4')}
+                </Button>
               </div>
-            ) : (
-              <>
-                <span className="text-2xs text-muted-foreground shrink-0">
-                  {t('sessions.launchCount').replace('{count}', String(count))}:
-                </span>
-                <div className="flex gap-1.5 flex-1">
-                  <button
-                    type="button"
-                    onClick={() => handleLayoutLaunch('horizontal2')}
-                    className="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-lg glass-subtle hover:bg-surface-raised transition-colors text-2xs font-medium text-foreground"
-                  >
-                    <LayoutThumbnailMini layout="horizontal2" />
-                    {t('sessions.layoutHorizontal2')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleLayoutLaunch('grid4')}
-                    className="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-lg glass-subtle hover:bg-surface-raised transition-colors text-2xs font-medium text-foreground"
-                  >
-                    <LayoutThumbnailMini layout="grid4" />
-                    {t('sessions.layoutGrid4')}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </>
+            </div>
+          )}
+        </div>
       )}
     </div>
-  );
-}
-
-/** Tiny inline SVG for layout buttons */
-function LayoutThumbnailMini({ layout }: { layout: 'horizontal2' | 'grid4' }) {
-  if (layout === 'horizontal2') {
-    return (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="2" y="3" width="20" height="18" rx="2" />
-        <line x1="12" y1="3" x2="12" y2="21" />
-      </svg>
-    );
-  }
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="3" width="20" height="18" rx="2" />
-      <line x1="12" y1="3" x2="12" y2="21" />
-      <line x1="2" y1="12" x2="22" y2="12" />
-    </svg>
   );
 }

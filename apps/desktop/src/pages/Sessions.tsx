@@ -1,9 +1,9 @@
-import { useState, useCallback } from 'react';
-import { LayoutGrid, List, Minimize2, Plus, Terminal, X, ChevronDown, Loader2, Check, FolderOpen } from 'lucide-react';
+import { useState, useCallback, useRef } from 'react';
+import { LayoutGrid, List, Minimize2, Plus, Terminal, X, FolderOpen, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { SessionCard, SessionList, ArrangeBanner, SessionLauncherPopover } from '@/components/sessions';
-import { LayoutPopover } from '@/components/sessions/LayoutPopover';
 import { useAppStore, type ArrangeLayout } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useLocale } from '../locales';
@@ -23,10 +23,11 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   const [showCloseAllDialog, setShowCloseAllDialog] = useState(false);
   const [isArranging, setIsArranging] = useState(false);
   const [arrangeStatus, setArrangeStatus] = useState<'normal' | 'loading' | 'success'>('normal');
-  const [popoverOpen, setPopoverOpen] = useState(false);
   const [launcherOpen, setLauncherOpen] = useState(false);
   const [isMultiLaunching, setIsMultiLaunching] = useState(false);
-  const { sessions, isLoadingSessions, arrangeLayout, setArrangeLayout, selectedWorkingDir } = useAppStore();
+  const [launched, setLaunched] = useState(false);
+  const launchedTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const { sessions, isLoadingSessions, arrangeLayout, setArrangeLayout, selectedWorkingDir, setSelectedWorkingDir } = useAppStore();
   const { focusSession, minimizeSession, closeSession, arrangeSessions, launchClaudeCode, openDirectoryPicker } = useTauriCommands();
 
   const runningSessions = sessions.filter(s => s.status === 'running');
@@ -134,6 +135,24 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
     }
   }, [openDirectoryPicker, onLaunchWithDir]);
 
+  // Single launch with success feedback
+  const handleLaunchClick = useCallback(() => {
+    if (selectedWorkingDir) {
+      onLaunchWithDir(selectedWorkingDir);
+    } else {
+      onLaunch();
+    }
+    setLaunched(true);
+    clearTimeout(launchedTimerRef.current);
+    launchedTimerRef.current = setTimeout(() => setLaunched(false), 1200);
+  }, [selectedWorkingDir, onLaunch, onLaunchWithDir]);
+
+  // Select directory for launch
+  const handleSelectDirectory = useCallback(async () => {
+    const dir = await openDirectoryPicker();
+    if (dir) setSelectedWorkingDir(dir);
+  }, [openDirectoryPicker, setSelectedWorkingDir]);
+
   // Register keyboard shortcuts
   useKeyboardShortcuts({
     'meta+shift+l': () => {
@@ -197,74 +216,100 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   }
 
   return (
-    <div className="page-transition-enter">
-      {/* Header */}
-      <div className="hero-gradient glass-noise rounded-2xl p-5 shadow-elevation-1 mb-6">
+    <div className="page-transition-enter space-y-6">
+      {/* Hero Card */}
+      <div className="stat-card glass-noise rounded-2xl p-5">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <div>
             <h2 className="text-2xl font-bold text-foreground">
-              Sessions ({sessions.length})
+              {t('sessions.title')}
             </h2>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              {t('sessions.runningCount').replace('{count}', String(runningCount))}
+            </p>
           </div>
 
           <div className="flex items-center gap-2">
             {/* View Mode Toggle */}
-            <div className="flex items-center gap-1 p-1 rounded-lg glass-subtle">
-              <Button
-                size="sm"
-                variant={viewMode === 'card' ? 'default' : 'ghost'}
+            <div className="flex items-center gap-0.5 p-0.5 rounded-lg glass-subtle">
+              <button
+                type="button"
                 onClick={() => setViewMode('card')}
-                className="h-8 w-8 p-0"
+                className={`h-7 w-7 rounded-md flex items-center justify-center transition-all duration-150 ${
+                  viewMode === 'card'
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
               >
-                <LayoutGrid className="w-4 h-4" />
-              </Button>
-              <Button
-                size="sm"
-                variant={viewMode === 'list' ? 'default' : 'ghost'}
+                <LayoutGrid className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
                 onClick={() => setViewMode('list')}
-                className="h-8 w-8 p-0"
+                className={`h-7 w-7 rounded-md flex items-center justify-center transition-all duration-150 ${
+                  viewMode === 'list'
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
               >
-              <List className="w-4 h-4" />
-              </Button>
+                <List className="w-3.5 h-3.5" />
+              </button>
             </div>
 
-            {/* New Session Split Button with directory hint */}
-            <div className="relative group">
-              <div className="absolute -top-9 right-0 opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none">
-                <div className="glass-subtle glass-noise rounded-lg px-2.5 py-1 flex items-center gap-1.5 whitespace-nowrap shadow-elevation-1">
-                  <FolderOpen className="w-3 h-3 text-muted-foreground shrink-0" />
-                  <span className="text-2xs text-muted-foreground" title={selectedWorkingDir || '~'}>
-                    {launchDirDisplay}
-                  </span>
-                </div>
-                <div className="absolute -bottom-1 right-6 w-2 h-2 glass-subtle rotate-45" />
-              </div>
-              <div className="flex items-center">
-                <Button onClick={onLaunch} className="rounded-r-none">
-                  <Plus className="w-4 h-4 mr-2" />
-                  {t('sessions.newSession')}
+            {/* Directory selector */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSelectDirectory}
+              className="glass-subtle border-[--glass-border-light] bg-transparent"
+            >
+              <FolderOpen className="w-4 h-4" />
+              {launchDirDisplay ? (
+                <span className="font-mono text-xs max-w-[140px] truncate">{launchDirDisplay}</span>
+              ) : (
+                <span>{t('dashboard.selectDir')}</span>
+              )}
+            </Button>
+
+            {/* New Session — single click launch with success feedback */}
+            <Button
+              size="sm"
+              onClick={handleLaunchClick}
+              className={`gap-2 px-4 font-semibold rounded-lg shadow-md transition-all duration-150 ${
+                launched
+                  ? 'bg-success hover:bg-success'
+                  : 'hover:shadow-lg hover:-translate-y-0.5 active:scale-95'
+              }`}
+            >
+              {launched ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+              {launched ? t('dashboard.launchBtnDone') : t('sessions.newSession')}
+            </Button>
+
+            {/* Multi-Launch — opens popover */}
+            <SessionLauncherPopover
+              open={launcherOpen}
+              onOpenChange={setLauncherOpen}
+              onLaunchMulti={handleMultiLaunch}
+              onBrowseAndLaunch={handleBrowseAndLaunch}
+              isLaunching={isMultiLaunching}
+              trigger={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="glass-subtle border-[--glass-border-light] bg-transparent"
+                >
+                  <LayoutGrid className="w-4 h-4" />
+                  {t('sessions.multiLaunch')}
                 </Button>
-                <SessionLauncherPopover
-                  open={launcherOpen}
-                  onOpenChange={setLauncherOpen}
-                  onLaunchMulti={handleMultiLaunch}
-                  onBrowseAndLaunch={handleBrowseAndLaunch}
-                  isLaunching={isMultiLaunching}
-                  trigger={
-                    <Button className="rounded-l-none border-l-0 px-1.5">
-                      <ChevronDown className="w-3.5 h-3.5" />
-                    </Button>
-                  }
-                />
-              </div>
-            </div>
+              }
+            />
           </div>
         </div>
       </div>
 
-      {/* Arrange Banner — shown between header and card grid when running >= 2 */}
+      {/* Arrange Banner — shown when running >= 2 */}
       {runningCount >= 2 && (
-        <div className="mb-4">
+        <div>
           <ArrangeBanner
             runningCount={runningCount}
             onArrange={handleArrange}
@@ -272,107 +317,76 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
             arrangeStatus={arrangeStatus}
             selectedLayout={selectedLayout}
             onSelectLayout={(layout) => setArrangeLayout(layout)}
+            onMinimizeAll={handleMinimizeAll}
+            onCloseAll={() => setShowCloseAllDialog(true)}
           />
         </div>
       )}
 
       {/* Sessions Display */}
       {sessions.length === 0 ? (
-        <div className="glass-subtle glass-noise rounded-xl py-12">
-          <EmptyState
-            icon={Terminal}
-            message={t('sessions.noActiveSessions')}
-            action={t('sessions.launchClaudeCode')}
-            onAction={onLaunch}
-          />
-          <p className="text-xs text-muted-foreground text-center -mt-8">
-            {t('sessions.detectionNote')}
-          </p>
-        </div>
-      ) : viewMode === 'card' ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {sessions.map((session) => (
-            <SessionCard
-              key={session.id}
-              session={session}
+        <Card className="p-4">
+          <div className="py-8">
+            <EmptyState
+              icon={Terminal}
+              message={t('sessions.noActiveSessions')}
+              action={t('sessions.launchClaudeCode')}
+              onAction={onLaunch}
+            />
+            <p className="text-xs text-muted-foreground text-center -mt-8">
+              {t('sessions.detectionNote')}
+            </p>
+          </div>
+        </Card>
+      ) : (
+        <Card className="p-4">
+          <h3 className="text-sm font-medium text-muted-foreground mb-4">
+            {t('sessions.activeSessions')} ({sessions.length})
+          </h3>
+
+          {viewMode === 'card' ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {sessions.map((session) => (
+                <SessionCard
+                  key={session.id}
+                  session={session}
+                  onFocus={handleFocus}
+                  onMinimize={handleMinimize}
+                  onClose={handleRequestClose}
+                  confirmingClose={confirmingId === session.id}
+                  onCancelClose={handleCancelClose}
+                  onConfirmClose={handleConfirmClose}
+                />
+              ))}
+            </div>
+          ) : (
+            <SessionList
+              sessions={sessions}
               onFocus={handleFocus}
               onMinimize={handleMinimize}
               onClose={handleRequestClose}
-              confirmingClose={confirmingId === session.id}
+              confirmingId={confirmingId}
               onCancelClose={handleCancelClose}
               onConfirmClose={handleConfirmClose}
             />
-          ))}
-        </div>
-      ) : (
-        <SessionList
-          sessions={sessions}
-          onFocus={handleFocus}
-          onMinimize={handleMinimize}
-          onClose={handleRequestClose}
-          confirmingId={confirmingId}
-          onCancelClose={handleCancelClose}
-          onConfirmClose={handleConfirmClose}
-        />
-      )}
+          )}
 
-      {/* Layout Controls */}
-      {sessions.length > 0 && (
-        <div className="mt-6">
-          <div className="glass-subtle glass-noise rounded-xl px-4 py-3 flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">
-              {t('sessions.layoutControl')}
-            </span>
-
-            {/* Split Button: Arrange Windows */}
-            <div className="flex items-center">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={runningCount < 2 || isArranging}
-                onClick={() => handleArrange()}
-                className="rounded-r-none"
-              >
-                {arrangeStatus === 'loading' && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}
-                {arrangeStatus === 'success' && <Check className="w-4 h-4 mr-1" />}
-                {arrangeStatus === 'normal' && <LayoutGrid className="w-4 h-4 mr-1" />}
-                {arrangeStatus === 'loading'
-                  ? t('sessions.arranging')
-                  : arrangeStatus === 'success'
-                    ? t('sessions.arranged')
-                    : t('sessions.arrangeWindows')
-                }
-              </Button>
-              <LayoutPopover
-                open={popoverOpen}
-                onOpenChange={setPopoverOpen}
-                runningCount={runningCount}
-                selectedLayout={selectedLayout}
-                onSelectLayout={(layout) => setArrangeLayout(layout)}
-                onArrange={handleArrange}
-                trigger={
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={runningCount < 2 || isArranging}
-                    className="rounded-l-none border-l-0 px-1.5"
-                  >
-                    <ChevronDown className="w-3.5 h-3.5" />
-                  </Button>
-                }
-              />
-            </div>
-
-            <Button size="sm" variant="outline" onClick={handleMinimizeAll}>
-              <Minimize2 className="w-4 h-4 mr-1" />
-              {t('sessions.minimizeAll')}
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => setShowCloseAllDialog(true)}>
-              <X className="w-4 h-4 mr-1" />
-              {t('sessions.closeAll')}
-            </Button>
-          </div>
-        </div>
+          {/* Card footer: Minimize All / Close All (when ArrangeBanner is not shown) */}
+          {runningCount > 0 && runningCount < 2 && (
+            <>
+              <div className="border-t border-[--glass-border-light] mt-4 pt-3 flex items-center gap-2">
+                <Button size="sm" variant="ghost" onClick={handleMinimizeAll}>
+                  <Minimize2 className="w-3.5 h-3.5 mr-1" />
+                  {t('sessions.minimizeAll')}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setShowCloseAllDialog(true)}>
+                  <X className="w-3.5 h-3.5 mr-1" />
+                  {t('sessions.closeAll')}
+                </Button>
+              </div>
+            </>
+          )}
+        </Card>
       )}
 
       {/* Close All Dialog */}

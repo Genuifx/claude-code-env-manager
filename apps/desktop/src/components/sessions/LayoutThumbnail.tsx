@@ -1,5 +1,6 @@
 import type { ArrangeLayout } from '@/store';
 import { useLocale } from '@/locales';
+import { Button } from '@/components/ui/button';
 
 interface LayoutThumbnailProps {
   layout: ArrangeLayout;
@@ -47,19 +48,19 @@ export function LayoutThumbnail({ layout, selected, onClick }: LayoutThumbnailPr
   };
 
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       onClick={onClick}
       className={`
-        flex flex-col items-center gap-1.5 rounded-lg p-3 cursor-pointer transition-all
+        flex flex-col items-center gap-1.5 h-auto p-3
         ${selected
-          ? 'glass-card ring-2 ring-primary/50 border-primary/30 text-primary'
+          ? 'glass-card ring-2 ring-primary/50 text-primary'
           : 'glass-subtle text-muted-foreground hover:text-foreground'
         }
       `}
     >
       <div className="w-6 h-6">{layoutSvgs[layout]}</div>
       <span className="text-2xs font-medium">{labelMap[layout]}</span>
-    </button>
+    </Button>
   );
 }

@@ -52,6 +52,9 @@
     "terminate": "终止",
     "closeAllTitle": "关闭所有 Session？",
     "closeAllDescription": "将关闭 {count} 个活跃会话，此操作不可撤销。",
+    "title": "会话",
+    "activeSessions": "活跃会话",
+    "runningCount": "{count} 个运行中",
     "noActiveSessions": "没有活跃会话",
     "detectionNote": "会话检测依赖进程扫描，部分会话可能未显示。",
     "launchClaudeCode": "启动 Claude Code",
@@ -84,7 +87,8 @@
     "multiLaunchSuccess": "成功启动 {count} 个会话并排列",
     "multiLaunchPartial": "成功启动 {success}/{total} 个会话",
     "noRecentProjects": "暂无最近项目",
-    "dirNotFound": "目录不存在"
+    "dirNotFound": "目录不存在",
+    "multiLaunch": "多分屏"
   },
   "environments": {
     "title": "环境管理",
