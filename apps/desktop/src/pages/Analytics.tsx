@@ -304,13 +304,10 @@ export function Analytics() {
 
   const { tokenPct: tokenChange } = computeWeekOverWeekChange();
 
-  // Build heatmap from real dailyHistory data — fill ALL days from earliest to today
+  // Build heatmap from real dailyHistory data — fill last 90 days up to today
   const dailyActivities: DailyActivity[] = (() => {
     if (!usageStats?.dailyHistory) return [];
-    const entries = Object.entries(usageStats.dailyHistory)
-      .sort(([a], [b]) => a.localeCompare(b));
-
-    if (entries.length === 0) return [];
+    const entries = Object.entries(usageStats.dailyHistory);
 
     // Find max tokens for level calculation
     const tokenCounts = entries.map(([, u]) => u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheCreationTokens);
@@ -323,16 +320,15 @@ export function Analytics() {
       dataMap.set(date, { tokens, cost: usage.cost });
     });
 
-    // Fill every day from earliest entry to today
+    // Always fill last 90 days up to today
     const result: DailyActivity[] = [];
-    const start = new Date(entries[0][0]);
     const end = new Date();
-    // Reset to start of day
-    start.setHours(0, 0, 0, 0);
     end.setHours(0, 0, 0, 0);
+    const start = new Date(end);
+    start.setDate(start.getDate() - 89); // 90 days including today
 
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      const dateStr = d.toISOString().split('T')[0];
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       const data = dataMap.get(dateStr);
       const tokens = data?.tokens ?? 0;
       const cost = data?.cost ?? 0;
@@ -432,7 +428,7 @@ export function Analytics() {
           )}
         </div>
 
-        {/* Bottom section: cost + streak */}
+        {/* Bottom section: cost + streak | compact heatmap */}
         <div className="flex items-end justify-between gap-4">
           {/* Left: Cost + Streak badges */}
           <div className="flex items-center gap-4">
@@ -459,16 +455,13 @@ export function Analytics() {
               </span>
             </div>
           </div>
+
+          {/* Right: Compact Heatmap */}
+          <div className="flex-shrink-0">
+            <HeatmapCalendar activities={dailyActivities} compact={true} />
+          </div>
         </div>
       </div>
-
-      {/* Activity Heatmap — full width */}
-      <Card className="p-4">
-        <h3 className="text-lg font-semibold text-foreground mb-4">
-          {t('analytics.activityHeatmap')}
-        </h3>
-        <HeatmapCalendar activities={dailyActivities} />
-      </Card>
 
       {/* Token Consumption Area Chart */}
       <Card className="p-4">
