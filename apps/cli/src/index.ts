@@ -726,6 +726,25 @@ program
     await loadFromRemote(url, options.secret);
   });
 
+// usage 命令 - 显示使用统计并刷新缓存
+program
+  .command('usage')
+  .description('显示使用统计并刷新缓存')
+  .option('--json', '以 JSON 格式输出')
+  .action(async function(this: any) {
+    const opts = this.opts();
+    const stats = await getUsageStats();
+    if (opts.json) {
+      console.log(JSON.stringify(stats, null, 2));
+    } else {
+      if (stats) {
+        console.log(renderUsageDetail(stats));
+      } else {
+        console.log(chalk.yellow('No usage data available'));
+      }
+    }
+  });
+
 // 默认交互式菜单
 program
   .action(async (options) => {
