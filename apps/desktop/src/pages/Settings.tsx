@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Moon, Sun, MonitorSmartphone, Lightbulb } from 'lucide-react';
+import { Moon, Sun, MonitorSmartphone, Lightbulb, Terminal, CheckCircle2, XCircle, Copy } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store';
@@ -17,7 +17,15 @@ export function Settings() {
   const [autoStart, setAutoStart] = useState(false);
   const [startMinimized, setStartMinimized] = useState(false);
   const [closeToTray, setCloseToTray] = useState(true);
+  const [ccemInstalled, setCcemInstalled] = useState<boolean | null>(null);
   const loaded = useRef(false);
+
+  // Check if ccem CLI is installed
+  useEffect(() => {
+    invoke<boolean>('check_ccem_installed')
+      .then(setCcemInstalled)
+      .catch(() => setCcemInstalled(false));
+  }, []);
 
   // Load settings on mount
   useEffect(() => {
@@ -264,6 +272,43 @@ export function Settings() {
               v2.0.0
             </span>
           </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground flex items-center gap-1.5">
+              <Terminal className="w-3.5 h-3.5" />
+              {t('settings.cliStatus')}
+            </span>
+            {ccemInstalled === null ? (
+              <span className="text-xs text-muted-foreground">...</span>
+            ) : ccemInstalled ? (
+              <span className="flex items-center gap-1.5 text-sm font-medium text-emerald-500">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                {t('settings.cliInstalled')}
+              </span>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                  <XCircle className="w-3.5 h-3.5" />
+                  {t('settings.cliNotInstalled')}
+                </span>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(t('settings.cliInstallCmd'));
+                    toast.success(t('settings.cliInstallCmd'));
+                  }}
+                  className="inline-flex items-center gap-1 text-[11px] font-mono text-primary hover:text-primary/80 bg-primary/10 px-2 py-0.5 rounded-md transition-colors"
+                >
+                  <Copy className="w-3 h-3" />
+                  {t('settings.cliInstallCmd')}
+                </button>
+              </div>
+            )}
+          </div>
+          {ccemInstalled === false && (
+            <p className="text-xs text-muted-foreground/70 flex items-center gap-1">
+              <Lightbulb className="w-3 h-3 text-primary shrink-0" />
+              {t('settings.cliInstallHint')}
+            </p>
+          )}
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => toast.info(t('settings.upToDate'))}>
               {t('settings.checkUpdate')}

@@ -23,6 +23,8 @@ aes = "0.8"
 cbc = "0.1"
 rand = "0.8"
 hex = "0.4"
+base64 = "0.22"
+reqwest = { version = "0.12", features = ["blocking", "json"] }
 urlencoding = "2"
 quick-xml = "0.31"
 tauri-plugin-mcp-bridge = "0.8"

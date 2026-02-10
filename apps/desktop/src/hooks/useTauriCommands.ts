@@ -130,10 +130,11 @@ export function useTauriCommands() {
     }
   }, [loadEnvironments, setLoading, setError]);
 
-  const updateEnvironment = useCallback(async (env: Environment) => {
+  const updateEnvironment = useCallback(async (env: Environment, oldName?: string) => {
     setLoading(true);
     try {
       await invoke('update_environment', {
+        old_name: oldName ?? env.name,
         name: env.name,
         base_url: env.baseUrl,
         api_key: env.apiKey,
@@ -141,13 +142,14 @@ export function useTauriCommands() {
         small_model: env.smallModel,
       });
       await loadEnvironments();
+      await loadCurrentEnv();
       setError(null);
     } catch (err) {
       setError(`Failed to update environment: ${err}`);
     } finally {
       setLoading(false);
     }
-  }, [loadEnvironments, setLoading, setError]);
+  }, [loadEnvironments, loadCurrentEnv, setLoading, setError]);
 
   const deleteEnvironment = useCallback(async (name: string) => {
     setLoading(true);
@@ -325,6 +327,15 @@ export function useTauriCommands() {
     }
   }, [loadAppConfig, setError]);
 
+  const loadFromRemote = useCallback(async (url: string, secret: string) => {
+    const result = await invoke<{
+      count: number;
+      environments: Array<{ name: string; original_name: string; renamed: boolean }>;
+    }>('load_from_remote', { url, secret });
+    await loadEnvironments();
+    return result;
+  }, [loadEnvironments]);
+
   return {
     loadEnvironments,
     loadCurrentEnv,
@@ -345,5 +356,6 @@ export function useTauriCommands() {
     openDirectoryPicker,
     syncVSCodeProjects,
     syncJetBrainsProjects,
+    loadFromRemote,
   };
 }

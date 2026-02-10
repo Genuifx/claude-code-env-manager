@@ -7,6 +7,8 @@ import { useLocale } from '@/locales';
 
 function maskApiKey(key?: string, notSet?: string): string {
   if (!key) return notSet || 'Not set';
+  // Encrypted keys start with "enc:" — show a generic mask
+  if (key.startsWith('enc:')) return '••••••••';
   if (key.length <= 7) return '****';
   return key.slice(0, 4) + '***' + key.slice(-3);
 }
@@ -72,17 +74,6 @@ function EnvCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardPro
       )}
       onClick={onSelect}
     >
-      {/* Active indicator */}
-      {isActive && (
-        <div className="absolute top-4 right-4 flex items-center gap-2">
-          <span className="relative flex h-2.5 w-2.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/75 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-primary"></span>
-          </span>
-          <span className="text-xs font-medium text-primary">{t('environments.currentlyActive')}</span>
-        </div>
-      )}
-
       <div className="flex items-start gap-4">
         {/* Icon */}
         <div className={cn(
@@ -120,13 +111,22 @@ function EnvCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardPro
           </div>
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        {/* Actions — always visible row with badge + buttons */}
+        <div className="flex items-center gap-1 shrink-0">
+          {isActive && (
+            <span className="flex items-center gap-1.5 text-xs font-medium text-primary mr-1">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/75 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+              </span>
+              {t('environments.currentlyActive')}
+            </span>
+          )}
           {!isActive && (
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 px-3 text-primary hover:text-primary hover:bg-primary/10"
+              className="h-8 px-3 text-primary hover:text-primary hover:bg-primary/10 opacity-0 group-hover:opacity-100 transition-opacity"
               onClick={(e) => {
                 e.stopPropagation();
                 onSelect();
@@ -138,7 +138,7 @@ function EnvCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardPro
           <Button
             variant="ghost"
             size="sm"
-            className="h-8 px-3 text-muted-foreground hover:text-foreground"
+            className="h-8 px-3 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
             onClick={(e) => {
               e.stopPropagation();
               onEdit();
@@ -154,7 +154,7 @@ function EnvCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardPro
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 px-3 text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20"
+              className="h-8 px-3 text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 opacity-0 group-hover:opacity-100 transition-opacity"
               onClick={(e) => {
                 e.stopPropagation();
                 onDelete();

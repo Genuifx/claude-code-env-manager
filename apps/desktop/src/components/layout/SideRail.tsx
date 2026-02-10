@@ -41,26 +41,27 @@ function NavButton({
       onClick={onClick}
       title={`${item.tooltipLabel || item.label} (\u2318${item.shortcut})`}
       className={cn(
-        'w-11 h-11 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors duration-150',
+        'relative w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5',
+        'transition-all duration-150',
         isActive
-          ? 'bg-sidebar-active/15 text-sidebar-active'
-          : 'text-sidebar-foreground hover:text-foreground hover:bg-muted'
+          ? 'bg-sidebar-active/15 text-sidebar-active nav-active-bar'
+          : 'text-sidebar-foreground hover:text-foreground hover:bg-surface-raised hover:scale-105'
       )}
     >
-      <Icon className="w-5 h-5" />
-      <span className="text-2xs leading-none">{item.label}</span>
+      <Icon className="w-5 h-5" strokeWidth={isActive ? 2.5 : 2} />
+      <span className="text-2xs leading-none font-medium">{item.label}</span>
     </button>
   );
 }
 
 export function SideRail({ activeTab, onTabChange }: SideRailProps) {
   return (
-    <aside className="w-16 h-full flex flex-col items-center py-4 gap-1 bg-sidebar border-r border-sidebar-border">
+    <aside className="w-[72px] h-full flex flex-col items-center py-4 gap-1.5 bg-sidebar border-r border-sidebar-border">
       {/* CC Logo */}
-      <div className="w-9 h-9 rounded-lg bg-primary flex items-center justify-center">
+      <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center shadow-md glow-amber">
         <span className="text-primary-foreground font-bold text-xs tracking-tight">CC</span>
       </div>
-      <div className="mb-6" />
+      <div className="mb-5" />
 
       {/* Nav items */}
       {navItems.map((item) => (

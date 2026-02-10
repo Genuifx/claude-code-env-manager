@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Lightbulb, Plus } from 'lucide-react';
+import { Plus, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ErrorBanner } from '@/components/ui/EmptyState';
 import { EnvList } from '@/components/environments';
-import { ENV_PRESETS, PERMISSION_PRESETS } from '@ccem/core/browser';
+import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { useAppStore } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
@@ -17,7 +17,6 @@ interface EnvironmentsProps {
 }
 
 export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsProps) {
-  const presetNames = Object.keys(ENV_PRESETS);
   const { environments, permissionMode, defaultMode, setPermissionMode, setDefaultMode, isLoadingEnvs, error } = useAppStore();
   const { t } = useLocale();
   const { loadEnvironments } = useTauriCommands();
@@ -92,7 +91,7 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
             <Plus className="w-5 h-5 text-muted-foreground/40 group-hover:text-muted-foreground/60" />
             <span className="text-sm text-muted-foreground">{t('environments.addEnv')}</span>
             <span className="text-xs text-muted-foreground/40 group-hover:text-muted-foreground/60 transition-colors duration-150">
-              {Object.keys(ENV_PRESETS).join(' · ')}
+              {t('environments.ghostCardHint')}
             </span>
           </button>
         )}
@@ -105,80 +104,58 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
         </h3>
 
         <div className="space-y-4">
-          {/* Default Permission Setting */}
-          <div className="flex items-center justify-between p-4 rounded-lg bg-muted">
-            <div>
-              <div className="font-medium text-foreground mb-1">
-                {t('environments.defaultPermission')}
-              </div>
-              <div className="text-sm text-muted-foreground">
-                {t('environments.userLevelHint')}
-              </div>
-            </div>
-            <select
-              value={defaultMode || permissionMode}
-              onChange={(e) => {
-                const mode = e.target.value as PermissionModeName;
-                setDefaultMode(mode);
-                setPermissionMode(mode);
-              }}
-              className="px-3 py-2 rounded-lg border border-border bg-card text-foreground"
-            >
-              {Object.entries(PERMISSION_PRESETS).map(([key, preset]) => (
-                <option key={key} value={key}>
-                  {key} - {preset.description}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Quick Switch (Temporary) */}
+          {/* Default Permission Label */}
           <div>
-            <div className="text-sm font-medium text-foreground mb-2">
-              {t('environments.quickSwitch')}
+            <div className="font-medium text-foreground mb-1">
+              {t('environments.defaultPermission')}
             </div>
-            <div className="flex flex-wrap gap-2">
-              {Object.keys(PERMISSION_PRESETS).map((mode) => (
-                <Button
-                  key={mode}
-                  size="sm"
-                  variant={permissionMode === mode ? 'default' : 'outline'}
-                  onClick={() => setPermissionMode(mode as PermissionModeName)}
-                >
-                  {mode}
-                </Button>
-              ))}
-            </div>
-            <div className="mt-2 text-xs text-muted-foreground">
-              <Lightbulb className="w-3.5 h-3.5 inline mr-1 text-primary" /> {t('environments.tempPermissionHint')}
+            <div className="text-sm text-muted-foreground mb-4">
+              {t('environments.userLevelHint')}
             </div>
           </div>
-        </div>
-      </div>
 
-      {/* Presets section */}
-      <div className="border-t border-border pt-8">
-        <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-4">
-          {t('environments.addFromPreset')}
-        </h3>
-        <div className="grid grid-cols-4 gap-3">
-          {presetNames.map((name) => (
-            <button
-              key={name}
-              className="group p-4 bg-card rounded-xl border border-border/50 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10 transition-all text-left"
-              onClick={() => onAddEnv?.()}
-            >
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center text-sm font-bold text-muted-foreground group-hover:bg-primary/15 group-hover:text-primary transition-colors">
-                  {name.charAt(0).toUpperCase()}
-                </div>
-                <span className="font-medium text-foreground">{name}</span>
-              </div>
-              <p className="text-xs text-muted-foreground line-clamp-2">
-                {getPresetDescription(name, t)}
-              </p>
-            </button>
-          ))}
+          {/* Permission Mode Card Grid */}
+          <div className="grid grid-cols-2 gap-3">
+            {Object.entries(PERMISSION_PRESETS).map(([key]) => {
+              const isActive = (defaultMode || permissionMode) === key;
+              const ModeIcon = getModeIcon(key as PermissionModeName);
+              const displayName = MODE_DISPLAY_NAMES[key as PermissionModeName] || key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => {
+                    const mode = key as PermissionModeName;
+                    setDefaultMode(mode);
+                    setPermissionMode(mode);
+                  }}
+                  className={`text-left p-4 rounded-xl transition-all duration-200 cursor-pointer ${
+                    isActive
+                      ? 'ring-2 ring-primary bg-primary/5 border border-transparent scale-[1.02]'
+                      : 'border border-border hover:border-primary/40'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <ModeIcon className={`w-4 h-4 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
+                    <span className={`font-semibold ${isActive ? 'text-primary' : 'text-foreground'}`}>
+                      {displayName}
+                    </span>
+                    <span className="font-mono text-[10px] text-muted-foreground/40 ml-auto">
+                      {key}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground line-clamp-2">
+                    {t(`environments.permMode_${key}_desc`)}
+                  </p>
+                  {isActive && (
+                    <p className="text-[11px] text-muted-foreground/70 leading-relaxed border-t border-border/50 pt-2 mt-2">
+                      {t(`environments.permMode_${key}_detail`)}
+                    </p>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -186,14 +163,24 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
   );
 }
 
-function getPresetDescription(name: string, t: (key: string) => string): string {
-  const keyMap: Record<string, string> = {
-    GLM: 'environments.presetGLM',
-    KIMI: 'environments.presetKIMI',
-    MiniMax: 'environments.presetMiniMax',
-    DeepSeek: 'environments.presetDeepSeek',
+const MODE_DISPLAY_NAMES: Record<PermissionModeName, string> = {
+  yolo: 'YOLO',
+  dev: 'Developer',
+  readonly: 'Read Only',
+  safe: 'Safe',
+  ci: 'CI / CD',
+  audit: 'Audit',
+};
+
+function getModeIcon(mode: PermissionModeName): typeof Shield {
+  const iconMap: Record<PermissionModeName, typeof Shield> = {
+    yolo: ShieldOff,
+    dev: ShieldCheck,
+    readonly: ShieldBan,
+    safe: ShieldAlert,
+    ci: ShieldCheck,
+    audit: Search,
   };
-  const key = keyMap[name];
-  if (key) return t(key);
-  return t('environments.presetDefault').replace('{name}', name);
+  return iconMap[mode] || Shield;
 }
+
