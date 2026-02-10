@@ -32,9 +32,9 @@ export function Sessions({ onLaunch }: SessionsProps) {
   // Smart layout: pick best layout based on session count, or use remembered layout
   const getSmartLayout = useCallback((): ArrangeLayout => {
     if (arrangeLayout) return arrangeLayout;
-    if (runningCount <= 2) return 'horizontal_2';
-    if (runningCount === 3) return 'left_main_3';
-    return 'grid_4';
+    if (runningCount <= 2) return 'horizontal2';
+    if (runningCount === 3) return 'left_main3';
+    return 'grid4';
   }, [arrangeLayout, runningCount]);
 
   const selectedLayout = arrangeLayout || getSmartLayout();
@@ -52,10 +52,10 @@ export function Sessions({ onLaunch }: SessionsProps) {
 
       setArrangeStatus('success');
       const layoutNames: Record<ArrangeLayout, string> = {
-        horizontal_2: t('sessions.layoutHorizontal2'),
-        vertical_2: t('sessions.layoutVertical2'),
-        grid_4: t('sessions.layoutGrid4'),
-        left_main_3: t('sessions.layoutLeftMain3'),
+        horizontal2: t('sessions.layoutHorizontal2'),
+        vertical2: t('sessions.layoutVertical2'),
+        grid4: t('sessions.layoutGrid4'),
+        left_main3: t('sessions.layoutLeftMain3'),
       };
       toast.success(
         t('sessions.arrangeSuccess')
