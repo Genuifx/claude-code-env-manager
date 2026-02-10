@@ -1,15 +1,16 @@
 // apps/desktop/src/pages/Analytics.tsx
 import { useEffect, useState, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { TrendingUp, TrendingDown, BarChart3 } from 'lucide-react';
+import { TrendingUp, TrendingDown, BarChart3, DollarSign, Flame } from 'lucide-react';
 import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { EmptyState, ErrorBanner } from '@/components/ui/EmptyState';
 import {
   TokenChart,
   ModelDistribution,
   HeatmapCalendar,
-  MilestoneCard,
 } from '@/components/analytics';
+import { DailyTokenBar } from '@/components/analytics';
 import { useAppStore } from '@/store';
 import {
   generateMockUsageStats,
@@ -18,9 +19,75 @@ import {
 import { useLocale } from '../locales';
 import { AnalyticsSkeleton } from '@/components/ui/skeleton-states';
 import { useCountUp } from '@/hooks/useCountUp';
-import type { ChartDataPoint, DailyActivity, UsageStats } from '@/types/analytics';
+import type { ChartDataPoint, DailyActivity, Milestone, UsageStats } from '@/types/analytics';
 
 type TimeGranularity = 'hour' | 'day' | 'week' | 'month';
+
+/* ─── NextMilestone ──────────────────────────────────────────────── */
+
+function NextMilestone({ milestones }: { milestones: Milestone[] }) {
+  const { t } = useLocale();
+
+  // Find the first unachieved milestone
+  let next = milestones.find((m) => !m.achieved);
+
+  // If all achieved, create higher targets
+  if (!next) {
+    const totalTokens = milestones.find((m) => m.type === 'tokens')?.current ?? 0;
+    const higherTargets: Milestone[] = [
+      {
+        id: 'tokens-10m', type: 'tokens', title: t('analytics.milestone10mTitle'),
+        description: t('analytics.milestone10mDesc'), target: 10_000_000,
+        current: totalTokens, achieved: totalTokens >= 10_000_000,
+      },
+      {
+        id: 'tokens-50m', type: 'tokens', title: t('analytics.milestone50mTitle'),
+        description: t('analytics.milestone50mDesc'), target: 50_000_000,
+        current: totalTokens, achieved: totalTokens >= 50_000_000,
+      },
+      {
+        id: 'tokens-100m', type: 'tokens', title: t('analytics.milestone100mTitle'),
+        description: t('analytics.milestone100mDesc'), target: 100_000_000,
+        current: totalTokens, achieved: totalTokens >= 100_000_000,
+      },
+    ];
+    next = higherTargets.find((m) => !m.achieved);
+    if (!next) {
+      return (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+          <Flame className="w-4 h-4 text-orange-500" />
+          <span>{t('analytics.allMilestonesAchieved')}</span>
+        </div>
+      );
+    }
+  }
+
+  const progress = Math.min((next.current / next.target) * 100, 100);
+  const Icon = next.type === 'cost' ? DollarSign : next.type === 'streak' ? Flame : BarChart3;
+
+  return (
+    <div className="flex items-center gap-3 py-2">
+      <Icon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+      <span className="text-sm text-muted-foreground flex-shrink-0">
+        {t('analytics.nextMilestone')}:
+      </span>
+      <span className="text-sm font-medium text-foreground flex-shrink-0">
+        {next.title}
+      </span>
+      <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+        <div
+          className="h-full rounded-full bg-primary transition-all duration-500"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+      <span className="text-xs text-muted-foreground flex-shrink-0">
+        {progress.toFixed(0)}%
+      </span>
+    </div>
+  );
+}
+
+/* ─── Analytics Page ─────────────────────────────────────────────── */
 
 export function Analytics() {
   const { t, lang } = useLocale();
@@ -56,7 +123,7 @@ export function Analytics() {
       }
 
       // Generate milestones from real data
-      const totalTokens = stats.total.inputTokens + stats.total.outputTokens;
+      const totalTokens = stats.total.inputTokens + stats.total.outputTokens + stats.total.cacheReadTokens + stats.total.cacheCreationTokens;
       const totalCost = stats.total.cost;
       setMilestones([
         {
@@ -114,71 +181,75 @@ export function Analytics() {
   }, []);
 
   // Count-up animation for stat card values (hooks must be called before conditional returns)
-  const weeklyTokensRaw = usageStats ? (usageStats.week.inputTokens + usageStats.week.outputTokens) : 0;
+  const totalTokensRaw = usageStats ? (usageStats.total.inputTokens + usageStats.total.outputTokens + usageStats.total.cacheReadTokens + usageStats.total.cacheCreationTokens) : 0;
   const weeklyCostRaw = usageStats?.week.cost ?? 0;
   const streakDays = continuousUsageDays ?? 0;
 
-  const animatedWeeklyTokens = useCountUp(weeklyTokensRaw);
+  const animatedTotalTokens = useCountUp(totalTokensRaw);
   const animatedWeeklyCostCents = useCountUp(Math.round(weeklyCostRaw * 100));
   const animatedStreakDays = useCountUp(streakDays);
 
   // ALL hooks must be called before any early return (Rules of Hooks)
-  // Build chart data based on granularity — uses real input/output token breakdown
+  // Build chart data based on granularity — single total tokens line
   const chartData: ChartDataPoint[] = useMemo(() => {
     if (!usageStats) return [];
 
     const allSortedEntries = Object.entries(usageStats.dailyHistory)
       .sort(([a], [b]) => a.localeCompare(b));
 
-    // Transform entries into ChartDataPoint[] with real input/output breakdown
+    const sumTokens = (u: TokenUsageWithCost) =>
+      u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheCreationTokens;
+
+    // Transform entries into ChartDataPoint[] with single total
     const toChartPoints = (
-      entries: [string, { inputTokens: number; outputTokens: number }][],
+      entries: [string, TokenUsageWithCost][],
       dateFormat: Intl.DateTimeFormatOptions,
     ): ChartDataPoint[] =>
       entries.map(([date, usage]) => ({
         date: new Date(date).toLocaleDateString(dateLocale, dateFormat),
-        'Input Tokens': usage.inputTokens,
-        'Output Tokens': usage.outputTokens,
+        Tokens: sumTokens(usage),
       }));
 
     // Aggregate entries by a grouping key
     const aggregate = (
-      entries: [string, { inputTokens: number; outputTokens: number }][],
+      entries: [string, TokenUsageWithCost][],
       keyFn: (dateStr: string) => string,
-    ): [string, { inputTokens: number; outputTokens: number }][] => {
-      const grouped: Record<string, { inputTokens: number; outputTokens: number }> = {};
+    ): [string, TokenUsageWithCost][] => {
+      const grouped: Record<string, TokenUsageWithCost> = {};
       entries.forEach(([date, usage]) => {
         const key = keyFn(date);
         if (!grouped[key]) {
-          grouped[key] = { inputTokens: 0, outputTokens: 0 };
+          grouped[key] = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cost: 0 };
         }
         grouped[key].inputTokens += usage.inputTokens;
         grouped[key].outputTokens += usage.outputTokens;
+        grouped[key].cacheReadTokens += usage.cacheReadTokens;
+        grouped[key].cacheCreationTokens += usage.cacheCreationTokens;
+        grouped[key].cost += usage.cost;
       });
       return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
     };
 
-    const toPoint = (entries: [string, { inputTokens: number; outputTokens: number }][], labelFn: (key: string) => string): ChartDataPoint[] =>
+    const toPoint = (entries: [string, TokenUsageWithCost][], labelFn: (key: string) => string): ChartDataPoint[] =>
       entries.map(([key, usage]) => ({
         date: labelFn(key),
-        'Input Tokens': usage.inputTokens,
-        'Output Tokens': usage.outputTokens,
+        Tokens: sumTokens(usage),
       }));
 
     switch (granularity) {
       case 'hour':
         return toChartPoints(
-          allSortedEntries.slice(-24) as [string, { inputTokens: number; outputTokens: number }][],
+          allSortedEntries.slice(-24) as [string, TokenUsageWithCost][],
           { month: 'short', day: 'numeric' },
         );
       case 'day':
         return toChartPoints(
-          allSortedEntries.slice(-7) as [string, { inputTokens: number; outputTokens: number }][],
+          allSortedEntries.slice(-7) as [string, TokenUsageWithCost][],
           { month: 'short', day: 'numeric' },
         );
       case 'week': {
         const weekEntries = aggregate(
-          allSortedEntries as [string, { inputTokens: number; outputTokens: number }][],
+          allSortedEntries as [string, TokenUsageWithCost][],
           (dateStr) => {
             const d = new Date(dateStr);
             const jan1 = new Date(d.getFullYear(), 0, 1);
@@ -190,7 +261,7 @@ export function Analytics() {
       }
       case 'month': {
         const monthEntries = aggregate(
-          allSortedEntries as [string, { inputTokens: number; outputTokens: number }][],
+          allSortedEntries as [string, TokenUsageWithCost][],
           (dateStr) => dateStr.slice(0, 7),
         );
         return toPoint(monthEntries, (key) =>
@@ -207,8 +278,8 @@ export function Analytics() {
     return <AnalyticsSkeleton />;
   }
 
-  // Chart series keys — real input/output breakdown instead of fake env splits
-  const chartSeriesKeys = ['Input Tokens', 'Output Tokens'];
+  // Chart series keys — single total line
+  const chartSeriesKeys = ['Tokens'];
 
   // Bug #21 fix: Calculate real week-over-week change from dailyHistory data
   const computeWeekOverWeekChange = () => {
@@ -219,29 +290,22 @@ export function Analytics() {
     const prevWeekEntries = sorted.slice(-14, -7);
 
     const sumTokens = (entries: typeof thisWeekEntries) =>
-      entries.reduce((acc, [, u]) => acc + u.inputTokens + u.outputTokens, 0);
-    const sumCost = (entries: typeof thisWeekEntries) =>
-      entries.reduce((acc, [, u]) => acc + u.cost, 0);
+      entries.reduce((acc, [, u]) => acc + u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheCreationTokens, 0);
 
     const thisWeekTokens = sumTokens(thisWeekEntries);
     const prevWeekTokens = sumTokens(prevWeekEntries);
-    const thisWeekCost = sumCost(thisWeekEntries);
-    const prevWeekCost = sumCost(prevWeekEntries);
 
     const tokenPct = prevWeekEntries.length > 0 && prevWeekTokens > 0
       ? ((thisWeekTokens - prevWeekTokens) / prevWeekTokens) * 100
       : null;
-    const costPct = prevWeekEntries.length > 0 && prevWeekCost > 0
-      ? ((thisWeekCost - prevWeekCost) / prevWeekCost) * 100
-      : null;
 
-    return { tokenPct, costPct };
+    return { tokenPct };
   };
 
-  const { tokenPct: tokenChange, costPct: costChange } = computeWeekOverWeekChange();
+  const { tokenPct: tokenChange } = computeWeekOverWeekChange();
 
-  // Build heatmap from real dailyHistory data instead of mock
-  const dailyActivities: DailyActivity[] = useMemo(() => {
+  // Build heatmap from real dailyHistory data — fill ALL days from earliest to today
+  const dailyActivities: DailyActivity[] = (() => {
     if (!usageStats?.dailyHistory) return [];
     const entries = Object.entries(usageStats.dailyHistory)
       .sort(([a], [b]) => a.localeCompare(b));
@@ -249,11 +313,29 @@ export function Analytics() {
     if (entries.length === 0) return [];
 
     // Find max tokens for level calculation
-    const tokenCounts = entries.map(([, u]) => u.inputTokens + u.outputTokens);
+    const tokenCounts = entries.map(([, u]) => u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheCreationTokens);
     const maxTokens = Math.max(...tokenCounts, 1);
 
-    return entries.map(([date, usage]) => {
-      const tokens = usage.inputTokens + usage.outputTokens;
+    // Build a lookup map from existing data
+    const dataMap = new Map<string, { tokens: number; cost: number }>();
+    entries.forEach(([date, usage]) => {
+      const tokens = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
+      dataMap.set(date, { tokens, cost: usage.cost });
+    });
+
+    // Fill every day from earliest entry to today
+    const result: DailyActivity[] = [];
+    const start = new Date(entries[0][0]);
+    const end = new Date();
+    // Reset to start of day
+    start.setHours(0, 0, 0, 0);
+    end.setHours(0, 0, 0, 0);
+
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split('T')[0];
+      const data = dataMap.get(dateStr);
+      const tokens = data?.tokens ?? 0;
+      const cost = data?.cost ?? 0;
       const ratio = tokens / maxTokens;
       let level: 0 | 1 | 2 | 3 | 4 = 0;
       if (ratio > 0.75) level = 4;
@@ -261,9 +343,18 @@ export function Analytics() {
       else if (ratio > 0.25) level = 2;
       else if (tokens > 0) level = 1;
 
-      return { date, tokens, cost: usage.cost, level };
-    });
-  }, [usageStats]);
+      result.push({ date: dateStr, tokens, cost, level });
+    }
+
+    return result;
+  })();
+
+  const granularityOptions: { key: TimeGranularity; label: string }[] = [
+    { key: 'hour', label: t('analytics.hour') },
+    { key: 'day', label: t('analytics.day') },
+    { key: 'week', label: t('analytics.week') },
+    { key: 'month', label: t('analytics.month') },
+  ];
 
   return (
     <div className="page-transition-enter space-y-6">
@@ -288,89 +379,98 @@ export function Analytics() {
         </div>
       )}
 
-      {/* Header */}
-      <div>
-        <h2 className="text-2xl font-bold text-foreground mb-2">
-          Analytics
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          {t('analytics.subtitle')}
-        </p>
+      {/* Granularity controls — right-aligned */}
+      <div className="flex items-center justify-end gap-2">
+        {granularityOptions.map(({ key, label }) => (
+          <Button
+            key={key}
+            size="sm"
+            variant={granularity === key ? 'default' : 'outline'}
+            onClick={() => setGranularity(key)}
+          >
+            {label}
+          </Button>
+        ))}
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-3 gap-4">
-        <Card className="p-4">
-          <div className="flex items-start justify-between mb-2">
-            <div className="text-sm text-muted-foreground">
-              {t('analytics.tokenThisWeek')}
-            </div>
-            {tokenChange !== null ? (
-              <div
-                className={`flex items-center gap-1 text-xs ${
-                  tokenChange >= 0 ? 'text-chart-2' : 'text-destructive'
-                }`}
-              >
-                {tokenChange >= 0 ? (
-                  <TrendingUp className="w-3 h-3" />
-                ) : (
-                  <TrendingDown className="w-3 h-3" />
-                )}
-                {Math.abs(tokenChange).toFixed(1)}%
-              </div>
-            ) : (
-              <div className="text-xs text-muted-foreground">&mdash;</div>
-            )}
+      {/* Hero Stats Card */}
+      <div className="stat-card glass-noise p-6">
+        {/* Hero number */}
+        <div className="mb-1">
+          <div
+            className="text-4xl font-bold"
+            style={{
+              background: 'linear-gradient(135deg, hsl(var(--chart-1)), hsl(var(--chart-2)))',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+            }}
+          >
+            {animatedTotalTokens.toLocaleString()}
           </div>
-          <div className="text-2xl font-bold text-foreground mb-1">
-            {(animatedWeeklyTokens / 1000).toFixed(1)}K
+          <div className="text-sm text-muted-foreground mt-1">
+            {t('analytics.totalTokens')}
           </div>
-          <div className="text-xs text-muted-foreground">
-            {t('analytics.vsLastWeek')}
-          </div>
-        </Card>
+        </div>
 
-        <Card className="p-4">
-          <div className="flex items-start justify-between mb-2">
-            <div className="text-sm text-muted-foreground">
-              {t('analytics.costThisWeek')}
+        {/* Week-over-week trend */}
+        <div className="mb-4">
+          {tokenChange !== null ? (
+            <div
+              className={`flex items-center gap-1 text-sm ${
+                tokenChange >= 0 ? 'text-chart-2' : 'text-destructive'
+              }`}
+            >
+              {tokenChange >= 0 ? (
+                <TrendingUp className="w-4 h-4" />
+              ) : (
+                <TrendingDown className="w-4 h-4" />
+              )}
+              {Math.abs(tokenChange).toFixed(1)}% {t('analytics.weeklyChange')}
             </div>
-            {costChange !== null ? (
-              <div
-                className={`flex items-center gap-1 text-xs ${
-                  costChange >= 0 ? 'text-chart-2' : 'text-destructive'
-                }`}
-              >
-                {costChange >= 0 ? (
-                  <TrendingUp className="w-3 h-3" />
-                ) : (
-                  <TrendingDown className="w-3 h-3" />
-                )}
-                {Math.abs(costChange).toFixed(1)}%
-              </div>
-            ) : (
-              <div className="text-xs text-muted-foreground">&mdash;</div>
-            )}
-          </div>
-          <div className="text-2xl font-bold text-foreground mb-1">
-            ${(animatedWeeklyCostCents / 100).toFixed(2)}
-          </div>
-          <div className="text-xs text-muted-foreground">
-            {t('analytics.vsLastWeek')}
-          </div>
-        </Card>
+          ) : (
+            <div className="text-sm text-muted-foreground">&mdash;</div>
+          )}
+        </div>
 
-        <Card className="p-4">
-          <div className="text-sm text-muted-foreground mb-2">
-            {t('analytics.streak')}
+        {/* Bottom section: cost + streak */}
+        <div className="flex items-end justify-between gap-4">
+          {/* Left: Cost + Streak badges */}
+          <div className="flex items-center gap-4">
+            {/* Cost badge */}
+            <div className="flex flex-col">
+              <span className="text-lg font-semibold text-foreground">
+                ${(animatedWeeklyCostCents / 100).toFixed(2)}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {t('analytics.costThisWeek')}
+              </span>
+            </div>
+
+            {/* Streak badge */}
+            <div className="flex flex-col items-center">
+              <div className="flex items-center gap-1">
+                <span className="text-lg font-semibold text-foreground">
+                  {animatedStreakDays}
+                </span>
+                <Flame className={`w-4 h-4 ${streakDays >= 7 ? 'text-orange-500' : 'text-muted-foreground'}`} />
+              </div>
+              <span className="text-xs text-muted-foreground">
+                {t('analytics.streak')}
+              </span>
+            </div>
           </div>
-          <div className="text-2xl font-bold text-foreground mb-1">
-            {animatedStreakDays} {t('analytics.days')}
-          </div>
-        </Card>
+        </div>
       </div>
 
-      {/* Token Consumption Chart */}
+      {/* Activity Heatmap — full width */}
+      <Card className="p-4">
+        <h3 className="text-lg font-semibold text-foreground mb-4">
+          {t('analytics.activityHeatmap')}
+        </h3>
+        <HeatmapCalendar activities={dailyActivities} />
+      </Card>
+
+      {/* Token Consumption Area Chart */}
       <Card className="p-4">
         <h3 className="text-lg font-semibold text-foreground mb-4">
           {t('analytics.tokenDistribution')}
@@ -380,14 +480,12 @@ export function Analytics() {
         ) : (
           <TokenChart
             data={chartData}
-            environments={chartSeriesKeys}
-            granularity={granularity}
-            onGranularityChange={setGranularity}
+            seriesKeys={chartSeriesKeys}
           />
         )}
       </Card>
 
-      {/* Model Distribution + Activity Heatmap side-by-side */}
+      {/* Model Distribution + Daily Token Bar side-by-side */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card className="p-4">
           <h3 className="text-lg font-semibold text-foreground mb-4">
@@ -398,25 +496,14 @@ export function Analytics() {
 
         <Card className="p-4">
           <h3 className="text-lg font-semibold text-foreground mb-4">
-            {t('analytics.heatmap')}
+            {t('analytics.dailyTokens')}
           </h3>
-          <HeatmapCalendar activities={dailyActivities} />
+          <DailyTokenBar dailyHistory={usageStats.dailyHistory} />
         </Card>
       </div>
 
-      {/* Milestones */}
-      <div>
-        <h3 className="text-lg font-semibold text-foreground mb-4">
-          {t('analytics.milestones')}
-        </h3>
-        <div className="flex gap-3 overflow-x-auto">
-          {milestones.map((milestone) => (
-            <div key={milestone.id} className="min-w-[200px] flex-shrink-0">
-              <MilestoneCard milestone={milestone} />
-            </div>
-          ))}
-        </div>
-      </div>
+      {/* Next Milestone — compact progress bar */}
+      <NextMilestone milestones={milestones} />
     </div>
   );
 }

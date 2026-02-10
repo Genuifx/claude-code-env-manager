@@ -32,6 +32,11 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   const runningSessions = sessions.filter(s => s.status === 'running');
   const runningCount = runningSessions.length;
 
+  // Truncate directory path for display (same logic as Dashboard)
+  const launchDirDisplay = selectedWorkingDir
+    ? selectedWorkingDir.replace(/^\/Users\/[^/]+/, '~').split('/').slice(-2).join('/')
+    : '~';
+
   // Smart layout: pick best layout based on session count, or use remembered layout
   const getSmartLayout = useCallback((): ArrangeLayout => {
     if (arrangeLayout) return arrangeLayout;
@@ -129,11 +134,6 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
     }
   }, [openDirectoryPicker, onLaunchWithDir]);
 
-  // Truncate directory path for display
-  const launchDirDisplay = selectedWorkingDir
-    ? selectedWorkingDir.replace(/^\/Users\/[^/]+/, '~').split('/').slice(-2).join('/')
-    : '~';
-
   // Register keyboard shortcuts
   useKeyboardShortcuts({
     'meta+shift+l': () => {
@@ -199,35 +199,36 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   return (
     <div className="page-transition-enter">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-2">
-          <h2 className="text-2xl font-bold text-foreground">
-            Sessions ({sessions.length})
-          </h2>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* View Mode Toggle */}
-          <div className="flex items-center gap-1 p-1 rounded-lg bg-muted">
-            <Button
-              size="sm"
-              variant={viewMode === 'card' ? 'default' : 'ghost'}
-              onClick={() => setViewMode('card')}
-              className="h-8 w-8 p-0"
-            >
-              <LayoutGrid className="w-4 h-4" />
-            </Button>
-            <Button
-              size="sm"
-              variant={viewMode === 'list' ? 'default' : 'ghost'}
-              onClick={() => setViewMode('list')}
-              className="h-8 w-8 p-0"
-            >
-            <List className="w-4 h-4" />
-            </Button>
+      <div className="hero-gradient glass-noise rounded-2xl p-5 shadow-elevation-1 mb-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <h2 className="text-2xl font-bold text-foreground">
+              Sessions ({sessions.length})
+            </h2>
           </div>
 
-          {/* New Session Split Button with directory hint */}
+          <div className="flex items-center gap-2">
+            {/* View Mode Toggle */}
+            <div className="flex items-center gap-1 p-1 rounded-lg glass-subtle">
+              <Button
+                size="sm"
+                variant={viewMode === 'card' ? 'default' : 'ghost'}
+                onClick={() => setViewMode('card')}
+                className="h-8 w-8 p-0"
+              >
+                <LayoutGrid className="w-4 h-4" />
+              </Button>
+              <Button
+                size="sm"
+                variant={viewMode === 'list' ? 'default' : 'ghost'}
+                onClick={() => setViewMode('list')}
+                className="h-8 w-8 p-0"
+              >
+              <List className="w-4 h-4" />
+              </Button>
+            </div>
+
+            {/* New Session Split Button with directory hint */}
             <div className="relative group">
               <div className="absolute -top-9 right-0 opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none">
                 <div className="glass-subtle glass-noise rounded-lg px-2.5 py-1 flex items-center gap-1.5 whitespace-nowrap shadow-elevation-1">
@@ -246,7 +247,6 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
                 <SessionLauncherPopover
                   open={launcherOpen}
                   onOpenChange={setLauncherOpen}
-                  onLaunchSingle={onLaunchWithDir}
                   onLaunchMulti={handleMultiLaunch}
                   onBrowseAndLaunch={handleBrowseAndLaunch}
                   isLaunching={isMultiLaunching}
@@ -258,6 +258,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
                 />
               </div>
             </div>
+          </div>
         </div>
       </div>
 
@@ -277,7 +278,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
 
       {/* Sessions Display */}
       {sessions.length === 0 ? (
-        <>
+        <div className="glass-subtle glass-noise rounded-xl py-12">
           <EmptyState
             icon={Terminal}
             message={t('sessions.noActiveSessions')}
@@ -286,8 +287,8 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
           />
           <p className="text-xs text-muted-foreground text-center -mt-8">
             {t('sessions.detectionNote')}
-       </p>
-        </>
+          </p>
+        </div>
       ) : viewMode === 'card' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {sessions.map((session) => (
@@ -317,8 +318,8 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
 
       {/* Layout Controls */}
       {sessions.length > 0 && (
-        <div className="mt-6 pt-6 border-t border-border">
-          <div className="flex items-center gap-2">
+        <div className="mt-6">
+          <div className="glass-subtle glass-noise rounded-xl px-4 py-3 flex items-center gap-2">
             <span className="text-sm text-muted-foreground">
               {t('sessions.layoutControl')}
             </span>
@@ -378,10 +379,10 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
       {showCloseAllDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
-            className="absolute inset-0 bg-black/50"
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={() => setShowCloseAllDialog(false)}
           />
-          <div className="relative bg-card border border-border rounded-lg shadow-lg p-6 max-w-md w-full mx-4">
+          <div className="relative frosted-panel glass-noise rounded-xl shadow-elevation-3 p-6 max-w-md w-full mx-4">
             <h3 className="text-lg font-semibold text-foreground mb-2">
               {t('sessions.closeAllTitle')}
             </h3>

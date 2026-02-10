@@ -50,7 +50,7 @@ export function SessionCard({ session, onFocus, onMinimize, onClose, confirmingC
   };
 
   return (
-    <Card className="p-4 hover:shadow-md transition-shadow">
+    <Card className="p-4 interactive-card card-stagger">
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-1">
@@ -60,10 +60,10 @@ export function SessionCard({ session, onFocus, onMinimize, onClose, confirmingC
             </h3>
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span className="bg-muted rounded-md px-2 py-0.5 text-xs font-medium">
+            <span className="glass-subtle rounded-md px-2 py-0.5 text-xs font-medium">
               {session.envName}
             </span>
-            <span className="bg-muted rounded-md px-2 py-0.5 text-xs font-medium">
+            <span className="glass-subtle rounded-md px-2 py-0.5 text-xs font-medium">
               {session.permMode}
             </span>
           </div>
@@ -97,7 +97,7 @@ export function SessionCard({ session, onFocus, onMinimize, onClose, confirmingC
             disabled={session.status !== 'running'}
             className="flex-1"
           >
-            Focus
+            {t('sessions.focus')}
           </Button>
           <Button
             size="sm"

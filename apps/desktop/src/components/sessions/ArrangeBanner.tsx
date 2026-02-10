@@ -51,7 +51,7 @@ export function ArrangeBanner({
           className={`
             h-8 px-3 rounded-l-md text-sm font-medium flex items-center gap-1.5 transition-all
             ${arrangeStatus === 'success'
-              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+              ? 'bg-success/20 text-success border border-success/30'
               : 'bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20'
             }
             ${isArranging ? 'opacity-50 cursor-not-allowed' : ''}
@@ -86,7 +86,7 @@ export function ArrangeBanner({
               className={`
                 h-8 px-1.5 rounded-r-md border-l-0 text-sm flex items-center transition-all
                 ${arrangeStatus === 'success'
-                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                  ? 'bg-success/20 text-success border border-success/30'
                   : 'bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20'
                 }
                 ${isArranging ? 'opacity-50 cursor-not-allowed' : ''}
