@@ -104,7 +104,7 @@ export function LauncherQuickSection({ onLaunchMulti, onBrowse, isLaunching }: L
                   transition-all duration-150 cursor-pointer
                   ${isSelected
                     ? 'glass-subtle ring-1 ring-primary/40'
-                    : 'hover:bg-[hsl(var(--glass-border-light)/0.06)]'
+                    : 'glass-ghost-hover'
                   }
                 `}
               >
@@ -113,7 +113,7 @@ export function LauncherQuickSection({ onLaunchMulti, onBrowse, isLaunching }: L
                   w-3.5 h-3.5 rounded-[4px] border flex items-center justify-center shrink-0 transition-colors
                   ${isSelected
                     ? 'bg-primary border-primary text-primary-foreground'
-                    : 'border-[hsl(var(--glass-border-light)/var(--glass-border-opacity))]'
+                    : 'glass-checkbox-border'
                   }
                 `}>
                   {isSelected && <Check className="w-2.5 h-2.5" />}
@@ -143,7 +143,7 @@ export function LauncherQuickSection({ onLaunchMulti, onBrowse, isLaunching }: L
 
       {/* Action buttons — visible when 1+ selected */}
       {count >= 1 && (
-        <div className="pt-3" style={{ borderTop: '1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity))' }}>
+        <div className="pt-3 glass-divider-top">
           {isLaunching ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground w-full justify-center py-2">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />

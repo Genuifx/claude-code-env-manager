@@ -19,16 +19,16 @@ export function SessionList({ sessions, onFocus, onMinimize, onClose, confirming
   const getStatusDot = (status: Session['status']) => {
     switch (status) {
       case 'running':
-        return { className: 'w-2.5 h-2.5 rounded-full inline-block bg-success status-running', glow: '0 0 6px hsl(var(--success) / 0.4)' };
+        return { className: 'w-2.5 h-2.5 rounded-full inline-block bg-success status-running status-glow-success' };
       case 'error':
-        return { className: 'w-2.5 h-2.5 rounded-full inline-block bg-destructive status-error', glow: '0 0 6px hsl(var(--destructive) / 0.4)' };
+        return { className: 'w-2.5 h-2.5 rounded-full inline-block bg-destructive status-error status-glow-destructive' };
       case 'interrupted':
-        return { className: 'w-2.5 h-2.5 rounded-full inline-block bg-warning', glow: '0 0 6px hsl(var(--warning) / 0.4)' };
+        return { className: 'w-2.5 h-2.5 rounded-full inline-block bg-warning status-glow-warning' };
       case 'idle':
-        return { className: 'w-2.5 h-2.5 rounded-full inline-block bg-warning', glow: '0 0 6px hsl(var(--warning) / 0.4)' };
+        return { className: 'w-2.5 h-2.5 rounded-full inline-block bg-warning status-glow-warning' };
       case 'stopped':
       default:
-        return { className: 'w-2.5 h-2.5 rounded-full inline-block bg-muted-foreground/40', glow: undefined };
+        return { className: 'w-2.5 h-2.5 rounded-full inline-block bg-muted-foreground/40' };
     }
   };
 
@@ -55,9 +55,9 @@ export function SessionList({ sessions, onFocus, onMinimize, onClose, confirming
         return (
           <div
             key={session.id}
-            className="flex items-center gap-4 p-3 rounded-lg glass-subtle hover:bg-[hsl(var(--glass-border-light)/0.06)] transition-all duration-150"
+            className="flex items-center gap-4 p-3 rounded-lg glass-subtle glass-ghost-hover transition-all duration-150"
           >
-            <span className={dot.className} style={dot.glow ? { boxShadow: dot.glow } : undefined} />
+            <span className={dot.className} />
 
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
@@ -88,8 +88,8 @@ export function SessionList({ sessions, onFocus, onMinimize, onClose, confirming
             {confirmingId === session.id ? (
               <div className="flex items-center gap-2 flex-shrink-0">
                 <span className="text-sm text-destructive font-medium">{t('sessions.confirmTerminate')}</span>
-                <Button variant="ghost" size="sm" onClick={onCancelClose} className="hover:bg-[hsl(var(--glass-border-light)/0.08)]">{t('common.cancel')}</Button>
-                <Button size="sm" onClick={() => onConfirmClose?.(session.id)} className="bg-destructive/80 text-destructive-foreground hover:bg-destructive/90 backdrop-blur-sm">{t('sessions.terminate')}</Button>
+                <Button variant="ghost" size="sm" onClick={onCancelClose} className="glass-ghost-hover">{t('common.cancel')}</Button>
+                <Button size="sm" onClick={() => onConfirmClose?.(session.id)} className="glass-btn-destructive">{t('sessions.terminate')}</Button>
               </div>
             ) : (
               <div className="flex gap-2 flex-shrink-0">
@@ -98,7 +98,7 @@ export function SessionList({ sessions, onFocus, onMinimize, onClose, confirming
                   variant="ghost"
                   onClick={() => onFocus(session.id)}
                   disabled={session.status !== 'running'}
-                  className="border border-[hsl(var(--glass-border-light)/var(--glass-border-opacity))] hover:border-[hsl(var(--glass-border-light)/var(--glass-border-hover-opacity))] hover:bg-[hsl(var(--glass-border-light)/0.06)] bg-transparent"
+                  className="glass-btn-outline"
                 >
                   {t('sessions.focus')}
                 </Button>
@@ -107,7 +107,7 @@ export function SessionList({ sessions, onFocus, onMinimize, onClose, confirming
                   variant="ghost"
                   onClick={() => onMinimize(session.id)}
                   disabled={session.status !== 'running'}
-                  className="border border-[hsl(var(--glass-border-light)/var(--glass-border-opacity))] hover:border-[hsl(var(--glass-border-light)/var(--glass-border-hover-opacity))] hover:bg-[hsl(var(--glass-border-light)/0.06)] bg-transparent"
+                  className="glass-btn-outline"
                 >
                   <Minus className="w-4 h-4" />
                 </Button>
@@ -115,7 +115,7 @@ export function SessionList({ sessions, onFocus, onMinimize, onClose, confirming
                   size="sm"
                   variant="ghost"
                   onClick={() => onClose(session.id)}
-                  className="border border-[hsl(var(--glass-border-light)/var(--glass-border-opacity))] hover:border-[hsl(var(--destructive)/0.3)] hover:bg-[hsl(var(--destructive)/0.08)] text-destructive hover:text-destructive bg-transparent"
+                  className="glass-btn-close"
                 >
                   <X className="w-4 h-4" />
                 </Button>
