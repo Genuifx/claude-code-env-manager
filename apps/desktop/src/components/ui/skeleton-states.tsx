@@ -57,41 +57,45 @@ export function DashboardSkeleton() {
 
 export function SessionsSkeleton() {
   return (
-    <div className="animate-pulse">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <Bone className="h-8 w-48" />
-        <div className="flex items-center gap-2">
-          <Bone className="h-8 w-20" />
-          <Bone className="h-9 w-32" />
+    <div className="animate-pulse space-y-6">
+      {/* Hero Card */}
+      <div className="stat-card glass-noise rounded-2xl p-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <Bone className="h-8 w-32 mb-1.5" />
+            <Bone className="h-4 w-24" />
+          </div>
+          <div className="flex items-center gap-2">
+            <Bone className="h-8 w-20 rounded-lg" />
+            <Bone className="h-9 w-28 rounded-lg" />
+            <Bone className="h-8 w-24 rounded-lg" />
+          </div>
         </div>
       </div>
 
-      {/* 2x2 session card grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {[1, 2, 3, 4].map((i) => (
-          <Card key={i} className="p-4">
-            <div className="flex items-center gap-3 mb-3">
-              {/* Status dot */}
-              <Bone className="h-3 w-3 rounded-full" />
-              {/* Name */}
-              <Bone className="h-5 w-32" />
-            </div>
-            {/* Badges */}
-            <div className="flex gap-2 mb-3">
-              <Bone className="h-5 w-16 rounded-full" />
-              <Bone className="h-5 w-20 rounded-full" />
-            </div>
-            {/* Path */}
-            <Bone className="h-4 w-full mb-3" />
-            {/* Action buttons */}
-            <div className="flex gap-2">
-              <Bone className="h-8 w-20" />
-              <Bone className="h-8 w-20" />
-            </div>
-          </Card>
-        ))}
-      </div>
+      {/* Sessions Card */}
+      <Card className="p-4">
+        <Bone className="h-4 w-36 mb-4" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {[1, 2, 3].map((i) => (
+            <Card key={i} className="p-4">
+              <div className="flex items-center gap-3 mb-3">
+                <Bone className="h-3 w-3 rounded-full" />
+                <Bone className="h-5 w-32" />
+              </div>
+              <div className="flex gap-2 mb-3">
+                <Bone className="h-5 w-16 rounded-full" />
+                <Bone className="h-5 w-20 rounded-full" />
+              </div>
+              <Bone className="h-4 w-full mb-3" />
+              <div className="flex gap-2">
+                <Bone className="h-8 w-20" />
+                <Bone className="h-8 w-20" />
+              </div>
+            </Card>
+          ))}
+        </div>
+      </Card>
     </div>
   );
 }

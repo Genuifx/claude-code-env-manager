@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { LayoutGrid, X, ChevronDown, Loader2, Check } from 'lucide-react';
+import { LayoutGrid, X, ChevronDown, Loader2, Check, Minimize2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { useLocale } from '@/locales';
 import { LayoutPopover } from './LayoutPopover';
 import type { ArrangeLayout } from '@/store';
@@ -11,6 +12,8 @@ interface ArrangeBannerProps {
   arrangeStatus: 'normal' | 'loading' | 'success';
   selectedLayout: ArrangeLayout;
   onSelectLayout: (layout: ArrangeLayout) => void;
+  onMinimizeAll: () => void;
+  onCloseAll: () => void;
 }
 
 export function ArrangeBanner({
@@ -20,6 +23,8 @@ export function ArrangeBanner({
   arrangeStatus,
   selectedLayout,
   onSelectLayout,
+  onMinimizeAll,
+  onCloseAll,
 }: ArrangeBannerProps) {
   const { t } = useLocale();
   const [dismissed, setDismissed] = useState(false);
@@ -44,23 +49,23 @@ export function ArrangeBanner({
 
       {/* Split Button: main action + popover chevron */}
       <div className="flex items-center shrink-0">
-        <button
-          type="button"
+        <Button
+          size="sm"
+          variant="ghost"
           disabled={isArranging}
           onClick={() => onArrange()}
           className={`
-            h-8 px-3 rounded-l-md text-sm font-medium flex items-center gap-1.5 transition-all
+            rounded-r-none
             ${arrangeStatus === 'success'
-              ? 'bg-success/20 text-success border border-success/30'
-              : 'bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20'
+              ? 'bg-success/20 text-success hover:bg-success/30'
+              : 'bg-primary/10 text-primary hover:bg-primary/20'
             }
-            ${isArranging ? 'opacity-50 cursor-not-allowed' : ''}
           `}
         >
           {arrangeStatus === 'loading' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
           {arrangeStatus === 'success' && <Check className="w-3.5 h-3.5" />}
           {arrangeStatus === 'normal' && <LayoutGrid className="w-3.5 h-3.5" />}
-          <span>
+          <span className="ml-1.5">
             {arrangeStatus === 'loading'
               ? t('sessions.arranging')
               : arrangeStatus === 'success'
@@ -68,7 +73,7 @@ export function ArrangeBanner({
                 : t('sessions.arrangeWindows')
             }
           </span>
-        </button>
+        </Button>
 
         <LayoutPopover
           open={popoverOpen}
@@ -80,31 +85,45 @@ export function ArrangeBanner({
             await onArrange(layout);
           }}
           trigger={
-            <button
-              type="button"
+            <Button
+              size="sm"
+              variant="ghost"
               disabled={isArranging}
               className={`
-                h-8 px-1.5 rounded-r-md border-l-0 text-sm flex items-center transition-all
+                rounded-l-none border-l-0 px-1.5
                 ${arrangeStatus === 'success'
-                  ? 'bg-success/20 text-success border border-success/30'
-                  : 'bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20'
+                  ? 'bg-success/20 text-success hover:bg-success/30'
+                  : 'bg-primary/10 text-primary hover:bg-primary/20'
                 }
-                ${isArranging ? 'opacity-50 cursor-not-allowed' : ''}
               `}
             >
               <ChevronDown className="w-3.5 h-3.5" />
-            </button>
+            </Button>
           }
         />
       </div>
 
-      <button
-        type="button"
+      {/* Separator + Bulk actions */}
+      <div className="border-l border-[--glass-border-light] h-5 shrink-0" />
+
+      <Button size="sm" variant="ghost" onClick={onMinimizeAll}>
+        <Minimize2 className="w-3.5 h-3.5 mr-1" />
+        {t('sessions.minimizeAll')}
+      </Button>
+      <Button size="sm" variant="ghost" onClick={onCloseAll}>
+        <X className="w-3.5 h-3.5 mr-1" />
+        {t('sessions.closeAll')}
+      </Button>
+
+      {/* Dismiss */}
+      <Button
+        size="sm"
+        variant="ghost"
         onClick={() => setDismissed(true)}
-        className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+        className="text-muted-foreground hover:text-foreground px-1"
       >
         <X className="w-3.5 h-3.5" />
-      </button>
+      </Button>
     </div>
   );
 }
