@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { useAppStore, type Environment, type Session } from '@/store';
+import { useAppStore, type Environment, type Session, type ArrangeLayout } from '@/store';
 import { useCallback } from 'react';
 import { toast } from 'sonner';
 
@@ -20,6 +20,7 @@ interface TauriSession {
   status: string;  // "running" | "stopped" | "interrupted"
   terminal_type?: string;  // "iterm2" | "terminalapp"
   window_id?: string;      // iTerm2 window ID
+  iterm_session_id?: string; // iTerm2 session unique ID for arrange
 }
 
 interface TauriFavoriteProject {
@@ -185,6 +186,7 @@ export function useTauriCommands() {
         permMode: tauriSession.perm_mode,
         terminalType: tauriSession.terminal_type,
         windowId: tauriSession.window_id,
+        itermSessionId: tauriSession.iterm_session_id,
       };
 
       addSession(session);
@@ -216,6 +218,7 @@ export function useTauriCommands() {
         permMode: s.perm_mode,
         terminalType: s.terminal_type,
         windowId: s.window_id,
+        itermSessionId: s.iterm_session_id,
       }));
       setSessions(sessions);
     } catch (err) {
@@ -336,6 +339,26 @@ export function useTauriCommands() {
     return result;
   }, [loadEnvironments]);
 
+  const arrangeSessions = useCallback(async (sessionIds: string[], layout: ArrangeLayout) => {
+    try {
+      const result = await invoke<string>('arrange_sessions', {
+        request: { session_ids: sessionIds, layout },
+      });
+      await loadSessions();
+      return result;
+    } catch (err) {
+      throw err;
+    }
+  }, [loadSessions]);
+
+  const checkArrangeSupport = useCallback(async (): Promise<boolean> => {
+    try {
+      return await invoke<boolean>('check_arrange_support');
+    } catch {
+      return false;
+    }
+  }, []);
+
   return {
     loadEnvironments,
     loadCurrentEnv,
@@ -357,5 +380,7 @@ export function useTauriCommands() {
     syncVSCodeProjects,
     syncJetBrainsProjects,
     loadFromRemote,
+    arrangeSessions,
+    checkArrangeSupport,
   };
 }

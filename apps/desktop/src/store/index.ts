@@ -10,6 +10,8 @@ export interface Environment {
   smallModel?: string;
 }
 
+export type ArrangeLayout = 'horizontal2' | 'vertical2' | 'grid4' | 'left_main3';
+
 export interface Session {
   id: string;
   envName: string;
@@ -20,6 +22,7 @@ export interface Session {
   permMode: string;
   terminalType?: string;  // "iterm2" | "terminalapp"
   windowId?: string;      // iTerm2 window ID
+  itermSessionId?: string; // iTerm2 session unique ID for arrange
 }
 
 export interface FavoriteProject {
@@ -64,6 +67,8 @@ interface AppState {
   addSession: (session: Session) => void;
   removeSession: (id: string) => void;
   updateSessionStatus: (id: string, status: Session['status']) => void;
+  arrangeLayout: ArrangeLayout | null;
+  setArrangeLayout: (layout: ArrangeLayout | null) => void;
 
   // Projects
   favorites: FavoriteProject[];
@@ -140,6 +145,8 @@ export const useAppStore = create<AppState>((set) => ({
         s.id === id ? { ...s, status } : s
       ),
     })),
+  arrangeLayout: null,
+  setArrangeLayout: (layout) => set({ arrangeLayout: layout }),
 
   // Projects
   favorites: [],

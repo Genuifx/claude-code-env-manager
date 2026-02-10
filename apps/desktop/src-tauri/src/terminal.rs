@@ -221,18 +221,21 @@ end tell"#,
 }
 
 /// Generate AppleScript for iTerm2 with tab title
-/// Returns the window ID for later operations
+/// Returns "windowId|sessionId" for later operations (arrange needs session unique ID)
 fn iterm2_script(shell_command: &str) -> String {
     // IMPORTANT: Escape backslashes FIRST, then double quotes
     let escaped_cmd = shell_command.replace("\\", "\\\\").replace("\"", "\\\"");
     format!(
         r#"tell application "iTerm2"
     set newWindow to (create window with default profile)
-    tell current session of newWindow
+    set theSession to current session of current tab of newWindow
+    tell theSession
         write text "{}"
     end tell
     activate
-    return id of newWindow
+    set windowId to id of newWindow
+    set sessionId to unique id of theSession
+    return (windowId as string) & "|" & sessionId
 end tell"#,
         escaped_cmd
     )
@@ -247,14 +250,14 @@ end tell"#,
 /// * `session_id` - Session ID (used for exit status tracking)
 ///
 /// # Returns
-/// * `Ok(Option<String>)` - Window ID on success (None for Terminal.app)
+/// * `Ok((Option<String>, Option<String>))` - (window_id, iterm_session_id) on success
 /// * `Err(String)` with error message on failure
 pub fn launch_in_terminal(
     terminal: TerminalType,
     env_vars: HashMap<String, String>,
     working_dir: &str,
     session_id: &str,
-) -> Result<Option<String>, String> {
+) -> Result<(Option<String>, Option<String>), String> {
     let shell_command = build_shell_command(&env_vars, working_dir, session_id);
 
     let script = match terminal {
@@ -277,13 +280,18 @@ pub fn launch_in_terminal(
         ));
     }
 
-    // For iTerm2, return the window ID
+    // For iTerm2, parse "windowId|sessionId" format
     match terminal {
         TerminalType::ITerm2 => {
-            let window_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            Ok(Some(window_id))
+            let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if let Some((window_id, session_id)) = raw.split_once('|') {
+                Ok((Some(window_id.to_string()), Some(session_id.to_string())))
+            } else {
+                // Fallback: old format (just window ID)
+                Ok((Some(raw), None))
+            }
         }
-        TerminalType::TerminalApp => Ok(None),
+        TerminalType::TerminalApp => Ok((None, None)),
     }
 }
 
@@ -427,6 +435,417 @@ end tell"#,
                 Err(format!("Failed to minimize window: {}", stderr.trim()))
             }
         }
+    }
+}
+
+// ============================================
+// Arrange Windows Support
+// ============================================
+
+/// Layout options for arranging terminal sessions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArrangeLayout {
+    Horizontal2,  // [A | B] side by side
+    Vertical2,    // [A] / [B] stacked
+    Grid4,        // 2×2 grid
+    LeftMain3,    // A large left + B/C stacked right
+}
+
+/// Session info needed for arranging
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArrangeSessionInfo {
+    pub window_id: String,
+    pub iterm_session_id: Option<String>,
+}
+
+/// Get screen size via AppleScript (Finder desktop bounds)
+pub fn get_screen_size() -> Result<(i32, i32), String> {
+    let script = r#"tell application "Finder"
+    set b to bounds of window of desktop
+    return (item 3 of b as string) & "," & (item 4 of b as string)
+end tell"#;
+
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .map_err(|e| format!("Failed to get screen size: {}", e))?;
+
+    if !output.status.success() {
+        return Err("Failed to query screen size".to_string());
+    }
+
+    let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let parts: Vec<&str> = raw.split(',').collect();
+    if parts.len() != 2 {
+        return Err(format!("Unexpected screen size format: {}", raw));
+    }
+
+    let w = parts[0].trim().parse::<i32>().map_err(|_| "Invalid screen width".to_string())?;
+    let h = parts[1].trim().parse::<i32>().map_err(|_| "Invalid screen height".to_string())?;
+    Ok((w, h))
+}
+
+/// Get iTerm2 session unique ID by querying a window ID
+/// Used to backfill sessions launched before this feature existed
+pub fn get_iterm_session_id(window_id: &str) -> Result<String, String> {
+    let script = format!(
+        r#"tell application "iTerm2"
+    repeat with aWindow in windows
+        if id of aWindow is {} then
+            return unique id of current session of current tab of aWindow
+        end if
+    end repeat
+    return "not_found"
+end tell"#,
+        window_id
+    );
+
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|e| format!("Failed to query iTerm2 session ID: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("AppleScript failed: {}", stderr.trim()));
+    }
+
+    let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if result == "not_found" {
+        return Err(format!("Window {} not found in iTerm2", window_id));
+    }
+    Ok(result)
+}
+
+/// Check if iTerm2 supports the invoke API expression (3.5+)
+pub fn check_arrange_support() -> Result<bool, String> {
+    // Try a harmless invoke API expression to test support
+    let script = r#"tell application "iTerm2"
+    if not running then return "not_running"
+    try
+        set v to version
+        return v
+    on error
+        return "unknown"
+    end try
+end tell"#;
+
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .map_err(|e| format!("Failed to check iTerm2: {}", e))?;
+
+    if !output.status.success() {
+ return Ok(false);
+    }
+
+    let version_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if version_str == "not_running" {
+        return Err("iTerm2 is not running".to_string());
+    }
+
+    // Parse version: need 3.5+ for invoke API expression
+    let parts: Vec<&str> = version_str.split('.').collect();
+    if parts.len() >= 2 {
+        if let (Ok(major), Ok(minor)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+            return Ok(major > 3 || (major == 3 && minor >= 5));
+        }
+    }
+
+    // If we can't parse version, assume it's supported (best effort)
+    Ok(true)
+}
+
+/// Arrange iTerm2 sessions into split panes using invoke API expression
+///
+/// This uses iTerm2's Python API bridge via AppleScript to move sessions
+/// into split-pane layouts within a single window.
+///
+/// Parameter semantics (iTerm2 3.6.6 verified):
+///   vertical: true  = vertical split line = side by side (left/right)
+///   vertical: false = horizontal split line = stacked (top/bottom)
+///   before: false   = session placed right-of/below destination
+///   before: true    = session placed left-of/above destination
+pub fn arrange_iterm_sessions(
+    sessions: &[ArrangeSessionInfo],
+    layout: &ArrangeLayout,
+) -> Result<String, String> {
+    if sessions.is_empty() {
+        return Err("No sessions to arrange".to_string());
+    }
+
+    // Collect session IDs (all must have iterm_session_id)
+    let session_ids: Vec<&str> = sessions
+        .iter()
+        .map(|s| s.iterm_session_id.as_deref().ok_or("Missing iTerm2 session ID"))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let script = match layout {
+        ArrangeLayout::Horizontal2 => {
+            if session_ids.len() < 2 {
+                return Err("Need at least 2 sessions for side-by-side layout".to_string());
+            }
+            // Move B right of A: vertical=true, before=false
+            format!(
+                r#"tell application "iTerm2"
+    invoke API expression "iterm2.move_session(session: \"{}\", destination: \"{}\", vertical: true, before: false)"
+    delay 0.8
+    -- Find the window containing session A
+    repeat with aWindow in windows
+        repeat with aTab in tabs of aWindow
+            repeat with aSession in sessions of aTab
+                if unique id of aSession is "{}" then
+                    return id of aWindow as string
+                end if
+            end repeat
+        end repeat
+    end repeat
+    return "not_found"
+end tell"#,
+                session_ids[1], session_ids[0], session_ids[0]
+            )
+        }
+        ArrangeLayout::Vertical2 => {
+            if session_ids.len() < 2 {
+                return Err("Need at least 2 sessions for stacked layout".to_string());
+            }
+            // Move B below A: vertical=false, before=true
+            format!(
+                r#"tell application "iTerm2"
+    invoke API expression "iterm2.move_session(session: \"{}\", destination: \"{}\", vertical: false, before: true)"
+    delay 0.8
+    repeat with aWindow in windows
+        repeat with aTab in tabs of aWindow
+            repeat with aSession in sessions of aTab
+                if unique id of aSession is "{}" then
+                    return id of aWindow as string
+                end if
+            end repeat
+        end repeat
+    end repeat
+    return "not_found"
+end tell"#,
+                session_ids[1], session_ids[0], session_ids[0]
+            )
+        }
+        ArrangeLayout::Grid4 => {
+            if session_ids.len() < 2 {
+                return Err("Need at least 2 sessions for grid layout".to_string());
+            }
+            let count = session_ids.len().min(4);
+            // Build the script dynamically based on session count
+            let mut steps = String::new();
+
+            // Step 1: Move B right of A → [A | B]
+            steps.push_str(&format!(
+                r#"    invoke API expression "iterm2.move_session(session: \"{}\", destination: \"{}\", vertical: true, before: false)"
+    delay 0.8
+"#,
+                session_ids[1], session_ids[0]
+            ));
+
+            if count >= 3 {
+                // Step 2: Move C below A → [A|B] becomes [A|B] / [C|_]
+                steps.push_str(&format!(
+                    r#"    invoke API expression "iterm2.move_session(session: \"{}\", destination: \"{}\", vertical: false, before: true)"
+    delay 0.8
+"#,
+                    session_ids[2], session_ids[0]
+                ));
+            }
+
+            if count >= 4 {
+                // Step 3: Move D below B → [A|B] / [C|D]
+                steps.push_str(&format!(
+                    r#"    invoke API expression "iterm2.move_session(session: \"{}\", destination: \"{}\", vertical: false, before: true)"
+    delay 0.8
+"#,
+                    session_ids[3], session_ids[1]
+                ));
+            }
+
+            format!(
+                r#"tell application "iTerm2"
+{}    -- Find the window containing session A
+    repeat with aWindow in windows
+        repeat with aTab in tabs of aWindow
+            repeat with aSession in sessions of aTab
+                if unique id of aSession is "{}" then
+                    return id of aWindow as string
+                end if
+            end repeat
+        end repeat
+    end repeat
+    return "not_found"
+end tell"#,
+                steps, session_ids[0]
+            )
+        }
+        ArrangeLayout::LeftMain3 => {
+            if session_ids.len() < 2 {
+                return Err("Need at least 2 sessions layout".to_string());
+            }
+            let count = session_ids.len().min(3);
+            let mut steps = String::new();
+
+            // Step 1: Move B right of A → [A | B]
+            steps.push_str(&format!(
+                r#"    invoke API expression "iterm2.move_session(session: \"{}\", destination: \"{}\", vertical: true, before: false)"
+    delay 0.8
+"#,
+                session_ids[1], session_ids[0]
+            ));
+
+            if count >= 3 {
+                // Step 2: Move C below B → [A | B/C]
+                steps.push_str(&format!(
+                    r#"    invoke API expression "iterm2.move_session(session: \"{}\", destination: \"{}\", vertical: false, before: true)"
+    delay 0.8
+"#,
+                    session_ids[2], session_ids[1]
+                ));
+            }
+
+            format!(
+                r#"tell application "iTerm2"
+{}    repeat with aWindow in windows
+        repeat with aTab in tabs of aWindow
+            repeat with aSession in sessions of aTab
+                if unique id of aSession is "{}" then
+                    return id of aWindow as string
+                end if
+            end repeat
+        end repeat
+    end repeat
+    return "not_found"
+end tell"#,
+                steps, session_ids[0]
+            )
+        }
+    };
+
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|e| format!("Failed to arrange iTerm2 sessions: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Arrange failed: {}", stderr.trim()));
+    }
+
+    let new_window_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if new_window_id == "not_found" {
+        return Err("Could not find arranged window".to_string());
+    }
+
+    Ok(new_window_id)
+}
+
+/// Arrange Terminal.app windows by setting bounds (pseudo split-screen)
+pub fn arrange_terminal_app_sessions(
+    sessions: &[ArrangeSessionInfo],
+    layout: &ArrangeLayout,
+) -> Result<String, String> {
+    if sessions.is_empty() {
+        return Err("No sessions to arrange".to_string());
+    }
+
+    let (screen_w, screen_h) = get_screen_size()?;
+    let menu_bar = 25; // macOS menu bar height
+    let usable_h = screen_h - menu_bar;
+
+    // Build bounds assignments based on layout
+    let bounds: Vec<(i32, i32, i32, i32)> = match layout {
+        ArrangeLayout::Horizontal2 => {
+            let half_w = screen_w / 2;
+            vec![
+                (0, menu_bar, half_w, screen_h),
+                (half_w, menu_bar, screen_w, screen_h),
+            ]
+        }
+        ArrangeLayout::Vertical2 => {
+            let half_h = usable_h / 2;
+            vec![
+                (0, menu_bar, screen_w, menu_bar + half_h),
+                (0, menu_bar + half_h, screen_w, screen_h),
+            ]
+        }
+        ArrangeLayout::Grid4 => {
+            let half_w = screen_w / 2;
+            let half_h = usable_h / 2;
+            vec![
+                (0, menu_bar, half_w, menu_bar + half_h),           // top-left
+                (half_w, menu_bar, screen_w, menu_bar + half_h),    // top-right
+                (0, menu_bar + half_h, half_w, screen_h),           // bottom-left
+                (half_w, menu_bar + half_h, screen_w, screen_h),    // bottom-right
+            ]
+        }
+        ArrangeLayout::LeftMain3 => {
+            let main_w = (screen_w as f64 * 0.55) as i32;
+            let side_h = usable_h / 2;
+            vec![
+                (0, menu_bar, main_w, screen_h),                          // left main
+                (main_w, menu_bar, screen_w, menu_bar + side_h),          // right top
+                (main_w, menu_bar + side_h, screen_w, screen_h),          // right bottom
+            ]
+        }
+    };
+
+    // Build AppleScript to set bounds for each window
+    let mut set_bounds_lines = String::new();
+    for (i, session) in sessions.iter().enumerate() {
+        if i >= bounds.len() {
+            break;
+        }
+        let (x1, y1, x2, y2) = bounds[i];
+        set_bounds_lines.push_str(&format!(
+            r#"        if id of aWindow is {} then
+            set bounds of aWindow to {{{}, {}, {}, {}}}
+        end if
+"#,
+            session.window_id, x1, y1, x2, y2
+        ));
+    }
+
+    let script = format!(
+        r#"tell application "Terminal"
+    repeat with aWindow in windows
+{}    end repeat
+    activate
+end tell"#,
+        set_bounds_lines
+    );
+
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|e| format!("Failed to arrange Terminal.app windows: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Arrange failed: {}", stderr.trim()));
+    }
+
+    // Terminal.app windows keep their individual IDs
+    Ok("arranged".to_string())
+}
+
+/// Arrange sessions — dispatches to iTerm2 or Terminal.app implementation
+pub fn arrange_sessions(
+    terminal: TerminalType,
+    sessions: &[ArrangeSessionInfo],
+    layout: &ArrangeLayout,
+) -> Result<String, String> {
+    match terminal {
+        TerminalType::ITerm2 => arrange_iterm_sessions(sessions, layout),
+        TerminalType::TerminalApp => arrange_terminal_app_sessions(sessions, layout),
     }
 }
 
