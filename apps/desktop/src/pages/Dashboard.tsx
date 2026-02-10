@@ -269,30 +269,30 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
         </Button>
       </Card>
 
-      {/* ══ Zone 3: Metrics Grid ══ */}
-      <div className="grid grid-cols-4 gap-4">
-        {/* Sessions Today */}
+      {/* ══ Zone 3: Metrics Bento Grid ══ */}
+      <div className="grid grid-cols-4 grid-rows-2 gap-4">
+        {/* Sessions — Hero Card (tall left) */}
         <Card
-          className="stat-card glass-noise p-5 cursor-pointer interactive-card card-stagger"
+          className="stat-card glass-noise p-8 cursor-pointer interactive-card card-stagger col-span-2 row-span-2"
           onClick={() => onNavigate('sessions')}
         >
-          <div className="flex items-center gap-1.5 mb-3">
-            <Zap className="w-3.5 h-3.5 text-primary" />
+          <div className="flex items-center gap-1.5 mb-4">
+            <Zap className="w-4 h-4 text-primary" />
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
               {t('dashboard.runningSessions')}
             </span>
           </div>
-          <div className="gradient-text text-4xl font-bold tabular-nums leading-tight">
+          <div className="gradient-text text-7xl font-bold tabular-nums leading-tight">
             {animatedSessions}
           </div>
           {!hasLaunched && sessions.length === 0 && (
-            <p className="text-2xs text-muted-foreground mt-2">{t('dashboard.launchToStart')}</p>
+            <p className="text-sm text-muted-foreground mt-4">{t('dashboard.launchToStart')}</p>
           )}
         </Card>
 
-        {/* Tokens Today */}
+        {/* Tokens Today — Wide top-right */}
         <Card
-          className="stat-card glass-noise p-5 cursor-pointer interactive-card card-stagger"
+          className="stat-card glass-noise p-5 cursor-pointer interactive-card card-stagger col-span-2"
           onClick={() => onNavigate('analytics')}
         >
           <div className="flex items-center gap-1.5 mb-3">
@@ -313,9 +313,9 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
           )}
         </Card>
 
-        {/* Cost Today */}
+        {/* Cost Today — Bottom-middle */}
         <Card
-          className="stat-card glass-noise p-5 cursor-pointer interactive-card card-stagger"
+          className="stat-card glass-noise p-5 cursor-pointer interactive-card card-stagger col-span-1"
           onClick={() => onNavigate('analytics')}
         >
           <div className="flex items-center gap-1.5 mb-3">
@@ -334,9 +334,9 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
           )}
         </Card>
 
-        {/* Streak */}
+        {/* Streak — Bottom-right */}
         <Card
-          className="stat-card glass-noise p-5 cursor-pointer interactive-card card-stagger"
+          className="stat-card glass-noise p-5 cursor-pointer interactive-card card-stagger col-span-1"
           onClick={() => onNavigate('analytics')}
         >
           <div className="flex items-center gap-1.5 mb-3">

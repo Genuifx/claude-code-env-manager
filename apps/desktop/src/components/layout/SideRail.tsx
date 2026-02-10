@@ -11,15 +11,34 @@ interface NavItem {
   label: string;
   icon: typeof Home;
   shortcut: string;
-  tooltipLabel?: string;
 }
 
-const navItems: NavItem[] = [
-  { id: 'dashboard', label: 'Home', icon: Home, shortcut: '1' },
-  { id: 'sessions', label: 'Sessions', icon: Terminal, shortcut: '2' },
-  { id: 'environments', label: 'Envs', icon: Globe, shortcut: '3', tooltipLabel: 'Environments' },
-  { id: 'analytics', label: 'Stats', icon: BarChart3, shortcut: '4', tooltipLabel: 'Analytics' },
-  { id: 'skills', label: 'Skills', icon: Sparkles, shortcut: '5' },
+interface NavGroup {
+  title: string;
+  items: NavItem[];
+}
+
+const navGroups: NavGroup[] = [
+  {
+    title: '',
+    items: [
+      { id: 'dashboard', label: 'Dashboard', icon: Home, shortcut: '1' },
+    ],
+  },
+  {
+    title: 'Workspace',
+    items: [
+      { id: 'sessions', label: 'Sessions', icon: Terminal, shortcut: '2' },
+      { id: 'environments', label: 'Environments', icon: Globe, shortcut: '3' },
+      { id: 'skills', label: 'Skills', icon: Sparkles, shortcut: '5' },
+    ],
+  },
+  {
+    title: 'Insights',
+    items: [
+      { id: 'analytics', label: 'Analytics', icon: BarChart3, shortcut: '4' },
+    ],
+  },
 ];
 
 const bottomItems: NavItem[] = [
@@ -39,52 +58,66 @@ function NavButton({
   return (
     <button
       onClick={onClick}
-      title={`${item.tooltipLabel || item.label} (\u2318${item.shortcut})`}
+      title={`${item.label} (⌘${item.shortcut})`}
       className={cn(
-        'relative w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5',
-        'transition-all duration-150',
+        'sidebar-nav-item group relative w-full flex items-center gap-2.5 px-2.5 h-[30px] rounded-[7px]',
+        'transition-colors duration-[var(--duration-fast)]',
         isActive
-          ? 'glass-nav-active text-sidebar-active nav-active-bar'
-          : 'text-sidebar-foreground hover:text-foreground hover:bg-white/[0.06] hover:scale-105'
+          ? 'sidebar-nav-active text-white'
+          : 'text-sidebar-foreground hover:text-foreground hover:bg-white/[0.06]'
       )}
     >
-      <Icon className="w-5 h-5" strokeWidth={isActive ? 2.5 : 2} />
-      <span className="text-2xs leading-none font-medium">{item.label}</span>
+      <Icon className="w-[18px] h-[18px] shrink-0" strokeWidth={isActive ? 2 : 1.8} />
+      <span className="text-[13px] leading-none truncate">{item.label}</span>
+      <span className="ml-auto text-[11px] font-mono opacity-0 group-hover:opacity-100 transition-opacity duration-[var(--duration-fast)]"
+        style={{ color: isActive ? 'rgba(255,255,255,0.5)' : undefined }}
+      >
+        ⌘{item.shortcut}
+      </span>
     </button>
   );
 }
 
 export function SideRail({ activeTab, onTabChange }: SideRailProps) {
   return (
-    <aside className="w-[72px] h-full flex flex-col items-center py-4 gap-1.5 glass-sidebar glass-noise border-r border-sidebar-border/60 relative z-20">
-      {/* CC Logo */}
-      <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center shadow-md glow-amber">
-        <span className="text-primary-foreground font-bold text-xs tracking-tight">CC</span>
-      </div>
-      <div className="mb-5" />
+    <aside className="w-[200px] h-full shrink-0 flex flex-col glass-sidebar-panel glass-noise relative rounded-xl overflow-hidden">
+      {/* Traffic light region */}
+      <div className="h-[52px] shrink-0" />
 
-      {/* Nav items */}
-      {navItems.map((item) => (
-        <NavButton
-          key={item.id}
-          item={item}
-          isActive={activeTab === item.id}
-          onClick={() => onTabChange(item.id)}
-        />
-      ))}
-
-      {/* Spacer */}
-      <div className="flex-1" />
+      {/* Nav groups */}
+      <nav className="flex-1 flex flex-col gap-4 overflow-y-auto px-3">
+        {navGroups.map((group, gi) => (
+          <div key={gi}>
+            {group.title && (
+              <div className="px-2.5 mb-1.5 text-[11px] font-semibold text-muted-foreground/50 uppercase tracking-wider">
+                {group.title}
+              </div>
+            )}
+            <div className="flex flex-col gap-0.5">
+              {group.items.map((item) => (
+                <NavButton
+                  key={item.id}
+                  item={item}
+                  isActive={activeTab === item.id}
+                  onClick={() => onTabChange(item.id)}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+      </nav>
 
       {/* Bottom items */}
-      {bottomItems.map((item) => (
-        <NavButton
-          key={item.id}
-          item={item}
-          isActive={activeTab === item.id}
-          onClick={() => onTabChange(item.id)}
-        />
-      ))}
+      <div className="flex flex-col gap-0.5 px-3 py-3 border-t border-white/[0.06]">
+        {bottomItems.map((item) => (
+          <NavButton
+            key={item.id}
+            item={item}
+            isActive={activeTab === item.id}
+            onClick={() => onTabChange(item.id)}
+          />
+        ))}
+      </div>
     </aside>
   );
 }

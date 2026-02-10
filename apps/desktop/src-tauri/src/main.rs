@@ -14,7 +14,7 @@ use session::{Session, SessionManager, start_session_monitor, cleanup_exit_file,
 use std::sync::Arc;
 use std::collections::HashMap;
 use std::process::Command;
-use tauri::State;
+use tauri::{Manager, State};
 use terminal::{TerminalInfo, TerminalType};
 use tray::create_tray;
 
@@ -773,7 +773,8 @@ fn main() {
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_notification::init());
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_decorum::init());
 
     #[cfg(debug_assertions)]
     {
@@ -820,6 +821,23 @@ fn main() {
             // Auto-migrate configuration if needed
             if let Err(e) = config::migrate_if_needed() {
                 eprintln!("Config migration warning: {}", e);
+            }
+
+            // Configure macOS overlay titlebar with inset traffic lights + vibrancy
+            #[cfg(target_os = "macos")]
+            {
+                use tauri_plugin_decorum::WebviewWindowExt;
+                let main_window = app.get_webview_window("main").unwrap();
+                main_window.create_overlay_titlebar().unwrap();
+                // Position traffic lights — offset to align inside the inset sidebar panel
+                main_window.set_traffic_lights_inset(20.0, 24.0).unwrap();
+                // Make window transparent so vibrancy can show through
+                main_window.make_transparent().unwrap();
+
+                // Apply sidebar vibrancy — real NSVisualEffectView
+                use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
+                apply_vibrancy(&main_window, NSVisualEffectMaterial::Sidebar, None, None)
+                    .expect("Failed to apply vibrancy");
             }
 
             let _ = create_tray(app.handle())?;
