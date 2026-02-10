@@ -14,6 +14,7 @@ import {
 } from 'recharts';
 import { TrendingUp, BarChart3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useLocale } from '@/locales';
 import type { ChartDataPoint } from '@/types/analytics';
 
 type ChartType = 'line' | 'bar';
@@ -41,6 +42,7 @@ const COLORS: Record<string, string> = {
 };
 
 export function TokenChart({ data, environments, granularity, onGranularityChange }: TokenChartProps) {
+  const { t } = useLocale();
   const [chartType, setChartType] = useState<ChartType>('line');
 
   const Chart = chartType === 'line' ? LineChart : BarChart;
@@ -55,28 +57,28 @@ export function TokenChart({ data, environments, granularity, onGranularityChang
             variant={granularity === 'hour' ? 'default' : 'outline'}
             onClick={() => onGranularityChange('hour')}
           >
-            小时
+            {t('analytics.hour')}
           </Button>
           <Button
             size="sm"
             variant={granularity === 'day' ? 'default' : 'outline'}
             onClick={() => onGranularityChange('day')}
           >
-            日
+            {t('analytics.day')}
           </Button>
           <Button
             size="sm"
             variant={granularity === 'week' ? 'default' : 'outline'}
             onClick={() => onGranularityChange('week')}
           >
-            周
+            {t('analytics.week')}
           </Button>
           <Button
             size="sm"
             variant={granularity === 'month' ? 'default' : 'outline'}
             onClick={() => onGranularityChange('month')}
           >
-            月
+            {t('analytics.month')}
           </Button>
         </div>
 
@@ -86,14 +88,14 @@ export function TokenChart({ data, environments, granularity, onGranularityChang
             variant={chartType === 'line' ? 'default' : 'outline'}
             onClick={() => setChartType('line')}
           >
-            <TrendingUp className="w-4 h-4 mr-1" /> 折线图
+            <TrendingUp className="w-4 h-4 mr-1" /> {t('analytics.lineChart')}
           </Button>
           <Button
             size="sm"
             variant={chartType === 'bar' ? 'default' : 'outline'}
             onClick={() => setChartType('bar')}
           >
-            <BarChart3 className="w-4 h-4 mr-1" /> 柱状图
+            <BarChart3 className="w-4 h-4 mr-1" /> {t('analytics.barChart')}
           </Button>
         </div>
       </div>

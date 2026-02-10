@@ -9,7 +9,7 @@ import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { EnvironmentDialog } from '@/components/EnvironmentDialog';
 import { Toaster, toast } from 'sonner';
-import { LocaleProvider } from '@/locales';
+import { LocaleProvider, useLocale } from '@/locales';
 import type { UsageStats } from '@/types/analytics';
 
 function App() {
@@ -17,6 +17,7 @@ function App() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<'add' | 'edit'>('add');
   const [editingEnvName, setEditingEnvName] = useState<string | undefined>();
+  const [pendingDeleteEnv, setPendingDeleteEnv] = useState<string | null>(null);
 
   const {
     setEnvironments,
@@ -37,6 +38,7 @@ function App() {
     addEnvironment,
     updateEnvironment,
     deleteEnvironment,
+    loadFromRemote,
   } = useTauriCommands();
 
   // Show global errors as toast notifications
@@ -180,13 +182,18 @@ function App() {
     setDialogOpen(true);
   };
 
-  const handleDeleteEnv = async (name: string) => {
-    if (confirm(`确定要删除环境 "${name}" 吗？`)) {
-      try {
-        await deleteEnvironment(name);
-      } catch (err) {
-        console.error('Delete failed:', err);
-      }
+  const handleDeleteEnv = (name: string) => {
+    setPendingDeleteEnv(name);
+  };
+
+  const confirmDeleteEnv = async () => {
+    if (!pendingDeleteEnv) return;
+    try {
+      await deleteEnvironment(pendingDeleteEnv);
+    } catch (err) {
+      console.error('Delete failed:', err);
+    } finally {
+      setPendingDeleteEnv(null);
     }
   };
 
@@ -195,7 +202,7 @@ function App() {
       if (dialogMode === 'add') {
         await addEnvironment(env);
       } else {
-        await updateEnvironment(env);
+        await updateEnvironment(env, editingEnvName);
       }
       setDialogOpen(false);
     } catch (err) {
@@ -268,11 +275,60 @@ function App() {
         mode={dialogMode}
         environment={getEditingEnv()}
         onSave={handleSaveEnv}
+        onServerSync={loadFromRemote}
       />
+
+      {/* Delete Environment Confirmation Dialog */}
+      {pendingDeleteEnv && (
+        <DeleteEnvConfirmDialog
+          envName={pendingDeleteEnv}
+          onConfirm={confirmDeleteEnv}
+          onCancel={() => setPendingDeleteEnv(null)}
+        />
+      )}
 
       {/* Toast notifications */}
       <Toaster position="top-center" richColors />
     </LocaleProvider>
+  );
+}
+
+/** Inline confirmation dialog for environment deletion — rendered inside LocaleProvider */
+function DeleteEnvConfirmDialog({
+  envName,
+  onConfirm,
+  onCancel,
+}: {
+  envName: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useLocale();
+  const message = t('environments.confirmDelete').replace('{name}', envName);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onCancel}>
+      <div
+        className="bg-card border border-border rounded-xl p-6 shadow-xl max-w-sm w-full mx-4 space-y-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="text-foreground text-sm">{message}</p>
+        <div className="flex justify-end gap-2">
+          <button
+            className="px-4 py-2 text-sm rounded-lg border border-border text-foreground hover:bg-muted transition-colors"
+            onClick={onCancel}
+          >
+            {t('common.cancel')}
+          </button>
+          <button
+            className="px-4 py-2 text-sm rounded-lg bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors"
+            onClick={onConfirm}
+          >
+            {t('common.delete')}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

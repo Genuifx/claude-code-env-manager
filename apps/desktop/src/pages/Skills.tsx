@@ -14,10 +14,8 @@ interface Skill {
   type: 'skill' | 'mcp';
 }
 
-const mockSkills: Skill[] = [
-  { name: 'product-designer', path: '.claude/skills/product-design/', source: 'local', type: 'skill' },
-  { name: 'chrome-devtools', path: '', source: 'official', type: 'mcp' },
-];
+// TODO: Load skills from Tauri backend when available
+const installedSkills: Skill[] = [];
 
 export function Skills() {
   const { t } = useLocale();
@@ -68,7 +66,7 @@ export function Skills() {
           {t('skills.installedSkills')}
         </h3>
         <div className="space-y-3">
-          {mockSkills.length === 0 ? (
+          {installedSkills.length === 0 ? (
             <EmptyState
               icon={Sparkles}
               message={t('skills.noSkills')}
@@ -76,7 +74,7 @@ export function Skills() {
               onAction={() => toast.info(t('skills.addSkillCLIHint'))}
             />
           ) : null}
-          {mockSkills.map((skill) => (
+          {installedSkills.map((skill) => (
             <Card key={skill.name} className="p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">

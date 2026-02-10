@@ -308,7 +308,7 @@ export function Analytics() {
             {tokenChange !== null ? (
               <div
                 className={`flex items-center gap-1 text-xs ${
-                  tokenChange >= 0 ? 'text-green-600' : 'text-red-600'
+                  tokenChange >= 0 ? 'text-chart-2' : 'text-destructive'
                 }`}
               >
                 {tokenChange >= 0 ? (
@@ -338,7 +338,7 @@ export function Analytics() {
             {costChange !== null ? (
               <div
                 className={`flex items-center gap-1 text-xs ${
-                  costChange >= 0 ? 'text-green-600' : 'text-red-600'
+                  costChange >= 0 ? 'text-chart-2' : 'text-destructive'
                 }`}
               >
                 {costChange >= 0 ? (

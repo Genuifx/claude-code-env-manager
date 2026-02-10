@@ -3,90 +3,142 @@
 @tailwind utilities;
 
 @layer base {
+  /* === Dark Mode (Default for dev tools) === */
   :root {
+    /* Primary (Amber) */
     --primary: 33 78% 54%;
     --primary-foreground: 33 10% 98%;
-    --accent: 16 65% 53%;
-    --accent-foreground: 16 10% 98%;
-    --background: 33 20% 97%;
-    --foreground: 33 15% 10%;
-    --card: 0 0% 100%;
-    --card-foreground: 33 15% 10%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 33 15% 10%;
-    --surface-raised: 33 15% 95%;
-    --surface-overlay: 33 10% 92%;
-    --surface-sunken: 33 20% 97%;
-    --secondary: 33 10% 94%;
-    --secondary-foreground: 33 15% 20%;
-    --muted: 33 10% 94%;
-    --muted-foreground: 33 8% 50%;
-    --border: 33 12% 88%;
-    --input: 33 12% 88%;
+    --primary-hover: 33 78% 48%;
+    --primary-active: 33 78% 42%;
+    --primary-muted: 33 45% 65%;
+    --primary-glow: 33 100% 60%;
+
+    /* Accent (Teal — complementary cool) */
+    --accent: 180 65% 48%;
+    --accent-foreground: 0 0% 100%;
+    --accent-hover: 180 65% 42%;
+    --accent-muted: 180 40% 60%;
+
+    /* Background layers (5-level hierarchy) */
+    --background: 30 16% 6%;
+    --foreground: 30 5% 95%;
+    --surface-sunken: 30 14% 8%;
+    --surface: 30 12% 10%;
+    --surface-raised: 30 10% 14%;
+    --surface-overlay: 30 8% 18%;
+    --surface-peak: 30 6% 24%;
+
+    /* Card uses surface level */
+    --card: 30 12% 10%;
+    --card-foreground: 30 5% 95%;
+    --popover: 30 8% 18%;
+    --popover-foreground: 30 5% 95%;
+
+    /* Secondary */
+    --secondary: 30 10% 15%;
+    --secondary-foreground: 33 10% 85%;
+    --muted: 30 10% 15%;
+    --muted-foreground: 30 5% 50%;
+
+    /* Borders (3-level) */
+    --border-subtle: 30 8% 18%;
+    --border: 30 10% 24%;
+    --border-strong: 30 12% 32%;
+    --input: 30 10% 24%;
     --ring: 33 78% 54%;
-    --success: 152 56% 42%;
+
+    /* Semantic status */
+    --success: 142 71% 45%;
     --success-foreground: 0 0% 100%;
-    --warning: 46 74% 58%;
+    --warning: 46 70% 55%;
     --warning-foreground: 33 15% 10%;
-    --destructive: 358 70% 60%;
+    --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
-    --info: 210 50% 60%;
+    --info: 217 91% 60%;
     --info-foreground: 0 0% 100%;
+
+    /* Radius */
     --radius: 0.5rem;
     --radius-sm: 0.375rem;
     --radius-lg: 0.75rem;
     --radius-xl: 1rem;
+    --radius-2xl: 1.5rem;
+
+    /* Sidebar */
+    --sidebar: 30 14% 8%;
+    --sidebar-foreground: 30 5% 50%;
+    --sidebar-active: 33 78% 54%;
+    --sidebar-active-foreground: 33 10% 98%;
+    --sidebar-border: 30 8% 15%;
+
+    /* Chart colors */
+    --chart-1: 33 78% 58%;
+    --chart-2: 180 65% 48%;
+    --chart-3: 142 71% 45%;
+    --chart-4: 262 83% 58%;
+    --chart-5: 14 83% 60%;
+    --chart-6: 217 91% 60%;
+  }
+
+  /* === Light Mode === */
+  .light {
+    --primary: 33 78% 54%;
+    --primary-foreground: 33 10% 98%;
+    --primary-hover: 33 78% 48%;
+    --primary-active: 33 78% 42%;
+    --primary-muted: 33 60% 70%;
+    --primary-glow: 33 100% 60%;
+
+    --accent: 180 65% 48%;
+    --accent-foreground: 0 0% 100%;
+    --accent-hover: 180 65% 42%;
+    --accent-muted: 180 40% 60%;
+
+    --background: 33 20% 96%;
+    --foreground: 30 10% 10%;
+    --surface-sunken: 33 18% 92%;
+    --surface: 0 0% 100%;
+    --surface-raised: 33 15% 99%;
+    --surface-overlay: 0 0% 100%;
+    --surface-peak: 33 20% 99%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 30 10% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 30 10% 10%;
+
+    --secondary: 33 10% 94%;
+    --secondary-foreground: 33 15% 20%;
+    --muted: 33 10% 94%;
+    --muted-foreground: 30 6% 50%;
+
+    --border-subtle: 33 10% 90%;
+    --border: 33 12% 85%;
+    --border-strong: 33 14% 75%;
+    --input: 33 12% 85%;
+    --ring: 33 78% 54%;
+
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 46 74% 58%;
+    --warning-foreground: 33 15% 10%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --info: 217 91% 60%;
+    --info-foreground: 0 0% 100%;
+
     --sidebar: 33 15% 95%;
     --sidebar-foreground: 33 8% 50%;
     --sidebar-active: 33 78% 54%;
     --sidebar-active-foreground: 33 10% 98%;
     --sidebar-border: 33 12% 88%;
-    --chart-1: 33 78% 54%;
-    --chart-2: 210 50% 60%;
-    --chart-3: 152 56% 42%;
-    --chart-4: 280 45% 60%;
-    --chart-5: 16 65% 53%;
-  }
 
-  .dark {
-    --primary: 33 78% 54%;
-    --primary-foreground: 33 10% 98%;
-    --accent: 16 65% 53%;
-    --accent-foreground: 16 10% 98%;
-    --background: 30 20% 5%;
-    --foreground: 33 10% 90%;
-    --card: 30 14% 10%;
-    --card-foreground: 33 10% 90%;
-    --popover: 30 14% 10%;
-    --popover-foreground: 33 10% 90%;
-    --surface-raised: 30 12% 13%;
-    --surface-overlay: 30 10% 17%;
-    --surface-sunken: 30 20% 5%;
-    --secondary: 30 10% 15%;
-    --secondary-foreground: 33 10% 85%;
-    --muted: 30 10% 15%;
-    --muted-foreground: 33 8% 55%;
-    --border: 30 8% 20%;
-    --input: 30 8% 20%;
-    --ring: 33 78% 54%;
-    --success: 152 50% 45%;
-    --success-foreground: 0 0% 100%;
-    --warning: 46 70% 55%;
-    --warning-foreground: 33 15% 10%;
-    --destructive: 358 65% 55%;
-    --destructive-foreground: 0 0% 100%;
-    --info: 210 45% 55%;
-    --info-foreground: 0 0% 100%;
-    --sidebar: 30 14% 8%;
-    --sidebar-foreground: 33 8% 55%;
-    --sidebar-active: 33 78% 54%;
-    --sidebar-active-foreground: 33 10% 98%;
-    --sidebar-border: 30 8% 15%;
-    --chart-1: 33 78% 58%;
-    --chart-2: 210 50% 65%;
-    --chart-3: 152 50% 50%;
-    --chart-4: 280 40% 65%;
-    --chart-5: 16 60% 58%;
+    --chart-1: 33 78% 54%;
+    --chart-2: 180 65% 48%;
+    --chart-3: 142 71% 45%;
+    --chart-4: 262 83% 58%;
+    --chart-5: 14 83% 60%;
+    --chart-6: 217 91% 60%;
   }
 }
 
@@ -105,28 +157,57 @@
 :root {
   --duration-instant: 80ms;
   --duration-fast: 150ms;
-  --duration-normal: 220ms;
+  --duration-base: 250ms;
   --duration-slow: 400ms;
   --duration-extended: 800ms;
-  --ease-default: cubic-bezier(0.25, 0.1, 0.25, 1.0);
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1.0);
+  --ease-default: cubic-bezier(0.4, 0.0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.68, -0.55, 0.265, 1.55);
   --ease-decelerate: cubic-bezier(0.0, 0.0, 0.2, 1.0);
   --ease-accelerate: cubic-bezier(0.4, 0.0, 1.0, 1.0);
 }
 
+/* === Elevation Shadows === */
+:root {
+  --shadow-sm:
+    0 1px 2px hsl(0 0% 0% / 0.06),
+    0 0 0 1px hsl(var(--border-subtle));
+  --shadow-md:
+    0 2px 8px hsl(0 0% 0% / 0.1),
+    0 1px 3px hsl(0 0% 0% / 0.08);
+  --shadow-lg:
+    0 8px 24px hsl(0 0% 0% / 0.14),
+    0 4px 12px hsl(0 0% 0% / 0.08);
+  --shadow-xl:
+    0 16px 48px hsl(0 0% 0% / 0.18),
+    0 8px 24px hsl(0 0% 0% / 0.1);
+}
+
 /* === Page Transition === */
 @keyframes page-enter {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(16px); }
   to { opacity: 1; transform: translateY(0); }
 }
 .page-transition-enter {
-  animation: page-enter var(--duration-normal) var(--ease-decelerate) both;
+  animation: page-enter var(--duration-base) var(--ease-decelerate) both;
 }
+
+/* === Card Stagger Animation === */
+@keyframes card-appear {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.card-stagger {
+  animation: card-appear var(--duration-base) var(--ease-decelerate) backwards;
+}
+.card-stagger:nth-child(1) { animation-delay: 0ms; }
+.card-stagger:nth-child(2) { animation-delay: 60ms; }
+.card-stagger:nth-child(3) { animation-delay: 120ms; }
+.card-stagger:nth-child(4) { animation-delay: 180ms; }
 
 /* === Status Indicators === */
 @keyframes status-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.1); }
 }
 @keyframes status-blink {
   0%, 100% { opacity: 1; }
@@ -134,6 +215,19 @@
 }
 .status-running { animation: status-pulse 2s var(--ease-default) infinite; }
 .status-error { animation: status-blink 1.2s steps(2) infinite; }
+
+/* === Glow Effects === */
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 8px hsl(var(--primary) / 0.2); }
+  50% { box-shadow: 0 0 20px hsl(var(--primary) / 0.4); }
+}
+.glow-amber { animation: glow-pulse 2s var(--ease-default) infinite; }
+
+@keyframes success-ripple {
+  from { box-shadow: 0 0 0 0 hsl(var(--success) / 0.4); }
+  to { box-shadow: 0 0 0 24px hsl(var(--success) / 0); }
+}
+.ripple-success { animation: success-ripple 600ms var(--ease-decelerate); }
 
 /* === Data Animations === */
 @keyframes draw-line {
@@ -176,15 +270,84 @@
     hsl(var(--muted)) 75%
   );
   background-size: 200% 100%;
-  animation: shimmer 1.5s var(--ease-default) infinite;
+  animation: shimmer 1.5s linear infinite;
 }
 
-/* === Interactive Card === */
+/* === Interactive Cards === */
 .interactive-card {
-  transition: border-color var(--duration-fast) var(--ease-default);
+  transition:
+    border-color var(--duration-fast) var(--ease-default),
+    box-shadow var(--duration-fast) var(--ease-default),
+    transform var(--duration-fast) var(--ease-default);
 }
 .interactive-card:hover {
   border-color: hsl(var(--primary) / 0.3);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+.interactive-card:active {
+  transform: scale(0.98);
+}
+
+/* === Stat Card === */
+.stat-card {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(160deg,
+      hsl(var(--card)) 0%,
+      hsl(var(--surface-raised)) 100%
+    );
+}
+.stat-card::before {
+  content: "";
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(circle,
+    hsl(var(--primary) / 0.06) 0%,
+    transparent 60%
+  );
+  pointer-events: none;
+}
+
+/* === Gradient Text (for stat numbers) === */
+.gradient-text {
+  background: linear-gradient(135deg,
+    hsl(var(--foreground)) 0%,
+    hsl(var(--primary-muted)) 100%
+  );
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* === Tabular Numbers === */
+.tabular-nums {
+  font-feature-settings: "tnum" 1;
+}
+
+/* === Glassmorphism === */
+.glass {
+  background: hsl(var(--surface-overlay) / 0.85);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+}
+
+/* === Hero Ambient Gradient === */
+.hero-gradient {
+  background:
+    radial-gradient(ellipse at top left,
+      hsl(var(--primary) / 0.06) 0%,
+      transparent 50%
+    ),
+    radial-gradient(ellipse at bottom right,
+      hsl(var(--accent) / 0.04) 0%,
+      transparent 50%
+    ),
+    hsl(var(--card));
 }
 
 /* === Heatmap Fade-In === */
@@ -194,6 +357,20 @@
 @keyframes heatmapFadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+/* === SideRail Active Indicator === */
+.nav-active-bar::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 24px;
+  background: hsl(var(--primary));
+  border-radius: 0 2px 2px 0;
+  box-shadow: 0 0 8px hsl(var(--primary-glow) / 0.5);
 }
 
 /* === Reduced Motion === */

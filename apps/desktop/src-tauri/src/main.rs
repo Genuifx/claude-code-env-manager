@@ -18,6 +18,19 @@ use tauri::State;
 use terminal::{TerminalInfo, TerminalType};
 use tray::create_tray;
 
+#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
+struct LoadedEnv {
+    name: String,
+    original_name: String,
+    renamed: bool,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
+struct LoadResult {
+    count: usize,
+    environments: Vec<LoadedEnv>,
+}
+
 fn generate_session_id() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let timestamp = SystemTime::now()
@@ -78,6 +91,7 @@ fn add_environment(
 
 #[tauri::command]
 fn update_environment(
+    old_name: String,
     name: String,
     base_url: String,
     api_key: Option<String>,
@@ -86,8 +100,13 @@ fn update_environment(
 ) -> Result<(), String> {
     let mut cfg = config::read_config()?;
 
-    if !cfg.registries.contains_key(&name) {
-        return Err(format!("Environment '{}' does not exist", name));
+    if !cfg.registries.contains_key(&old_name) {
+        return Err(format!("Environment '{}' does not exist", old_name));
+    }
+
+    // If renaming, check that new name doesn't conflict
+    if old_name != name && cfg.registries.contains_key(&name) {
+        return Err(format!("Environment '{}' already exists", name));
     }
 
     let env_config = create_env_with_encrypted_key(
@@ -96,6 +115,15 @@ fn update_environment(
         Some(model),
         small_model,
     );
+
+    // Remove old key if renamed
+    if old_name != name {
+        cfg.registries.remove(&old_name);
+        // Update current env pointer if it was pointing to the old name
+        if cfg.current.as_ref() == Some(&old_name) {
+            cfg.current = Some(name.clone());
+        }
+    }
 
     cfg.registries.insert(name, env_config);
     config::write_config(&cfg)
@@ -610,6 +638,134 @@ fn extract_jetbrains_projects(
     }
 }
 
+// ============================================
+// Remote Environment Loading Commands
+// ============================================
+
+#[tauri::command]
+fn check_ccem_installed() -> bool {
+    #[cfg(unix)]
+    let result = Command::new("which").arg("ccem").output();
+    #[cfg(windows)]
+    let result = Command::new("where").arg("ccem").output();
+
+    match result {
+        Ok(output) => output.status.success(),
+        Err(_) => false,
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct RemoteResponse {
+    encrypted: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct RemoteEnvConfig {
+    #[serde(rename = "ANTHROPIC_BASE_URL")]
+    base_url: Option<String>,
+    #[serde(rename = "ANTHROPIC_API_KEY")]
+    api_key: Option<String>,
+    #[serde(rename = "ANTHROPIC_MODEL")]
+    model: Option<String>,
+    #[serde(rename = "ANTHROPIC_SMALL_FAST_MODEL")]
+    small_model: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct RemoteEnvironments {
+    environments: HashMap<String, RemoteEnvConfig>,
+}
+
+#[tauri::command]
+fn load_from_remote(url: String, secret: String) -> Result<LoadResult, String> {
+    // Path A: try CLI if installed
+    if check_ccem_installed() {
+        let output = Command::new("ccem")
+            .args(["load", &url, "--secret", &secret])
+            .output();
+
+        if let Ok(out) = output {
+            if out.status.success() {
+                // CLI succeeded — re-read config and build result
+                let cfg = config::read_config()?;
+                let envs: Vec<LoadedEnv> = cfg.registries.keys().map(|name| LoadedEnv {
+                    name: name.clone(),
+                    original_name: name.clone(),
+                    renamed: false,
+                }).collect();
+                return Ok(LoadResult {
+                    count: envs.len(),
+                    environments: envs,
+                });
+            }
+            // CLI failed — fall through to native path
+        }
+    }
+
+    // Path B: native Rust implementation
+    let response = reqwest::blocking::get(&url)
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    let status = response.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Err("Unauthorized: invalid credentials".to_string());
+    }
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return Err("Rate limited: please try again later".to_string());
+    }
+    if !status.is_success() {
+        return Err(format!("Server returned HTTP {}", status.as_u16()));
+    }
+
+    let remote_resp: RemoteResponse = response.json()
+        .map_err(|e| format!("Invalid server response: {}", e))?;
+
+    let decrypted = crypto::decrypt_remote(&remote_resp.encrypted, &secret)?;
+
+    let remote_envs: RemoteEnvironments = serde_json::from_str(&decrypted)
+        .map_err(|e| format!("Invalid environment data: {}", e))?;
+
+    let mut cfg = config::read_config()?;
+    let mut loaded: Vec<LoadedEnv> = Vec::new();
+
+    for (orig_name, env) in remote_envs.environments {
+        // Generate unique name if duplicate
+        let mut final_name = orig_name.clone();
+        if cfg.registries.contains_key(&final_name) {
+            final_name = format!("{}-remote", orig_name);
+            let mut counter = 2;
+            while cfg.registries.contains_key(&final_name) {
+                final_name = format!("{}-remote-{}", orig_name, counter);
+                counter += 1;
+            }
+        }
+
+        let renamed = final_name != orig_name;
+
+        let env_config = create_env_with_encrypted_key(
+            env.base_url,
+            env.api_key,
+            env.model,
+            env.small_model,
+        );
+
+        cfg.registries.insert(final_name.clone(), env_config);
+        loaded.push(LoadedEnv {
+            name: final_name,
+            original_name: orig_name,
+            renamed,
+        });
+    }
+
+    config::write_config(&cfg)?;
+
+    Ok(LoadResult {
+        count: loaded.len(),
+        environments: loaded,
+    })
+}
+
 fn main() {
     // Create SessionManager wrapped in Arc for sharing with monitor
     let session_manager = Arc::new(SessionManager::default());
@@ -653,7 +809,9 @@ fn main() {
             sync_jetbrains_projects,
             get_usage_stats,
             get_usage_history,
-            get_continuous_usage_days
+            get_continuous_usage_days,
+            check_ccem_installed,
+            load_from_remote
         ])
         .setup(move |app| {
             // Clean up stale exit files from previous sessions
