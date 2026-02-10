@@ -1,7 +1,7 @@
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { Package, Wrench, Lightbulb, Sparkles } from 'lucide-react';
+import { Package, Wrench, Lightbulb, Sparkles, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { useLocale } from '../locales';
 import { useAppStore } from '@/store';
@@ -53,9 +53,9 @@ export function Skills() {
         <Button
           disabled
           title={t('skills.addSkillCLIHint')}
-          className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/25 border-0 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/25 border border-[hsl(var(--glass-border-light)/0.15)] disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <span className="mr-2">+</span>
+          <Plus className="w-4 h-4 mr-1.5" />
           {t('skills.addSkill')}
         </Button>
       </div>
@@ -79,7 +79,7 @@ export function Skills() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   {/* Icon */}
-                  <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
+                  <div className="w-10 h-10 rounded-lg glass-icon-container flex items-center justify-center">
                     {skill.type === 'skill' ? (
                       <Package className="w-5 h-5 text-muted-foreground" />
                     ) : (
@@ -93,7 +93,7 @@ export function Skills() {
                       <span className="font-semibold text-foreground">
                         {skill.name}
                       </span>
-                      <span className="px-2 py-0.5 text-xs rounded-full bg-muted text-muted-foreground">
+                      <span className="px-2 py-0.5 text-xs rounded-full glass-badge text-muted-foreground">
                         {sourceLabel(skill.source)}
                       </span>
                     </div>
@@ -117,6 +117,7 @@ export function Skills() {
                     <Button
                       variant="outline"
                       size="sm"
+                      className="glass-btn-outline"
                       onClick={() => handleViewFile(skill.path)}
                     >
                       {t('skills.viewFile')}
@@ -126,6 +127,7 @@ export function Skills() {
                     <Button
                       variant="outline"
                       size="sm"
+                      className="glass-btn-outline"
                       disabled
                       title={t('skills.officialProtected')}
                     >
@@ -135,7 +137,7 @@ export function Skills() {
                     <Button
                       variant="outline"
                       size="sm"
-                      className="text-red-500 hover:text-red-600 hover:border-red-300 dark:hover:border-red-700"
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10 glass-btn-outline"
                       onClick={() => handleUninstall(skill.name)}
                     >
                       {t('skills.uninstall')}
@@ -149,10 +151,10 @@ export function Skills() {
       </div>
 
       {/* CLI Hint Section */}
-      <Card className="p-6 bg-muted/50 border-border lg:col-span-1">
+      <Card className="p-6 lg:col-span-1">
         <div className="text-sm text-muted-foreground space-y-2">
           <div className="font-medium text-foreground mb-3 flex items-center gap-2">
-            <Lightbulb className="w-4 h-4" />
+            <Lightbulb className="w-4 h-4 text-primary" />
             {t('skills.cliHintTitle')}
           </div>
           <div className="font-mono text-xs space-y-1.5 pl-4">

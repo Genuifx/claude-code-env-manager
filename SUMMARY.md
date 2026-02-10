@@ -81,3 +81,52 @@ This creates a "selected" feel that's distinctly glass-native rather than a flat
 - `apps/desktop/src/index.css` — Complete color palette rewrite (dark + light), glass token system, 6 new glass utility classes
 - `apps/desktop/src/components/layout/SideRail.tsx` — Updated to use `glass-sidebar` and `glass-nav-active` classes
 - `apps/desktop/tailwind.config.js` — Added `glass` and `glass-hover` box shadows, `backdropBlur` extensions
+
+---
+
+## Env + Skills + Settings Glassmorphism Polish
+
+### New CSS Classes Added (`index.css`)
+
+| Class | Purpose |
+|-------|---------|
+| `.glass-mode-card` | Permission mode selection cards with glass background, white borders, hover lift, and active state with primary glow |
+| `.glass-env-card` | Environment cards with full glass treatment (blur, saturate, inset highlight, hover lift) |
+| `.glass-toggle` | Custom toggle switch replacing native checkboxes -- glass track with animated knob |
+| `.glass-select` | Custom select dropdown with glass background and focus ring |
+| `.glass-divider` | White highlight divider replacing gray `border-border` |
+| `.glass-icon-container` | Subtle frost for icon background containers |
+| `.glass-badge` | Semi-transparent pill badges |
+| `.glass-btn-outline` | Glass-style outline buttons with white borders |
+
+### Changes by File
+
+**Environments.tsx**
+- Add Environment button: Added `shadow-primary/25` glow + white glass border + replaced text `+` with Lucide `<Plus>` icon
+- Ghost card (FTUE): Replaced `border-border/50` with white glass border; added hover background effect
+- Section divider: `border-border` replaced with `glass-divider` class
+- Permission mode cards: Replaced inline `ring-2 ring-primary` / `border border-border` with `.glass-mode-card` CSS class
+- Mono key text: Opacity raised from `/40` to `/60` for readability on glass
+
+**EnvList.tsx**
+- Card container: Replaced `bg-card border-border/50` with `.glass-env-card .glass-noise` classes
+- Icon container: Replaced solid `bg-primary` with `bg-primary/15 text-primary` + blue glow shadow; inactive uses `.glass-icon-container`
+- Text character icons: `checkmark` and `circle` replaced with Lucide `<Check>` and `<Circle>` icons
+- Badges: `bg-muted` replaced with `.glass-badge`
+- Delete button: `text-rose-500 dark:hover:bg-rose-900/20` replaced with `text-destructive hover:bg-destructive/10` (no `dark:` prefix)
+
+**Skills.tsx**
+- Add Skill button: Text `+` replaced with Lucide `<Plus>` icon; added glass border
+- Skill icon container: `bg-muted` replaced with `.glass-icon-container`
+- Source badge: `bg-muted` replaced with `.glass-badge`
+- Uninstall button: Tailwind colors replaced with design system tokens (no `dark:` prefix)
+- CLI hint card: Removed `bg-muted/50 border-border` overrides that blocked Card's default glass effect
+- Action buttons: Added `.glass-btn-outline` class
+
+**Settings.tsx**
+- Theme switcher: Replaced `<Button variant="default|outline">` with segmented control (`glass-subtle` + `seg-active`/`seg-hover`)
+- Language switcher: Replaced native radio buttons with segmented control
+- Checkboxes: Replaced native `<input type="checkbox" custom `.glass-toggle` switch (`ToggleSetting` component)
+- Permission select: Replaced `border border-border bg-card` with `.glass-select` class
+- CLI status: `text-emerald-500` replaced with `text-success` (design system token)
+- About buttons: All outline buttons now use `.glass-btn-outline`
