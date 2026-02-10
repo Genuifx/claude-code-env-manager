@@ -18,6 +18,7 @@ pub struct Session {
     // Terminal metadata for window control
     pub terminal_type: Option<String>,  // "iterm2" | "terminalapp"
     pub window_id: Option<String>,      // iTerm2 window ID for operations
+    pub iterm_session_id: Option<String>, // iTerm2 session unique ID for move_session API
 }
 
 pub struct SessionManager {
@@ -77,6 +78,22 @@ impl SessionManager {
             .filter(|s| s.status == "running")
             .cloned()
             .collect()
+    }
+
+    /// Update the iTerm2 session ID for a session
+    pub fn update_session_iterm_id(&self, id: &str, iterm_session_id: &str) {
+        let mut sessions = self.sessions.lock().unwrap();
+        if let Some(session) = sessions.iter_mut().find(|s| s.id == id) {
+            session.iterm_session_id = Some(iterm_session_id.to_string());
+        }
+    }
+
+    /// Update the window ID for a session (used after arrange merges windows)
+    pub fn update_session_window_id(&self, id: &str, window_id: &str) {
+        let mut sessions = self.sessions.lock().unwrap();
+        if let Some(session) = sessions.iter_mut().find(|s| s.id == id) {
+            session.window_id = Some(window_id.to_string());
+        }
     }
 
     /// Get all running sessions that have terminal metadata
