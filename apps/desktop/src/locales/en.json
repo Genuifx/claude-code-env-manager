@@ -52,6 +52,9 @@
     "terminate": "Terminate",
     "closeAllTitle": "Close all sessions?",
     "closeAllDescription": "This will close {count} active sessions. This action cannot be undone.",
+    "title": "Sessions",
+    "activeSessions": "Active Sessions",
+    "runningCount": "{count} running",
     "noActiveSessions": "No active sessions",
     "detectionNote": "Session detection relies on process scanning. Some sessions may not appear.",
     "launchClaudeCode": "Launch Claude Code",
@@ -84,7 +87,8 @@
     "multiLaunchSuccess": "Launched {count} sessions and arranged",
     "multiLaunchPartial": "Launched {success}/{total} sessions",
     "noRecentProjects": "No recent projects",
-    "dirNotFound": "Directory not found"
+    "dirNotFound": "Directory not found",
+    "multiLaunch": "Multi-Launch"
   },
   "environments": {
     "title": "Environments",
