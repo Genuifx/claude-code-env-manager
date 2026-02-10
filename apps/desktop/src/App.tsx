@@ -240,7 +240,7 @@ function App() {
           />
         );
       case 'sessions':
-        return <Sessions onLaunch={handleLaunch} />;
+        return <Sessions onLaunch={handleLaunch} onLaunchWithDir={handleLaunchWithDir} />;
       case 'environments':
         return (
           <Environments

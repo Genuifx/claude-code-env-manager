@@ -3,3 +3,8 @@ export { SessionList } from './SessionList';
 export { ArrangeBanner } from './ArrangeBanner';
 export { LayoutPopover } from './LayoutPopover';
 export { LayoutThumbnail } from './LayoutThumbnail';
+export { SessionLauncherPopover } from './SessionLauncherPopover';
+export { LauncherQuickSection } from './LauncherQuickSection';
+export { LauncherMultiSection } from './LauncherMultiSection';
+export { MultiLaunchPanel } from './MultiLaunchPanel';
+export { PaneDirectoryPicker } from './PaneDirectoryPicker';
