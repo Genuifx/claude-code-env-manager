@@ -53,12 +53,11 @@ export function LayoutPopover({
           </div>
 
           <Button
-            className="w-full"
+            className="w-full shadow-primary-glow"
             onClick={async () => {
               await onArrange(selectedLayout);
               onOpenChange(false);
             }}
-            style={{ boxShadow: '0 2px 8px hsl(var(--primary) / 0.25), 0 4px 16px hsl(var(--primary) / 0.15)' }}
           >
             {t('sessions.arrangeRunningCount').replace('{count}', String(runningCount))}
           </Button>

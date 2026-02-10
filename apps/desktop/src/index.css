@@ -816,6 +816,13 @@
   border-color: hsl(var(--glass-border-light) / var(--glass-border-hover-opacity));
   background: hsl(var(--glass-border-light) / 0.06);
 }
+.light .glass-btn-outline {
+  border-color: hsl(var(--glass-border-light) / var(--glass-border-opacity));
+}
+.light .glass-btn-outline:hover {
+  border-color: hsl(var(--glass-border-light) / var(--glass-border-hover-opacity));
+  background: hsl(var(--glass-border-light) / 0.12);
+}
 
 /* === Glass Destructive Button — semi-transparent red for glass surfaces === */
 .glass-btn-destructive {
@@ -828,4 +835,103 @@
 }
 .glass-btn-destructive:hover {
   background: hsl(var(--destructive) / 0.90);
+}
+.light .glass-btn-destructive {
+  background: hsl(var(--destructive) / 0.75);
+}
+.light .glass-btn-destructive:hover {
+  background: hsl(var(--destructive) / 0.85);
+}
+
+/* === Glass Close Button — outline that turns destructive on hover === */
+.glass-btn-close {
+  background: transparent;
+  border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
+  color: hsl(var(--destructive));
+  transition:
+    border-color var(--duration-fast) var(--ease-default),
+    background var(--duration-fast) var(--ease-default);
+}
+.glass-btn-close:hover {
+  border-color: hsl(var(--destructive) / 0.3);
+  background: hsl(var(--destructive) / 0.08);
+}
+.light .glass-btn-close:hover {
+  border-color: hsl(var(--destructive) / 0.4);
+  background: hsl(var(--destructive) / 0.10);
+}
+
+/* === Glass Ghost Hover — subtle white hover for ghost buttons on glass === */
+.glass-ghost-hover {
+  transition: background var(--duration-fast) var(--ease-default);
+}
+.glass-ghost-hover:hover {
+  background: hsl(var(--glass-border-light) / 0.08);
+}
+.light .glass-ghost-hover:hover {
+  background: hsl(var(--glass-border-light) / 0.16);
+}
+
+/* === Glass Divider — replaces inline border-top/left styles === */
+.glass-divider-top {
+  border-top: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
+}
+.glass-divider-left {
+  border-left: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
+}
+
+/* === Status Dot Glow — replaces inline boxShadow on status indicators === */
+.status-glow-success {
+  box-shadow: 0 0 6px hsl(var(--success) / 0.4);
+}
+.status-glow-destructive {
+  box-shadow: 0 0 6px hsl(var(--destructive) / 0.4);
+}
+.status-glow-warning {
+  box-shadow: 0 0 6px hsl(var(--warning) / 0.4);
+}
+.light .status-glow-success {
+  box-shadow: 0 0 8px hsl(var(--success) / 0.5);
+}
+.light .status-glow-destructive {
+  box-shadow: 0 0 8px hsl(var(--destructive) / 0.5);
+}
+.light .status-glow-warning {
+  box-shadow: 0 0 8px hsl(var(--warning) / 0.5);
+}
+
+/* === Glass Checkbox Border — white border for unchecked state on glass === */
+.glass-checkbox-border {
+  border-color: hsl(var(--glass-border-light) / var(--glass-border-opacity));
+}
+
+/* === Split Button Container — for ArrangeBanner split button === */
+.glass-split-btn {
+  border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+/* === Primary Glow Shadow — for CTA buttons === */
+.shadow-primary-glow {
+  box-shadow:
+    0 2px 8px hsl(var(--primary) / 0.25),
+    0 4px 16px hsl(var(--primary) / 0.15);
+}
+.light .shadow-primary-glow {
+  box-shadow:
+    0 2px 8px hsl(var(--primary) / 0.20),
+    0 4px 16px hsl(var(--primary) / 0.12);
+}
+
+/* === Dialog Overlay Shadow — for frosted modal panels === */
+.shadow-dialog {
+  box-shadow:
+    0 12px 40px hsl(var(--glass-shadow-base) / 0.2),
+    0 4px 12px hsl(var(--glass-shadow-base) / 0.08);
+}
+.light .shadow-dialog {
+  box-shadow:
+    0 12px 40px hsl(var(--glass-shadow-base) / 0.15),
+    0 4px 12px hsl(var(--glass-shadow-base) / 0.06);
 }

@@ -48,7 +48,7 @@ export function ArrangeBanner({
       </div>
 
       {/* Split Button: main action + popover chevron */}
-      <div className="flex items-center shrink-0 rounded-md overflow-hidden" style={{ border: '1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity))' }}>
+      <div className="flex items-center shrink-0 glass-split-btn">
         <Button
           size="sm"
           variant="ghost"
@@ -90,13 +90,12 @@ export function ArrangeBanner({
               variant="ghost"
               disabled={isArranging}
               className={`
-                rounded-none border-0 px-1.5
+                rounded-none border-0 px-1.5 glass-divider-left
                 ${arrangeStatus === 'success'
                   ? 'bg-success/15 text-success hover:bg-success/25'
                   : 'bg-primary/10 text-primary hover:bg-primary/20'
                 }
               `}
-              style={{ borderLeft: '1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity))' }}
             >
               <ChevronDown className="w-3.5 h-3.5" />
             </Button>
@@ -105,13 +104,13 @@ export function ArrangeBanner({
       </div>
 
       {/* Separator + Bulk actions */}
-      <div className="h-5 shrink-0" style={{ borderLeft: '1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity))' }} />
+      <div className="h-5 shrink-0 glass-divider-left" />
 
-      <Button size="sm" variant="ghost" onClick={onMinimizeAll} className="hover:bg-[hsl(var(--glass-border-light)/0.08)]">
+      <Button size="sm" variant="ghost" onClick={onMinimizeAll} className="glass-ghost-hover">
         <Minimize2 className="w-3.5 h-3.5 mr-1" />
         {t('sessions.minimizeAll')}
       </Button>
-      <Button size="sm" variant="ghost" onClick={onCloseAll} className="hover:bg-[hsl(var(--glass-border-light)/0.08)]">
+      <Button size="sm" variant="ghost" onClick={onCloseAll} className="glass-ghost-hover">
         <X className="w-3.5 h-3.5 mr-1" />
         {t('sessions.closeAll')}
       </Button>
@@ -121,7 +120,7 @@ export function ArrangeBanner({
         size="sm"
         variant="ghost"
         onClick={() => setDismissed(true)}
-        className="text-muted-foreground hover:text-foreground hover:bg-[hsl(var(--glass-border-light)/0.08)] px-1"
+        className="text-muted-foreground hover:text-foreground glass-ghost-hover px-1"
       >
         <X className="w-3.5 h-3.5" />
       </Button>
