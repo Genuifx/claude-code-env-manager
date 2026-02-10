@@ -258,10 +258,10 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
 
             {/* Directory selector */}
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
               onClick={handleSelectDirectory}
-              className="glass-subtle border-[--glass-border-light] bg-transparent"
+              className="glass-subtle border border-[hsl(var(--glass-border-light)/var(--glass-border-opacity))] hover:border-[hsl(var(--glass-border-light)/var(--glass-border-hover-opacity))] bg-transparent"
             >
               <FolderOpen className="w-4 h-4" />
               {launchDirDisplay ? (
@@ -275,11 +275,12 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
             <Button
               size="sm"
               onClick={handleLaunchClick}
-              className={`gap-2 px-4 font-semibold rounded-lg shadow-md transition-all duration-150 ${
+              className={`gap-2 px-4 font-semibold rounded-lg transition-all duration-150 ${
                 launched
                   ? 'bg-success hover:bg-success'
-                  : 'hover:shadow-lg hover:-translate-y-0.5 active:scale-95'
+                  : 'hover:-translate-y-0.5 active:scale-95'
               }`}
+              style={launched ? undefined : { boxShadow: '0 2px 8px hsl(var(--primary) / 0.25), 0 4px 16px hsl(var(--primary) / 0.15)' }}
             >
               {launched ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
               {launched ? t('dashboard.launchBtnDone') : t('sessions.newSession')}
@@ -294,9 +295,9 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
               isLaunching={isMultiLaunching}
               trigger={
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
-                  className="glass-subtle border-[--glass-border-light] bg-transparent"
+                  className="glass-subtle border border-[hsl(var(--glass-border-light)/var(--glass-border-opacity))] hover:border-[hsl(var(--glass-border-light)/var(--glass-border-hover-opacity))] bg-transparent"
                 >
                   <LayoutGrid className="w-4 h-4" />
                   {t('sessions.multiLaunch')}
@@ -374,12 +375,12 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
           {/* Card footer: Minimize All / Close All (when ArrangeBanner is not shown) */}
           {runningCount > 0 && runningCount < 2 && (
             <>
-              <div className="border-t border-[--glass-border-light] mt-4 pt-3 flex items-center gap-2">
-                <Button size="sm" variant="ghost" onClick={handleMinimizeAll}>
+              <div className="mt-4 pt-3 flex items-center gap-2" style={{ borderTop: '1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity))' }}>
+                <Button size="sm" variant="ghost" onClick={handleMinimizeAll} className="hover:bg-[hsl(var(--glass-border-light)/0.08)]">
                   <Minimize2 className="w-3.5 h-3.5 mr-1" />
                   {t('sessions.minimizeAll')}
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => setShowCloseAllDialog(true)}>
+                <Button size="sm" variant="ghost" onClick={() => setShowCloseAllDialog(true)} className="hover:bg-[hsl(var(--glass-border-light)/0.08)]">
                   <X className="w-3.5 h-3.5 mr-1" />
                   {t('sessions.closeAll')}
                 </Button>
@@ -393,10 +394,10 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
       {showCloseAllDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
-            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            className="absolute inset-0 bg-black/40 backdrop-blur-md"
             onClick={() => setShowCloseAllDialog(false)}
           />
-          <div className="relative frosted-panel glass-noise rounded-xl shadow-elevation-3 p-6 max-w-md w-full mx-4">
+          <div className="relative frosted-panel glass-noise rounded-xl p-6 max-w-md w-full mx-4" style={{ boxShadow: '0 12px 40px hsl(var(--glass-shadow-base) / 0.2), 0 4px 12px hsl(var(--glass-shadow-base) / 0.08)' }}>
             <h3 className="text-lg font-semibold text-foreground mb-2">
               {t('sessions.closeAllTitle')}
             </h3>
@@ -404,10 +405,10 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
               {t('sessions.closeAllDescription').replace('{count}', String(sessions.length))}
             </p>
             <div className="flex justify-end gap-3">
-              <Button variant="ghost" onClick={() => setShowCloseAllDialog(false)}>
+              <Button variant="ghost" onClick={() => setShowCloseAllDialog(false)} className="hover:bg-[hsl(var(--glass-border-light)/0.08)]">
                 {t('common.cancel')}
               </Button>
-              <Button variant="destructive" onClick={handleCloseAll}>
+              <Button onClick={handleCloseAll} className="bg-destructive/80 text-destructive-foreground hover:bg-destructive/90 backdrop-blur-sm">
                 {t('sessions.closeAll')}
               </Button>
             </div>

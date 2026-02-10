@@ -1,83 +1,78 @@
-# Frosted Glass — macOS Sequoia Glassmorphism Theme
+# Sessions Glassmorphism Polish Summary
 
-## Design Philosophy
+## Overview
 
-This theme draws direct inspiration from **macOS Sequoia's window chrome and control surfaces** — the restrained, optically precise frosted glass that Apple uses across Finder, Settings, and system panels. The goal is not flashy glassmorphism, but the quiet confidence of real desktop software.
+Pixel-perfect glassmorphism polish for every UI element in the Sessions page and all sub-components. Every button, border, separator, status indicator, and interactive state has been audited and updated to conform to the macOS Sequoia frosted glass design language.
 
-The key principle: **glass should feel like a material property, not a decoration.**
+## Key Principles Applied
 
-## Color Strategy
-
-### Primary: System Blue (HSL 211, 100%, 50%)
-Chosen to match macOS Sequoia's default accent color exactly. This creates instant familiarity for Mac users — buttons, active indicators, and focus rings all feel native.
-
-### Neutral Scale: Cool Gray (HSL 220, low saturation)
-The entire gray scale sits on a `220` hue base with carefully controlled saturation (16% at the darkest, tapering to 6% at lighter values). This micro-tint of blue in the grays is what gives macOS its characteristic "cool professionalism" — warmer grays would read as earthy or vintage.
-
-### Why Not Warm Tones?
-The previous "Midnight Sapphire" theme used `222` hue grays. We shifted to `220` (slightly warmer within cool) and reduced saturation further to avoid the "space UI" feeling and lean toward macOS's more grounded aesthetic.
-
-## Glass Layer Hierarchy
-
-The most critical design decision is the **three-tier blur hierarchy**:
-
-| Layer | Blur | Saturate | Opacity | Purpose |
-|-------|------|----------|---------|---------|
-| Sidebar | 40px | 200% | 0.72 | Heaviest frost — visual anchor, always visible landmark |
-| Cards | 20px | 190% | 0.55 | Medium frost — content containers, interactive |
-| Subtle | 12px | 160% | ~0.28 | Light frost — secondary surfaces, minimal interference |
-
-### Why This Matters
-Without a blur hierarchy, all glass surfaces compete for attention. The sidebar's 40px blur makes it feel **permanently frosted** (like bathroom glass), while cards at 20px feel more like **looking through a cold window** — you can sense depth behind them.
-
-## Key CSS Techniques
-
-### 1. Inset Top-Edge Highlight
-```css
-box-shadow: inset 0 0.5px 0 0 rgba(255, 255, 255, 0.1);
-```
-This single `0.5px` inset shadow at the top edge of every glass surface simulates the way real glass catches overhead light. It is the most important detail separating professional glassmorphism from amateur implementations.
-
-### 2. Saturate Alongside Blur
-```css
-backdrop-filter: blur(24px) saturate(190%);
-```
-Pure blur desaturates the background content, making everything look washed out. Adding `saturate(190%)` counteracts this and keeps underlying colors vivid — exactly how Apple implements their vibrancy effects.
-
-### 3. CSS Custom Properties for Glass Tokens
-All glass parameters are tokenized (`--glass-blur`, `--glass-bg-opacity`, etc.) and have separate values in dark vs light mode. This means:
-- Dark mode: lower opacity (0.55) so glass is more transparent, revealing the dark depth beneath
-- Light mode: higher opacity (0.72) because light-on-light glass needs more substance to read as a surface
-
-### 4. Glass Shimmer Animation
-A subtle 8-second ambient light sweep across glass surfaces using a narrow gradient band. The slow speed (8s) makes it feel like natural light shifting across a surface, not a loading indicator.
-
-### 5. Active Nav Pill
-Active navigation buttons get a dedicated `.glass-nav-active` class with:
-- Tinted background using the primary blue at 10% opacity
-- Inset top highlight tinted blue
-- Soft blue glow halo (12px spread at 8% opacity)
-This creates a "selected" feel that's distinctly glass-native rather than a flat color swap.
-
-## Light vs Dark Mode Differences
-
-| Property | Dark | Light | Rationale |
-|----------|------|-------|-----------|
-| Glass BG opacity | 0.55 | 0.72 | Light mode needs more opacity for contrast |
-| Border source | White at 8% | Black at 6% | Borders need to contrast with their background |
-| Inset highlight | White at 10% | White at 50% | Light mode highlights must be stronger to read |
-| Shadow base | Blue-tinted black | Neutral gray | Dark shadows look blue-ish; light shadows look neutral |
-| Sidebar opacity | 0.72 | 0.78 | Light sidebar needs more substance |
-
-## Accessibility Considerations
-
-- All text maintains **4.5:1 contrast ratio** minimum against glass backgrounds
-- `prefers-reduced-motion` disables all animations including the glass shimmer
-- Focus rings use the full-opacity primary blue with a visible ring offset
-- Glass borders provide structural delineation beyond just the blur effect — important for users who may not perceive subtle transparency differences
+1. **White borders, not gray** — All `border-input` / `border-border` replaced with `hsl(var(--glass-border-light) / var(--glass-border-opacity))`
+2. **Semi-transparent backgrounds** — Destructive buttons use `bg-destructive/80` with `backdrop-blur-sm` instead of solid `bg-destructive`
+3. **No `dark:` prefix** — All dark/light mode differences handled via CSS custom variables
+4. **Glass hover states** — `hover:bg-[hsl(var(--glass-border-light)/0.06)]` instead of `hover:bg-accent`
+5. **Status indicator glow** — Running/error dots now have `box-shadow: 0 0 6px` color glow for visibility on glass
 
 ## Files Modified
 
-- `apps/desktop/src/index.css` — Complete color palette rewrite (dark + light), glass token system, 6 new glass utility classes
-- `apps/desktop/src/components/layout/SideRail.tsx` — Updated to use `glass-sidebar` and `glass-nav-active` classes
-- `apps/desktop/tailwind.config.js` — Added `glass` and `glass-hover` box shadows, `backdropBlur` extensions
+### `index.css`
+- Added `.glass-btn-outline` utility class — reusable white-border button for glass surfaces
+- Added `.glass-btn-destructive` utility class — semi-transparent red button with backdrop-blur
+
+### `SessionCard.tsx`
+- **Status dots**: Added `box-shadow` glow effect for running (green) and error (red) states
+- **Time/path icons**: Increased from `w-3 h-3` to `w-3.5 h-3.5` for better readability on glass
+- **Text opacity**: Changed `text-muted-foreground` to `text-muted-foreground/80` for better contrast
+- **Action buttons**: Replaced `variant="outline"` (gray border) with `variant="ghost"` + glass white border via className
+- **Close button**: Added `hover:border-[hsl(var(--destructive)/0.3)]` + `hover:bg-[hsl(var(--destructive)/0.08)]` for red hover glow
+- **Confirm close state**: Destructive button now uses semi-transparent `bg-destructive/80` with `backdrop-blur-sm`
+- **Cancel button**: Added glass-style hover `hover:bg-[hsl(var(--glass-border-light)/0.08)]`
+
+### `SessionList.tsx`
+- **Complete rewrite of status dot system**: Returns `{ className, glow }` object for proper `style` prop application
+- **List row hover**: Changed from `hover:bg-surface-raised/50` to glass-style `hover:bg-[hsl(var(--glass-border-light)/0.06)]`
+- **Row spacing**: Tightened from `space-y-2` to `space-y-1.5` for denser list feel
+- **All action buttons**: Same glass-outline treatment as SessionCard
+- **Destructive button**: Semi-transparent with backdrop-blur
+
+### `ArrangeBanner.tsx`
+- **Split button container**: Wrapped in `rounded-md overflow-hidden` with glass border via `style` prop
+plit button halves**: Changed from `rounded-r-none`/`rounded-l-none` to `rounded-none` with inner glass border separator
+- **Success state opacity**: Reduced from `/20` to `/15` for subtler green on glass
+- **Vertical separator**: Changed from `border-l border-[--glass-border-light]` (missing `hsl()`) to proper `style` prop with full `hsl(var(...))` syntax
+- **Ghost buttons**: Added `hover:bg-[hsl(var(--glass-border-light)/0.08)]` for visible hover on glass-subtle surface
+- **Dismiss button**: Added glass hover state
+
+### `Sessions.tsx` (main page)
+- **Directory selector button**: Changed from `variant="outline"` to `variant="ghost"` with explicit glass border classes
+- **New Session button**: Replaced `shadow-md` / `hover:shadow-lg` with blue glow shadow via `style` prop: `0 2px 8px hsl(var(--primary) / 0.25)`
+- **Multi-Launch trigger button**: Same glass-outline treatment as directory selector
+- **Card footer separator**: Changed from `border-t border-[--glass-border-light]` to `style` prop with proper `hsl(var(...))` syntax including opacity
+- **Card footer ghost buttons**: Added glass hover state
+- **Close All Dialog backdrop**: Strengthened from `backdrop-blur-sm` to `backdrop-blur-md`
+- **Close All Dialog shadow**: Changed from `shadow-elevation-3` class to explicit glass shadow via `style` prop
+- **Close All Dialog cancel button**: Added glass hover
+- **Close All Dialog destructive button**: Changed from `variant="destructive"` (solid) to semi-transparent `bg-destructive/80` with `backdrop-blur-sm`
+
+### `SessionLauncherPopover.tsx`
+- **Popover arrow**: Changed fill from `hsl(var(--surface-overlay))` to `hsl(var(--glass-bg)/0.66)` to match frosted-panel background
+
+### `LayoutPopover.tsx`
+- **Arrange button**: Added blue glow shadow via `style` prop
+- **Popover arrow**: Same fix as SessionherPopover
+
+### `LauncherQuickSection.tsx`
+- **Project list hover**: Changed from `hover:bg-accent/50` to glass-style `hover:bg-[hsl(var(--glass-border-light)/0.06)]`
+- **Checkbox border (unselected)**: Changed from `border-muted-foreground/25` to `border-[hsl(var(--glass-border-light)/var(--glass-border-opacity))]`
+- **Action section separator**: Changed from `border-t border-[hsl(...)]` class to `style` prop with proper glass border
+- **Layout launch buttons**: Changed from `variant="outline"` with `glass-subtle` to `variant="ghost"` with new `glass-btn-outline` CSS class
+
+## Design Decisions
+
+### Why `style` prop for borders instead of Tailwind classes?
+Tailwind's `border-[--glass-border-light]` syntax doesn't include the `hsl()` wrapper or opacity variable. Using `style={{ borderTop: 'hsl(var(--glass-border-light) / var(--glass-border-opacity))' }}` ensures the CSS variable system works correctly across dark/light modes.
+
+### Why `variant="ghost"` + className instead of `variant="outline"`?
+The `outline` variant in button.tsx hardcodes `border border-input bg-background` — `border-input` maps to gray colors that break the glass aesthetic. Using `ghoss base and adding glass borders via className gives full control.
+
+### Why semi-transparent destructive buttons?
+Solid `bg-destructive` looks like "a brick on glass" (per the design guide). `bg-destructive/80` with `backdrop-blur-sm` lets the ambient light bleed through slightly, keeping the button visually integrated with the glass surface.

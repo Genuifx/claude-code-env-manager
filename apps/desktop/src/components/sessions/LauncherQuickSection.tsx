@@ -104,7 +104,7 @@ export function LauncherQuickSection({ onLaunchMulti, onBrowse, isLaunching }: L
                   transition-all duration-150 cursor-pointer
                   ${isSelected
                     ? 'glass-subtle ring-1 ring-primary/40'
-                    : 'hover:bg-accent/50'
+                    : 'hover:bg-[hsl(var(--glass-border-light)/0.06)]'
                   }
                 `}
               >
@@ -113,7 +113,7 @@ export function LauncherQuickSection({ onLaunchMulti, onBrowse, isLaunching }: L
                   w-3.5 h-3.5 rounded-[4px] border flex items-center justify-center shrink-0 transition-colors
                   ${isSelected
                     ? 'bg-primary border-primary text-primary-foreground'
-                    : 'border-muted-foreground/25'
+                    : 'border-[hsl(var(--glass-border-light)/var(--glass-border-opacity))]'
                   }
                 `}>
                   {isSelected && <Check className="w-2.5 h-2.5" />}
@@ -143,7 +143,7 @@ export function LauncherQuickSection({ onLaunchMulti, onBrowse, isLaunching }: L
 
       {/* Action buttons — visible when 1+ selected */}
       {count >= 1 && (
-        <div className="border-t border-[hsl(var(--glass-border-light)/0.08)] pt-3">
+        <div className="pt-3" style={{ borderTop: '1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity))' }}>
           {isLaunching ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground w-full justify-center py-2">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -156,19 +156,19 @@ export function LauncherQuickSection({ onLaunchMulti, onBrowse, isLaunching }: L
               </p>
               <div className="flex gap-2">
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
                   onClick={() => handleLayoutLaunch('horizontal2')}
-                  className="flex-1 glass-subtle border-[--glass-border-light] bg-transparent gap-1.5"
+                  className="flex-1 glass-btn-outline gap-1.5"
                 >
                   <Columns2 className="w-3.5 h-3.5" />
                   {t('sessions.layoutHorizontal2')}
                 </Button>
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
                   onClick={() => handleLayoutLaunch('grid4')}
-                  className="flex-1 glass-subtle border-[--glass-border-light] bg-transparent gap-1.5"
+                  className="flex-1 glass-btn-outline gap-1.5"
                 >
                   <LayoutGrid className="w-3.5 h-3.5" />
                   {t('sessions.layoutGrid4')}

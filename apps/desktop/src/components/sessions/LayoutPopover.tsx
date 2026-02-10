@@ -58,11 +58,12 @@ export function LayoutPopover({
               await onArrange(selectedLayout);
               onOpenChange(false);
             }}
+            style={{ boxShadow: '0 2px 8px hsl(var(--primary) / 0.25), 0 4px 16px hsl(var(--primary) / 0.15)' }}
           >
             {t('sessions.arrangeRunningCount').replace('{count}', String(runningCount))}
           </Button>
 
-          <Popover.Arrow className="fill-[hsl(var(--surface-overlay))]" />
+          <Popover.Arrow className="fill-[hsl(var(--glass-bg)/0.66)]" />
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

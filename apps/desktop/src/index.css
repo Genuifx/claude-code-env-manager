@@ -802,3 +802,30 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* === Glass Outline Button — white border instead of gray === */
+/* Use on buttons that sit on glass surfaces (cards, panels, banners) */
+.glass-btn-outline {
+  background: transparent;
+  border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
+  transition:
+    border-color var(--duration-fast) var(--ease-default),
+    background var(--duration-fast) var(--ease-default);
+}
+.glass-btn-outline:hover {
+  border-color: hsl(var(--glass-border-light) / var(--glass-border-hover-opacity));
+  background: hsl(var(--glass-border-light) / 0.06);
+}
+
+/* === Glass Destructive Button — semi-transparent red for glass surfaces === */
+.glass-btn-destructive {
+  background: hsl(var(--destructive) / 0.80);
+  color: hsl(var(--destructive-foreground));
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition:
+    background var(--duration-fast) var(--ease-default);
+}
+.glass-btn-destructive:hover {
+  background: hsl(var(--destructive) / 0.90);
+}
