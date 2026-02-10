@@ -67,16 +67,18 @@ CLI detects TTY vs piped output (`process.stdout.isTTY`): TTY shows tables/color
 
 **Frontend** (React 18 + TypeScript):
 - **Vite** dev server on port 1420
-- **Tailwind CSS** with CSS custom properties (HSL format) for theming — "Volcanic Amber" design system
+- **Tailwind CSS** with CSS custom properties (HSL format) for theming — "Frosted Glass / macOS Sequoia" design system
 - **Zustand** store (`src/store/index.ts`) — single store for environments, sessions, permissions, analytics, projects, plus per-domain loading flags (`isLoadingEnvs`, `isLoadingSessions`, `isLoadingStats`, `isLoadingSkills`, `isLoadingSettings`)
 - **shadcn/ui pattern** — Radix UI primitives + `cva` (class-variance-authority) in `src/components/ui/`
 - **Lucide React** — all icons (no emoji in UI)
 - **Recharts** — token usage charts
 - **sonner** — toast notifications
-- Layout: AppShell pattern with `SideRail` (64px vertical nav) + `PageHeader` (48px sticky) + scrolling main content
+- Layout: AppShell pattern with `SideRail` (72px vertical nav) + `PageHeader` (48px sticky) + scrolling main content
 - Pages: Dashboard, Sessions, Environments, Analytics, Skills, Settings
 
-**Frontend data flow**: `App.tsx` → `useTauriCommands` hook → `invoke()` (Tauri IPC) → Rust backend. The hook maps Rust snake_case responses to TypeScript camelCase and updates the Zustand store.
+**Frontend data flow**: `App.tsx` → `useTauriCommands` hook → `invoke()` (Tauri IPC) → Rust backend. The hook maps Rust snake_case responses to TypeScript camelCase and updates the Zustand store. On window `focus`, the app re-syncs with the CLI config file to stay consistent when both are running.
+
+**Tray events**: Backend emits `tray-launch-claude`, `navigate-to-settings`, `env-changed`, `perm-changed` — frontend listens via `useTauriEvents`.
 
 **i18n**: `src/locales/index.tsx` provides `LocaleProvider` + `useLocale()` hook. Two JSON locale files (`zh.json`, `en.json`). Default language is Chinese (`zh`). Persisted in `localStorage` under key `ccem-locale`. All user-facing strings use `t('namespace.key')` — never hardcode Chinese or English in components.
 
@@ -99,7 +101,7 @@ CLI detects TTY vs piped output (`process.stdout.isTTY`): TTY shows tables/color
 - `config.rs` — reads/writes CLI's `conf` JSON config directly (shared config with CLI)
 - `crypto.rs` — AES-256-CBC matching CLI's encryption
 - `session.rs` — session lifecycle management
-- `analytics.rs` — parses Claude's JSONL logs from `~/.claude/projects/`, incremental caching in `~/.ccem/usage-cache.json`
+- `analytics.rs` — parses Claude's JSONL logs from `~/.claude/projects/`, incremental caching in `~/.ccem/usage-cache.json`. Usage costs calculated via LiteLLM price data cached in `~/.ccem/model-prices.json`
 - `tray.rs` — system tray with environment/permission menus
 - `terminal.rs` — terminal detection (iTerm2/Terminal.app)
 - Uses `tauri-plugin-shell` for launching Claude Code and `tauri-plugin-mcp-bridge` for MCP tool connectivity
@@ -124,13 +126,51 @@ CLI detects TTY vs piped output (`process.stdout.isTTY`): TTY shows tables/color
 
 ## Design System (Desktop)
 
-The desktop app uses a custom "Volcanic Amber" theme with CSS custom properties in `src/index.css`:
-- Primary color: `#E5922E` (amber)
-- Neutrals: warm brown-gray scale
-- Semantic tokens: `--surface-raised`, `--surface-overlay`, `--sidebar-*`, `--chart-1` through `--chart-5`
-- Motion tokens: `--duration-instant` (80ms) through `--duration-extended` (800ms)
-- Fonts: Inter (UI) + JetBrains Mono (code) via Google Fonts
-- All colors defined as HSL in `:root` and `.dark` blocks, consumed via Tailwind config extensions
+The desktop app uses a **Frosted Glass / macOS Sequoia** glassmorphism theme with CSS custom properties in `src/index.css`:
+- Primary color: System Blue `hsl(211 100% 50%)` — cool blue spectrum
+- Neutrals: cool gray-blue scale (`222` hue family)
+- All colors defined as HSL in `:root` (dark mode default) and `.light` blocks, consumed via Tailwind config extensions
+- Fonts: Inter (UI) + JetBrains Mono (code)
 - `prefers-reduced-motion` media query disables all animations globally
+- No ESLint/Prettier configs — the project doesn't enforce formatting via config files
 
-When adding new UI components, use the existing color tokens (`text-primary`, `bg-surface-raised`, etc.) rather than hardcoded Tailwind colors like `text-emerald-600`. Use Lucide icons, not emoji. Use `t()` for all strings, not hardcoded text.
+### Glassmorphism Architecture (3 layers)
+
+1. **Ambient layer** (`ambient-bg` in `AppLayout.tsx`): 4 colored gradient orbs (`position: fixed; inset: 0`) drifting behind all panels including the sidebar — `backdrop-filter: blur()` needs colorful content behind it to produce visible frosting
+2. **Glass panels**: Sidebar, header, cards with heavy blur (44–56px) + high saturate (200–220%) + translucent backgrounds (opacity 0.42–0.48)
+3. **Noise texture** (`glass-noise`): SVG fractal noise overlay with `mix-blend-mode: overlay` adds frosted grain
+
+**Critical — light/dark ambient opacity**: Light mode needs ~2-3× higher `--ambient-opacity` than dark mode (0.35 vs 0.18) because white backgrounds wash out color. Panel `--glass-bg-opacity` must stay ≤0.48 or ambient colors can't bleed through the blur.
+
+### Glass CSS Utility Classes
+
+| Class | Use | Blur |
+|-------|-----|------|
+| `glass-sidebar` | SideRail (heaviest frost) | 56px / 220% |
+| `glass-header` | PageHeader bar | 44px / 200% |
+| `glass-card` | Content cards (hover lift) | 44px / 200% |
+| `glass` | Generic glass panel | 44px / 200% |
+| `glass-subtle` | Secondary surfaces | 16px / 170% |
+| `frosted-panel` | Modals, overlays | 48px / 220% |
+| `glass-noise` | Add to any glass element for grain texture | — |
+| `stat-card` | Dashboard metric cards (specular highlight) | 44px / 200% |
+| `glass-shimmer` | Ambient light sweep animation | — |
+
+### Key Token Groups
+
+- **Surfaces** (5-level hierarchy): `--surface-sunken` → `--surface` → `--surface-raised` → `--surface-overlay` → `--surface-peak`
+- **Borders** (3-level): `--border-subtle` → `--border` → `--border-strong`
+- **Shadows** (Tailwind): `shadow-elevation-1` through `shadow-elevation-4`, `shadow-glass`, `shadow-glass-hover`
+- **Glass tokens**: `--glass-blur`, `--glass-saturate`, `--glass-bg-opacity`, `--glass-inset-opacity`, `--glass-noise-opacity`
+- **Ambient orbs**: `--ambient-1` (blue), `--ambient-2` (purple), `--ambient-3` (teal), `--ambient-opacity`
+- **Motion**: `--duration-instant` (80ms), `--duration-fast` (150ms), `--duration-base` (250ms), `--duration-slow` (400ms), `--duration-extended` (800ms)
+- **Custom spacing/font**: `text-2xs` (0.625rem), `spacing-13` (3.25rem), `spacing-18` (4.5rem)
+
+### UI Rules
+
+- Use existing color tokens (`text-primary`, `bg-surface-raised`, etc.) — never hardcoded Tailwind colors like `text-emerald-600`
+- Use Lucide icons, not emoji
+- Use `t()` for all user-facing strings, not hardcoded text
+- All glass surfaces should include `glass-noise` for the frosted grain texture
+- New cards should use `glass-card glass-noise` (the base `Card` component already includes this)
+- Glass borders must use `--glass-border-light` (white) — never gray Tailwind border classes like `border-sidebar-border`. In light mode, gray borders look flat; white borders at 45% opacity create the frosted edge effect
