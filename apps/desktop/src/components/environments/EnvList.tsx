@@ -26,7 +26,7 @@ export function EnvList({ onEdit, onDelete }: EnvListProps) {
   if (environments.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
-        <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mb-4">
+        <div className="w-16 h-16 rounded-lg bg-muted flex items-center justify-center mb-4">
           <Globe className="w-8 h-8 text-muted-foreground/30" />
         </div>
         <h3 className="text-lg font-medium text-foreground mb-1">{t('environments.noEnvTitle')}</h3>
@@ -77,7 +77,7 @@ function EnvCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardPro
       <div className="flex items-start gap-4">
         {/* Icon */}
         <div className={cn(
-          'w-12 h-12 rounded-xl flex items-center justify-center text-xl shrink-0',
+          'w-12 h-12 rounded-lg flex items-center justify-center text-xl shrink-0',
           isActive
             ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
             : 'bg-muted'

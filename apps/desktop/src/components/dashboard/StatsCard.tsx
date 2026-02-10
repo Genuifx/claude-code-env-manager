@@ -43,7 +43,7 @@ export function StatsCard({
 
       {/* Icon */}
       <div className={cn(
-        'w-10 h-10 rounded-xl flex items-center justify-center text-lg mb-3',
+        'w-10 h-10 rounded-lg flex items-center justify-center text-lg mb-3',
         accentBg[accentColor]
       )}>
         {icon}

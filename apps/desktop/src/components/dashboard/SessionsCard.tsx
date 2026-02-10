@@ -160,7 +160,7 @@ function SessionItem({ session, onFocus, onMinimize, onClose, onRemove }: Sessio
   const workingDirName = session.workingDir.split('/').pop() || session.workingDir;
 
   return (
-    <div className="flex items-center justify-between p-3 bg-muted/50 rounded-xl border border-border/50 hover:border-border transition-colors group">
+    <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border border-border/50 hover:border-border transition-colors group">
       <div className="flex items-center gap-3 min-w-0 flex-1">
         <div className={cn(
           'w-2 h-2 rounded-full flex-shrink-0',

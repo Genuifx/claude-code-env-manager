@@ -218,7 +218,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   return (
     <div className="page-transition-enter space-y-6">
       {/* Hero Card */}
-      <div className="stat-card glass-noise rounded-2xl p-5">
+      <div className="stat-card glass-noise p-5">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-2xl font-bold text-foreground">
@@ -237,8 +237,8 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
                 onClick={() => setViewMode('card')}
                 className={`h-7 w-7 rounded-md flex items-center justify-center transition-all duration-150 ${
                   viewMode === 'card'
-                    ? 'bg-primary text-primary-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
+                    ? 'seg-active text-foreground'
+                    : 'text-muted-foreground seg-hover hover:text-foreground'
                 }`}
               >
                 <LayoutGrid className="w-3.5 h-3.5" />
@@ -248,8 +248,8 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
                 onClick={() => setViewMode('list')}
                 className={`h-7 w-7 rounded-md flex items-center justify-center transition-all duration-150 ${
                   viewMode === 'list'
-                    ? 'bg-primary text-primary-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
+                    ? 'seg-active text-foreground'
+                    : 'text-muted-foreground seg-hover hover:text-foreground'
                 }`}
               >
                 <List className="w-3.5 h-3.5" />

@@ -1,4 +1,5 @@
 // apps/desktop/src/components/analytics/TokenChart.tsx
+import { memo } from 'react';
 import {
   AreaChart,
   Area,
@@ -24,7 +25,16 @@ const formatAxisValue = (value: number): string => {
   return value.toString();
 };
 
-export function TokenChart({ data, seriesKeys }: TokenChartProps) {
+const tooltipStyle = {
+  backgroundColor: 'hsl(var(--surface-overlay))',
+  border: '1px solid hsl(var(--glass-border-light) / 0.3)',
+  borderRadius: '8px',
+  backdropFilter: 'blur(12px)',
+};
+
+const tooltipFormatter = (value: number | undefined) => [formatAxisValue(value ?? 0), undefined];
+
+export const TokenChart = memo(function TokenChart({ data, seriesKeys }: TokenChartProps) {
   const dataKey = seriesKeys[0] ?? 'Tokens';
 
   return (
@@ -46,13 +56,8 @@ export function TokenChart({ data, seriesKeys }: TokenChartProps) {
           tickFormatter={formatAxisValue}
         />
         <Tooltip
-          contentStyle={{
-            backgroundColor: 'hsl(var(--surface-overlay))',
-            border: '1px solid hsl(var(--glass-border-light) / 0.3)',
-            borderRadius: '8px',
-            backdropFilter: 'blur(12px)',
-          }}
-          formatter={(value: number | undefined) => [formatAxisValue(value ?? 0), undefined]}
+          contentStyle={tooltipStyle}
+          formatter={tooltipFormatter}
         />
         <Area
           type="monotone"
@@ -65,4 +70,4 @@ export function TokenChart({ data, seriesKeys }: TokenChartProps) {
       </AreaChart>
     </ResponsiveContainer>
   );
-}
+});

@@ -41,6 +41,7 @@ pub struct UsageStats {
     pub month: TokenUsageWithCost,
     pub total: TokenUsageWithCost,
     pub daily_history: HashMap<String, TokenUsageWithCost>,
+    pub hourly_history: HashMap<String, TokenUsageWithCost>,
     pub by_model: HashMap<String, TokenUsageWithCost>,
     pub by_environment: HashMap<String, TokenUsageWithCost>,
     pub last_updated: String,
@@ -131,14 +132,11 @@ fn read_usage_cache() -> Result<CacheFile, String> {
         .map_err(|e| format!("Failed to parse usage cache: {}", e))
 }
 
-/// Extract LOCAL date string (YYYY-MM-DD) from ISO-8601 timestamp.
-/// Converts UTC timestamp to local timezone before extracting date,
-/// matching CLI behavior where `new Date(ts)` auto-converts to local.
-fn extract_date(timestamp: &str) -> Option<String> {
-    // Try to parse as full ISO-8601 with timezone → convert to local date
+/// Parse an ISO-8601 timestamp into a local DateTime.
+fn parse_to_local(timestamp: &str) -> Option<chrono::DateTime<Local>> {
+    // Try to parse as full ISO-8601 with timezone → convert to local
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(timestamp) {
-        let local_dt: chrono::DateTime<Local> = dt.into();
-        return Some(local_dt.format("%Y-%m-%d").to_string());
+        return Some(dt.into());
     }
     // Fallback: try "2026-02-07T01:06:29.622Z" format (Z suffix)
     if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(
@@ -146,7 +144,16 @@ fn extract_date(timestamp: &str) -> Option<String> {
         "%Y-%m-%dT%H:%M:%S%.f",
     ) {
         let utc_dt = dt.and_utc();
-        let local_dt: chrono::DateTime<Local> = utc_dt.into();
+        return Some(utc_dt.into());
+    }
+    None
+}
+
+/// Extract LOCAL date string (YYYY-MM-DD) from ISO-8601 timestamp.
+/// Converts UTC timestamp to local timezone before extracting date,
+/// matching CLI behavior where `new Date(ts)` auto-converts to local.
+fn extract_date(timestamp: &str) -> Option<String> {
+    if let Some(local_dt) = parse_to_local(timestamp) {
         return Some(local_dt.format("%Y-%m-%d").to_string());
     }
     // Last resort: just take first 10 chars
@@ -155,6 +162,11 @@ fn extract_date(timestamp: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Extract LOCAL hour key (YYYY-MM-DDTHH) from ISO-8601 timestamp.
+fn extract_hour(timestamp: &str) -> Option<String> {
+    parse_to_local(timestamp).map(|dt| dt.format("%Y-%m-%dT%H").to_string())
 }
 
 /// Aggregate all cache entries into UsageStats
@@ -230,6 +242,14 @@ fn aggregate_cache(cache: &CacheFile) -> UsageStats {
                             stats.month.add(&token_usage);
                         }
                     }
+                }
+
+                // Add to hourly history (key: YYYY-MM-DDTHH)
+                if let Some(hour_key) = extract_hour(ts) {
+                    stats.hourly_history
+                        .entry(hour_key)
+                        .or_insert_with(TokenUsageWithCost::default)
+                        .add(&token_usage);
                 }
             }
         }

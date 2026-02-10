@@ -17,6 +17,7 @@ export interface UsageStats {
   month: TokenUsageWithCost;
   total: TokenUsageWithCost;
   dailyHistory: Record<string, TokenUsageWithCost>; // key: YYYY-MM-DD
+  hourlyHistory: Record<string, TokenUsageWithCost>; // key: YYYY-MM-DDTHH
   byModel: Record<string, TokenUsageWithCost>;
   byEnvironment: Record<string, TokenUsageWithCost>;
   lastUpdated: string;

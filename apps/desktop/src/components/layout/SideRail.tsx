@@ -60,17 +60,16 @@ function NavButton({
       onClick={onClick}
       title={`${item.label} (⌘${item.shortcut})`}
       className={cn(
-        'sidebar-nav-item group relative w-full flex items-center gap-2.5 px-2.5 h-[30px] rounded-[7px]',
+        'sidebar-nav-item group relative w-full flex items-center gap-2.5 px-2.5 h-[30px] rounded-lg',
         'transition-colors duration-[var(--duration-fast)]',
         isActive
-          ? 'sidebar-nav-active text-white'
+          ? 'sidebar-nav-active text-primary'
           : 'text-sidebar-foreground hover:text-foreground hover:bg-white/[0.06]'
       )}
     >
       <Icon className="w-[18px] h-[18px] shrink-0" strokeWidth={isActive ? 2 : 1.8} />
       <span className="text-[13px] leading-none truncate">{item.label}</span>
-      <span className="ml-auto text-[11px] font-mono opacity-0 group-hover:opacity-100 transition-opacity duration-[var(--duration-fast)]"
-        style={{ color: isActive ? 'rgba(255,255,255,0.5)' : undefined }}
+      <span className="ml-auto text-[11px] font-mono opacity-0 group-hover:opacity-100 transition-opacity duration-[var(--duration-fast)] text-muted-foreground"
       >
         ⌘{item.shortcut}
       </span>

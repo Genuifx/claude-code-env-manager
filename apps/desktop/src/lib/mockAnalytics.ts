@@ -50,6 +50,21 @@ export function generateMockUsageStats(): UsageStats {
     };
   }
 
+  // Generate hourly history for last 24 hours
+  const hourlyHistory: Record<string, typeof today> = {};
+  for (let i = 0; i < 24; i++) {
+    const date = new Date(now);
+    date.setHours(date.getHours() - i);
+    const hourStr = `${date.toISOString().split('T')[0]}T${String(date.getHours()).padStart(2, '0')}`;
+    hourlyHistory[hourStr] = {
+      inputTokens: Math.floor(Math.random() * 8000) + 1000,
+      outputTokens: Math.floor(Math.random() * 4000) + 500,
+      cacheReadTokens: Math.floor(Math.random() * 2000) + 300,
+      cacheCreationTokens: Math.floor(Math.random() * 1000) + 100,
+      cost: Math.random() * 0.08 + 0.01,
+    };
+  }
+
   const byModel = {
     'claude-opus-4-5': {
       inputTokens: 1200000,
@@ -111,6 +126,7 @@ export function generateMockUsageStats(): UsageStats {
     month,
     total,
     dailyHistory,
+    hourlyHistory,
     byModel,
     byEnvironment,
     lastUpdated: now.toISOString(),
