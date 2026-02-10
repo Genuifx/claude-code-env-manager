@@ -3,58 +3,58 @@
 @tailwind utilities;
 
 @layer base {
-  /* === Dark Mode (Default for dev tools) === */
+  /* === Dark Mode (Default) — Frosted Glass / macOS Sequoia === */
   :root {
-    /* Primary (Sapphire Blue) */
-    --primary: 222 65% 52%;
-    --primary-foreground: 222 10% 98%;
-    --primary-hover: 222 65% 46%;
-    --primary-active: 222 65% 40%;
-    --primary-muted: 222 38% 62%;
-    --primary-glow: 222 80% 58%;
+    /* Primary (System Blue — macOS Sequoia accent) */
+    --primary: 211 100% 50%;
+    --primary-foreground: 0 0% 100%;
+    --primary-hover: 211 100% 44%;
+    --primary-active: 211 100% 38%;
+    --primary-muted: 211 45% 55%;
+    --primary-glow: 211 100% 58%;
 
-    /* Accent (Ice Silver / Platinum) */
-    --accent: 215 18% 68%;
-    --accent-foreground: 220 20% 8%;
-    --accent-hover: 215 18% 60%;
-    --accent-muted: 215 12% 55%;
+    /* Accent (Cool Silver) */
+    --accent: 212 12% 62%;
+    --accent-foreground: 210 15% 8%;
+    --accent-hover: 212 12% 54%;
+    --accent-muted: 212 8% 48%;
 
-    /* Background layers (5-level hierarchy) */
-    --background: 222 22% 7%;
-    --foreground: 218 8% 93%;
-    --surface-sunken: 222 20% 9%;
-    --surface: 222 18% 11%;
-    --surface-raised: 222 15% 15%;
-    --surface-overlay: 222 12% 19%;
-    --surface-peak: 222 10% 25%;
+    /* Background layers (5-level hierarchy — cool gray scale) */
+    --background: 222 18% 6%;
+    --foreground: 210 12% 93%;
+    --surface-sunken: 222 16% 5%;
+    --surface: 222 14% 10%;
+    --surface-raised: 222 11% 14%;
+    --surface-overlay: 222 9% 18%;
+    --surface-peak: 222 7% 24%;
 
     /* Card uses surface level */
-    --card: 222 18% 11%;
-    --card-foreground: 218 8% 93%;
-    --popover: 222 12% 19%;
-    --popover-foreground: 218 8% 93%;
+    --card: 222 14% 10%;
+    --card-foreground: 210 12% 93%;
+    --popover: 222 9% 18%;
+    --popover-foreground: 210 12% 93%;
 
     /* Secondary */
-    --secondary: 222 15% 16%;
-    --secondary-foreground: 218 12% 82%;
-    --muted: 222 15% 16%;
-    --muted-foreground: 218 8% 48%;
+    --secondary: 222 11% 15%;
+    --secondary-foreground: 210 10% 82%;
+    --muted: 222 11% 15%;
+    --muted-foreground: 210 6% 50%;
 
-    /* Borders (3-level) */
-    --border-subtle: 222 12% 18%;
-    --border: 222 14% 24%;
-    --border-strong: 222 16% 32%;
-    --input: 222 14% 24%;
-    --ring: 222 65% 52%;
+    /* Borders (3-level — subtle translucent) */
+    --border-subtle: 222 8% 15%;
+    --border: 222 10% 20%;
+    --border-strong: 222 12% 28%;
+    --input: 222 10% 20%;
+    --ring: 211 100% 50%;
 
     /* Semantic status */
-    --success: 160 58% 42%;
+    --success: 142 60% 42%;
     --success-foreground: 0 0% 100%;
-    --warning: 40 62% 55%;
-    --warning-foreground: 222 15% 10%;
-    --destructive: 355 68% 56%;
+    --warning: 38 92% 55%;
+    --warning-foreground: 220 15% 10%;
+    --destructive: 0 72% 56%;
     --destructive-foreground: 0 0% 100%;
-    --info: 200 75% 55%;
+    --info: 200 85% 55%;
     --info-foreground: 0 0% 100%;
 
     /* Radius */
@@ -65,80 +65,123 @@
     --radius-2xl: 1.5rem;
 
     /* Sidebar */
-    --sidebar: 222 20% 9%;
-    --sidebar-foreground: 218 8% 48%;
-    --sidebar-active: 222 65% 52%;
-    --sidebar-active-foreground: 222 10% 98%;
-    --sidebar-border: 222 12% 15%;
+    --sidebar: 222 18% 5%;
+    --sidebar-foreground: 210 8% 50%;
+    --sidebar-active: 211 100% 50%;
+    --sidebar-active-foreground: 0 0% 100%;
+    --sidebar-border: 222 10% 12%;
 
-    /* Chart colors */
-    --chart-1: 222 65% 58%;
-    --chart-2: 195 50% 55%;
-    --chart-3: 165 48% 48%;
-    --chart-4: 252 40% 62%;
-    --chart-5: 215 15% 68%;
-    --chart-6: 240 38% 55%;
+    /* Chart colors (cool blue spectrum) */
+    --chart-1: 211 100% 55%;
+    --chart-2: 190 65% 50%;
+    --chart-3: 160 50% 45%;
+    --chart-4: 250 45% 60%;
+    --chart-5: 210 12% 62%;
+    --chart-6: 330 55% 55%;
+
+    /* === Glass tokens (dark) — macOS Sequoia quality === */
+    --glass-blur: 44px;
+    --glass-saturate: 200%;
+    --glass-bg: 222 14% 10%;
+    --glass-bg-opacity: 0.48;
+    --glass-sidebar-bg: 222 18% 5%;
+    --glass-sidebar-opacity: 0.65;
+    --glass-sidebar-blur: 56px;
+    --glass-sidebar-saturate: 220%;
+    --glass-border-light: 0 0% 100%;
+    --glass-border-opacity: 0.09;
+    --glass-border-hover-opacity: 0.16;
+    --glass-inset-highlight: 0 0% 100%;
+    --glass-inset-opacity: 0.12;
+    --glass-shadow-base: 222 60% 3%;
+    --glass-noise-opacity: 0.035;
+    /* Ambient orb colors for depth */
+    --ambient-1: 211 90% 55%;
+    --ambient-2: 260 70% 50%;
+    --ambient-3: 180 60% 40%;
+    --ambient-opacity: 0.07;
   }
 
-  /* === Light Mode === */
+  /* === Light Mode — Frosted Glass / macOS Sequoia === */
   .light {
-    --primary: 222 60% 48%;
-    --primary-foreground: 222 10% 98%;
-    --primary-hover: 222 60% 42%;
-    --primary-active: 222 60% 36%;
-    --primary-muted: 222 45% 68%;
-    --primary-glow: 222 75% 55%;
+    --primary: 211 100% 45%;
+    --primary-foreground: 0 0% 100%;
+    --primary-hover: 211 100% 38%;
+    --primary-active: 211 100% 32%;
+    --primary-muted: 211 55% 70%;
+    --primary-glow: 211 100% 52%;
 
-    --accent: 215 14% 52%;
+    --accent: 212 10% 48%;
     --accent-foreground: 0 0% 100%;
-    --accent-hover: 215 14% 44%;
-    --accent-muted: 215 10% 62%;
+    --accent-hover: 212 10% 40%;
+    --accent-muted: 212 6% 58%;
 
-    --background: 220 18% 96%;
-    --foreground: 222 18% 10%;
-    --surface-sunken: 220 16% 92%;
-    --surface: 220 10% 99%;
-    --surface-raised: 220 12% 100%;
-    --surface-overlay: 220 10% 100%;
-    --surface-peak: 220 14% 100%;
+    --background: 220 20% 97%;
+    --foreground: 220 16% 10%;
+    --surface-sunken: 220 15% 93%;
+    --surface: 0 0% 99%;
+    --surface-raised: 0 0% 100%;
+    --surface-overlay: 0 0% 100%;
+    --surface-peak: 0 0% 100%;
 
-    --card: 220 10% 99%;
-    --card-foreground: 222 18% 10%;
-    --popover: 220 10% 100%;
-    --popover-foreground: 222 18% 10%;
+    --card: 0 0% 99%;
+    --card-foreground: 220 16% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 16% 10%;
 
-    --secondary: 220 12% 93%;
-    --secondary-foreground: 222 15% 22%;
-    --muted: 220 12% 93%;
-    --muted-foreground: 218 8% 48%;
+    --secondary: 220 10% 93%;
+    --secondary-foreground: 220 12% 22%;
+    --muted: 220 10% 93%;
+    --muted-foreground: 210 6% 46%;
 
-    --border-subtle: 220 10% 90%;
-    --border: 220 12% 84%;
-    --border-strong: 220 14% 74%;
-    --input: 220 12% 84%;
-    --ring: 222 60% 48%;
+    --border-subtle: 220 8% 90%;
+    --border: 220 10% 84%;
+    --border-strong: 220 12% 72%;
+    --input: 220 10% 84%;
+    --ring: 211 100% 45%;
 
-    --success: 160 52% 38%;
+    --success: 142 55% 38%;
     --success-foreground: 0 0% 100%;
-    --warning: 40 58% 50%;
-    --warning-foreground: 222 15% 10%;
-    --destructive: 355 62% 52%;
+    --warning: 38 88% 50%;
+    --warning-foreground: 220 15% 10%;
+    --destructive: 0 68% 50%;
     --destructive-foreground: 0 0% 100%;
-    --info: 200 68% 48%;
+    --info: 200 78% 45%;
     --info-foreground: 0 0% 100%;
 
-    --sidebar: 220 14% 94%;
-    --sidebar-foreground: 218 8% 48%;
-    --sidebar-active: 222 60% 48%;
-    --sidebar-active-foreground: 222 10% 98%;
-    --sidebar-border: 220 12% 88%;
+    --sidebar: 220 15% 95%;
+    --sidebar-foreground: 210 6% 46%;
+    --sidebar-active: 211 100% 45%;
+    --sidebar-active-foreground: 0 0% 100%;
+    --sidebar-border: 220 10% 88%;
 
-    --chart-1: 222 60% 52%;
-    --chart-2: 195 45% 48%;
-    --chart-3: 165 42% 42%;
-    --chart-4: 252 35% 55%;
-    --chart-5: 215 12% 58%;
-    --chart-6: 240 32% 50%;
+    --chart-1: 211 100% 48%;
+    --chart-2: 190 60% 42%;
+    --chart-3: 160 45% 38%;
+    --chart-4: 250 40% 52%;
+    --chart-5: 210 10% 52%;
+    --chart-6: 330 50% 48%;
+
+    /* Glass tokens (light) — macOS light mode frosted */
+    --glass-blur: 40px;
+    --glass-saturate: 190%;
+    --glass-bg: 0 0% 100%;
+    --glass-bg-opacity: 0.62;
+    --glass-sidebar-bg: 220 15% 97%;
+    --glass-sidebar-opacity: 0.68;
+    --glass-sidebar-blur: 48px;
+    --glass-sidebar-saturate: 200%;
+    --glass-border-light: 220 10% 0%;
+    --glass-border-opacity: 0.07;
+    --glass-border-hover-opacity: 0.12;
+    --glass-inset-highlight: 0 0% 100%;
+    --glass-inset-opacity: 0.7;
+    --glass-shadow-base: 222 15% 20%;
+    --glass-noise-opacity: 0.025;
+    --ambient-1: 211 80% 60%;
+    --ambient-2: 280 50% 65%;
+    --ambient-3: 170 50% 50%;
+    --ambient-opacity: 0.05;
   }
 }
 
@@ -166,20 +209,107 @@
   --ease-accelerate: cubic-bezier(0.4, 0.0, 1.0, 1.0);
 }
 
-/* === Elevation Shadows === */
+/* === Elevation Shadows (cool-tinted for glass aesthetic) === */
 :root {
   --shadow-sm:
-    0 1px 2px hsl(0 0% 0% / 0.06),
-    0 0 0 1px hsl(var(--border-subtle));
+    0 1px 2px hsl(var(--glass-shadow-base) / 0.12),
+    0 0 0 1px hsl(var(--glass-border-light) / var(--glass-border-opacity));
   --shadow-md:
-    0 2px 8px hsl(0 0% 0% / 0.1),
-    0 1px 3px hsl(0 0% 0% / 0.08);
+    0 4px 16px hsl(var(--glass-shadow-base) / 0.18),
+    0 1px 4px hsl(var(--glass-shadow-base) / 0.1);
   --shadow-lg:
-    0 8px 24px hsl(0 0% 0% / 0.14),
-    0 4px 12px hsl(0 0% 0% / 0.08);
+    0 12px 36px hsl(var(--glass-shadow-base) / 0.22),
+    0 4px 12px hsl(var(--glass-shadow-base) / 0.08);
   --shadow-xl:
-    0 16px 48px hsl(0 0% 0% / 0.18),
-    0 8px 24px hsl(0 0% 0% / 0.1);
+    0 24px 60px hsl(var(--glass-shadow-base) / 0.28),
+    0 8px 24px hsl(var(--glass-shadow-base) / 0.12);
+}
+
+/* ========================================================= */
+/* === AMBIENT BACKGROUND — the secret to real glass      === */
+/* === Glass needs color behind it to blur. Without this, === */
+/* === backdrop-filter has nothing to work with.          === */
+/* ========================================================= */
+
+/* Ambient orb container — provides colorful blobs behind glass panels */
+.ambient-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.ambient-bg::before,
+.ambient-bg::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(100px);
+  will-change: transform;
+}
+/* Top-left blue orb */
+.ambient-bg::before {
+  width: 600px;
+  height: 600px;
+  top: -15%;
+  left: -10%;
+  background: radial-gradient(circle, hsl(var(--ambient-1) / var(--ambient-opacity)) 0%, transparent 70%);
+  animation: ambient-drift-1 25s var(--ease-default) infinite alternate;
+}
+/* Bottom-right purple orb */
+.ambient-bg::after {
+  width: 500px;
+  height: 500px;
+  bottom: -10%;
+  right: -5%;
+  background: radial-gradient(circle, hsl(var(--ambient-2) / var(--ambient-opacity)) 0%, transparent 70%);
+  animation: ambient-drift-2 30s var(--ease-default) infinite alternate;
+}
+/* Third orb via a child element */
+.ambient-orb-3 {
+  position: absolute;
+  width: 400px;
+  height: 400px;
+  top: 40%;
+  left: 30%;
+  border-radius: 50%;
+  background: radial-gradient(circle, hsl(var(--ambient-3) / calc(var(--ambient-opacity) * 0.7)) 0%, transparent 70%);
+  filter: blur(100px);
+  animation: ambient-drift-3 22s var(--ease-default) infinite alternate;
+  pointer-events: none;
+}
+
+@keyframes ambient-drift-1 {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(60px, 40px) scale(1.15); }
+}
+@keyframes ambient-drift-2 {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(-50px, -30px) scale(1.1); }
+}
+@keyframes ambient-drift-3 {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(30px, -50px) scale(1.2); }
+}
+
+/* ========================================================= */
+/* === NOISE TEXTURE — gives frosted glass its grain      === */
+/* === Real glass has micro-texture. We use an SVG data   === */
+/* === URI for a fractal noise overlay.                   === */
+/* ========================================================= */
+
+.glass-noise::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  opacity: var(--glass-noise-opacity);
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 128px 128px;
+  pointer-events: none;
+  z-index: 1;
+  mix-blend-mode: overlay;
 }
 
 /* === Page Transition === */
@@ -216,12 +346,12 @@
 .status-running { animation: status-pulse 2s var(--ease-default) infinite; }
 .status-error { animation: status-blink 1.2s steps(2) infinite; }
 
-/* === Glow Effects === */
+/* === Glow Effects (blue glow for frosted glass) === */
 @keyframes glow-pulse {
-  0%, 100% { box-shadow: 0 0 8px hsl(var(--primary) / 0.2); }
-  50% { box-shadow: 0 0 20px hsl(var(--primary) / 0.4); }
+  0%, 100% { box-shadow: 0 0 8px hsl(var(--primary) / 0.25), 0 0 2px hsl(var(--primary) / 0.4); }
+  50% { box-shadow: 0 0 22px hsl(var(--primary) / 0.4), 0 0 4px hsl(var(--primary) / 0.6); }
 }
-.glow-amber { animation: glow-pulse 2s var(--ease-default) infinite; }
+.glow-amber { animation: glow-pulse 2.5s var(--ease-default) infinite; }
 
 @keyframes success-ripple {
   from { box-shadow: 0 0 0 0 hsl(var(--success) / 0.4); }
@@ -273,44 +403,59 @@
   animation: shimmer 1.5s linear infinite;
 }
 
-/* === Interactive Cards === */
+/* === Interactive Cards (glass-enhanced) === */
 .interactive-card {
   transition:
     border-color var(--duration-fast) var(--ease-default),
     box-shadow var(--duration-fast) var(--ease-default),
-    transform var(--duration-fast) var(--ease-default);
+    transform var(--duration-fast) var(--ease-default),
+    background var(--duration-fast) var(--ease-default);
 }
 .interactive-card:hover {
-  border-color: hsl(var(--primary) / 0.3);
-  box-shadow: var(--shadow-md);
+  border-color: hsl(var(--primary) / 0.2);
+  box-shadow:
+    var(--shadow-md),
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) + 0.06));
   transform: translateY(-2px);
 }
 .interactive-card:active {
   transform: scale(0.98);
 }
 
-/* === Stat Card === */
+/* ============================================================ */
+/* === Stat Card — frosted glass with specular highlight     === */
+/* ============================================================ */
 .stat-card {
   position: relative;
   overflow: hidden;
   background:
-    linear-gradient(160deg,
-      hsl(var(--card)) 0%,
-      hsl(var(--surface-raised)) 100%
+    linear-gradient(165deg,
+      hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) + 0.08)) 0%,
+      hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) - 0.08)) 100%
     );
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
+  /* Top highlight + outer shadow */
+  box-shadow:
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / var(--glass-inset-opacity)),
+    inset 0 0 0 0.5px hsl(var(--glass-border-light) / calc(var(--glass-border-opacity) * 0.5)),
+    var(--shadow-sm);
 }
+/* Specular light spot — simulates light hitting glass from top-left */
 .stat-card::before {
   content: "";
   position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 100%;
-  height: 100%;
-  background: radial-gradient(circle,
-    hsl(var(--primary) / 0.06) 0%,
+  top: 0;
+  left: 0;
+  right: 50%;
+  height: 50%;
+  background: linear-gradient(135deg,
+    hsl(var(--glass-inset-highlight) / 0.04) 0%,
     transparent 60%
   );
   pointer-events: none;
+  border-radius: inherit;
 }
 
 /* === Gradient Text (for stat numbers) === */
@@ -329,25 +474,158 @@
   font-feature-settings: "tnum" 1;
 }
 
-/* === Glassmorphism === */
+/* ============================================================ */
+/* === GLASSMORPHISM SYSTEM — macOS Sequoia quality           === */
+/* === Key principles:                                        === */
+/* ===   1. Heavy blur (40-56px) + high saturate (190-220%)   === */
+/* ===   2. Top 1px inset highlight (light refraction)        === */
+/* ===   3. SVG noise texture (frosted grain)                 === */
+/* ===   4. Subtle outer shadow for depth                     === */
+/* ===   5. Semi-transparent bg lets ambient colors bleed     === */
+/* ============================================================ */
+
+/* --- Base Glass --- */
 .glass {
-  background: hsl(var(--surface-overlay) / 0.85);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  position: relative;
+  background: hsl(var(--glass-bg) / var(--glass-bg-opacity));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
+  box-shadow:
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / var(--glass-inset-opacity)),
+    0 4px 16px hsl(var(--glass-shadow-base) / 0.12);
 }
 
-/* === Hero Ambient Gradient === */
+/* --- Sidebar Glass (heaviest frost — visual anchor) --- */
+.glass-sidebar {
+  position: relative;
+  background: hsl(var(--glass-sidebar-bg) / var(--glass-sidebar-opacity));
+  backdrop-filter: blur(var(--glass-sidebar-blur)) saturate(var(--glass-sidebar-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-sidebar-blur)) saturate(var(--glass-sidebar-saturate));
+  /* Right-edge highlight (light refracting at panel edge) */
+  box-shadow:
+    inset -1px 0 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.3)),
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / var(--glass-inset-opacity));
+}
+
+/* --- Card Glass (medium frost for content cards) --- */
+.glass-card {
+  position: relative;
+  background: hsl(var(--glass-bg) / var(--glass-bg-opacity));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
+  box-shadow:
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / var(--glass-inset-opacity)),
+    0 2px 8px hsl(var(--glass-shadow-base) / 0.08),
+    0 8px 24px hsl(var(--glass-shadow-base) / 0.05);
+  transition:
+    background var(--duration-fast) var(--ease-default),
+    border-color var(--duration-fast) var(--ease-default),
+    box-shadow var(--duration-fast) var(--ease-default),
+    transform var(--duration-fast) var(--ease-default);
+}
+.glass-card:hover {
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) + 0.08));
+  border-color: hsl(var(--glass-border-light) / var(--glass-border-hover-opacity));
+  box-shadow:
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) + 0.05)),
+    0 4px 16px hsl(var(--glass-shadow-base) / 0.12),
+    0 12px 36px hsl(var(--glass-shadow-base) / 0.08);
+  transform: translateY(-1px);
+}
+
+/* --- Subtle Glass (light frost for secondary surfaces) --- */
+.glass-subtle {
+  position: relative;
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.45));
+  backdrop-filter: blur(16px) saturate(170%);
+  -webkit-backdrop-filter: blur(16px) saturate(170%);
+  border: 1px solid hsl(var(--glass-border-light) / calc(var(--glass-border-opacity) * 0.5));
+  box-shadow: inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.6));
+}
+
+/* --- Frosted Panel (heavy frost for modals, drawers, overlays) --- */
+.frosted-panel {
+  position: relative;
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) + 0.18));
+  backdrop-filter: blur(48px) saturate(var(--glass-sidebar-saturate));
+  -webkit-backdrop-filter: blur(48px) saturate(var(--glass-sidebar-saturate));
+  border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
+  box-shadow:
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / var(--glass-inset-opacity)),
+    0 12px 40px hsl(var(--glass-shadow-base) / 0.2),
+    0 4px 12px hsl(var(--glass-shadow-base) / 0.08);
+}
+
+/* --- Glass Header (frosted header bar) --- */
+.glass-header {
+  position: relative;
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) + 0.12));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border-bottom: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
+  box-shadow:
+    inset 0 -0.5px 0 0 hsl(var(--glass-shadow-base) / 0.06),
+    0 1px 4px hsl(var(--glass-shadow-base) / 0.06);
+}
+
+/* --- Glass Shimmer (ambient light sweep on premium elements) --- */
+@keyframes glass-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.glass-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.glass-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 38%,
+    hsl(var(--glass-inset-highlight) / 0.015) 44%,
+    hsl(var(--glass-inset-highlight) / 0.04) 50%,
+    hsl(var(--glass-inset-highlight) / 0.015) 56%,
+    transparent 62%
+  );
+  background-size: 200% 100%;
+  animation: glass-shimmer 10s var(--ease-default) infinite;
+  pointer-events: none;
+  border-radius: inherit;
+  z-index: 2;
+}
+
+/* --- Nav Button Glass Active Pill --- */
+.glass-nav-active {
+  background: hsl(var(--sidebar-active) / 0.12);
+  box-shadow:
+    inset 0 1px 0 0 hsl(var(--sidebar-active) / 0.18),
+    0 0 16px hsl(var(--sidebar-active) / 0.1),
+    0 0 4px hsl(var(--sidebar-active) / 0.15);
+}
+
+/* === Hero Ambient Gradient (glass + ambient color bleed) === */
 .hero-gradient {
+  position: relative;
   background:
-    radial-gradient(ellipse at top left,
+    radial-gradient(ellipse at 20% 0%,
       hsl(var(--primary) / 0.06) 0%,
       transparent 50%
     ),
-    radial-gradient(ellipse at bottom right,
-      hsl(var(--accent) / 0.04) 0%,
+    radial-gradient(ellipse at 80% 100%,
+      hsl(var(--ambient-2) / 0.04) 0%,
       transparent 50%
     ),
-    hsl(var(--card));
+    hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) + 0.05));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
+  box-shadow:
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / var(--glass-inset-opacity)),
+    0 2px 8px hsl(var(--glass-shadow-base) / 0.08);
 }
 
 /* === Heatmap Fade-In === */
@@ -359,7 +637,7 @@
   to { opacity: 1; }
 }
 
-/* === SideRail Active Indicator === */
+/* === SideRail Active Indicator (blue glow bar) === */
 .nav-active-bar::before {
   content: "";
   position: absolute;
@@ -370,7 +648,9 @@
   height: 24px;
   background: hsl(var(--primary));
   border-radius: 0 2px 2px 0;
-  box-shadow: 0 0 8px hsl(var(--primary-glow) / 0.5);
+  box-shadow:
+    0 0 12px hsl(var(--primary-glow) / 0.6),
+    0 0 4px hsl(var(--primary-glow) / 0.3);
 }
 
 /* === Reduced Motion === */
