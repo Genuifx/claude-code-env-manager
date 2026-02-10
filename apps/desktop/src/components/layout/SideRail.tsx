@@ -44,8 +44,8 @@ function NavButton({
         'relative w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5',
         'transition-all duration-150',
         isActive
-          ? 'bg-sidebar-active/15 text-sidebar-active nav-active-bar'
-          : 'text-sidebar-foreground hover:text-foreground hover:bg-surface-raised hover:scale-105'
+          ? 'glass-nav-active text-sidebar-active nav-active-bar'
+          : 'text-sidebar-foreground hover:text-foreground hover:bg-white/[0.06] hover:scale-105'
       )}
     >
       <Icon className="w-5 h-5" strokeWidth={isActive ? 2.5 : 2} />
@@ -56,7 +56,7 @@ function NavButton({
 
 export function SideRail({ activeTab, onTabChange }: SideRailProps) {
   return (
-    <aside className="w-[72px] h-full flex flex-col items-center py-4 gap-1.5 bg-sidebar border-r border-sidebar-border">
+    <aside className="w-[72px] h-full flex flex-col items-center py-4 gap-1.5 glass-sidebar glass-noise border-r border-sidebar-border/60 relative z-20">
       {/* CC Logo */}
       <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center shadow-md glow-amber">
         <span className="text-primary-foreground font-bold text-xs tracking-tight">CC</span>
