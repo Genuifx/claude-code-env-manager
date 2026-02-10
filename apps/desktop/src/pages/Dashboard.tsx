@@ -157,7 +157,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
   return (
     <div className="page-transition-enter space-y-6">
       {/* ══ Zone 1: Status Header ══ */}
-      <div className="hero-gradient rounded-2xl border border-border p-5 shadow-elevation-1">
+      <div className="hero-gradient glass-noise rounded-2xl border border-border p-5 shadow-elevation-1">
         <div className="flex items-center justify-between" role="status">
           {/* Environment Badge */}
           <div className="relative">
@@ -273,7 +273,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
       <div className="grid grid-cols-4 gap-4">
         {/* Sessions Today */}
         <Card
-          className="stat-card p-5 cursor-pointer interactive-card card-stagger"
+          className="stat-card glass-noise p-5 cursor-pointer interactive-card card-stagger"
           onClick={() => onNavigate('sessions')}
         >
           <div className="flex items-center gap-1.5 mb-3">
@@ -292,7 +292,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
 
         {/* Tokens Today */}
         <Card
-          className="stat-card p-5 cursor-pointer interactive-card card-stagger"
+          className="stat-card glass-noise p-5 cursor-pointer interactive-card card-stagger"
           onClick={() => onNavigate('analytics')}
         >
           <div className="flex items-center gap-1.5 mb-3">
@@ -315,7 +315,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
 
         {/* Cost Today */}
         <Card
-          className="stat-card p-5 cursor-pointer interactive-card card-stagger"
+          className="stat-card glass-noise p-5 cursor-pointer interactive-card card-stagger"
           onClick={() => onNavigate('analytics')}
         >
           <div className="flex items-center gap-1.5 mb-3">
@@ -336,7 +336,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
 
         {/* Streak */}
         <Card
-          className="stat-card p-5 cursor-pointer interactive-card card-stagger"
+          className="stat-card glass-noise p-5 cursor-pointer interactive-card card-stagger"
           onClick={() => onNavigate('analytics')}
         >
           <div className="flex items-center gap-1.5 mb-3">

@@ -56,7 +56,7 @@ function NavButton({
 
 export function SideRail({ activeTab, onTabChange }: SideRailProps) {
   return (
-    <aside className="w-[72px] h-full flex flex-col items-center py-4 gap-1.5 glass-sidebar border-r border-sidebar-border/60">
+    <aside className="w-[72px] h-full flex flex-col items-center py-4 gap-1.5 glass-sidebar glass-noise border-r border-sidebar-border/60 relative z-20">
       {/* CC Logo */}
       <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center shadow-md glow-amber">
         <span className="text-primary-foreground font-bold text-xs tracking-tight">CC</span>
