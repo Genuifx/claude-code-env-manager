@@ -826,6 +826,25 @@
     0 4px 16px hsl(var(--primary) / 0.10),
     0 1px 4px hsl(var(--glass-shadow-base) / 0.06);
 }
+/* Light mode: stronger shadows + more visible backgrounds */
+.light .glass-mode-card {
+  box-shadow:
+    inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.6)),
+    0 1px 3px hsl(var(--glass-shadow-base) / 0.06);
+}
+.light .glass-mode-card:hover {
+  box-shadow:
+    inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.8)),
+    0 2px 8px hsl(var(--glass-shadow-base) / 0.1),
+    0 4px 16px hsl(var(--glass-shadow-base) / 0.06);
+}
+.light .glass-mode-card.active {
+  box-shadow:
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / var(--glass-inset-opacity)),
+    0 0 0 1px hsl(var(--primary) / 0.2),
+    0 4px 16px hsl(var(--primary) / 0.12),
+    0 1px 4px hsl(var(--glass-shadow-base) / 0.08);
+}
 
 /* === Environment Card (glass env card) === */
 .glass-env-card {
@@ -860,6 +879,26 @@
     0 0 0 1px hsl(var(--primary) / 0.12),
     0 4px 16px hsl(var(--primary) / 0.08),
     0 8px 24px hsl(var(--glass-shadow-base) / 0.06);
+}
+/* Light mode: env card needs stronger shadows for depth */
+.light .glass-env-card {
+  box-shadow:
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / var(--glass-inset-opacity)),
+    0 1px 3px hsl(var(--glass-shadow-base) / 0.06),
+    0 4px 16px hsl(var(--glass-shadow-base) / 0.05);
+}
+.light .glass-env-card:hover {
+  box-shadow:
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) + 0.04)),
+    0 4px 16px hsl(var(--glass-shadow-base) / 0.1),
+    0 8px 24px hsl(var(--glass-shadow-base) / 0.07);
+}
+.light .glass-env-card.active {
+  box-shadow:
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / var(--glass-inset-opacity)),
+    0 0 0 1px hsl(var(--primary) / 0.18),
+    0 4px 16px hsl(var(--primary) / 0.1),
+    0 8px 24px hsl(var(--glass-shadow-base) / 0.07);
 }
 
 /* === Glass Toggle Switch === */
@@ -898,6 +937,23 @@
   background: hsl(var(--primary));
   box-shadow: 0 0 8px hsl(var(--primary) / 0.3), 0 1px 2px hsl(var(--glass-shadow-base) / 0.15);
 }
+/* Light mode: toggle track needs more contrast against white bg */
+.light .glass-toggle {
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.8));
+  box-shadow: inset 0 1px 3px hsl(var(--glass-shadow-base) / 0.1),
+    inset 0 0 0 0.5px hsl(var(--glass-border-light) / 0.3);
+}
+.light .glass-toggle::after {
+  background: hsl(var(--foreground) / 0.45);
+  box-shadow: 0 1px 3px hsl(var(--glass-shadow-base) / 0.12);
+}
+.light .glass-toggle.checked {
+  background: hsl(var(--primary) / 0.2);
+  border-color: hsl(var(--primary) / 0.35);
+}
+.light .glass-toggle.checked::after {
+  box-shadow: 0 0 8px hsl(var(--primary) / 0.25), 0 1px 3px hsl(var(--glass-shadow-base) / 0.12);
+}
 
 /* === Glass Select (dropdown) === */
 .glass-select {
@@ -918,6 +974,20 @@
     0 0 0 2px hsl(var(--primary) / 0.15);
   outline: none;
 }
+/* Light mode: select needs visible track + option bg */
+.light .glass-select {
+  box-shadow:
+    inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.5)),
+    0 1px 3px hsl(var(--glass-shadow-base) / 0.06);
+}
+.light .glass-select option {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+.glass-select option {
+  background: hsl(var(--surface));
+  color: hsl(var(--foreground));
+}
 
 /* === Glass Divider (white highlight instead of gray) === */
 .glass-divider {
@@ -932,12 +1002,22 @@
   border: 1px solid hsl(var(--glass-border-light) / calc(var(--glass-border-opacity) * 0.5));
   box-shadow: inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.5));
 }
+.light .glass-icon-container {
+  box-shadow:
+    inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.5)),
+    0 1px 2px hsl(var(--glass-shadow-base) / 0.05);
+}
 
 /* === Glass Badge (semi-transparent pill) === */
 .glass-badge {
   background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.5));
   border: 1px solid hsl(var(--glass-border-light) / calc(var(--glass-border-opacity) * 0.6));
   box-shadow: inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.3));
+}
+.light .glass-badge {
+  box-shadow:
+    inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.3)),
+    0 0.5px 1px hsl(var(--glass-shadow-base) / 0.04);
 }
 
 /* === Glass Outline Button (for outline buttons in glass context) === */
@@ -956,6 +1036,37 @@
   box-shadow:
     inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.6)),
     0 2px 8px hsl(var(--glass-shadow-base) / 0.08);
+}
+.light .glass-btn-outline {
+  box-shadow:
+    inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.4)),
+    0 1px 2px hsl(var(--glass-shadow-base) / 0.05);
+}
+.light .glass-btn-outline:hover {
+  box-shadow:
+    inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.6)),
+    0 2px 8px hsl(var(--glass-shadow-base) / 0.08),
+    0 4px 12px hsl(var(--glass-shadow-base) / 0.05);
+}
+
+/* === Ghost Card (dashed add-new card) === */
+.glass-ghost-card {
+  border: 1px dashed hsl(var(--glass-border-light) / 0.2);
+  background: transparent;
+  transition:
+    border-color var(--duration-fast) var(--ease-default),
+    background var(--duration-fast) var(--ease-default);
+}
+.glass-ghost-card:hover {
+  border-color: hsl(var(--primary) / 0.3);
+  background: hsl(var(--glass-bg) / 0.15);
+}
+.light .glass-ghost-card {
+  border-color: hsl(var(--glass-border-light) / 0.35);
+}
+.light .glass-ghost-card:hover {
+  border-color: hsl(var(--primary) / 0.4);
+  background: hsl(var(--glass-bg) / 0.25);
 }
 
 /* === Reduced Motion === */
