@@ -3,7 +3,7 @@ import type { ArrangeLayout } from '@/store';
 import { useLocale } from '@/locales';
 import { LayoutThumbnail } from './LayoutThumbnail';
 
-const layouts: ArrangeLayout[] = ['horizontal_2', 'vertical_2', 'grid_4', 'left_main_3'];
+const layouts: ArrangeLayout[] = ['horizontal2', 'vertical2', 'grid4', 'left_main3'];
 
 interface LayoutPopoverProps {
   open: boolean;

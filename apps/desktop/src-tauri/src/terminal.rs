@@ -592,7 +592,7 @@ pub fn arrange_iterm_sessions(
             // Move B right of A: vertical=true, before=false
             format!(
                 r#"tell application "iTerm2"
-    invoke API expression "iterm2.move_session(\"{}\", \"{}\", vertical=True, before=False)"
+    invoke API expression "iterm2.move_session(session: \"{}\", destination: \"{}\", vertical: true, before: false)"
     delay 0.8
     -- Find the window containing session A
     repeat with aWindow in windows
@@ -616,7 +616,7 @@ end tell"#,
             // Move B below A: vertical=false, before=true
             format!(
                 r#"tell application "iTerm2"
-    invoke API expression "iterm2.move_session(\"{}\", \"{}\", vertical=False, before=True)"
+    invoke API expression "iterm2.move_session(session: \"{}\", destination: \"{}\", vertical: false, before: true)"
     delay 0.8
     repeat with aWindow in windows
         repeat with aTab in tabs of aWindow
@@ -642,7 +642,7 @@ end tell"#,
 
             // Step 1: Move B right of A → [A | B]
             steps.push_str(&format!(
-                r#"    invoke API expression "iterm2.move_session(\"{}\", \"{}\", vertical=True, before=False)"
+                r#"    invoke API expression "iterm2.move_session(session: \"{}\", destination: \"{}\", vertical: true, before: false)"
     delay 0.8
 "#,
                 session_ids[1], session_ids[0]
@@ -651,7 +651,7 @@ end tell"#,
             if count >= 3 {
                 // Step 2: Move C below A → [A|B] becomes [A|B] / [C|_]
                 steps.push_str(&format!(
-                    r#"    invoke API expression "iterm2.move_session(\"{}\", \"{}\", vertical=False, before=True)"
+                    r#"    invoke API expression "iterm2.move_session(session: \"{}\", destination: \"{}\", vertical: false, before: true)"
     delay 0.8
 "#,
                     session_ids[2], session_ids[0]
@@ -661,7 +661,7 @@ end tell"#,
             if count >= 4 {
                 // Step 3: Move D below B → [A|B] / [C|D]
                 steps.push_str(&format!(
-                    r#"    invoke API expression "iterm2.move_session(\"{}\", \"{}\", vertical=False, before=True)"
+                    r#"    invoke API expression "iterm2.move_session(session: \"{}\", destination: \"{}\", vertical: false, before: true)"
     delay 0.8
 "#,
                     session_ids[3], session_ids[1]
@@ -694,7 +694,7 @@ end tell"#,
 
             // Step 1: Move B right of A → [A | B]
             steps.push_str(&format!(
-                r#"    invoke API expression "iterm2.move_session(\"{}\", \"{}\", vertical=True, before=False)"
+                r#"    invoke API expression "iterm2.move_session(session: \"{}\", destination: \"{}\", vertical: true, before: false)"
     delay 0.8
 "#,
                 session_ids[1], session_ids[0]
@@ -703,7 +703,7 @@ end tell"#,
             if count >= 3 {
                 // Step 2: Move C below B → [A | B/C]
                 steps.push_str(&format!(
-                    r#"    invoke API expression "iterm2.move_session(\"{}\", \"{}\", vertical=False, before=True)"
+                    r#"    invoke API expression "iterm2.move_session(session: \"{}\", destination: \"{}\", vertical: false, before: true)"
     delay 0.8
 "#,
                     session_ids[2], session_ids[1]

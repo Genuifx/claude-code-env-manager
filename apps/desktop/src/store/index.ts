@@ -10,7 +10,7 @@ export interface Environment {
   smallModel?: string;
 }
 
-export type ArrangeLayout = 'horizontal_2' | 'vertical_2' | 'grid_4' | 'left_main_3';
+export type ArrangeLayout = 'horizontal2' | 'vertical2' | 'grid4' | 'left_main3';
 
 export interface Session {
   id: string;
