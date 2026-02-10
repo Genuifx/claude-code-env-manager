@@ -1,139 +1,68 @@
 // apps/desktop/src/components/analytics/TokenChart.tsx
-import { useState } from 'react';
 import {
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   ResponsiveContainer,
 } from 'recharts';
-import { TrendingUp, BarChart3 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { useLocale } from '@/locales';
 import type { ChartDataPoint } from '@/types/analytics';
-
-type ChartType = 'line' | 'bar';
-type TimeGranularity = 'hour' | 'day' | 'week' | 'month';
 
 interface TokenChartProps {
   data: ChartDataPoint[];
-  environments: string[];
-  /** Controlled granularity from parent (Bug #23 fix) */
-  granularity: TimeGranularity;
-  /** Callback when user changes granularity */
-  onGranularityChange: (g: TimeGranularity) => void;
+  seriesKeys: string[];
 }
 
-const COLORS: Record<string, string> = {
-  // Input/Output token breakdown (real data mode) — using CSS chart variables
-  'Input Tokens': 'hsl(var(--chart-1))',
-  'Output Tokens': 'hsl(var(--chart-2))',
-  // Legacy environment names (mock data fallback)
-  official: 'hsl(var(--chart-1))',
-  'GLM-4': 'hsl(var(--chart-2))',
-  DeepSeek: 'hsl(var(--chart-3))',
-  KIMI: 'hsl(var(--chart-4))',
-  MiniMax: 'hsl(var(--chart-5))',
+const AMBER = 'hsl(38 92% 50%)';
+const AMBER_LIGHT = 'hsl(45 93% 58%)';
+
+const formatAxisValue = (value: number): string => {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(0)}K`;
+  return value.toString();
 };
 
-export function TokenChart({ data, environments, granularity, onGranularityChange }: TokenChartProps) {
-  const { t } = useLocale();
-  const [chartType, setChartType] = useState<ChartType>('line');
-
-  const Chart = chartType === 'line' ? LineChart : BarChart;
+export function TokenChart({ data, seriesKeys }: TokenChartProps) {
+  const dataKey = seriesKeys[0] ?? 'Tokens';
 
   return (
-    <div className="space-y-4">
-      {/* Controls */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant={granularity === 'hour' ? 'default' : 'outline'}
-            onClick={() => onGranularityChange('hour')}
-          >
-            {t('analytics.hour')}
-          </Button>
-          <Button
-            size="sm"
-            variant={granularity === 'day' ? 'default' : 'outline'}
-            onClick={() => onGranularityChange('day')}
-          >
-            {t('analytics.day')}
-          </Button>
-          <Button
-            size="sm"
-            variant={granularity === 'week' ? 'default' : 'outline'}
-            onClick={() => onGranularityChange('week')}
-          >
-            {t('analytics.week')}
-          </Button>
-          <Button
-            size="sm"
-            variant={granularity === 'month' ? 'default' : 'outline'}
-            onClick={() => onGranularityChange('month')}
-          >
-            {t('analytics.month')}
-          </Button>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant={chartType === 'line' ? 'default' : 'outline'}
-            onClick={() => setChartType('line')}
-          >
-            <TrendingUp className="w-4 h-4 mr-1" /> {t('analytics.lineChart')}
-          </Button>
-          <Button
-            size="sm"
-            variant={chartType === 'bar' ? 'default' : 'outline'}
-            onClick={() => setChartType('bar')}
-          >
-            <BarChart3 className="w-4 h-4 mr-1" /> {t('analytics.barChart')}
-          </Button>
-        </div>
-      </div>
-
-      {/* Chart */}
-      <ResponsiveContainer width="100%" height={300}>
-        <Chart data={data}>
-          <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-          <XAxis
-            dataKey="date"
-            className="text-xs text-muted-foreground"
-          />
-          <YAxis className="text-xs text-muted-foreground" />
-          <Tooltip
-            contentStyle={{
-              backgroundColor: 'rgba(255, 255, 255, 0.95)',
-              border: '1px solid #e2e8f0',
-              borderRadius: '8px',
-            }}
-          />
-          <Legend />
-          {environments.map((env) => {
-            const color = COLORS[env] || '#6b7280';
-            return chartType === 'line' ? (
-              <Line
-                key={env}
-                type="monotone"
-                dataKey={env}
-                stroke={color}
-                strokeWidth={2}
-                dot={false}
-              />
-            ) : (
-              <Bar key={env} dataKey={env} fill={color} />
-            );
-          })}
-        </Chart>
-      </ResponsiveContainer>
-    </div>
+    <ResponsiveContainer width="100%" height={300}>
+      <AreaChart data={data}>
+        <defs>
+          <linearGradient id="amber-gradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor={AMBER_LIGHT} stopOpacity={0.35} />
+            <stop offset="95%" stopColor={AMBER} stopOpacity={0.05} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+        <XAxis
+          dataKey="date"
+          className="text-xs text-muted-foreground"
+        />
+        <YAxis
+          className="text-xs text-muted-foreground"
+          tickFormatter={formatAxisValue}
+        />
+        <Tooltip
+          contentStyle={{
+            backgroundColor: 'hsl(var(--surface-overlay))',
+            border: '1px solid hsl(var(--glass-border-light) / 0.3)',
+            borderRadius: '8px',
+            backdropFilter: 'blur(12px)',
+          }}
+          formatter={(value: number | undefined) => [formatAxisValue(value ?? 0), undefined]}
+        />
+        <Area
+          type="monotone"
+          dataKey={dataKey}
+          stroke={AMBER}
+          strokeWidth={2}
+          fillOpacity={1}
+          fill="url(#amber-gradient)"
+        />
+      </AreaChart>
+    </ResponsiveContainer>
   );
 }

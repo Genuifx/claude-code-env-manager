@@ -4,10 +4,11 @@ import { useLocale } from '@/locales';
 
 interface HeatmapCalendarProps {
   activities: DailyActivity[];
+  compact?: boolean;
 }
 
 const LEVEL_COLORS = {
-  0: 'bg-transparent',
+  0: 'bg-muted/50',
   1: 'bg-primary/15',
   2: 'bg-primary/40',
   3: 'bg-primary/70',
@@ -22,7 +23,7 @@ function formatTokens(tokens: number): string {
   return tokens.toString();
 }
 
-export function HeatmapCalendar({ activities }: HeatmapCalendarProps) {
+export function HeatmapCalendar({ activities, compact = false }: HeatmapCalendarProps) {
   const { lang, t } = useLocale();
   const dateLocale = lang === 'zh' ? 'zh-CN' : 'en-US';
 
@@ -82,48 +83,56 @@ export function HeatmapCalendar({ activities }: HeatmapCalendarProps) {
     }
   });
 
-  return (
-    <div className="heatmap-enter space-y-4">
-      {/* Month Labels */}
-      <div className="flex gap-1 text-xs text-muted-foreground pl-12 relative" style={{ height: '16px' }}>
-        {monthLabels.map(({ label, weekIndex }, i) => (
-          <div
-            key={i}
-            className="absolute text-xs"
-            style={{ left: `calc(48px + ${weekIndex} * (12px + 4px))` }}
-          >
-            {label}
-          </div>
-        ))}
-      </div>
+  const cellSize = compact ? 'w-2.5 h-2.5' : 'w-3 h-3';
+  const gapClass = compact ? 'gap-0.5' : 'gap-1';
+  const displayWeeks = compact ? weeks.slice(-12) : weeks;
 
-      {/* Calendar Grid */}
-      <div className="flex gap-1">
-        {/* Day Labels — all 7 days (Mon through Sun) */}
-        <div className="flex flex-col gap-1 text-xs text-muted-foreground w-10 shrink-0">
-          {DAY_LABELS.map((label) => (
-            <div key={label} className="h-3 flex items-center">
+  return (
+    <div className={`heatmap-enter ${compact ? '' : 'space-y-4'}`}>
+      {/* Month Labels — hide in compact mode */}
+      {!compact && (
+        <div className="flex gap-1 text-xs text-muted-foreground pl-12 relative" style={{ height: '16px' }}>
+          {monthLabels.map(({ label, weekIndex }, i) => (
+            <div
+              key={i}
+              className="absolute text-xs"
+              style={{ left: `calc(48px + ${weekIndex} * (12px + 4px))` }}
+            >
               {label}
             </div>
           ))}
         </div>
+      )}
+
+      {/* Calendar Grid */}
+      <div className={`flex ${gapClass}`}>
+        {/* Day Labels — hide in compact mode */}
+        {!compact && (
+          <div className="flex flex-col gap-1 text-xs text-muted-foreground w-10 shrink-0">
+            {DAY_LABELS.map((label) => (
+              <div key={label} className="h-3 flex items-center">
+                {label}
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Heatmap — each week is a column, each row is a weekday */}
-        <div className="flex gap-1 flex-1 overflow-x-auto">
-          {weeks.map((week, weekIndex) => (
-            <div key={weekIndex} className="flex flex-col gap-1">
+        <div className={`flex ${gapClass} flex-1 overflow-x-auto`}>
+          {displayWeeks.map((week, weekIndex) => (
+            <div key={weekIndex} className={`flex flex-col ${gapClass}`}>
               {week.map((activity, dayIndex) =>
                 activity ? (
                   <div
                     key={activity.date}
-                    className={`w-3 h-3 rounded-sm ${
+                    className={`${cellSize} rounded-sm ${
                       LEVEL_COLORS[activity.level]
                     } hover:brightness-110 hover:ring-2 hover:ring-primary/40 cursor-pointer transition-[filter,box-shadow] duration-150`}
                     title={formatTooltip(activity)}
                   />
                 ) : (
                   // Invisible spacer for null padding cells
-                  <div key={`empty-${weekIndex}-${dayIndex}`} className="w-3 h-3" />
+                  <div key={`empty-${weekIndex}-${dayIndex}`} className={cellSize} />
                 ),
               )}
             </div>
@@ -131,19 +140,21 @@ export function HeatmapCalendar({ activities }: HeatmapCalendarProps) {
         </div>
       </div>
 
-      {/* Legend */}
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span>{t('analytics.legendLow')}</span>
-        {[0, 1, 2, 3, 4].map((level) => (
-          <div
-            key={level}
-            className={`w-3 h-3 rounded-sm ${
-              LEVEL_COLORS[level as keyof typeof LEVEL_COLORS]
-            }`}
-          />
-        ))}
-        <span>{t('analytics.legendHigh')}</span>
-      </div>
+      {/* Legend — hide in compact mode */}
+      {!compact && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>{t('analytics.legendLow')}</span>
+          {[0, 1, 2, 3, 4].map((level) => (
+            <div
+              key={level}
+              className={`w-3 h-3 rounded-sm ${
+                LEVEL_COLORS[level as keyof typeof LEVEL_COLORS]
+              }`}
+            />
+          ))}
+          <span>{t('analytics.legendHigh')}</span>
+        </div>
+      )}
     </div>
   );
 }

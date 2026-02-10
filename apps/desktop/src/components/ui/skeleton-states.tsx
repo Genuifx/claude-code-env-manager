@@ -143,24 +143,31 @@ export function EnvironmentsSkeleton() {
 export function AnalyticsSkeleton() {
   return (
     <div className="animate-pulse space-y-6">
-      {/* Header */}
-      <div>
-        <Bone className="h-8 w-32 mb-2" />
-        <Bone className="h-4 w-64" />
+      {/* Granularity controls — right-aligned */}
+      <div className="flex items-center justify-end gap-2">
+        {[1, 2, 3, 4].map((i) => (
+          <Bone key={i} className="h-9 w-16 rounded-md" />
+        ))}
       </div>
 
-      {/* 3 stat cards — grid-cols-3 */}
-      <div className="grid grid-cols-3 gap-4">
-        {[1, 2, 3].map((i) => (
-          <Card key={i} className="p-4">
-            <div className="flex items-start justify-between mb-2">
-              <Bone className="h-4 w-24" />
-              <Bone className="h-4 w-12" />
+      {/* Hero Stats Card */}
+      <div className="stat-card glass-noise p-6">
+        <Bone className="h-10 w-56 mb-2" />
+        <Bone className="h-4 w-24 mb-2" />
+        <Bone className="h-4 w-40 mb-4" />
+        <div className="flex items-end justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="flex flex-col gap-1">
+              <Bone className="h-6 w-20" />
+              <Bone className="h-3 w-16" />
             </div>
-            <Bone className="h-8 w-20 mb-1" />
-            <Bone className="h-3 w-16" />
-          </Card>
-        ))}
+            <div className="flex flex-col items-center gap-1">
+              <Bone className="h-6 w-14" />
+              <Bone className="h-3 w-12" />
+            </div>
+          </div>
+          <Bone className="h-16 w-48" />
+        </div>
       </div>
 
       {/* Chart — h-64 */}
@@ -169,7 +176,7 @@ export function AnalyticsSkeleton() {
         <Bone className="h-64 w-full" />
       </Card>
 
-      {/* Distribution + Heatmap side by side */}
+      {/* Model Distribution + Daily Token Bar side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card className="p-4">
           <Bone className="h-5 w-36 mb-4" />
@@ -181,14 +188,13 @@ export function AnalyticsSkeleton() {
         </Card>
       </div>
 
-      {/* Milestones */}
-      <div>
-        <Bone className="h-5 w-28 mb-4" />
-        <div className="flex gap-3">
-          {[1, 2, 3].map((i) => (
-            <Bone key={i} className="h-24 w-[200px] flex-shrink-0" />
-          ))}
-        </div>
+      {/* Next Milestone — thin progress bar */}
+      <div className="flex items-center gap-3 py-2">
+        <Bone className="h-4 w-4 rounded" />
+        <Bone className="h-4 w-24" />
+        <Bone className="h-4 w-20" />
+        <Bone className="h-2 flex-1 rounded-full" />
+        <Bone className="h-3 w-8" />
       </div>
     </div>
   );

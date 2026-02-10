@@ -4,7 +4,7 @@
 // and aggregates real token/cost data for the frontend.
 
 use crate::config;
-use chrono::{NaiveDate, Utc, Datelike};
+use chrono::{NaiveDate, Local, Datelike, Weekday};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -131,9 +131,25 @@ fn read_usage_cache() -> Result<CacheFile, String> {
         .map_err(|e| format!("Failed to parse usage cache: {}", e))
 }
 
-/// Extract date string (YYYY-MM-DD) from ISO-8601 timestamp
+/// Extract LOCAL date string (YYYY-MM-DD) from ISO-8601 timestamp.
+/// Converts UTC timestamp to local timezone before extracting date,
+/// matching CLI behavior where `new Date(ts)` auto-converts to local.
 fn extract_date(timestamp: &str) -> Option<String> {
-    // Handle "2026-02-07T01:06:29.622Z" → "2026-02-07"
+    // Try to parse as full ISO-8601 with timezone → convert to local date
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(timestamp) {
+        let local_dt: chrono::DateTime<Local> = dt.into();
+        return Some(local_dt.format("%Y-%m-%d").to_string());
+    }
+    // Fallback: try "2026-02-07T01:06:29.622Z" format (Z suffix)
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(
+        timestamp.trim_end_matches('Z'),
+        "%Y-%m-%dT%H:%M:%S%.f",
+    ) {
+        let utc_dt = dt.and_utc();
+        let local_dt: chrono::DateTime<Local> = utc_dt.into();
+        return Some(local_dt.format("%Y-%m-%d").to_string());
+    }
+    // Last resort: just take first 10 chars
     if timestamp.len() >= 10 {
         Some(timestamp[..10].to_string())
     } else {
@@ -143,12 +159,14 @@ fn extract_date(timestamp: &str) -> Option<String> {
 
 /// Aggregate all cache entries into UsageStats
 fn aggregate_cache(cache: &CacheFile) -> UsageStats {
-    let now = Utc::now();
+    let now = Local::now();
     let today_str = now.format("%Y-%m-%d").to_string();
 
-    // Calculate date boundaries
+    // Calculate date boundaries (using local timezone, matching CLI behavior)
     let today_date = now.date_naive();
-    let week_start = today_date - chrono::Duration::days(6); // last 7 days including today
+    // Calendar week starting Sunday, matching CLI: weekStart.setDate(d - d.getDay())
+    let days_since_sunday = today_date.weekday().num_days_from_sunday();
+    let week_start = today_date - chrono::Duration::days(days_since_sunday as i64);
     let month_start = NaiveDate::from_ymd_opt(today_date.year(), today_date.month(), 1)
         .unwrap_or(today_date);
 
@@ -222,7 +240,7 @@ fn aggregate_cache(cache: &CacheFile) -> UsageStats {
 
 /// Calculate streak of consecutive usage days ending at today
 fn calculate_streak(daily_history: &HashMap<String, TokenUsageWithCost>) -> u32 {
-    let today = Utc::now().date_naive();
+    let today = Local::now().date_naive();
     let mut streak: u32 = 0;
     let mut check_date = today;
 
