@@ -1,6 +1,7 @@
 import * as Popover from '@radix-ui/react-popover';
 import type { ArrangeLayout } from '@/store';
 import { useLocale } from '@/locales';
+import { Button } from '@/components/ui/button';
 import { LayoutThumbnail } from './LayoutThumbnail';
 
 const layouts: ArrangeLayout[] = ['horizontal2', 'vertical2', 'grid4', 'left_main3'];
@@ -51,16 +52,15 @@ export function LayoutPopover({
             ))}
           </div>
 
-          <button
-            type="button"
+          <Button
+            className="w-full"
             onClick={async () => {
               await onArrange(selectedLayout);
               onOpenChange(false);
             }}
-            className="w-full h-9 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
           >
             {t('sessions.arrangeRunningCount').replace('{count}', String(runningCount))}
-          </button>
+          </Button>
 
           <Popover.Arrow className="fill-[hsl(var(--surface-overlay))]" />
         </Popover.Content>

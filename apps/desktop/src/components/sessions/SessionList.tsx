@@ -55,7 +55,7 @@ export function SessionList({ sessions, onFocus, onMinimize, onClose, confirming
       {sessions.map((session) => (
         <div
           key={session.id}
-          className="flex items-center gap-4 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors"
+          className="flex items-center gap-4 p-3 rounded-lg glass-subtle hover:bg-surface-raised/50 transition-colors"
         >
           <span className={getStatusDot(session.status)} />
 
@@ -64,10 +64,10 @@ export function SessionList({ sessions, onFocus, onMinimize, onClose, confirming
               <span className="font-medium text-foreground">
                 {getProjectName(session.workingDir)}
               </span>
-              <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+              <span className="text-xs px-1.5 py-0.5 glass-subtle rounded-md font-medium">
                 {session.envName}
               </span>
-              <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+              <span className="text-xs px-1.5 py-0.5 glass-subtle rounded-md font-medium">
                 {session.permMode}
               </span>
             </div>
@@ -99,7 +99,7 @@ export function SessionList({ sessions, onFocus, onMinimize, onClose, confirming
                 onClick={() => onFocus(session.id)}
                 disabled={session.status !== 'running'}
               >
-                Focus
+                {t('sessions.focus')}
               </Button>
               <Button
                 size="sm"
