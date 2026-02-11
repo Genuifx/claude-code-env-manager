@@ -1,4 +1,4 @@
-import { Star, Clock, Monitor, Brain, RefreshCw, FolderOpen } from 'lucide-react';
+import { Star, Clock, Monitor, Brain, RefreshCw, FolderOpen, Play, X, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
@@ -47,10 +47,10 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
       <div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-            <Star className="w-4 h-4 text-primary" /> {t('dashboard.recentProjects')}
+            <Star className="w-4 h-4 text-primary" /> {t('dashboard.favorites')}
           </h3>
           <Button variant="ghost" size="sm" onClick={handleAddFavorite}>
-            <span className="mr-1">+</span> {t('common.save')}
+            <Plus className="w-3.5 h-3.5 mr-1" /> {t('common.save')}
           </Button>
         </div>
         {favorites.length === 0 ? (
@@ -60,7 +60,7 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
             {favorites.map((project) => (
               <div
                 key={project.path}
-                className="flex items-center justify-between p-3 bg-card rounded-lg border border-border hover:border-primary/40 transition-all"
+                className="flex items-center justify-between p-3 glass-list-item rounded-lg"
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <FolderOpen className="w-5 h-5 text-primary/60 flex-shrink-0" />
@@ -73,22 +73,22 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex items-center gap-1 flex-shrink-0">
                   <Button
                     variant="ghost"
-                    size="sm"
-                    className="text-primary hover:text-primary hover:bg-primary/10"
+                    size="icon"
+                    className="w-8 h-8 text-primary hover:text-primary hover:bg-primary/[0.08]"
                     onClick={() => handleLaunch(project.path)}
                   >
-                    ▶
+                    <Play className="w-3.5 h-3.5" />
                   </Button>
                   <Button
                     variant="ghost"
-                    size="sm"
-                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                    size="icon"
+                    className="w-8 h-8 text-muted-foreground hover:text-destructive hover:bg-destructive/[0.08]"
                     onClick={() => removeFavoriteProject(project.path)}
                   >
-                    ×
+                    <X className="w-3.5 h-3.5" />
                   </Button>
                 </div>
               </div>
@@ -100,13 +100,13 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
       {/* Recent Section */}
       <div>
         <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2 mb-3">
-          <Clock className="w-4 h-4 text-muted-foreground" /> Recent
+          <Clock className="w-4 h-4 text-muted-foreground" /> {t('dashboard.recentHistory')}
         </h3>
         <div className="space-y-2">
           {recent.map((project) => (
             <div
               key={project.path}
-              className="flex items-center justify-between p-3 bg-card rounded-lg border border-border hover:border-primary/40 transition-all"
+              className="flex items-center justify-between p-3 glass-list-item rounded-lg"
             >
               <div className="flex items-center gap-3 min-w-0">
                 <FolderOpen className="w-5 h-5 text-muted-foreground/60 flex-shrink-0" />
@@ -121,23 +121,23 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="flex items-center gap-1 flex-shrink-0">
                 <Button
                   variant="ghost"
-                  size="sm"
-                  className="text-primary hover:text-primary hover:bg-primary/10"
+                  size="icon"
+                  className="w-8 h-8 text-primary hover:text-primary hover:bg-primary/[0.08]"
                   onClick={() => handleLaunch(project.path)}
                 >
-                  ▶
+                  <Play className="w-3.5 h-3.5" />
                 </Button>
                 {!isFavorite(project.path) && (
                   <Button
                     variant="ghost"
-                    size="sm"
-                    className="text-primary hover:text-primary hover:bg-primary/10"
+                    size="icon"
+                    className="w-8 h-8 text-muted-foreground hover:text-primary hover:bg-primary/[0.08]"
                     onClick={() => handleAddToFavorites(project.path)}
                   >
-                    <Star className="w-4 h-4" />
+                    <Star className="w-3.5 h-3.5" />
                   </Button>
                 )}
               </div>
@@ -145,10 +145,10 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
           ))}
           {/* "+ Add" card */}
           <button
-            className="flex items-center justify-center gap-2 p-3 w-full rounded-lg border border-dashed border-border hover:border-primary/40 hover:bg-primary/5 transition-all text-muted-foreground hover:text-primary"
+            className="flex items-center justify-center gap-2 p-3 w-full rounded-lg glass-add-btn text-muted-foreground"
             onClick={handleAddFavorite}
           >
-            <span className="text-lg">+</span>
+            <Plus className="w-4 h-4" />
             <span className="text-sm font-medium">{t('environments.addEnv')}</span>
           </button>
         </div>
@@ -161,17 +161,17 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
             <Monitor className="w-4 h-4 text-muted-foreground" /> VS Code
           </h3>
           <Button variant="ghost" size="sm" onClick={syncVSCodeProjects}>
-            <RefreshCw className="w-3.5 h-3.5 mr-1" /> Sync
+            <RefreshCw className="w-3.5 h-3.5 mr-1" /> {t('dashboard.syncProjects')}
           </Button>
         </div>
         {vscodeProjects.length === 0 ? (
-          <p className="text-sm text-muted-foreground/70 py-2">Click sync to load VS Code projects</p>
+          <p className="text-sm text-muted-foreground/70 py-2">{t('dashboard.syncHintVSCode')}</p>
         ) : (
           <div className="space-y-2">
             {vscodeProjects.map((project) => (
               <div
                 key={project.path}
-                className="flex items-center justify-between p-3 bg-card rounded-lg border border-border hover:border-primary/40 transition-all"
+                className="flex items-center justify-between p-3 glass-list-item rounded-lg"
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <FolderOpen className="w-5 h-5 text-muted-foreground/60 flex-shrink-0" />
@@ -184,23 +184,23 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex items-center gap-1 flex-shrink-0">
                   <Button
                     variant="ghost"
-                    size="sm"
-                    className="text-primary hover:text-primary hover:bg-primary/10"
+                    size="icon"
+                    className="w-8 h-8 text-primary hover:text-primary hover:bg-primary/[0.08]"
                     onClick={() => handleLaunch(project.path)}
                   >
-                    ▶
+                    <Play className="w-3.5 h-3.5" />
                   </Button>
                   {!isFavorite(project.path) && (
                     <Button
                       variant="ghost"
-                      size="sm"
-                      className="text-primary hover:text-primary hover:bg-primary/10"
+                      size="icon"
+                      className="w-8 h-8 text-muted-foreground hover:text-primary hover:bg-primary/[0.08]"
                       onClick={() => handleAddToFavorites(project.path)}
                     >
-                      <Star className="w-4 h-4" />
+                      <Star className="w-3.5 h-3.5" />
                     </Button>
                   )}
                 </div>
@@ -217,17 +217,17 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
             <Brain className="w-4 h-4 text-muted-foreground" /> JetBrains
           </h3>
           <Button variant="ghost" size="sm" onClick={syncJetBrainsProjects}>
-            <RefreshCw className="w-3.5 h-3.5 mr-1" /> Sync
+            <RefreshCw className="w-3.5 h-3.5 mr-1" /> {t('dashboard.syncProjects')}
           </Button>
         </div>
         {jetbrainsProjects.length === 0 ? (
-          <p className="text-sm text-muted-foreground/70 py-2">Click sync to load JetBrains projects</p>
+          <p className="text-sm text-muted-foreground/70 py-2">{t('dashboard.syncHintJetBrains')}</p>
         ) : (
           <div className="space-y-2">
             {jetbrainsProjects.map((project) => (
               <div
                 key={project.path}
-                className="flex items-center justify-between p-3 bg-card rounded-lg border border-border hover:border-primary/40 transition-all"
+                className="flex items-center justify-between p-3 glass-list-item rounded-lg"
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <FolderOpen className="w-5 h-5 text-muted-foreground/60 flex-shrink-0" />
@@ -242,23 +242,23 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex items-center gap-1 flex-shrink-0">
                   <Button
                     variant="ghost"
-                    size="sm"
-                    className="text-primary hover:text-primary hover:bg-primary/10"
+                    size="icon"
+                    className="w-8 h-8 text-primary hover:text-primary hover:bg-primary/[0.08]"
                     onClick={() => handleLaunch(project.path)}
                   >
-                    ▶
+                    <Play className="w-3.5 h-3.5" />
                   </Button>
                   {!isFavorite(project.path) && (
                     <Button
                       variant="ghost"
-                      size="sm"
-                      className="text-primary hover:text-primary hover:bg-primary/10"
+                      size="icon"
+                      className="w-8 h-8 text-muted-foreground hover:text-primary hover:bg-primary/[0.08]"
                       onClick={() => handleAddToFavorites(project.path)}
                     >
-                      <Star className="w-4 h-4" />
+                      <Star className="w-3.5 h-3.5" />
                     </Button>
                   )}
                 </div>
