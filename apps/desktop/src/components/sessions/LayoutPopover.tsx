@@ -53,7 +53,7 @@ export function LayoutPopover({
           </div>
 
           <Button
-            className="w-full"
+            className="w-full shadow-primary-glow"
             onClick={async () => {
               await onArrange(selectedLayout);
               onOpenChange(false);
@@ -62,7 +62,7 @@ export function LayoutPopover({
             {t('sessions.arrangeRunningCount').replace('{count}', String(runningCount))}
           </Button>
 
-          <Popover.Arrow className="fill-[hsl(var(--surface-overlay))]" />
+          <Popover.Arrow className="fill-[hsl(var(--glass-bg)/0.66)]" />
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

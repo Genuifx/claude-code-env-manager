@@ -44,7 +44,7 @@ export function SessionLauncherPopover({
             onBrowse={handleBrowse}
             isLaunching={isLaunching}
           />
-          <Popover.Arrow className="fill-[hsl(var(--surface-overlay))]" />
+          <Popover.Arrow className="fill-[hsl(var(--glass-bg)/0.66)]" />
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
