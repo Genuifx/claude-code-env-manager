@@ -4,7 +4,6 @@ import {
   Play,
   ChevronDown,
   TrendingUp,
-  TrendingDown,
   Zap,
   DollarSign,
   Flame,
@@ -30,7 +29,7 @@ const PERM_COLORS: Record<string, string> = {
   safe: 'bg-primary/15 text-primary border-primary/30',
   readonly: 'bg-info/15 text-info border-info/30',
   ci: 'bg-chart-4/15 text-chart-4 border-chart-4/30',
-  audit: 'bg-muted text-muted-foreground border-border',
+  audit: 'bg-accent/15 text-accent border-accent/30',
 };
 
 const PERM_ICONS: Record<string, string> = {
@@ -157,25 +156,25 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
   return (
     <div className="page-transition-enter space-y-6">
       {/* ══ Zone 1: Status Header ══ */}
-      <div className="hero-gradient glass-noise rounded-2xl border border-border p-5 shadow-elevation-1">
+      <div className="hero-gradient glass-noise rounded-2xl p-5">
         <div className="flex items-center justify-between" role="status">
           {/* Environment Badge */}
           <div className="relative">
             <button
               onClick={(e) => { e.stopPropagation(); setEnvDropdownOpen(!envDropdownOpen); setPermDropdownOpen(false); }}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-chart-2/15 text-chart-2 border border-chart-2/30 hover:bg-chart-2/25 transition-colors"
+              className="flex items-center gap-2 px-3 py-2 rounded-md bg-chart-2/[0.12] text-chart-2 border border-chart-2/[0.18] hover:bg-chart-2/20 transition-colors"
             >
               <span className="w-2 h-2 rounded-full bg-chart-2" />
               <span className="font-semibold text-sm">{currentEnv}</span>
               <ChevronDown className="w-3.5 h-3.5 opacity-60" />
             </button>
             {envDropdownOpen && (
-              <div className="absolute top-full left-0 mt-2 w-48 rounded-xl border border-border bg-popover shadow-elevation-3 glass z-50 py-1">
+              <div className="absolute top-full left-0 mt-2 w-48 rounded-xl glass-dropdown glass-noise z-50 py-1">
                 {environments.map((env) => (
                   <button
                     key={env.name}
                     onClick={() => { switchEnvironment(env.name); setEnvDropdownOpen(false); }}
-                    className={`w-full text-left px-4 py-2.5 text-sm hover:bg-surface-raised transition-colors flex items-center gap-2 ${
+                    className={`glass-dropdown-item w-full text-left px-4 py-2.5 text-sm flex items-center gap-2 ${
                       env.name === currentEnv ? 'text-primary font-medium' : 'text-foreground'
                     }`}
                   >
@@ -191,19 +190,19 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
           <div className="relative">
             <button
               onClick={(e) => { e.stopPropagation(); setPermDropdownOpen(!permDropdownOpen); setEnvDropdownOpen(false); }}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors hover:opacity-80 ${permColorClass}`}
+              className={`flex items-center gap-2 px-3 py-2 rounded-md border transition-colors hover:opacity-80 ${permColorClass}`}
             >
               <Shield className="w-3.5 h-3.5" />
               <span className="font-semibold text-sm">{permissionMode}</span>
               <ChevronDown className="w-3.5 h-3.5 opacity-60" />
             </button>
             {permDropdownOpen && (
-              <div className="absolute top-full right-0 mt-2 w-52 rounded-xl border border-border bg-popover shadow-elevation-3 glass z-50 py-1">
+              <div className="absolute top-full right-0 mt-2 w-52 rounded-xl glass-dropdown glass-noise z-50 py-1">
                 {Object.keys(PERMISSION_PRESETS).map((mode) => (
                   <button
                     key={mode}
                     onClick={() => { setPermissionMode(mode as PermissionModeName); setPermDropdownOpen(false); }}
-                    className={`w-full text-left px-4 py-2.5 text-sm hover:bg-surface-raised transition-colors flex items-center justify-between ${
+                    className={`glass-dropdown-item w-full text-left px-4 py-2.5 text-sm flex items-center justify-between ${
                       mode === permissionMode ? 'text-primary font-medium' : 'text-foreground'
                     }`}
                   >
@@ -218,7 +217,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
           {/* Active Sessions Indicator */}
           <button
             onClick={() => onNavigate('sessions')}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-raised hover:bg-surface-overlay transition-colors"
+            className="flex items-center gap-2 px-3 py-2 rounded-md glass-indicator"
           >
             {activeSessions > 0 && (
               <span className="w-2 h-2 rounded-full bg-success status-running" />
@@ -249,10 +248,10 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
         <Button
           onClick={handleLaunchClick}
           title={t('dashboard.launchShortcut')}
-          className={`gap-2 px-6 font-semibold rounded-lg shadow-md transition-all duration-150 ${
+          className={`gap-2 px-6 font-semibold rounded-md glass-launch-btn transition-all duration-150 ${
             launched
               ? 'bg-success hover:bg-success ripple-success'
-              : 'hover:shadow-lg hover:-translate-y-0.5 active:scale-95'
+              : 'hover:-translate-y-0.5 active:scale-95'
           }`}
         >
           {launched ? (
@@ -272,8 +271,8 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
       {/* ══ Zone 3: Metrics Bento Grid ══ */}
       <div className="grid grid-cols-4 grid-rows-2 gap-4">
         {/* Sessions — Hero Card (tall left) */}
-        <Card
-          className="stat-card glass-noise p-8 cursor-pointer interactive-card card-stagger col-span-2 row-span-2"
+        <div
+          className="stat-card glass-noise text-card-foreground p-8 cursor-pointer interactive-card card-stagger col-span-2 row-span-2"
           onClick={() => onNavigate('sessions')}
         >
           <div className="flex items-center gap-1.5 mb-4">
@@ -288,11 +287,11 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
           {!hasLaunched && sessions.length === 0 && (
             <p className="text-sm text-muted-foreground mt-4">{t('dashboard.launchToStart')}</p>
           )}
-        </Card>
+        </div>
 
         {/* Tokens Today — Wide top-right */}
-        <Card
-          className="stat-card glass-noise p-5 cursor-pointer interactive-card card-stagger col-span-2"
+        <div
+          className="stat-card glass-noise text-card-foreground p-5 cursor-pointer interactive-card card-stagger col-span-2"
           onClick={() => onNavigate('analytics')}
         >
           <div className="flex items-center gap-1.5 mb-3">
@@ -311,11 +310,11 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
               <span>{t('dashboard.weekTotal')}: {(weekTokensRaw / 1000).toFixed(0)}K</span>
             </div>
           )}
-        </Card>
+        </div>
 
         {/* Cost Today — Bottom-middle */}
-        <Card
-          className="stat-card glass-noise p-5 cursor-pointer interactive-card card-stagger col-span-1"
+        <div
+          className="stat-card glass-noise text-card-foreground p-5 cursor-pointer interactive-card card-stagger col-span-1"
           onClick={() => onNavigate('analytics')}
         >
           <div className="flex items-center gap-1.5 mb-3">
@@ -332,11 +331,11 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
               <span>{t('dashboard.weekTotal')}: ${weekCostRaw.toFixed(2)}</span>
             </div>
           )}
-        </Card>
+        </div>
 
         {/* Streak — Bottom-right */}
-        <Card
-          className="stat-card glass-noise p-5 cursor-pointer interactive-card card-stagger col-span-1"
+        <div
+          className="stat-card glass-noise text-card-foreground p-5 cursor-pointer interactive-card card-stagger col-span-1"
           onClick={() => onNavigate('analytics')}
         >
           <div className="flex items-center gap-1.5 mb-3">
@@ -345,9 +344,11 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
               {t('dashboard.streak')}
             </span>
           </div>
-          <div className="gradient-text text-4xl font-bold tabular-nums leading-tight">
-            {animatedStreak}
-            <span className="text-lg ml-1 text-muted-foreground">{t('dashboard.streakDays')}</span>
+          <div className="flex items-baseline gap-1">
+            <span className="gradient-text text-4xl font-bold tabular-nums leading-tight">
+              {animatedStreak}
+            </span>
+            <span className="text-lg text-muted-foreground">{t('dashboard.streakDays')}</span>
           </div>
           {continuousUsageDays >= 7 && (
             <div className="flex items-center gap-1 mt-2 text-2xs text-success">
@@ -355,7 +356,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
               <span>{t('dashboard.streakKeepGoing')}</span>
             </div>
           )}
-        </Card>
+        </div>
       </div>
 
       {/* ══ Zone 4: Recent Projects ══ */}
