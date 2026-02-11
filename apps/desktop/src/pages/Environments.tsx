@@ -64,10 +64,10 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
           </p>
         </div>
         <Button
-          className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg border-0"
+          className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/25 border border-[hsl(var(--glass-border-light)/0.15)]"
           onClick={onAddEnv}
         >
-          <span className="mr-2">+</span>
+          <Plus className="w-4 h-4 mr-1.5" />
           {t('environments.addEnv')}
         </Button>
       </div>
@@ -83,14 +83,14 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
         {showGhostCard && (
           <button
             type="button"
-            className="w-full border border-dashed border-border/50 rounded-2xl p-4 flex flex-col items-center
-              justify-center cursor-pointer hover:border-primary/30 gap-2 min-h-[120px]
-              transition-colors duration-150 group bg-transparent mt-4"
+            className="w-full rounded-2xl p-4 flex flex-col items-center
+              justify-center cursor-pointer gap-2 min-h-[120px]
+              glass-ghost-card group mt-4"
             onClick={() => onAddEnv?.()}
           >
-            <Plus className="w-5 h-5 text-muted-foreground/40 group-hover:text-muted-foreground/60" />
+            <Plus className="w-5 h-5 text-muted-foreground/50 group-hover:text-muted-foreground/70 transition-colors" />
             <span className="text-sm text-muted-foreground">{t('environments.addEnv')}</span>
-            <span className="text-xs text-muted-foreground/40 group-hover:text-muted-foreground/60 transition-colors duration-150">
+            <span className="text-xs text-muted-foreground/50 group-hover:text-muted-foreground/70 transition-colors duration-150">
               {t('environments.ghostCardHint')}
             </span>
           </button>
@@ -98,7 +98,7 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
       </div>
 
       {/* Permission Mode Section */}
-      <div className="border-t border-border pt-8">
+      <div className="border-t glass-divider pt-8">
         <h3 className="text-lg font-semibold text-foreground mb-4">
           {t('environments.permissionMode')}
         </h3>
@@ -129,10 +129,8 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
                     setDefaultMode(mode);
                     setPermissionMode(mode);
                   }}
-                  className={`text-left p-4 rounded-lg transition-all duration-200 cursor-pointer ${
-                    isActive
-                      ? 'ring-2 ring-primary bg-primary/5 border border-transparent scale-[1.02]'
-                      : 'border border-border hover:border-primary/40'
+                  className={`text-left p-4 rounded-lg cursor-pointer glass-mode-card ${
+                    isActive ? 'active' : ''
                   }`}
                 >
                   <div className="flex items-center gap-2 mb-1">
@@ -140,7 +138,7 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
                     <span className={`font-semibold ${isActive ? 'text-primary' : 'text-foreground'}`}>
                       {displayName}
                     </span>
-                    <span className="font-mono text-[10px] text-muted-foreground/40 ml-auto">
+                    <span className="font-mono text-[10px] text-muted-foreground/60 ml-auto">
                       {key}
                     </span>
                   </div>
@@ -148,7 +146,7 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
                     {t(`environments.permMode_${key}_desc`)}
                   </p>
                   {isActive && (
-                    <p className="text-[11px] text-muted-foreground/70 leading-relaxed border-t border-border/50 pt-2 mt-2">
+                    <p className="text-[11px] text-muted-foreground/80 leading-relaxed border-t glass-divider pt-2 mt-2">
                       {t(`environments.permMode_${key}_detail`)}
                     </p>
                   )}
@@ -183,4 +181,3 @@ function getModeIcon(mode: PermissionModeName): typeof Shield {
   };
   return iconMap[mode] || Shield;
 }
-

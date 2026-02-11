@@ -91,10 +91,16 @@ export function Settings() {
     })();
   }, [theme, autoStart, startMinimized, closeToTray, defaultMode]);
 
-  // Delayed skeleton — only shows if settings load takes >200ms
+  // Delayed skeleton -- only shows if settings load takes >200ms
   if (isLoadingSettings) {
     return <SettingsSkeleton />;
   }
+
+  const themeOptions: { key: 'dark' | 'light' | 'system'; icon: typeof Moon; label: string }[] = [
+    { key: 'dark', icon: Moon, label: t('settings.dark') },
+    { key: 'light', icon: Sun, label: t('settings.light') },
+    { key: 'system', icon: MonitorSmartphone, label: t('settings.system') },
+  ];
 
   return (
     <div className="page-transition-enter space-y-6">
@@ -114,58 +120,54 @@ export function Settings() {
           {t('settings.appearance')}
         </h3>
         <div className="space-y-4">
+          {/* Theme -- segmented control */}
           <div>
             <label className="block text-sm font-medium text-muted-foreground mb-2">
               {t('settings.theme')}
             </label>
-            <div className="flex gap-2">
-              <Button
-                variant={theme === 'dark' ? 'default' : 'outline'}
-                onClick={() => setTheme('dark')}
-              >
-                <Moon className="w-4 h-4 mr-1.5" /> {t('settings.dark')}
-              </Button>
-              <Button
-                variant={theme === 'light' ? 'default' : 'outline'}
-                onClick={() => setTheme('light')}
-              >
-                <Sun className="w-4 h-4 mr-1.5" /> {t('settings.light')}
-              </Button>
-              <Button
-                variant={theme === 'system' ? 'default' : 'outline'}
-                onClick={() => setTheme('system')}
-              >
-                <MonitorSmartphone className="w-4 h-4 mr-1.5" /> {t('settings.system')}
-              </Button>
+            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg glass-subtle">
+              {themeOptions.map(({ key, icon: Icon, label }) => (
+                <button
+                  key={key}
+                  onClick={() => setTheme(key)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-all duration-150 ${
+                    theme === key
+                      ? 'seg-active text-foreground'
+                      : 'seg-hover text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" /> {label}
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* Language Switcher */}
+          {/* Language -- segmented control */}
           <div className="space-y-2">
             <label className="text-sm font-medium text-foreground">
               语言 / Language
             </label>
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="language"
-                  checked={lang === 'zh'}
-                  onChange={() => setLang('zh')}
-                  className="accent-primary"
-                />
-                <span className="text-sm text-foreground">中文</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="language"
-                  checked={lang === 'en'}
-                  onChange={() => setLang('en')}
-                  className="accent-primary"
-                />
-                <span className="text-sm text-foreground">English</span>
-              </label>
+            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg glass-subtle">
+              <button
+                onClick={() => setLang('zh')}
+                className={`px-3 py-1.5 rounded-md text-sm transition-all duration-150 ${
+                  lang === 'zh'
+                    ? 'seg-active text-foreground'
+                    : 'seg-hover text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                中文
+              </button>
+              <button
+                onClick={() => setLang('en')}
+                className={`px-3 py-1.5 rounded-md text-sm transition-all duration-150 ${
+                  lang === 'en'
+                    ? 'seg-active text-foreground'
+                    : 'seg-hover text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                English
+              </button>
             </div>
           </div>
         </div>
@@ -177,56 +179,24 @@ export function Settings() {
           {t('settings.application')}
         </h3>
         <div className="space-y-4">
-          <label className="flex items-center gap-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={autoStart}
-              onChange={(e) => setAutoStart(e.target.checked)}
-              className="w-4 h-4 rounded border-border accent-primary"
-            />
-            <div>
-              <div className="text-sm font-medium text-foreground">
-                {t('settings.autoStart')}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {t('settings.autoStartDesc')}
-              </div>
-            </div>
-          </label>
-
-          <label className="flex items-center gap-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={startMinimized}
-              onChange={(e) => setStartMinimized(e.target.checked)}
-              className="w-4 h-4 rounded border-border accent-primary"
-            />
-            <div>
-              <div className="text-sm font-medium text-foreground">
-                {t('settings.startMinimized')}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {t('settings.startMinimizedDesc')}
-              </div>
-            </div>
-          </label>
-
-          <label className="flex items-center gap-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={closeToTray}
-              onChange={(e) => setCloseToTray(e.target.checked)}
-              className="w-4 h-4 rounded border-border accent-primary"
-            />
-            <div>
-              <div className="text-sm font-medium text-foreground">
-                {t('settings.closeToTray')}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {t('settings.closeToTrayDesc')}
-              </div>
-            </div>
-          </label>
+          <ToggleSetting
+            checked={autoStart}
+            onChange={setAutoStart}
+            title={t('settings.autoStart')}
+            description={t('settings.autoStartDesc')}
+          />
+          <ToggleSetting
+            checked={startMinimized}
+            onChange={setStartMinimized}
+            title={t('settings.startMinimized')}
+            description={t('settings.startMinimizedDesc')}
+          />
+          <ToggleSetting
+            checked={closeToTray}
+            onChange={setCloseToTray}
+            title={t('settings.closeToTray')}
+            description={t('settings.closeToTrayDesc')}
+          />
         </div>
       </Card>
 
@@ -243,7 +213,7 @@ export function Settings() {
             <select
               value={defaultMode || 'dev'}
               onChange={(e) => setDefaultMode(e.target.value as PermissionModeName)}
-              className="w-full px-3 py-2 rounded-lg border border-border bg-card text-foreground"
+              className="w-full px-3 py-2 rounded-lg glass-select text-sm"
             >
               {Object.entries(PERMISSION_PRESETS).map(([key, preset]) => (
                 <option key={key} value={key}>
@@ -280,7 +250,7 @@ export function Settings() {
             {ccemInstalled === null ? (
               <span className="text-xs text-muted-foreground">...</span>
             ) : ccemInstalled ? (
-              <span className="flex items-center gap-1.5 text-sm font-medium text-emerald-500">
+              <span className="flex items-center gap-1.5 text-sm font-medium text-success">
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 {t('settings.cliInstalled')}
               </span>
@@ -295,7 +265,7 @@ export function Settings() {
                     navigator.clipboard.writeText(t('settings.cliInstallCmd'));
                     toast.success(t('settings.cliInstallCmd'));
                   }}
-                  className="inline-flex items-center gap-1 text-[11px] font-mono text-primary hover:text-primary/80 bg-primary/10 px-2 py-0.5 rounded-md transition-colors"
+                  className="inline-flex items-center gap-1 text-[11px] font-mono text-primary hover:text-primary/80 glass-btn-outline px-2 py-0.5 rounded-md"
                 >
                   <Copy className="w-3 h-3" />
                   {t('settings.cliInstallCmd')}
@@ -304,19 +274,19 @@ export function Settings() {
             )}
           </div>
           {ccemInstalled === false && (
-            <p className="text-xs text-muted-foreground/70 flex items-center gap-1">
+            <p className="text-xs text-muted-foreground/80 flex items-center gap-1">
               <Lightbulb className="w-3 h-3 text-primary shrink-0" />
               {t('settings.cliInstallHint')}
             </p>
           )}
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => toast.info(t('settings.upToDate'))}>
+            <Button variant="outline" size="sm" className="glass-btn-outline" onClick={() => toast.info(t('settings.upToDate'))}>
               {t('settings.checkUpdate')}
             </Button>
-            <Button variant="outline" size="sm" onClick={() => window.open('https://github.com/anthropics/claude-code-env-manager', '_blank')}>
+            <Button variant="outline" size="sm" className="glass-btn-outline" onClick={() => window.open('https://github.com/anthropics/claude-code-env-manager', '_blank')}>
               GitHub
             </Button>
-            <Button variant="outline" size="sm" onClick={() => window.open('https://github.com/anthropics/claude-code-env-manager/issues', '_blank')}>
+            <Button variant="outline" size="sm" className="glass-btn-outline" onClick={() => window.open('https://github.com/anthropics/claude-code-env-manager/issues', '_blank')}>
               {t('settings.feedback')}
             </Button>
           </div>
@@ -324,5 +294,32 @@ export function Settings() {
       </Card>
       </div>
     </div>
+  );
+}
+
+function ToggleSetting({ checked, onChange, title, description }: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  title: string;
+  description: string;
+}) {
+  return (
+    <label className="flex items-center gap-3 cursor-pointer group">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={`glass-toggle ${checked ? 'checked' : ''}`}
+      />
+      <div>
+        <div className="text-sm font-medium text-foreground">
+          {title}
+        </div>
+        <div className="text-xs text-muted-foreground">
+          {description}
+        </div>
+      </div>
+    </label>
   );
 }
