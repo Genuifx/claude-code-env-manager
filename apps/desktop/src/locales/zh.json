@@ -263,5 +263,18 @@
     "settingsSaved": "设置已保存",
     "settingsSavedLocal": "设置已保存 (本地)",
     "upToDate": "当前已是最新版本 v2.0.0"
+  },
+  "history": {
+    "searchPlaceholder": "搜索会话...",
+    "allProjects": "所有项目",
+    "noResults": "没有匹配的会话",
+    "totalSessions": "{count} 个会话",
+    "selectConversation": "选择一个会话查看详情",
+    "noMessages": "此会话没有消息记录",
+    "thinking": "思考过程",
+    "toolSuccess": "工具执行成功",
+    "toolError": "工具执行失败",
+    "summaryLabel": "对话摘要",
+    "emptyMessage": "空消息"
   }
 }
