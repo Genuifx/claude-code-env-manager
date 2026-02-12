@@ -235,3 +235,114 @@ The ideal final implementation would fuse elements from all three:
 | P1 | 方案 C 的 ghost card hover 改为 CSS 类 | C |
 | P2 | 方案 B/C 的新增 CSS 类添加 `.light` 变体 | B + C |
 | P2 | 三个方案未触及的共享文件残留清理（App.tsx, Analytics.tsx 等） | 全部 |
+
+---
+---
+
+# 会话历史功能竞赛评审报告
+
+> **评审人**: Critic | **日期**: 2026-02-13
+> **范围**: Alpha / Beta / Gamma 三个方案实现 claude-run 风格的会话历史浏览功能
+
+---
+
+## 评审概述
+
+本次评审对 Alpha、Beta、Gamma 三个方案进行了逐文件代码审阅，覆盖 Rust 后端（history.rs）、前端页面（History.tsx）、组件（components/history/）、集成点（SideRail、store、useTauriCommands、i18n）。评审基准为主分支的 glass 设计系统（index.css）、现有页面风格（Sessions.tsx）、导航结构（SideRail.tsx）和 store 模式（store/index.ts）。
+
+---
+
+## 方案评审
+
+### Alpha: 侧边栏 + 抽屉式
+
+- **设计一致性: 8/10** — 正确使用 `stat-card glass-noise`、`glass-card glass-noise`、`frosted-panel glass-noise`、`glass-subtle` 等 glass 类。搜索框使用 `border-white/[0.08]` 而非 `--glass-border-light` token，轻微违规。ConversationDrawer 中 tool_result 的成功状态使用了 `border-emerald-500/20 bg-emerald-500/[0.04]` 硬编码颜色而非 `--success` token。avatar 使用 `bg-teal-500/20 text-teal-400` 硬编码而非设计 token。Lucide 图标使用正确。
+- **代码质量: 7/10** — Rust 后端结构清晰，错误处理合理，使用 `BufReader` 逐行解析。但 `get_conversation_messages` 只做了单层目录搜索，没有 fallback 机制。前端 `formatRelativeTime` 硬编码英文字符串（"just now", "m ago"）而非使用 i18n。store 添加了 `isLoadingHistory` / `setLoadingHistory` 但没有添加 `historySessions` 到 store，而是用组件本地 state 管理——与项目 Zustand 集中管理的模式不一致。`ConversationDrawer` 中有缩进不一致的问题（第 203、218 行）。
+- **用户体验: 8/10** — 抽屉式交互自然，保留了列表上下文。搜索和项目筛选功能完整。skeleton loading 正确实现。空状态使用了 `EmptyState` 组件。drawer 有 backdrop 点击关闭。但缺少 Escape 键关闭 drawer 的支持。
+- **功能完整度: 8/10** — 会话列表、搜索、项目筛选、对话详情、content block 渲染（text/thinking/tool_use/tool_result）、折叠面板均已实现。缺少 resume 命令复制功能。缺少排序选项。
+- **创新性: 6/10** — 抽屉式是常见的 UI 模式，没有特别突出的亮点。lazy loading messages 是合理的设计但不算创新。
+
+**加权总分: 7.55/10**
+
+**优点:**
+- 抽屉式交互保留列表上下文，快速切换会话
+- glass 设计系统使用整体到位
+- 组件拆分合理（History + ConversationDrawer）
+
+**不足:**
+- 硬编码颜色（emerald、teal）违反设计规范
+- `formatRelativeTime` 硬编码英文
+- 会话数据未放入 Zustand store
+- 缺少 Escape 键关闭、resume 命令复制
+
+---
+
+### Beta: master-detail 双栏
+
+- **设计一致性: 7/10** — 左侧面板使用 `glass-subtle glass-noise`，符合规范。但用户消息气泡使用 `bg-primary/80 text-primary-foreground`——这是一个较重的不透明度，在 glass 系统中显得过于实心。assistant 气泡使用 `glass-subtle glass-noise` 很好。边框使用 `border-white/[0.06]` 而非 `--glass-border-light` token。搜索框使用 `bg-white/[0.04]` 而非 glass token。选中状态使用 `bg-primary/10 border-l-2 border-l-primary` 是合理的但不是 glass 风格的选中态（应参考 `sidebar-nav-active`）。没有使用 `stat-card` hero 区域。
+- **代码质量: 6/10** — 最大问题：`History.tsx` 直接调用 `invoke()` 而非通过 `useTauriCommands` hook，违反了项目的数据流模式（App.tsx -> useTauriCommands -> invoke）。store 没有添加 `isLoadingHistory` 或 `historySessions`，完全用组件本地 state。Rust 后端的 `find_session_file` 有两轮搜索（filename match + content scan），比较健壮，但 content scan 只检查前 5 行可能不够。`HistoryLine` 的 timestamp 字段类型是 `Option<String>`，不支持数字类型的 timestamp，比 Alpha/Gamma 的 `serde_json::Value` 处理更脆弱。deduplicate 逻辑用 `retain` 删除旧条目再 push 新条目，效率不如 Alpha 的 HashSet 方式。
+- **用户体验: 8.5/10** — master-detail 是最适合"浏览历史"场景的布局模式，左侧列表 + 右侧详情的交互非常自然。选der-l-primary` 视觉指示。搜索和项目筛选在左侧面板内，不占用详情空间。skeleton loading 对两个面板分别实现。消息加载后自动滚动到底部。但页面使用 `-mx-6 -mb-6` 负 margin hack 来实现全高布局，不够优雅。
+- **功能完整度: 7/10** — 会话列表、搜索、项目筛选、对话详情、content block 渲染均已实现。CollapsibleBlock 使用 `ChevronRight` 旋转动画比较精致。但缺少 resume 命令复制。`HistoryList` 底部有 session 计数，是个好细节。`formatRelativeTime` 同样硬编码英文。
+- **创新性: 7/10** — master-detail 布局是最接近 claude-run 原始设计的方案，对于"历史浏览"这个场景来说是最符合用户心智模型的。左侧面板底部的 session 计数是个贴心细节。
+
+**加权总分: 7.15/10**
+
+**优点:**
+- master-detail 布局最适合历史浏览场景
+- 左侧面板的搜索/筛选/计数体验完整
+- 两面板独立 skeleton loading
+- Rust 后端有两轮文件搜索 fallback
+
+**不足:**
+- 直接调用 `invoke()` 违反项目数据流模式
+- sto添加 history 相关状态
+- 用户气泡 `bg-primary/80` 过于实心
+- 负 margin hack 不优雅
+- timestamp 解析只支持字符串格式
+
+---
+
+### Gamma: 卡片网格 + 模态
+
+- **设计一致性: 9/10** — 设计一致性最好的方案。`HistoryCard` 使用 `Card` 组件（自带 `glass-card glass-noise`）+ `interactive-card` + `card-stagger` 动画，完全复用了现有 Sessions 页面的卡片模式。`ConversationModal` 使用 `frosted-panel glass-noise rounded-xl shadow-dialog`，与现有 Close All Dialog 模式一致。搜索框使用 `border-[hsl(var(--glass-border-light))]` 正确引用 glass token。项目 badge 使用 `glass-subtle`。关闭按钮使用 `glass-btn-close`，resume 按钮使用 `glass-btn-outline`。assistant 气泡使用 `glass-subtle`，用户气泡使用 `bg-primary/15`（比 Beta 的 0.80 更符合 glass 半透明美学）。唯一小问题：`ConversationModal` header 使用 `glass-divider-bottom` 但 CSS 中只定义了 `glass-divider-top`。
+- **代码质量: 8.5/10** — 遵循项目模式最好的方案。store 添加了 `HistorySession` 类型导出 + `historySessions` / `setHistorySessions` + `isLoadingHistory` / `setLoadingHistory`，完全符合 Zustand 集中管理模式。通过 `useTauriCommands` hook 调用后端。组件拆分为 `HistoryCard`（展示）+ `ConversationModal`（详情）+ `index.ts`（barrel export），结构清晰。Rust 后端的 `find_session_file` 有 filename match + content scan fallback。`ContentBlockRenderer` 作为独立组件处理所有 block 类型，包含 unknown type fallback。Escape 键关闭 modal。`HistoryCard` 的 `formatRelativeTime` 使用 i18n（`t('history.daysAgo')` 等），是三个方案中唯一正确国际化时间显示的。
+- **用户体验: 7.5/10** — 卡片网格浏览体验好，3 列响应式布局。但全屏模态打开后完全遮挡了列表，切换会话需要关闭再选择，不如 Alpha 的 drawer 或 Beta 的 master-detail 流畅。modal 有 Escape 关闭 + backdrop 点击关闭。resume 命令复制按钮 + toast 反馈是独有的实用功能。skeleton loading 对网格和 modal 内容分别实现。
+- **功能完整度: 9/10** — 功能最完整的方案。会话列表、搜索、项目筛选、卡片网格、对话详情、content block 渲染（text/thinking/tool_use/tool_result）、折叠面板、resume 命令复制、Escape 关闭、i18n 时间格式化均已实现。`ContentBlockRenderer` 有 unknown block type fallback 显示 `[block.type]`。
+- **创新性: 8/10** — resume 命令复制是独有的实用功能。卡片网格 + `card-stagger` 动画提供了最好的视觉体验。`HistoryCard` 的 `glass-subtle` 项目 badge 是个精致的细节。
+
+**加权总分: 8.40/10**
+
+**优点:**
+- 设计一致性最好，完全复用现有 glass 组件模式
+- 代码质量最高，正确使用 Zustand store + useTauriCommands
+- 唯一正
+- resume 命令复制是独有实用功能
+- `card-stagger` 动画 + `interactive-card` 视觉体验好
+- Escape 键关闭 + unknown block fallback
+
+**不足:**
+- 全屏模态切换会话不如 drawer/master-detail 流畅
+- `glass-divider-bottom` 类可能未定义（CSS 中只有 `glass-divider-top`）
+- 用户气泡 `bg-primary/15` 虽然比 Beta 好但仍非 glass 类
+
+---
+
+## 最终排名
+
+| 排名 | 方案 | 设计一致性 | 代码质量 | 用户体验 | 功能完整度 | 创新性 | 加权总分 | 推荐理由 |
+|------|------|-----------|---------|---------|-----------|--------|---------|---------|
+| 1 | Gamma (卡片网格 + 模态) | 9 | 8.5 | 7.5 | 9 | 8 | **8.40** | 设计一致性和代码质量最优，功能最完整，唯一正确遵循所有项目模式的方案 |
+| 2 | Alpha (侧边栏 + 抽屉式) | 8 | 7 | 8 | 8 | 6 | **7.55** | 抽屉式交互体验好，但有硬编码颜色和 store 模式违规 |
+| 3 | Beta (master-detail 双栏) | 7 | 6 | 8.5 | 7 | 7 | **7.15** | 布局模式最适合场景，但直接调用 invoke() 严重违反项目架构 |
+
+加权计算公式：设计一致性 x 0.25 + 代码质量 x 0.20 + 用户体验 x 0.25 + 功能完整度 x 0.20 + 创新性 x 0.10
+
+## 建议
+
+对获胜方案 Gamma 的改进建议：
+
+1. **交互优化**：全屏模态切换会话体验不够流畅。建议在 modal 内添加左右箭头键导航到上/下一个会话，或在 modal 左侧添加一个迷你会话列表侧栏，避免每次都要关闭再选择。
+2. **CSS 修复**：`glass-divider-bottom` 需要在 `index.css` 中补充定义（参照 `glass-divider-top` 的模式）。
+3. **虚拟滚动**：当会话历史很长时（数百条），卡片网格和 modal 内的消息列表都应考虑虚拟滚动（如 `@tanstack/react-virtual`）以保持性能。
+4. **消息搜索**：当前只能搜索会话标题和项目名，建议增加对消息内容的全文搜索能力（需要 Rust 后端支持）。
+5. **合并 Beta 的优点**：Beta 的 master-detail 布局在用户体验维度得分最高。可以考虑在 Gamma 的 modal 中借鉴 Beta 的双栏思路——modal 左侧放迷你会话列表，右侧放消息详情，兼得两者优势。
