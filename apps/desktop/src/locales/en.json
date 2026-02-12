@@ -263,5 +263,18 @@
     "settingsSaved": "Settings saved",
     "settingsSavedLocal": "Settings saved (local)",
     "upToDate": "Already on the latest version v2.0.0"
+  },
+  "history": {
+    "searchPlaceholder": "Search conversations...",
+    "allProjects": "All Projects",
+    "noResults": "No matching conversations",
+    "totalSessions": "{count} conversations",
+    "selectConversation": "Select a conversation to view details",
+    "noMessages": "No messages in this conversation",
+    "thinking": "Thinking",
+    "toolSuccess": "Tool succeeded",
+    "toolError": "Tool failed",
+    "summaryLabel": "Conversation summary",
+    "emptyMessage": "Empty message"
   }
 }
