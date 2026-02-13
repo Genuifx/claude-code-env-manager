@@ -208,49 +208,38 @@ export function AnalyticsSkeleton() {
 
 export function SkillsSkeleton() {
   return (
-    <div className="animate-pulse grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div className="animate-pulse space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between lg:col-span-3">
-        <div>
-          <Bone className="h-8 w-20 mb-2" />
-          <Bone className="h-4 w-56" />
-        </div>
-        <Bone className="h-10 w-28" />
+      <div>
+        <Bone className="h-8 w-20 mb-2" />
+        <Bone className="h-4 w-56" />
       </div>
 
-      {/* 2 compact skill cards */}
-      <div className="lg:col-span-2">
-        <Bone className="h-4 w-32 mb-4" />
-        <div className="space-y-3">
-          {[1, 2].map((i) => (
-            <Card key={i} className="p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <Bone className="h-10 w-10 rounded-lg" />
-                  <div className="space-y-1.5">
-                    <Bone className="h-5 w-36" />
-                    <Bone className="h-3 w-24" />
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Bone className="h-8 w-20" />
-                  <Bone className="h-8 w-20" />
-                </div>
+      {/* Tab bar */}
+      <div className="flex gap-2">
+        <Bone className="h-10 w-24 rounded-md" />
+        <Bone className="h-10 w-24 rounded-md" />
+      </div>
+
+      {/* Search bar */}
+      <Bone className="h-10 w-full rounded-lg" />
+
+      {/* Skill cards */}
+      <div className="space-y-3">
+        {[1, 2, 3].map((i) => (
+          <Card key={i} className="p-4">
+            <div className="flex items-start gap-3">
+              <Bone className="h-10 w-10 rounded-lg shrink-0" />
+              <div className="flex-1 space-y-2">
+                <Bone className="h-5 w-36" />
+                <Bone className="h-4 w-full" />
+                <Bone className="h-3 w-48" />
               </div>
-            </Card>
-          ))}
-        </div>
+              <Bone className="h-8 w-20 shrink-0" />
+            </div>
+          </Card>
+        ))}
       </div>
-
-      {/* CLI hint sidebar */}
-      <Card className="p-6 lg:col-span-1">
-        <Bone className="h-5 w-32 mb-4" />
-        <div className="space-y-2">
-          <Bone className="h-4 w-full" />
-          <Bone className="h-4 w-full" />
-          <Bone className="h-4 w-3/4" />
-        </div>
-      </Card>
     </div>
   );
 }

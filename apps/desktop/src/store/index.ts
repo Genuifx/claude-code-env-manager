@@ -46,6 +46,13 @@ export interface JetBrainsProject {
   syncedAt: string;
 }
 
+export interface InstalledSkill {
+  name: string;
+  description: string;
+  path: string;
+  scope: 'project' | 'global';
+}
+
 interface AppState {
   // Environments
   environments: Environment[];
@@ -83,6 +90,10 @@ interface AppState {
   addFavorite: (project: FavoriteProject) => void;
   removeFavorite: (path: string) => void;
   setSelectedWorkingDir: (dir: string | null) => void;
+
+  // Skills
+  installedSkills: InstalledSkill[];
+  setInstalledSkills: (skills: InstalledSkill[]) => void;
 
   // Analytics
   usageStats: UsageStats | null;
@@ -165,6 +176,10 @@ export const useAppStore = create<AppState>((set) => ({
       favorites: state.favorites.filter((f) => f.path !== path),
     })),
   setSelectedWorkingDir: (dir) => set({ selectedWorkingDir: dir }),
+
+  // Skills
+  installedSkills: [],
+  setInstalledSkills: (skills) => set({ installedSkills: skills }),
 
   // Analytics
   usageStats: null,
