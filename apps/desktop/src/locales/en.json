@@ -288,6 +288,11 @@
     "groupEarlier": "Earlier",
     "toolCount": "{count} tool calls",
     "expandAll": "Expand all",
-    "collapseAll": "Collapse all"
+    "collapseAll": "Collapse all",
+    "plan": "Plan",
+    "expandPlan": "Expand All",
+    "collapsePlan": "Collapse",
+    "copyCode": "Copy",
+    "copied": "Copied"
   }
 }
