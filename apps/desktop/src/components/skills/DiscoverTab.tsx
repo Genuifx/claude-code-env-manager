@@ -19,6 +19,7 @@ export function DiscoverTab() {
   const { t } = useLocale();
   const [query, setQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const isSearchingRef = useRef(false);
   const [streamMessages, setStreamMessages] = useState<StreamMessage[]>([]);
   const [results, setResults] = useState<DiscoverSkillInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -30,9 +31,23 @@ export function DiscoverTab() {
     streamEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
 
-  // Listen for stream events
+  const tryParseResults = useCallback((text: string) => {
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (Array.isArray(parsed)) {
+          setResults(parsed.filter((s: any) => s.name && s.package_id));
+        }
+      } catch {
+        // Not valid JSON
+      }
+    }
+  }, []);
+
+  // Listen for stream events — use ref to avoid stale closure
   useTauriEvent<string>('skill-search-stream', (line) => {
-    if (!isSearching) return;
+    if (!isSearchingRef.current) return;
 
     try {
       const data = JSON.parse(line);
@@ -60,45 +75,41 @@ export function DiscoverTab() {
           return [...prev, { type: 'thinking', content: data.delta.text }];
         });
       } else if (data.type === 'result') {
-        // Try to extract skill results from the final result
         const resultText = data.result || '';
-        tryParseResults(resultText);
+        if (data.is_error) {
+          setError(resultText);
+        } else {
+          tryParseResults(resultText);
+        }
       }
+      // Skip system events silently
     } catch {
-      // Non-JSON line or partial — try to extract results from raw text
+      // Non-JSON line — try to extract results from raw text
       if (line.trim().startsWith('[')) {
         tryParseResults(line.trim());
       }
     }
 
     scrollToBottom();
-  }, [isSearching]);
+  });
 
   useTauriEvent('skill-search-done', () => {
-    setIsSearching(false);
-    if (streamMessages.length > 0) {
-      setStreamMessages(prev => [...prev, { type: 'result', content: t('skills.searchComplete') }]);
-    }
-  }, []);
-
-  const tryParseResults = (text: string) => {
-    // Try to find JSON array in the text
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (jsonMatch) {
-      try {
-        const parsed = JSON.parse(jsonMatch[0]);
-        if (Array.isArray(parsed)) {
-          setResults(parsed.filter((s: any) => s.name && s.package_id));
+    if (isSearchingRef.current) {
+      isSearchingRef.current = false;
+      setIsSearching(false);
+      setStreamMessages(prev => {
+        if (prev.length > 0) {
+          return [...prev, { type: 'result' as const, content: t('skills.searchComplete') }];
         }
-      } catch {
-        // Not valid JSON
-      }
+        return prev;
+      });
     }
-  };
+  });
 
   const handleSearch = async () => {
     if (!query.trim() || isSearching) return;
 
+    isSearchingRef.current = true;
     setIsSearching(true);
     setStreamMessages([]);
     setResults([]);
@@ -108,6 +119,7 @@ export function DiscoverTab() {
       await invoke('search_skills_stream', { query: query.trim() });
     } catch (err) {
       setError(String(err));
+      isSearchingRef.current = false;
       setIsSearching(false);
     }
   };

@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use std::process::Command;
 use tauri::{AppHandle, Emitter};
 
+use crate::config;
+
 // ============================================
 // Types
 // ============================================
@@ -141,21 +143,43 @@ pub fn search_skills_stream(app: AppHandle, query: String) {
 
         let user_path = get_user_path();
 
-        let child = Command::new("claude")
-            .args([
-                "-p",
-                &prompt,
-                "--output-format",
-                "stream-json",
-                "--verbose",
-                "--allowedTools",
-                "Bash(npx skills find *)",
-            ])
-            .env("PATH", &user_path)
-            .env_remove("CLAUDECODE")
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn();
+        let mut cmd = Command::new("claude");
+        cmd.args([
+            "-p",
+            &prompt,
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--allowedTools",
+            "Bash(npx skills find *)",
+        ])
+        .env("PATH", &user_path)
+        .env_remove("CLAUDECODE")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+        // Inject current environment's API config
+        if let Ok(cfg) = config::read_config() {
+            if let Some(env_name) = &cfg.current {
+                if let Some(env) = cfg.registries.get(env_name) {
+                    let decrypted = config::get_env_with_decrypted_key(env);
+                    if let Some(url) = &decrypted.base_url {
+                        cmd.env("ANTHROPIC_BASE_URL", url);
+                    }
+                    if let Some(key) = &decrypted.api_key {
+                        cmd.env("ANTHROPIC_API_KEY", key);
+                    }
+                    if let Some(model) = &decrypted.model {
+                        cmd.env("ANTHROPIC_MODEL", model);
+                    }
+                    if let Some(small) = &decrypted.small_model {
+                        cmd.env("ANTHROPIC_SMALL_FAST_MODEL", small);
+                    }
+                }
+            }
+        }
+
+        let child = cmd.spawn();
 
         match child {
             Ok(mut process) => {
