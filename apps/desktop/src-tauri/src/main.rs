@@ -10,7 +10,7 @@ mod terminal;
 mod tray;
 
 use analytics::{get_usage_stats, get_usage_history, get_continuous_usage_days};
-use history::{get_conversation_history, get_conversation_messages};
+use history::{get_conversation_history, get_conversation_messages, get_conversation_segments};
 use config::{EnvConfig, get_env_with_decrypted_key, create_env_with_encrypted_key, AppConfig, FavoriteProject, RecentProject, VSCodeProject, JetBrainsProject};
 use session::{Session, SessionManager, start_session_monitor, cleanup_exit_file, cleanup_stale_exit_files};
 use std::sync::Arc;
@@ -917,7 +917,8 @@ fn main() {
             arrange_sessions,
             check_arrange_support,
             get_conversation_history,
-            get_conversation_messages
+            get_conversation_messages,
+            get_conversation_segments
         ])
         .setup(move |app| {
             // Clean up stale exit files from previous sessions

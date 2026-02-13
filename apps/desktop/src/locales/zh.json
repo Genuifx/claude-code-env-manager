@@ -275,6 +275,12 @@
     "toolSuccess": "工具执行成功",
     "toolError": "工具执行失败",
     "summaryLabel": "对话摘要",
-    "emptyMessage": "空消息"
+    "emptyMessage": "空消息",
+    "toolInput": "输入",
+    "toolOutput": "输出",
+    "compactBoundary": "上下文已压缩",
+    "allSegments": "全部",
+    "segmentInitial": "初始对话",
+    "segmentLabel": "段落"
   }
 }
