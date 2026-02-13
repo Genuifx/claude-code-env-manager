@@ -7,6 +7,7 @@ mod crypto;
 mod history;
 mod session;
 mod terminal;
+mod skills;
 mod tray;
 
 use analytics::{get_usage_stats, get_usage_history, get_continuous_usage_days};
@@ -918,7 +919,11 @@ fn main() {
             check_arrange_support,
             get_conversation_history,
             get_conversation_messages,
-            get_conversation_segments
+            get_conversation_segments,
+            skills::search_skills_stream,
+            skills::list_installed_skills,
+            skills::install_skill,
+            skills::uninstall_skill
         ])
         .setup(move |app| {
             // Clean up stale exit files from previous sessions
