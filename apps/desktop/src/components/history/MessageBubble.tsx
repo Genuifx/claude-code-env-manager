@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronRight, Brain, CheckCircle2, XCircle, User, Bot, Circle, Scissors } from 'lucide-react';
+import { ChevronRight, Brain, CheckCircle2, XCircle, User, Bot, Circle, Scissors, ChevronsUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 
@@ -30,6 +30,7 @@ export interface ConversationMessageData {
 
 interface MessageBubbleProps {
   message: ConversationMessageData;
+  prevRole?: string | null;
 }
 
 function CollapsibleBlock({
@@ -119,10 +120,10 @@ function ToolCallBlock({ block, t }: { block: ContentBlock; t: (key: string) => 
     <div className="my-1">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-1.5 py-1 text-xs hover:bg-white/[0.03] rounded transition-colors group text-left"
+        className="w-full flex items-center gap-1.5 py-1 text-xs hover:bg-white/[0.03] rounded transition-colors group text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       >
         <Circle className={cn(
-          'w-2.5 h-2.5 shrink-0 fill-current',
+          'w-[5px] h-[5px] shrink-0 fill-current',
           isError ? 'text-destructive' : 'text-primary'
         )} />
         <span className="font-medium text-foreground/90">{block.name || 'Tool'}</span>
@@ -138,8 +139,8 @@ function ToolCallBlock({ block, t }: { block: ContentBlock; t: (key: string) => 
               : <CheckCircle2 className="w-3 h-3 text-success/70" />
           )}
           <ChevronRight className={cn(
-            'w-3 h-3 text-muted-foreground/50 transition-transform',
-            open && 'rotate-90'
+            'w-3 h-3 text-muted-foreground/50 transition-transform opacity-0 group-hover:opacity-100',
+            open && 'rotate-90 opacity-100'
           )} />
         </span>
       </button>
@@ -147,7 +148,7 @@ function ToolCallBlock({ block, t }: { block: ContentBlock; t: (key: string) => 
       {open && (
         <div className="ml-4 mt-1 mb-2 space-y-2">
           {/* Input */}
-          <div>
+          <div className="rounded-md p-2 bg-[hsl(var(--tool-input-bg))]">
             <p className="text-[10px] text-muted-foreground/60 uppercase tracking-wider mb-1">{t('history.toolInput')}</p>
             <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px] leading-relaxed max-h-[200px] overflow-y-auto">
               {typeof block.input === 'string'
@@ -172,22 +173,70 @@ function ToolCallBlock({ block, t }: { block: ContentBlock; t: (key: string) => 
   );
 }
 
+/** Groups 3+ tool_use blocks with expand/collapse all controls */
+function ToolCallGroup({ blocks, t }: { blocks: ContentBlock[]; t: (key: string) => string }) {
+  const [allExpanded, setAllExpanded] = useState(false);
+  const label = t('history.toolCount').replace('{count}', String(blocks.length));
+
+  return (
+    <div className="my-1">
+      <div className="flex items-center gap-2 py-1">
+        <span className="text-[11px] text-muted-foreground/70">{label}</span>
+        <button
+          onClick={() => setAllExpanded(!allExpanded)}
+          className="flex items-center gap-1 text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded px-1"
+        >
+          <ChevronsUpDown className="w-3 h-3" />
+          {allExpanded ? t('history.collapseAll') : t('history.expandAll')}
+        </button>
+      </div>
+      {blocks.map((block, i) => (
+        <ToolCallBlock key={block.id || i} block={block} t={t} />
+      ))}
+    </div>
+  );
+}
+
 function renderTextContent(text: string) {
   return (
-    <div className="text-[13px] leading-relaxed whitespace-pre-wrap break-words">
+    <div className="text-[13px] leading-[1.65] whitespace-pre-wrap break-words">
       {text}
     </div>
   );
 }
 
 function renderContentBlocks(blocks: ContentBlock[], t: (key: string) => string) {
-  return blocks.map((block, i) => {
+  const result: React.ReactNode[] = [];
+  let i = 0;
+
+  while (i < blocks.length) {
+    const block = blocks[i];
+
+    if (block.type === 'tool_use') {
+      // Collect consecutive tool_use blocks
+      const toolBlocks: ContentBlock[] = [];
+      while (i < blocks.length && blocks[i].type === 'tool_use') {
+        toolBlocks.push(blocks[i]);
+        i++;
+      }
+      // 3+ consecutive tool calls → group them
+      if (toolBlocks.length >= 3) {
+        result.push(<ToolCallGroup key={`tg-${toolBlocks[0].id || i}`} blocks={toolBlocks} t={t} />);
+      } else {
+        toolBlocks.forEach((tb, j) => {
+          result.push(<ToolCallBlock key={tb.id || `tc-${i}-${j}`} block={tb} t={t} />);
+        });
+      }
+      continue;
+    }
+
     switch (block.type) {
       case 'text':
-        return <div key={i}>{renderTextContent(block.text || '')}</div>;
+        result.push(<div key={i}>{renderTextContent(block.text || '')}</div>);
+        break;
 
       case 'thinking':
-        return (
+        result.push(
           <CollapsibleBlock
             key={i}
             icon={Brain}
@@ -199,24 +248,30 @@ function renderContentBlocks(blocks: ContentBlock[], t: (key: string) => string)
             </pre>
           </CollapsibleBlock>
         );
-
-      case 'tool_use':
-        return <ToolCallBlock key={i} block={block} t={t} />;
+        break;
 
       case 'tool_result':
         // Already merged into tool_use via _result — skip rendering
-        return null;
+        break;
 
       default:
-        return null;
+        break;
     }
-  });
+    i++;
+  }
+
+  return result;
 }
 
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({ message, prevRole }: MessageBubbleProps) {
   const { t } = useLocale();
   const isUser = message.msgType === 'user' || message.msgType === 'human';
   const isSummary = message.msgType === 'summary';
+  const currentRole = isUser ? 'user' : 'assistant';
+
+  // Dynamic spacing: same role → tight, role switch → wider
+  const sameRole = prevRole === currentRole;
+  const spacingClass = prevRole == null ? 'my-3' : sameRole ? 'my-1' : 'my-3';
 
   // Summary messages
   if (isSummary) {
@@ -263,7 +318,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   }
 
   return (
-    <div className={cn('flex gap-2.5 my-3', isUser ? 'flex-row-reverse' : 'flex-row')}>
+    <div className={cn('flex gap-2.5', spacingClass, isUser ? 'flex-row-reverse' : 'flex-row')}>
       {/* Avatar */}
       <div className={cn(
         'w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5',
@@ -277,10 +332,10 @@ export function MessageBubble({ message }: MessageBubbleProps) {
 
       {/* Bubble */}
       <div className={cn(
-        'rounded-xl px-3.5 py-2.5 max-w-[85%] min-w-0',
+        'rounded-2xl px-3.5 py-2.5 max-w-[85%] min-w-0',
         isUser
-          ? 'bg-primary/80 text-primary-foreground'
-          : 'glass-subtle glass-noise'
+          ? 'glass-chat-user text-primary-foreground'
+          : 'glass-chat-assistant'
       )}>
         {renderedContent}
         {/* Model tag for assistant */}

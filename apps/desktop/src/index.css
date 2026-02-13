@@ -104,6 +104,15 @@
     /* Content area background opacity (1 = opaque, <1 = ambient bleeds through) */
     --content-bg-opacity: 1;
 
+    /* Chat bubble glass tokens (dark) */
+    --chat-assistant-bg: 222 14% 12%;
+    --chat-assistant-opacity: 0.72;
+    --chat-assistant-blur: 20px;
+    --chat-user-bg: var(--primary);
+    --chat-user-opacity: 0.85;
+    --chat-user-blur: 8px;
+    --tool-input-bg: 0 0% 100% / 0.02;
+
     /* Segmented control — selected pill */
     --seg-active-bg: 0 0% 100% / 0.14;
     --seg-hover-bg: 0 0% 100% / 0.07;
@@ -199,6 +208,15 @@
 
     /* Content area — semi-transparent so ambient orbs bleed through */
     --content-bg-opacity: 0.82;
+
+    /* Chat bubble glass tokens (light) */
+    --chat-assistant-bg: 0 0% 100%;
+    --chat-assistant-opacity: 0.78;
+    --chat-assistant-blur: 20px;
+    --chat-user-bg: var(--primary);
+    --chat-user-opacity: 0.88;
+    --chat-user-blur: 8px;
+    --tool-input-bg: 220 10% 50% / 0.06;
 
     /* Segmented control — selected pill */
     --seg-active-bg: 0 0% 100% / 0.60;
@@ -1251,6 +1269,32 @@
 .light .glass-ghost-card:hover {
   border-color: hsl(var(--primary) / 0.4);
   background: hsl(var(--glass-bg) / 0.25);
+}
+
+/* --- Chat Assistant Bubble (high opacity glass for readability) --- */
+.glass-chat-assistant {
+  position: relative;
+  background: hsl(var(--chat-assistant-bg) / var(--chat-assistant-opacity));
+  backdrop-filter: blur(var(--chat-assistant-blur)) saturate(170%);
+  -webkit-backdrop-filter: blur(var(--chat-assistant-blur)) saturate(170%);
+  border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
+  box-shadow: inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.5));
+}
+
+/* --- Chat User Bubble (subtle glass tint on primary) --- */
+.glass-chat-user {
+  background: hsl(var(--chat-user-bg) / var(--chat-user-opacity));
+  backdrop-filter: blur(var(--chat-user-blur));
+  -webkit-backdrop-filter: blur(var(--chat-user-blur));
+}
+
+/* --- Message entrance animation --- */
+@keyframes msg-fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.msg-enter {
+  animation: msg-fade-in var(--duration-fast) var(--ease-default) both;
 }
 
 /* === Reduced Motion === */
