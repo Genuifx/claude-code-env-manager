@@ -39,6 +39,7 @@ function App() {
     updateEnvironment,
     deleteEnvironment,
     loadFromRemote,
+    loadInstalledSkills,
   } = useTauriCommands();
 
   // Show global errors as toast notifications
@@ -107,6 +108,9 @@ function App() {
     });
     loadAppConfig().catch((err) => {
       console.error('Failed to load app config:', err);
+    });
+    loadInstalledSkills().catch((err) => {
+      console.error('Failed to load installed skills:', err);
     });
     try {
       const stats = await invoke('get_usage_stats');
