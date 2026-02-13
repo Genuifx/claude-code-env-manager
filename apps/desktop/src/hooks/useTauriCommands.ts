@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { useAppStore, type Environment, type Session, type ArrangeLayout } from '@/store';
+import { useAppStore, type Environment, type Session, type ArrangeLayout, type InstalledSkill } from '@/store';
 import { useCallback } from 'react';
 import { toast } from 'sonner';
 
@@ -68,6 +68,7 @@ export function useTauriCommands() {
     setVSCodeProjects,
     setJetBrainsProjects,
     selectedWorkingDir,
+    setInstalledSkills,
   } = useAppStore();
 
   const loadEnvironments = useCallback(async () => {
@@ -359,6 +360,15 @@ export function useTauriCommands() {
     }
   }, []);
 
+  const loadInstalledSkills = useCallback(async () => {
+    try {
+      const skills = await invoke<InstalledSkill[]>('list_installed_skills');
+      setInstalledSkills(skills);
+    } catch (err) {
+      console.error('Failed to load installed skills:', err);
+    }
+  }, [setInstalledSkills]);
+
   return {
     loadEnvironments,
     loadCurrentEnv,
@@ -382,5 +392,6 @@ export function useTauriCommands() {
     loadFromRemote,
     arrangeSessions,
     checkArrangeSupport,
+    loadInstalledSkills,
   };
 }
