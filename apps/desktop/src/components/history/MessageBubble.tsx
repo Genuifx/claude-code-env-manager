@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronRight, Wrench, Brain, CheckCircle2, XCircle, User, Bot } from 'lucide-react';
+import { ChevronRight, Brain, CheckCircle2, XCircle, User, Bot, Circle, Scissors } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 
@@ -8,10 +8,14 @@ interface ContentBlock {
   text?: string;
   thinking?: string;
   name?: string;
+  id?: string;
   input?: unknown;
   content?: unknown;
   is_error?: boolean;
   tool_use_id?: string;
+  // Injected by mergeToolResults in History.tsx
+  _result?: unknown;
+  _resultError?: boolean;
 }
 
 export interface ConversationMessageData {
@@ -20,6 +24,8 @@ export interface ConversationMessageData {
   content: ContentBlock[] | string | null;
   model?: string;
   summary?: string;
+  segmentIndex: number;
+  isCompactBoundary: boolean;
 }
 
 interface MessageBubbleProps {
@@ -60,6 +66,112 @@ function CollapsibleBlock({
   );
 }
 
+/** Extract a concise summary string from tool input based on tool name. */
+function extractToolSummary(name: string | undefined, input: unknown): string {
+  if (!input || typeof input !== 'object') return '';
+  const obj = input as Record<string, unknown>;
+
+  switch (name) {
+    case 'Read':
+    case 'Write':
+    case 'Edit': {
+      const fp = obj.file_path as string | undefined;
+      if (!fp) return '';
+      // Show last 2 path segments for context
+      const parts = fp.split('/');
+      return parts.length > 2 ? parts.slice(-2).join('/') : fp;
+    }
+    case 'Bash': {
+      const cmd = (obj.command as string) || '';
+      return cmd.length > 60 ? cmd.slice(0, 57) + '...' : cmd;
+    }
+    case 'Glob':
+    case 'Grep': {
+      return (obj.pattern as string) || '';
+    }
+    case 'Task': {
+      const desc = (obj.description as string) || (obj.prompt as string) || '';
+      return desc.length > 50 ? desc.slice(0, 47) + '...' : desc;
+    }
+    case 'WebFetch': {
+      const url = (obj.url as string) || '';
+      return url.length > 50 ? url.slice(0, 47) + '...' : url;
+    }
+    default: {
+      // First string value, truncated
+      for (const val of Object.values(obj)) {
+        if (typeof val === 'string' && val.length > 0) {
+          return val.length > 50 ? val.slice(0, 47) + '...' : val;
+        }
+      }
+      return '';
+    }
+  }
+}
+
+function ToolCallBlock({ block, t }: { block: ContentBlock; t: (key: string) => string }) {
+  const [open, setOpen] = useState(false);
+  const summary = extractToolSummary(block.name, block.input);
+  const hasResult = '_result' in block;
+  const isError = block._resultError === true;
+
+  return (
+    <div className="my-1">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-1.5 py-1 text-xs hover:bg-white/[0.03] rounded transition-colors group text-left"
+      >
+        <Circle className={cn(
+          'w-2.5 h-2.5 shrink-0 fill-current',
+          isError ? 'text-destructive' : 'text-primary'
+        )} />
+        <span className="font-medium text-foreground/90">{block.name || 'Tool'}</span>
+        {summary && (
+          <span className="text-muted-foreground font-mono text-[11px] min-w-0 truncate">
+            ({summary})
+          </span>
+        )}
+        <span className="ml-auto shrink-0 flex items-center gap-1">
+          {hasResult && (
+            isError
+              ? <XCircle className="w-3 h-3 text-destructive/70" />
+              : <CheckCircle2 className="w-3 h-3 text-success/70" />
+          )}
+          <ChevronRight className={cn(
+            'w-3 h-3 text-muted-foreground/50 transition-transform',
+            open && 'rotate-90'
+          )} />
+        </span>
+      </button>
+
+      {open && (
+        <div className="ml-4 mt-1 mb-2 space-y-2">
+          {/* Input */}
+          <div>
+            <p className="text-[10px] text-muted-foreground/60 uppercase tracking-wider mb-1">{t('history.toolInput')}</p>
+            <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px] leading-relaxed max-h-[200px] overflow-y-auto">
+              {typeof block.input === 'string'
+                ? block.input
+                : JSON.stringify(block.input, null, 2)}
+            </pre>
+          </div>
+          {/* Result */}
+          {hasResult && (
+            <div className={cn('border-l-2 pl-3', isError ? 'border-destructive/30' : 'border-primary/20')}>
+              <p className="text-[10px] text-muted-foreground/60 uppercase tracking-wider mb-1">{t('history.toolOutput')}</p>
+              <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px] leading-relaxed max-h-[200px] overflow-y-auto">
+                {typeof block._result === 'string'
+                  ? block._result
+                  : JSON.stringify(block._result, null, 2)}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function renderTextContent(text: string) {
   return (
     <div className="text-[13px] leading-relaxed whitespace-pre-wrap break-words">
@@ -89,42 +201,11 @@ function renderContentBlocks(blocks: ContentBlock[], t: (key: string) => string)
         );
 
       case 'tool_use':
-        return (
-          <CollapsibleBlock
-            key={i}
-            icon={Wrench}
-            label={block.name || 'Tool'}
-            iconClassName="text-primary"
-          >
-            <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px] leading-relaxed max-h-[200px] overflow-y-auto">
-              {typeof block.input === 'string'
-                ? block.input
-                : JSON.stringify(block.input, null, 2)}
-            </pre>
-          </CollapsibleBlock>
-        );
+        return <ToolCallBlock key={i} block={block} t={t} />;
 
-      case 'tool_result': {
-        const isError = block.is_error;
-        const StatusIcon = isError ? XCircle : CheckCircle2;
-        const statusLabel = isError ? t('history.toolError') : t('history.toolSuccess');
-        const statusColor = isError ? 'text-destructive' : 'text-success';
-
-        return (
-          <CollapsibleBlock
-            key={i}
-            icon={StatusIcon}
-            label={statusLabel}
-            iconClassName={statusColor}
-          >
-            <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px] leading-relaxed max-h-[200px] overflow-y-auto">
-              {typeof block.content === 'string'
-                ? block.content
-                : JSON.stringify(block.content, null, 2)}
-            </pre>
-          </CollapsibleBlock>
-        );
-      }
+      case 'tool_result':
+        // Already merged into tool_use via _result — skip rendering
+        return null;
 
       default:
         return null;
@@ -146,6 +227,22 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             {message.summary || t('history.summaryLabel')}
           </p>
         </div>
+      </div>
+    );
+  }
+
+  // Compact boundary divider
+  if (message.isCompactBoundary) {
+    return (
+      <div className="flex items-center gap-3 my-6 px-2">
+        <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.12] to-transparent" />
+        <div className="glass-subtle glass-noise rounded-lg px-3 py-1.5 flex items-center gap-2 shrink-0">
+          <Scissors className="w-3.5 h-3.5 text-muted-foreground" />
+          <span className="text-[11px] text-muted-foreground">
+            {t('history.compactBoundary')}
+          </span>
+        </div>
+        <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.12] to-transparent" />
       </div>
     );
   }

@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Search, Clock, FolderOpen, MessageSquare } from 'lucide-react';
+import { Search, Clock, FolderOpen, MessageSquare, Scissors } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 
@@ -9,6 +9,7 @@ export interface HistorySessionItem {
   timestamp: number;
   project: string;
   projectName: string;
+  segmentCount: number;
 }
 
 interface HistoryListProps {
@@ -121,6 +122,12 @@ export function HistoryList({ sessions, selectedId, onSelect }: HistoryListProps
                     <Clock className="w-3 h-3" />
                     {formatRelativeTime(session.timestamp)}
                   </span>
+                  {session.segmentCount > 1 && (
+                    <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground/60 ml-1 shrink-0">
+                      <Scissors className="w-2.5 h-2.5" />
+                      {session.segmentCount}
+                    </span>
+                  )}
                 </div>
               </button>
             ))}

@@ -275,6 +275,12 @@
     "toolSuccess": "Tool succeeded",
     "toolError": "Tool failed",
     "summaryLabel": "Conversation summary",
-    "emptyMessage": "Empty message"
+    "emptyMessage": "Empty message",
+    "toolInput": "Input",
+    "toolOutput": "Output",
+    "compactBoundary": "Context compacted",
+    "allSegments": "All",
+    "segmentInitial": "Initial",
+    "segmentLabel": "Segment"
   }
 }
