@@ -3,7 +3,7 @@ import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { ENV_PRESETS } from '@ccem/core/browser';
 import { AppLayout } from '@/components/layout';
-import { Dashboard, Environments, Sessions, Analytics, Settings, Skills } from '@/pages';
+import { Dashboard, Environments, Sessions, Analytics, Settings, Skills, History } from '@/pages';
 import { useAppStore, type Environment } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
@@ -152,7 +152,8 @@ function App() {
     'meta+3': () => setActiveTab('environments'),
     'meta+4': () => setActiveTab('analytics'),
     'meta+5': () => setActiveTab('skills'),
-    'meta+6': () => setActiveTab('settings'),
+    'meta+6': () => setActiveTab('history'),
+    'meta+7': () => setActiveTab('settings'),
     'meta+enter': () => handleLaunch(),
     'meta+n': () => handleLaunch(),
     'meta+,': () => setActiveTab('settings'),
@@ -224,6 +225,7 @@ function App() {
     environments: 'Environments',
     analytics: 'Analytics',
     skills: 'Skills',
+    history: 'History',
     settings: 'Settings',
   };
   const pageTitle = pageTitleMap[activeTab] || 'Home';
@@ -253,6 +255,8 @@ function App() {
         return <Analytics />;
       case 'skills':
         return <Skills />;
+      case 'history':
+        return <History />;
       case 'settings':
         return <Settings />;
       default:
