@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { ChevronRight, Brain, CheckCircle2, XCircle, User, Bot, Circle, Scissors, ChevronsUpDown } from 'lucide-react';
+import { ChevronRight, Brain, CheckCircle2, XCircle, User, Bot, Circle, Scissors, ChevronsUpDown, ClipboardList, ChevronDown } from 'lucide-react';
+import { MarkdownRenderer } from './MarkdownRenderer';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 
@@ -26,6 +27,7 @@ export interface ConversationMessageData {
   summary?: string;
   segmentIndex: number;
   isCompactBoundary: boolean;
+  planContent?: string;
 }
 
 interface MessageBubbleProps {
@@ -197,15 +199,66 @@ function ToolCallGroup({ blocks, t }: { blocks: ContentBlock[]; t: (key: string)
   );
 }
 
-function renderTextContent(text: string) {
+function PlanCard({ content, t, spacingClass }: { content: string; t: (key: string) => string; spacingClass: string }) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Extract plan title from first # heading
+  const titleMatch = content.match(/^#\s+(?:Plan:\s*)?(.+)$/m);
+  const title = titleMatch?.[1]?.trim();
+
   return (
-    <div className="text-[13px] leading-[1.65] whitespace-pre-wrap break-words">
-      {text}
+    <div className={cn('max-w-[90%]', spacingClass)}>
+      <div className="glass-card glass-noise rounded-2xl overflow-hidden border-l-[3px] border-primary">
+        {/* Header */}
+        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/[0.06]">
+          <ClipboardList className="w-4 h-4 text-primary shrink-0" />
+          <span className="text-xs font-medium text-primary">{t('history.plan')}</span>
+          {title && (
+            <span className="text-xs text-muted-foreground truncate">{title}</span>
+          )}
+        </div>
+        {/* Content */}
+        <div className="relative">
+          <div
+            className={cn('px-4 py-3 overflow-hidden', !expanded && 'max-h-[400px]')}
+          >
+            <MarkdownRenderer content={content} />
+          </div>
+          {/* Gradient mask + expand button when collapsed */}
+          {!expanded && (
+            <div className="absolute bottom-0 inset-x-0 flex flex-col items-center">
+              <div className="w-full h-16 bg-gradient-to-t from-[hsl(var(--surface))] to-transparent" />
+              <button
+                onClick={() => setExpanded(true)}
+                className="absolute bottom-2 flex items-center gap-1 px-3 py-1 rounded-lg glass-subtle text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <ChevronDown className="w-3.5 h-3.5" />
+                {t('history.expandPlan')}
+              </button>
+            </div>
+          )}
+          {expanded && (
+            <div className="flex justify-center pb-2">
+              <button
+                onClick={() => setExpanded(false)}
+                className="flex items-center gap-1 px-3 py-1 rounded-lg glass-subtle text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <ChevronDown className="w-3.5 h-3.5 rotate-180" />
+                {t('history.collapsePlan')}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
 
-function renderContentBlocks(blocks: ContentBlock[], t: (key: string) => string) {
+function renderTextContent(text: string, isUser = false) {
+  return <MarkdownRenderer content={text} variant={isUser ? 'user' : 'default'} />;
+}
+
+function renderContentBlocks(blocks: ContentBlock[], t: (key: string) => string, isUser = false) {
   const result: React.ReactNode[] = [];
   let i = 0;
 
@@ -232,7 +285,7 @@ function renderContentBlocks(blocks: ContentBlock[], t: (key: string) => string)
 
     switch (block.type) {
       case 'text':
-        result.push(<div key={i}>{renderTextContent(block.text || '')}</div>);
+        result.push(<div key={i}>{renderTextContent(block.text || '', isUser)}</div>);
         break;
 
       case 'thinking':
@@ -302,17 +355,22 @@ export function MessageBubble({ message, prevRole }: MessageBubbleProps) {
     );
   }
 
+  // Plan execution card
+  if (message.planContent) {
+    return <PlanCard content={message.planContent} t={t} spacingClass={spacingClass} />;
+  }
+
   // Parse content
   const content = message.content;
   let renderedContent: React.ReactNode;
 
   if (typeof content === 'string') {
-    renderedContent = renderTextContent(content);
+    renderedContent = renderTextContent(content, isUser);
   } else if (Array.isArray(content)) {
-    renderedContent = renderContentBlocks(content as ContentBlock[], t);
+    renderedContent = renderContentBlocks(content as ContentBlock[], t, isUser);
   } else if (content && typeof content === 'object') {
     // Single content block
-    renderedContent = renderContentBlocks([content as ContentBlock], t);
+    renderedContent = renderContentBlocks([content as ContentBlock], t, isUser);
   } else {
     renderedContent = <p className="text-xs text-muted-foreground italic">{t('history.emptyMessage')}</p>;
   }

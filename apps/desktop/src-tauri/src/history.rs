@@ -34,6 +34,7 @@ pub struct ConversationMessage {
     pub content: serde_json::Value,
     pub model: Option<String>,
     pub summary: Option<String>,
+    pub plan_content: Option<String>,
     pub segment_index: usize,
     pub is_compact_boundary: bool,
 }
@@ -85,6 +86,8 @@ struct MessageLine {
     #[serde(rename = "isMeta")]
     is_meta: Option<bool>,
     timestamp: Option<serde_json::Value>,
+    #[serde(rename = "planContent")]
+    plan_content: Option<String>,
 }
 
 // ============================================================================
@@ -320,6 +323,7 @@ fn parse_conversation_file(path: &PathBuf) -> Result<(Vec<ConversationMessage>, 
                     ),
                     model: None,
                     summary: None,
+                    plan_content: None,
                     segment_index: current_segment,
                     is_compact_boundary: true,
                 });
@@ -376,6 +380,7 @@ fn parse_conversation_file(path: &PathBuf) -> Result<(Vec<ConversationMessage>, 
             content,
             model,
             summary: parsed.summary,
+            plan_content: parsed.plan_content,
             segment_index: current_segment,
             is_compact_boundary: false,
         });
