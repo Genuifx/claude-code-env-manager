@@ -117,10 +117,10 @@ export function useTauriCommands() {
     try {
       await invoke('add_environment', {
         name: env.name,
-        base_url: env.baseUrl,
-        api_key: env.apiKey,
+        baseUrl: env.baseUrl,
+        apiKey: env.apiKey,
         model: env.model,
-        small_model: env.smallModel,
+        smallModel: env.smallModel,
       });
       await loadEnvironments();
       setError(null);
@@ -135,12 +135,12 @@ export function useTauriCommands() {
     setLoading(true);
     try {
       await invoke('update_environment', {
-        old_name: oldName ?? env.name,
+        oldName: oldName ?? env.name,
         name: env.name,
-        base_url: env.baseUrl,
-        api_key: env.apiKey,
+        baseUrl: env.baseUrl,
+        apiKey: env.apiKey,
         model: env.model,
-        small_model: env.smallModel,
+        smallModel: env.smallModel,
       });
       await loadEnvironments();
       await loadCurrentEnv();
