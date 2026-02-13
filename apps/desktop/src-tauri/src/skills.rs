@@ -20,6 +20,22 @@ pub struct InstalledSkill {
 // Helpers
 // ============================================
 
+/// Get the user's full PATH from their login shell.
+/// macOS GUI apps don't inherit shell PATH, so we need to source it.
+fn get_user_path() -> String {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let output = Command::new(&shell)
+        .args(["-l", "-c", "echo $PATH"])
+        .output();
+
+    match output {
+        Ok(out) if out.status.success() => {
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        }
+        _ => std::env::var("PATH").unwrap_or_default(),
+    }
+}
+
 /// Parse YAML frontmatter from SKILL.md content.
 /// Returns (name, description) if frontmatter exists.
 fn parse_skill_frontmatter(content: &str) -> (Option<String>, Option<String>) {
@@ -123,6 +139,8 @@ pub fn search_skills_stream(app: AppHandle, query: String) {
             query
         );
 
+        let user_path = get_user_path();
+
         let child = Command::new("claude")
             .args([
                 "-p",
@@ -133,6 +151,8 @@ pub fn search_skills_stream(app: AppHandle, query: String) {
                 "--allowedTools",
                 "Bash(npx skills find *)",
             ])
+            .env("PATH", &user_path)
+            .env_remove("CLAUDECODE")
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn();
@@ -192,8 +212,10 @@ pub fn install_skill(package_id: String, global: bool) -> Result<String, String>
         args.push("-g");
     }
 
+    let user_path = get_user_path();
     let output = Command::new("npx")
         .args(&args)
+        .env("PATH", &user_path)
         .output()
         .map_err(|e| format!("Failed to run npx: {}", e))?;
 
@@ -212,8 +234,10 @@ pub fn uninstall_skill(name: String, global: bool) -> Result<String, String> {
         args.push("-g");
     }
 
+    let user_path = get_user_path();
     let output = Command::new("npx")
         .args(&args)
+        .env("PATH", &user_path)
         .output()
         .map_err(|e| format!("Failed to run npx: {}", e))?;
 
@@ -224,8 +248,6 @@ pub fn uninstall_skill(name: String, global: bool) -> Result<String, String> {
     }
 }
 
-// ============================================
-// Tests
 // ============================================
 
 #[cfg(test)]
