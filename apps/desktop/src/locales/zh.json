@@ -281,6 +281,13 @@
     "compactBoundary": "上下文已压缩",
     "allSegments": "全部",
     "segmentInitial": "初始对话",
-    "segmentLabel": "段落"
+    "segmentLabel": "段落",
+    "groupToday": "今天",
+    "groupYesterday": "昨天",
+    "groupThisWeek": "本周",
+    "groupEarlier": "更早",
+    "toolCount": "{count} 个工具调用",
+    "expandAll": "全部展开",
+    "collapseAll": "全部折叠"
   }
 }

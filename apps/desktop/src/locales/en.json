@@ -281,6 +281,13 @@
     "compactBoundary": "Context compacted",
     "allSegments": "All",
     "segmentInitial": "Initial",
-    "segmentLabel": "Segment"
+    "segmentLabel": "Segment",
+    "groupToday": "Today",
+    "groupYesterday": "Yesterday",
+    "groupThisWeek": "This Week",
+    "groupEarlier": "Earlier",
+    "toolCount": "{count} tool calls",
+    "expandAll": "Expand all",
+    "collapseAll": "Collapse all"
   }
 }
