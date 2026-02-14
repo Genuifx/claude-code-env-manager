@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { useAppStore, type Environment, type Session, type ArrangeLayout, type InstalledSkill } from '@/store';
+import { useAppStore, type Environment, type Session, type ArrangeLayout, type InstalledSkill, type CronTask, type CronTaskRun, type CronTemplate } from '@/store';
 import { useCallback } from 'react';
 import { toast } from 'sonner';
 
@@ -69,6 +69,9 @@ export function useTauriCommands() {
     setJetBrainsProjects,
     selectedWorkingDir,
     setInstalledSkills,
+    setCronTasks,
+    setCronRuns,
+    setLoadingCron,
   } = useAppStore();
 
   const loadEnvironments = useCallback(async () => {
@@ -370,6 +373,88 @@ export function useTauriCommands() {
     }
   }, [setInstalledSkills]);
 
+  // Cron commands
+  const loadCronTasks = useCallback(async () => {
+    setLoadingCron(true);
+    try {
+      const tasks = await invoke<CronTask[]>('list_cron_tasks');
+      setCronTasks(tasks);
+    } finally {
+      setLoadingCron(false);
+    }
+  }, [setCronTasks, setLoadingCron]);
+
+  const addCronTask = useCallback(async (data: {
+    name: string;
+    cronExpression: string;
+    prompt: string;
+    workingDir: string;
+    envName?: string;
+    timeoutSecs?: number;
+    templateId?: string;
+  }) => {
+    const task = await invoke<CronTask>('add_cron_task', {
+      name: data.name,
+      cronExpression: data.cronExpression,
+      prompt: data.prompt,
+      workingDir: data.workingDir,
+      envName: data.envName || null,
+      timeoutSecs: data.timeoutSecs || 300,
+      templateId: data.templateId || null,
+    });
+    const tasks = await invoke<CronTask[]>('list_cron_tasks');
+    setCronTasks(tasks);
+    return task;
+  }, [setCronTasks]);
+
+  const updateCronTask = useCallback(async (data: {
+    id: string;
+    name?: string;
+    cronExpression?: string;
+    prompt?: string;
+    workingDir?: string;
+    envName?: string;
+    timeoutSecs?: number;
+  }) => {
+    const task = await invoke<CronTask>('update_cron_task', data);
+    const tasks = await invoke<CronTask[]>('list_cron_tasks');
+    setCronTasks(tasks);
+    return task;
+  }, [setCronTasks]);
+
+  const deleteCronTask = useCallback(async (id: string) => {
+    await invoke('delete_cron_task', { id });
+    const tasks = await invoke<CronTask[]>('list_cron_tasks');
+    setCronTasks(tasks);
+  }, [setCronTasks]);
+
+  const toggleCronTask = useCallback(async (id: string) => {
+    await invoke('toggle_cron_task', { id });
+    const tasks = await invoke<CronTask[]>('list_cron_tasks');
+    setCronTasks(tasks);
+  }, [setCronTasks]);
+
+  const loadCronTaskRuns = useCallback(async (taskId: string) => {
+    const runs = await invoke<CronTaskRun[]>('get_cron_task_runs', { taskId });
+    setCronRuns(taskId, runs);
+  }, [setCronRuns]);
+
+  const retryCronTask = useCallback(async (id: string) => {
+    await invoke('retry_cron_task', { id });
+  }, []);
+
+  const getCronNextRuns = useCallback(async (cronExpression: string, count?: number) => {
+    return invoke<string[]>('get_cron_next_runs', { cronExpression, count: count || 5 });
+  }, []);
+
+  const listCronTemplates = useCallback(async () => {
+    return invoke<CronTemplate[]>('list_cron_templates');
+  }, []);
+
+  const generateCronTaskStream = useCallback(async (query: string) => {
+    await invoke('generate_cron_task_stream', { query });
+  }, []);
+
   return {
     loadEnvironments,
     loadCurrentEnv,
@@ -394,5 +479,15 @@ export function useTauriCommands() {
     arrangeSessions,
     checkArrangeSupport,
     loadInstalledSkills,
+    loadCronTasks,
+    addCronTask,
+    updateCronTask,
+    deleteCronTask,
+    toggleCronTask,
+    loadCronTaskRuns,
+    retryCronTask,
+    getCronNextRuns,
+    listCronTemplates,
+    generateCronTaskStream,
   };
 }

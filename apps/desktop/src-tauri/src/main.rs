@@ -3,6 +3,7 @@
 
 mod analytics;
 mod config;
+mod cron;
 mod crypto;
 mod history;
 mod session;
@@ -13,6 +14,7 @@ mod tray;
 use analytics::{get_usage_stats, get_usage_history, get_continuous_usage_days};
 use history::{get_conversation_history, get_conversation_messages, get_conversation_segments};
 use config::{EnvConfig, get_env_with_decrypted_key, create_env_with_encrypted_key, AppConfig, FavoriteProject, RecentProject, VSCodeProject, JetBrainsProject};
+use cron::{CronScheduler, start_cron_scheduler};
 use session::{Session, SessionManager, start_session_monitor, cleanup_exit_file, cleanup_stale_exit_files};
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -927,7 +929,18 @@ fn main() {
             skills::search_skills_stream,
             skills::list_installed_skills,
             skills::install_skill,
-            skills::uninstall_skill
+            skills::uninstall_skill,
+            cron::list_cron_tasks,
+            cron::add_cron_task,
+            cron::update_cron_task,
+            cron::delete_cron_task,
+            cron::toggle_cron_task,
+            cron::get_cron_task_runs,
+            cron::retry_cron_task,
+            cron::get_cron_run_detail,
+            cron::list_cron_templates,
+            cron::get_cron_next_runs,
+            cron::generate_cron_task_stream
         ])
         .setup(move |app| {
             // Clean up stale exit files from previous sessions
@@ -959,6 +972,12 @@ fn main() {
 
             // Start session monitor background task
             start_session_monitor(app.handle().clone(), session_manager.clone());
+
+            // Start cron scheduler background task
+            let cron_scheduler = Arc::new(CronScheduler::default());
+            app.manage(cron_scheduler.clone());
+            let cron_app = app.handle().clone();
+            start_cron_scheduler(cron_app, cron_scheduler);
 
             Ok(())
         })
