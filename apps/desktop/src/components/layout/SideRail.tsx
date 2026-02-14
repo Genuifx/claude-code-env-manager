@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { Home, Terminal, Globe, BarChart3, Sparkles, Settings, MessageSquare } from 'lucide-react';
+import { Home, Terminal, Globe, BarChart3, Sparkles, Settings, MessageSquare, Clock } from 'lucide-react';
 
 interface SideRailProps {
   activeTab: string;
@@ -32,6 +32,7 @@ const navGroups: NavGroup[] = [
       { id: 'environments', label: 'Environments', icon: Globe, shortcut: '3' },
       { id: 'skills', label: 'Skills', icon: Sparkles, shortcut: '5' },
       { id: 'history', label: 'History', icon: MessageSquare, shortcut: '6' },
+      { id: 'cron', label: 'Cron', icon: Clock, shortcut: '8' },
     ],
   },
   {
