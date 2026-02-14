@@ -54,6 +54,7 @@ export const TokenChart = memo(function TokenChart({ data, seriesKeys }: TokenCh
         <YAxis
           className="text-xs text-muted-foreground"
           tickFormatter={formatAxisValue}
+          domain={[0, 'auto']}
         />
         <Tooltip
           contentStyle={tooltipStyle}

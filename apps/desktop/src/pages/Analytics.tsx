@@ -247,15 +247,19 @@ export function Analytics() {
 
     switch (granularity) {
       case 'hour': {
-        // Use real hourly data (key: YYYY-MM-DDTHH) — show last 24 hours
-        const hourlyEntries = Object.entries(usageStats.hourlyHistory ?? {})
-          .sort(([a], [b]) => a.localeCompare(b))
-          .slice(-24) as [string, TokenUsageWithCost][];
+        // Build a complete 24-hour window ending at the current hour,
+        // filling missing hours with 0 so the time axis stays linear.
+        const hourlyMap = usageStats.hourlyHistory ?? {};
+        const now = new Date();
+        const points: ChartDataPoint[] = [];
         let prevDate = '';
-        return hourlyEntries.map(([key, usage]) => {
-          const datePart = key.slice(5, 10); // "MM-DD"
-          const hourPart = key.slice(11);    // "HH"
-          // Show date on first point or when day changes
+        for (let i = 23; i >= 0; i--) {
+          const d = new Date(now);
+          d.setMinutes(0, 0, 0);
+          d.setHours(d.getHours() - i);
+          const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}`;
+          const datePart = key.slice(5, 10);
+          const hourPart = key.slice(11);
           let label: string;
           if (prevDate !== datePart) {
             label = `${datePart} ${hourPart}:00`;
@@ -263,8 +267,10 @@ export function Analytics() {
           } else {
             label = `${hourPart}:00`;
           }
-          return { date: label, Tokens: sumTokens(usage) };
-        });
+          const usage = hourlyMap[key];
+          points.push({ date: label, Tokens: usage ? sumTokens(usage) : 0 });
+        }
+        return points;
       }
       case 'day':
         return toChartPoints(

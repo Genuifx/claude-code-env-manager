@@ -37,7 +37,7 @@ export function AppLayout({ children, activeTab, onTabChange, pageTitle, pageAct
             </div>
           )}
         </div>
-        <main className="flex-1 overflow-y-auto px-8 py-4 relative z-10">
+        <main className="flex-1 overflow-y-auto px-8 py-4 relative z-10" style={{ willChange: 'transform' }}>
           <div className="max-w-6xl">
             {children}
           </div>

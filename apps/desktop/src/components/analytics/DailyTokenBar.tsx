@@ -49,6 +49,7 @@ export function DailyTokenBar({ dailyHistory }: DailyTokenBarProps) {
           className="text-xs text-muted-foreground"
           tickFormatter={formatAxisValue}
           tick={{ fontSize: 11 }}
+          domain={[0, 'auto']}
         />
         <Tooltip
           contentStyle={{
