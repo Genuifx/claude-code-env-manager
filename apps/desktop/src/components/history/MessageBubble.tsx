@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ChevronRight, Brain, CheckCircle2, XCircle, User, Bot, Circle, Scissors, ChevronsUpDown, ClipboardList, ChevronDown, Terminal, Sparkles, Users, AlertCircle } from 'lucide-react';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { ModelIcon } from './ModelIcon';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 
@@ -344,17 +345,19 @@ function PlanCard({ content, t, spacingClass }: { content: string; t: (key: stri
         {/* Content */}
         <div className="relative">
           <div
-            className={cn('px-4 py-3 overflow-hidden', !expanded && 'max-h-[400px]')}
+            className={cn('px-4 py-3', !expanded && 'max-h-[400px] overflow-hidden')}
+            style={!expanded ? {
+              maskImage: 'linear-gradient(to bottom, black 70%, transparent 100%)',
+              WebkitMaskImage: 'linear-gradient(to bottom, black 70%, transparent 100%)',
+            } : undefined}
           >
             <MarkdownRenderer content={content} />
           </div>
-          {/* Gradient mask + expand button when collapsed */}
           {!expanded && (
-            <div className="absolute bottom-0 inset-x-0 flex flex-col items-center">
-              <div className="w-full h-16 bg-gradient-to-t from-[hsl(var(--surface))] to-transparent" />
+            <div className="flex justify-center pb-3 -mt-4 relative">
               <button
                 onClick={() => setExpanded(true)}
-                className="absolute bottom-2 flex items-center gap-1 px-3 py-1 rounded-lg glass-subtle text-xs text-muted-foreground hover:text-foreground transition-colors"
+                className="flex items-center gap-1 px-3 py-1 rounded-lg glass-subtle text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
                 <ChevronDown className="w-3.5 h-3.5" />
                 {t('history.expandPlan')}
@@ -362,7 +365,7 @@ function PlanCard({ content, t, spacingClass }: { content: string; t: (key: stri
             </div>
           )}
           {expanded && (
-            <div className="flex justify-center pb-2">
+            <div className="flex justify-center pb-3">
               <button
                 onClick={() => setExpanded(false)}
                 className="flex items-center gap-1 px-3 py-1 rounded-lg glass-subtle text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -717,7 +720,7 @@ export function MessageBubble({ message, prevRole }: MessageBubbleProps) {
         )}>
           {isUser
             ? <User className="w-3.5 h-3.5 text-primary" />
-            : <Bot className="w-3.5 h-3.5 text-muted-foreground" />
+            : <ModelIcon model={message.model} size={14} className="text-muted-foreground" />
           }
         </div>
 

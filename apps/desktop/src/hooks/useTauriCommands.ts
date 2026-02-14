@@ -166,7 +166,7 @@ export function useTauriCommands() {
     }
   }, [loadEnvironments, setLoading, setError]);
 
-  const launchClaudeCode = useCallback(async (workingDir?: string) => {
+  const launchClaudeCode = useCallback(async (workingDir?: string, resumeSessionId?: string) => {
     setLoading(true);
     try {
       const workDir = workingDir || selectedWorkingDir || null;
@@ -174,6 +174,7 @@ export function useTauriCommands() {
         envName: currentEnv,
         permMode: permissionMode,
         workingDir: workDir,
+        resumeSessionId: resumeSessionId || null,
       });
 
       // Convert Tauri session to frontend session

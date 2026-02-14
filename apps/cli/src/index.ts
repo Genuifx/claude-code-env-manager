@@ -41,6 +41,7 @@ import {
   listAvailableModes,
   runWithTempPermissions
 } from './permissions.js';
+import { launchClaude } from './launcher.js';
 import { getUsageStats, getUsageStatsFromCache } from './usage.js';
 import { runSetupInit } from './setup.js';
 import type { UsageStats } from '@ccem/core';
@@ -726,6 +727,36 @@ program
     await loadFromRemote(url, options.secret);
   });
 
+// launch 命令 - Desktop app 调用的隐藏命令
+program
+  .command('launch')
+  .description(false as any) // hidden from help
+  .option('--env <name>', '环境名称')
+  .option('--perm <mode>', '权限模式')
+  .option('--session-id <id>', '会话 ID')
+  .option('--resume-session <id>', '恢复会话 ID')
+  .option('--working-dir <path>', '工作目录')
+  .action(async function(this: any) {
+    const opts = this.opts();
+    const envName = opts.env || (config.get('current') as string);
+    const registries = config.get('registries') as Record<string, EnvConfig>;
+    const envConfig = registries[envName];
+
+    if (!envConfig) {
+      console.error(chalk.red(`Environment '${envName}' not found.`));
+      process.exit(1);
+    }
+
+    await launchClaude({
+      envConfig,
+      permMode: opts.perm as PermissionModeName | undefined,
+      workingDir: opts.workingDir,
+      sessionId: opts.sessionId,
+      resumeSessionId: opts.resumeSession,
+      silent: true,
+    });
+  });
+
 // usage 命令 - 显示使用统计并刷新缓存
 program
   .command('usage')
@@ -802,26 +833,7 @@ program
           process.exit(1);
         }
 
-        if (defaultMode && PERMISSION_PRESETS[defaultMode]) {
-          await runWithTempPermissions(defaultMode, envConfig);
-        } else {
-          const env = { ...process.env };
-          if (envConfig.ANTHROPIC_BASE_URL) env.ANTHROPIC_BASE_URL = envConfig.ANTHROPIC_BASE_URL;
-          if (envConfig.ANTHROPIC_API_KEY) env.ANTHROPIC_API_KEY = decrypt(envConfig.ANTHROPIC_API_KEY || '');
-          if (envConfig.ANTHROPIC_MODEL) env.ANTHROPIC_MODEL = envConfig.ANTHROPIC_MODEL;
-          if (envConfig.ANTHROPIC_SMALL_FAST_MODEL) env.ANTHROPIC_SMALL_FAST_MODEL = envConfig.ANTHROPIC_SMALL_FAST_MODEL;
-
-          console.log(renderStarting());
-          const child = spawn('claude', [], {
-            env,
-            stdio: 'inherit',
-            shell: true
-          });
-
-          child.on('exit', (code) => {
-            process.exit(code ?? 0);
-          });
-        }
+        await launchClaude({ envConfig, permMode: defaultMode || undefined });
         return;
       } else if (action === 'usage') {
         // 显示详细 usage 统计

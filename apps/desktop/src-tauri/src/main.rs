@@ -224,9 +224,10 @@ fn launch_claude_code(
     env_name: String,
     perm_mode: Option<String>,
     working_dir: Option<String>,
+    resume_session_id: Option<String>,
 ) -> Result<Session, String> {
     println!("=== launch_claude_code called ===");
-    println!("env_name: {}, perm_mode: {:?}, working_dir: {:?}", env_name, perm_mode, working_dir);
+    println!("env_name: {}, perm_mode: {:?}, working_dir: {:?}, resume_session_id: {:?}", env_name, perm_mode, working_dir, resume_session_id);
 
     // Read environment configuration
     let cfg = config::read_config()?;
@@ -274,6 +275,9 @@ fn launch_claude_code(
         env_vars,
         &work_dir,
         &session_id,
+        &env_name,
+        perm_mode.as_deref(),
+        resume_session_id.as_deref(),
     );
 
     let (window_id, iterm_session_id) = match &launch_result {
