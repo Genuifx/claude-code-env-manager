@@ -3,7 +3,7 @@ import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { ENV_PRESETS } from '@ccem/core/browser';
 import { AppLayout } from '@/components/layout';
-import { Dashboard, Environments, Sessions, Analytics, Settings, Skills, History } from '@/pages';
+import { Dashboard, Environments, Sessions, Analytics, Settings, Skills, History, CronTasks } from '@/pages';
 import { useAppStore, type Environment } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
@@ -158,6 +158,7 @@ function App() {
     'meta+5': () => setActiveTab('skills'),
     'meta+6': () => setActiveTab('history'),
     'meta+7': () => setActiveTab('settings'),
+    'meta+8': () => setActiveTab('cron'),
     'meta+enter': () => handleLaunch(),
     'meta+n': () => handleLaunch(),
     'meta+,': () => setActiveTab('settings'),
@@ -230,6 +231,7 @@ function App() {
     analytics: 'Analytics',
     skills: 'Skills',
     history: 'History',
+    cron: 'Cron',
     settings: 'Settings',
   };
   const pageTitle = pageTitleMap[activeTab] || 'Home';
@@ -261,6 +263,8 @@ function App() {
         return <Skills />;
       case 'history':
         return <History />;
+      case 'cron':
+        return <CronTasks />;
       case 'settings':
         return <Settings />;
       default:

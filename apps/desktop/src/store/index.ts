@@ -53,6 +53,43 @@ export interface InstalledSkill {
   scope: 'project' | 'global';
 }
 
+export interface CronTask {
+  id: string;
+  name: string;
+  cronExpression: string;
+  prompt: string;
+  workingDir: string;
+  envName: string | null;
+  enabled: boolean;
+  timeoutSecs: number;
+  templateId: string | null;
+  triggerType: string;
+  parentTaskId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CronTaskRun {
+  id: string;
+  taskId: string;
+  startedAt: string;
+  finishedAt: string | null;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  durationMs: number | null;
+  status: string; // "running" | "success" | "failed" | "timeout"
+}
+
+export interface CronTemplate {
+  id: string;
+  name: string;
+  description: string;
+  cronExpression: string;
+  prompt: string;
+  icon: string;
+}
+
 interface AppState {
   // Environments
   environments: Environment[];
@@ -102,6 +139,14 @@ interface AppState {
   setUsageStats: (stats: UsageStats) => void;
   setMilestones: (milestones: Milestone[]) => void;
   setContinuousUsageDays: (days: number) => void;
+
+  // Cron
+  cronTasks: CronTask[];
+  cronRuns: Record<string, CronTaskRun[]>;
+  isLoadingCron: boolean;
+  setCronTasks: (tasks: CronTask[]) => void;
+  setCronRuns: (taskId: string, runs: CronTaskRun[]) => void;
+  setLoadingCron: (loading: boolean) => void;
 
   // UI State
   isLoading: boolean;
@@ -188,6 +233,14 @@ export const useAppStore = create<AppState>((set) => ({
   setUsageStats: (stats) => set({ usageStats: stats }),
   setMilestones: (milestones) => set({ milestones }),
   setContinuousUsageDays: (days) => set({ continuousUsageDays: days }),
+
+  // Cron
+  cronTasks: [],
+  cronRuns: {},
+  isLoadingCron: false,
+  setCronTasks: (tasks) => set({ cronTasks: tasks }),
+  setCronRuns: (taskId, runs) => set((state) => ({ cronRuns: { ...state.cronRuns, [taskId]: runs } })),
+  setLoadingCron: (loading) => set({ isLoadingCron: loading }),
 
   // UI State
   isLoading: false,
