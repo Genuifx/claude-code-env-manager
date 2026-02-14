@@ -1,8 +1,132 @@
 import { useState } from 'react';
-import { ChevronRight, Brain, CheckCircle2, XCircle, User, Bot, Circle, Scissors, ChevronsUpDown, ClipboardList, ChevronDown } from 'lucide-react';
+import { ChevronRight, Brain, CheckCircle2, XCircle, User, Bot, Circle, Scissors, ChevronsUpDown, ClipboardList, ChevronDown, Terminal, Sparkles, Users, AlertCircle } from 'lucide-react';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
+
+/** Parse and sanitize Claude Code internal XML tags from message text. */
+interface TeammateMessage {
+  id: string;
+  color: string;
+  summary?: string;
+  content: string;
+  /** Parsed JSON notification, if content is JSON */
+  notification?: { type: string; idleReason?: string; failureReason?: string };
+}
+
+interface ParsedText {
+  /** Cleaned text with all internal tags removed */
+  cleanText: string;
+  /** Extracted slash command info, if present */
+  command?: { name: string; output?: string };
+  /** Extracted teammate messages */
+  teammateMessages: TeammateMessage[];
+}
+
+const TEAMMATE_RE = /<teammate-message\s+teammate_id="([^"]*)"(?:\s+color="([^"]*)")?(?:\s+summary="([^"]*)")?\s*>([\s\S]*?)<\/teammate-message>/g;
+
+function parseMessageText(raw: string): ParsedText {
+  let text = raw;
+
+  // Extract command info before stripping
+  const cmdMatch = text.match(/<command-name>\/?([\s\S]*?)<\/command-name>/);
+  const stdoutMatch = text.match(/<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/);
+
+  const command = cmdMatch
+    ? { name: cmdMatch[1].trim(), output: stdoutMatch?.[1]?.trim() }
+    : undefined;
+
+  // Extract teammate messages before stripping
+  const teammateMessages: TeammateMessage[] = [];
+  for (const match of text.matchAll(TEAMMATE_RE)) {
+    const [, id, color, summary, content] = match;
+    const trimmed = content.trim();
+    let notification: TeammateMessage['notification'];
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === 'object' && parsed.type) {
+        notification = parsed;
+      }
+    } catch { /* not JSON, it's markdown content */ }
+    teammateMessages.push({ id, color: color || 'blue', summary, content: trimmed, notification });
+  }
+  text = text.replace(TEAMMATE_RE, '');
+
+  // Strip all known internal XML tags (and their content)
+  const tagPatterns = [
+    /<system-reminder>[\s\S]*?<\/system-reminder>/g,
+    /<local-command-caveat>[\s\S]*?<\/local-command-caveat>/g,
+    /<local-command-stdout>[\s\S]*?<\/local-command-stdout>/g,
+    /<command-name>[\s\S]*?<\/command-name>/g,
+    /<command-message>[\s\S]*?<\/command-message>/g,
+    /<command-args>[\s\S]*?<\/command-args>/g,
+    /<synthetic>[\s\S]*?<\/synthetic>/g,
+    /<synthetic\s*\/?>/g,
+    /<task-notification>[\s\S]*?<\/task-notification>/g,
+    /<task-id>[\s\S]*?<\/task-id>/g,
+    /<tool_use_error>[\s\S]*?<\/tool_use_error>/g,
+    /<local-command>[\s\S]*?<\/local-command>/g,
+    /<direct-parameter>[\s\S]*?<\/direct-parameter>/g,
+    /<responds-to>[\s\S]*?<\/responds-to>/g,
+    /<retrieval_status>[\s\S]*?<\/retrieval_status>/g,
+  ];
+  for (const pattern of tagPatterns) {
+    text = text.replace(pattern, '');
+  }
+
+  // Strip "Caveat: ..." lines injected by Claude Code
+  text = text.replace(/^Caveat:.*$/gm, '');
+
+  // Collapse excessive blank lines left after stripping
+  text = text.replace(/\n{3,}/g, '\n\n').trim();
+
+  return { cleanText: text, command, teammateMessages };
+}
+
+/** Inline chip for slash commands — adapts to bubble background via isUser */
+function CommandChip({ name, output, isUser, standalone }: { name: string; output?: string; isUser?: boolean; standalone?: boolean }) {
+  // Standalone: command-only message, chip IS the bubble
+  if (standalone) {
+    return (
+      <div className="flex items-center gap-2">
+        <div className={cn(
+          'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl',
+          'glass-subtle glass-noise',
+          'border border-[hsl(var(--glass-border-light)/var(--glass-border-opacity))]',
+          'shadow-[inset_0_0.5px_0_0_hsl(var(--glass-inset-highlight)/calc(var(--glass-inset-opacity)*0.6)),0_2px_8px_hsl(var(--glass-shadow-base)/0.08)]',
+        )}>
+          <Terminal className="w-3.5 h-3.5 text-primary/70" />
+          <span className="text-[12px] font-mono font-medium text-primary">/{name}</span>
+        </div>
+        {output && (
+          <span className="text-[11px] font-mono text-muted-foreground/50 truncate max-w-[250px]">
+            {output}
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  // Inline: inside a user or assistant bubble
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className={cn(
+        'inline-flex items-center gap-1 px-2 py-0.5 rounded-md',
+        isUser
+          ? 'bg-white/[0.12] border border-white/[0.18] shadow-[inset_0_0.5px_0_0_rgba(255,255,255,0.15)]'
+          : 'bg-[hsl(var(--glass-bg)/calc(var(--glass-bg-opacity)*0.5))] border border-[hsl(var(--glass-border-light)/var(--glass-border-opacity))] shadow-[inset_0_0.5px_0_0_hsl(var(--glass-inset-highlight)/calc(var(--glass-inset-opacity)*0.5))]'
+      )}>
+        <Terminal className={cn('w-3 h-3', isUser ? 'text-white/60' : 'text-primary/60')} />
+        <span className={cn('text-[11px] font-mono font-medium', isUser ? 'text-white/90' : 'text-primary')}>/{name}</span>
+      </div>
+      {output && (
+        <span className={cn('text-[11px] font-mono truncate max-w-[250px]', isUser ? 'text-white/40' : 'text-muted-foreground/50')}>
+          {output}
+        </span>
+      )}
+    </div>
+  );
+}
 
 interface ContentBlock {
   type: string;
@@ -254,8 +378,176 @@ function PlanCard({ content, t, spacingClass }: { content: string; t: (key: stri
   );
 }
 
-function renderTextContent(text: string, isUser = false) {
-  return <MarkdownRenderer content={text} variant={isUser ? 'user' : 'default'} />;
+/** Matches insight blocks: backtick-wrapped ★ header line, content, backtick-wrapped closing line */
+const INSIGHT_RE = /`★\s*Insight\s*─+`\n([\s\S]*?)\n`─+`/g;
+
+/** Render an insight block as a frosted glass callout card */
+function InsightBlock({ content }: { content: string }) {
+  return (
+    <div className={cn(
+      'relative my-2.5 rounded-xl overflow-hidden',
+      'glass-noise',
+      'bg-[hsl(var(--primary)/0.08)]',
+      'border-l-[3px] border-l-primary/70',
+      'border border-primary/20',
+      'shadow-[inset_0_1px_0_0_hsl(var(--glass-inset-highlight)/calc(var(--glass-inset-opacity)*0.8)),0_2px_12px_hsl(var(--glass-shadow-base)/0.1)]',
+    )}>
+      {/* Accent glow on left edge */}
+      <div className="absolute left-0 top-0 bottom-0 w-12 bg-gradient-to-r from-primary/[0.08] to-transparent pointer-events-none" />
+      {/* Header */}
+      <div className="relative flex items-center gap-1.5 px-3 pt-2 pb-0.5">
+        <Sparkles className="w-3 h-3 text-primary" />
+        <span className="text-[10px] font-semibold text-primary uppercase tracking-widest">Insight</span>
+      </div>
+      {/* Body */}
+      <div className="relative px-3 pb-2.5 text-[12.5px] leading-relaxed">
+        <MarkdownRenderer content={content.trim()} />
+      </div>
+    </div>
+  );
+}
+
+/** Color map for teammate badges */
+const TEAMMATE_COLORS: Record<string, string> = {
+  blue: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+  green: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+  yellow: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+  purple: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+  red: 'bg-red-500/20 text-red-400 border-red-500/30',
+};
+const TEAMMATE_BORDER_COLORS: Record<string, string> = {
+  blue: 'border-l-blue-400/70',
+  green: 'border-l-emerald-400/70',
+  yellow: 'border-l-amber-400/70',
+  purple: 'border-l-purple-400/70',
+  red: 'border-l-red-400/70',
+};
+
+/** Render a teammate message — either a full markdown deliverable or a status notification */
+function TeammateMessageBlock({ msg }: { msg: TeammateMessage }) {
+  const [expanded, setExpanded] = useState(false);
+  const isNotification = !!msg.notification;
+  const isFailed = msg.notification?.idleReason === 'failed';
+  const colorClass = TEAMMATE_COLORS[msg.color] || TEAMMATE_COLORS.blue;
+  const borderClass = TEAMMATE_BORDER_COLORS[msg.color] || TEAMMATE_BORDER_COLORS.blue;
+
+  // Compact notification chip (idle/available/failed)
+  if (isNotification) {
+    return (
+      <div className="my-1.5 flex items-center gap-2">
+        <div className={cn(
+          'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px]',
+          isFailed
+            ? 'bg-destructive/10 border border-destructive/20'
+            : 'bg-muted/80 border border-border/50',
+        )}>
+          {isFailed
+            ? <AlertCircle className="w-3 h-3 text-destructive/70" />
+            : <Users className="w-3 h-3 text-muted-foreground/60" />
+          }
+          <span className={cn('font-mono font-medium', colorClass, 'bg-transparent border-0')}>
+            {msg.id}
+          </span>
+          <span className={cn('text-muted-foreground/70', isFailed && 'text-destructive/70')}>
+            {isFailed ? 'failed' : msg.notification?.idleReason || 'idle'}
+          </span>
+        </div>
+        {isFailed && msg.notification?.failureReason && (
+          <span className="text-[10px] text-destructive/60 truncate max-w-[300px]">
+            {msg.notification.failureReason}
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  // Full content deliverable — collapsible card
+  return (
+    <div className={cn(
+      'relative my-2.5 rounded-xl overflow-hidden',
+      'glass-noise',
+      'bg-[hsl(var(--glass-bg)/calc(var(--glass-bg-opacity)*0.8))]',
+      'border-l-[3px]', borderClass,
+      'border border-[hsl(var(--glass-border-light)/var(--glass-border-opacity))]',
+      'shadow-[inset_0_0.5px_0_0_hsl(var(--glass-inset-highlight)/calc(var(--glass-inset-opacity)*0.6)),0_2px_8px_hsl(var(--glass-shadow-base)/0.08)]',
+    )}>
+      {/* Header */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="relative w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/[0.03] transition-colors"
+      >
+        <Users className="w-3.5 h-3.5 text-muted-foreground/60 shrink-0" />
+        <span className={cn(
+          'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold border',
+          colorClass,
+        )}>
+          {msg.id}
+        </span>
+        {msg.summary && (
+          <span className="text-[12px] text-muted-foreground truncate min-w-0">
+            {msg.summary}
+          </span>
+        )}
+        <ChevronRight className={cn(
+          'w-3.5 h-3.5 text-muted-foreground/50 ml-auto shrink-0 transition-transform',
+          expanded && 'rotate-90'
+        )} />
+      </button>
+      {/* Expandable content */}
+      {expanded && (
+        <div className="px-3 pb-3 border-t border-white/[0.06]">
+          <div className="pt-2 max-h-[500px] overflow-y-auto">
+            <MarkdownRenderer content={msg.content} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Returns an array of { type, content } for sequential rendering.
+ */
+function splitInsightBlocks(text: string): Array<{ type: 'md' | 'insight'; content: string }> {
+  const parts: Array<{ type: 'md' | 'insight'; content: string }> = [];
+  let lastIndex = 0;
+
+  for (const match of text.matchAll(INSIGHT_RE)) {
+    const before = text.slice(lastIndex, match.index);
+    if (before.trim()) parts.push({ type: 'md', content: before });
+    parts.push({ type: 'insight', content: match[1] });
+    lastIndex = match.index! + match[0].length;
+  }
+
+  const after = text.slice(lastIndex);
+  if (after.trim()) parts.push({ type: 'md', content: after });
+
+  return parts;
+}
+
+function renderTextContent(text: string, isUser = false, standalone = false) {
+  const { cleanText, command } = parseMessageText(text);
+  if (command && !cleanText) {
+    return <CommandChip name={command.name} output={command.output} isUser={isUser} standalone={standalone} />;
+  }
+  if (!cleanText) return null;
+
+  // Check for insight blocks in assistant messages
+  if (!isUser && INSIGHT_RE.test(cleanText)) {
+    INSIGHT_RE.lastIndex = 0;
+    const parts = splitInsightBlocks(cleanText);
+    return (
+      <>
+        {parts.map((part, i) =>
+          part.type === 'insight'
+            ? <InsightBlock key={`insight-${i}`} content={part.content} />
+            : <MarkdownRenderer key={`md-${i}`} content={part.content.trim()} />
+        )}
+      </>
+    );
+  }
+
+  return <MarkdownRenderer content={cleanText} variant={isUser ? 'user' : 'default'} />;
 }
 
 function renderContentBlocks(blocks: ContentBlock[], t: (key: string) => string, isUser = false) {
@@ -360,49 +652,104 @@ export function MessageBubble({ message, prevRole }: MessageBubbleProps) {
     return <PlanCard content={message.planContent} t={t} spacingClass={spacingClass} />;
   }
 
+  // Collect all teammate messages from content for standalone rendering
+  const allTeammateMessages: TeammateMessage[] = [];
+  const collectTeammate = (text: string) => {
+    const { teammateMessages } = parseMessageText(text);
+    allTeammateMessages.push(...teammateMessages);
+  };
+
   // Parse content
   const content = message.content;
   let renderedContent: React.ReactNode;
+  let isCommandOnly = false;
 
   if (typeof content === 'string') {
-    renderedContent = renderTextContent(content, isUser);
+    collectTeammate(content);
+    const { cleanText, command } = parseMessageText(content);
+    isCommandOnly = !!(command && !cleanText);
+    renderedContent = renderTextContent(content, isUser, isCommandOnly);
   } else if (Array.isArray(content)) {
-    renderedContent = renderContentBlocks(content as ContentBlock[], t, isUser);
+    // Collect teammate messages from all text blocks
+    for (const block of content as ContentBlock[]) {
+      if (block.type === 'text' && block.text) collectTeammate(block.text);
+    }
+    // Check if the only meaningful block is a command-only text
+    const textBlocks = (content as ContentBlock[]).filter(b => b.type === 'text');
+    if (textBlocks.length === 1 && textBlocks.length === content.length) {
+      const { cleanText, command } = parseMessageText(textBlocks[0].text || '');
+      isCommandOnly = !!(command && !cleanText);
+    }
+    renderedContent = isCommandOnly
+      ? renderTextContent((content as ContentBlock[])[0].text || '', isUser, true)
+      : renderContentBlocks(content as ContentBlock[], t, isUser);
   } else if (content && typeof content === 'object') {
     // Single content block
     renderedContent = renderContentBlocks([content as ContentBlock], t, isUser);
   } else {
-    renderedContent = <p className="text-xs text-muted-foreground italic">{t('history.emptyMessage')}</p>;
+    renderedContent = null;
+  }
+
+  // If message is ONLY teammate messages (no other content), render them standalone
+  const hasMainContent = renderedContent && !(Array.isArray(renderedContent) && renderedContent.length === 0);
+  if (!hasMainContent && allTeammateMessages.length > 0) {
+    return (
+      <div className={spacingClass}>
+        {allTeammateMessages.map((msg, i) => (
+          <TeammateMessageBlock key={`tm-${msg.id}-${i}`} msg={msg} />
+        ))}
+      </div>
+    );
+  }
+
+  // Skip empty bubbles (e.g. message was only internal tags that got stripped)
+  if (!hasMainContent) {
+    return null;
   }
 
   return (
-    <div className={cn('flex gap-2.5', spacingClass, isUser ? 'flex-row-reverse' : 'flex-row')}>
-      {/* Avatar */}
-      <div className={cn(
-        'w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5',
-        isUser ? 'bg-primary/20' : 'glass-subtle'
-      )}>
-        {isUser
-          ? <User className="w-3.5 h-3.5 text-primary" />
-          : <Bot className="w-3.5 h-3.5 text-muted-foreground" />
-        }
-      </div>
+    <>
+      <div className={cn('flex gap-2.5', spacingClass, isUser ? 'flex-row-reverse' : 'flex-row')}>
+        {/* Avatar */}
+        <div className={cn(
+          'w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5',
+          isUser ? 'bg-primary/20' : 'glass-subtle'
+        )}>
+          {isUser
+            ? <User className="w-3.5 h-3.5 text-primary" />
+            : <Bot className="w-3.5 h-3.5 text-muted-foreground" />
+          }
+        </div>
 
-      {/* Bubble */}
-      <div className={cn(
-        'rounded-2xl px-3.5 py-2.5 max-w-[85%] min-w-0',
-        isUser
-          ? 'glass-chat-user text-primary-foreground'
-          : 'glass-chat-assistant'
-      )}>
-        {renderedContent}
-        {/* Model tag for assistant */}
-        {!isUser && message.model && (
-          <p className="text-[10px] text-muted-foreground/50 mt-1.5 font-mono">
-            {message.model}
-          </p>
-        )}
+        {/* Bubble */}
+        <div className={cn(
+          'rounded-2xl max-w-[85%] min-w-0',
+          isCommandOnly
+            ? 'px-0 py-0'
+            : 'px-3.5 py-2.5',
+          isCommandOnly
+            ? ''
+            : isUser
+              ? 'glass-chat-user text-primary-foreground'
+              : 'glass-chat-assistant'
+        )}>
+          {renderedContent}
+          {/* Model tag for assistant */}
+          {!isUser && message.model && (
+            <p className="text-[10px] text-muted-foreground/50 mt-1.5 font-mono">
+              {message.model}
+            </p>
+          )}
+        </div>
       </div>
-    </div>
+      {/* Teammate messages rendered outside the bubble */}
+      {allTeammateMessages.length > 0 && (
+        <div className="ml-[38px] mt-1">
+          {allTeammateMessages.map((msg, i) => (
+            <TeammateMessageBlock key={`tm-${msg.id}-${i}`} msg={msg} />
+          ))}
+        </div>
+      )}
+    </>
   );
 }
