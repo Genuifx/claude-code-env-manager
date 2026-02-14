@@ -384,6 +384,15 @@
     "viewHistory": "View History",
     "disable": "Disable",
     "enable": "Enable",
-    "taskCreated": "Task created"
+    "taskCreated": "Task created",
+    "aiCreate": "AI Create",
+    "aiPlaceholder": "Describe the task you want, e.g.: code review every day at 9am",
+    "aiGenerate": "Generate",
+    "aiGenerating": "Generating...",
+    "aiEdit": "Edit",
+    "aiConfirm": "Confirm",
+    "aiComplete": "Analysis complete",
+    "aiCreated": "Task created",
+    "aiError": "Generation failed"
   }
 }

@@ -384,6 +384,15 @@
     "viewHistory": "查看历史",
     "disable": "禁用",
     "enable": "启用",
-    "taskCreated": "任务已创建"
+    "taskCreated": "任务已创建",
+    "aiCreate": "AI 创建",
+    "aiPlaceholder": "描述你想要的定时任务，例如：每天早上 9 点对项目做 code review",
+    "aiGenerate": "生成",
+    "aiGenerating": "生成中...",
+    "aiEdit": "编辑",
+    "aiConfirm": "确认创建",
+    "aiComplete": "分析完成",
+    "aiCreated": "任务已创建",
+    "aiError": "生成失败"
   }
 }

@@ -4,12 +4,13 @@ import { useLocale } from '@/locales';
 import { useAppStore, type CronTask, type CronTaskRun, type CronTemplate } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { CronEditor } from '@/components/cron';
+import { AiCronPanel } from '@/components/cron/AiCronPanel';
 import { PageHeader } from '@/components/layout';
 import { EmptyState } from '@/components/ui/EmptyState';
 import {
   Clock, Plus, Play, Trash2, ChevronRight, CheckCircle2, XCircle,
   Timer, AlertTriangle, FolderOpen, ChevronDown, GitPullRequest,
-  FlaskConical, FileText, Shield, Newspaper,
+  FlaskConical, FileText, Shield, Newspaper, Sparkles,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -266,6 +267,7 @@ export function CronTasks() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<CronTask | null>(null);
   const [templates, setTemplates] = useState<CronTemplate[]>([]);
+  const [showAiPanel, setShowAiPanel] = useState(false);
 
   useEffect(() => {
     loadCronTasks();
@@ -289,6 +291,26 @@ export function CronTasks() {
 
   const handleAdd = () => { setEditingTask(undefined); setDialogOpen(true); };
   const handleEdit = (task: CronTask) => { setEditingTask(task); setDialogOpen(true); };
+
+  const handleAiEdit = (task: { name: string; cronExpression: string; prompt: string; workingDir: string }) => {
+    setEditingTask({
+      id: '',
+      name: task.name,
+      cronExpression: task.cronExpression,
+      prompt: task.prompt,
+      workingDir: task.workingDir,
+      envName: null,
+      enabled: true,
+      timeoutSecs: 300,
+      templateId: null,
+      triggerType: 'schedule',
+      parentTaskId: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } as CronTask);
+    setDialogOpen(true);
+    setShowAiPanel(false);
+  };
 
   const handleTemplateCreate = async (tpl: CronTemplate) => {
     try {
@@ -331,13 +353,28 @@ export function CronTasks() {
   return (
     <div className="flex flex-col h-full">
       <PageHeader title={t('cron.title')}>
-        <button onClick={handleAdd} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-sm hover:bg-primary/90 transition-colors">
-          <Plus className="w-4 h-4" />
-          {t('cron.addTask')}
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowAiPanel(!showAiPanel)} className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors', showAiPanel ? 'bg-primary/20 text-primary' : 'glass-outline-btn text-foreground hover:bg-white/[0.06]')}>
+            <Sparkles className="w-4 h-4" />
+            {t('cron.aiCreate')}
+          </button>
+          <button onClick={handleAdd} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-sm hover:bg-primary/90 transition-colors">
+            <Plus className="w-4 h-4" />
+            {t('cron.addTask')}
+          </button>
+        </div>
       </PageHeader>
 
       <div className="flex-1 flex flex-col gap-4 p-4 overflow-hidden">
+        {showAiPanel && (
+          <div className="shrink-0">
+            <AiCronPanel
+              onTaskCreated={() => { loadCronTasks(); setShowAiPanel(false); }}
+              onEdit={handleAiEdit}
+            />
+          </div>
+        )}
+
         {templates.length > 0 && cronTasks.length === 0 && (
           <div className="shrink-0">
             <p className="text-xs text-muted-foreground mb-2">{t('cron.templates')}</p>

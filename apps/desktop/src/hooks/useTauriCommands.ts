@@ -450,6 +450,10 @@ export function useTauriCommands() {
     return invoke<CronTemplate[]>('list_cron_templates');
   }, []);
 
+  const generateCronTaskStream = useCallback(async (query: string) => {
+    await invoke('generate_cron_task_stream', { query });
+  }, []);
+
   return {
     loadEnvironments,
     loadCurrentEnv,
@@ -483,5 +487,6 @@ export function useTauriCommands() {
     retryCronTask,
     getCronNextRuns,
     listCronTemplates,
+    generateCronTaskStream,
   };
 }
