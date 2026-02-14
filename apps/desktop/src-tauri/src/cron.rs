@@ -2,6 +2,7 @@ use crate::config;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::io::BufRead;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -781,4 +782,91 @@ pub fn get_cron_next_runs(cron_expression: String, count: Option<usize>) -> Resu
         return Err("Invalid cron expression: must have exactly 5 fields".to_string());
     }
     Ok(next_runs(&cron_expression, count.unwrap_or(5)))
+}
+
+// ============================================================================
+// AI-assisted cron task generation (streaming)
+// ============================================================================
+
+/// Resolve the user's full login-shell PATH so we can find the `claude` binary.
+fn get_user_path() -> String {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let output = Command::new(&shell)
+        .args(["-l", "-c", "echo $PATH"])
+        .output();
+
+    match output {
+        Ok(out) if out.status.success() => {
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        }
+        _ => std::env::var("PATH").unwrap_or_default(),
+    }
+}
+
+#[tauri::command]
+pub fn generate_cron_task_stream(app: AppHandle, query: String) {
+    thread::spawn(move || {
+        let prompt = format!(
+            "用户想创建一个定时任务: {}\n\n\
+             请根据用户描述，生成一个 cron 任务配置。返回一个 JSON 对象（不要包含在 markdown 代码块中）：\n\
+             {{\n\
+               \"name\": \"简短的任务名称\",\n\
+               \"cronExpression\": \"标准5字段cron表达式\",\n\
+               \"prompt\": \"要发送给 Claude Code 执行的详细 prompt\",\n\
+               \"workingDir\": \"建议的工作目录，如果用户没指定则用 ~\"\n\
+             }}\n\n\
+             注意：\n\
+             - cronExpression 使用标准 5 字段: 分 时 日 月 周\n\
+             - prompt 应该是详细的、可直接执行的指令\n\
+             - 只返回 JSON，不要其他内容",
+            query
+        );
+
+        let user_path = get_user_path();
+        let mut cmd = Command::new("claude");
+        cmd.args(["-p", &prompt, "--output-format", "stream-json", "--verbose"])
+            .env("PATH", &user_path)
+            .env_remove("CLAUDECODE")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        // Inject current environment's API config
+        if let Ok(cfg) = config::read_config() {
+            if let Some(env_name) = &cfg.current {
+                if let Some(env) = cfg.registries.get(env_name) {
+                    let decrypted = config::get_env_with_decrypted_key(env);
+                    if let Some(url) = &decrypted.base_url { cmd.env("ANTHROPIC_BASE_URL", url); }
+                    if let Some(key) = &decrypted.api_key { cmd.env("ANTHROPIC_API_KEY", key); }
+                    if let Some(model) = &decrypted.model { cmd.env("ANTHROPIC_MODEL", model); }
+                    if let Some(small) = &decrypted.small_model { cmd.env("ANTHROPIC_SMALL_FAST_MODEL", small); }
+                }
+            }
+        }
+
+        let child = cmd.spawn();
+        match child {
+            Ok(mut process) => {
+                if let Some(stdout) = process.stdout.take() {
+                    let reader = std::io::BufReader::new(stdout);
+                    for line in reader.lines() {
+                        match line {
+                            Ok(l) if !l.trim().is_empty() => {
+                                let _ = app.emit("cron-ai-stream", &l);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                let _ = process.wait();
+                let _ = app.emit("cron-ai-done", ());
+            }
+            Err(e) => {
+                let _ = app.emit(
+                    "cron-ai-stream",
+                    &serde_json::json!({"type":"error","error":format!("Failed to start claude CLI: {}",e)}).to_string(),
+                );
+                let _ = app.emit("cron-ai-done", ());
+            }
+        }
+    });
 }

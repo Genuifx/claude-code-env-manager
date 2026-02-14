@@ -935,7 +935,8 @@ fn main() {
             cron::retry_cron_task,
             cron::get_cron_run_detail,
             cron::list_cron_templates,
-            cron::get_cron_next_runs
+            cron::get_cron_next_runs,
+            cron::generate_cron_task_stream
         ])
         .setup(move |app| {
             // Clean up stale exit files from previous sessions
