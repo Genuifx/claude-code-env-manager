@@ -1,8 +1,9 @@
 import { useEffect, useCallback } from 'react';
 import { Terminal, Moon } from 'lucide-react';
-import { useAppStore, type Session } from '@/store';
+import { useAppStore } from '@/store';
+import type { Session } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
-import { useSessionUpdatedEvent, type SessionUpdatePayload } from '@/hooks/useTauriEvents';
+import { useSessionUpdatedEvent, useTaskCompletedEvent, useTaskErrorEvent, useSessionInterruptedEvent } from '@/hooks/useTauriEvents';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
@@ -12,7 +13,7 @@ interface SessionsCardProps {
 }
 
 export function SessionsCard({ onStopAll }: SessionsCardProps) {
-  const { sessions, updateSessionStatus } = useAppStore();
+  const { sessions } = useAppStore();
   const { loadSessions, deleteSession, focusSession, closeSession, minimizeSession } = useTauriCommands();
   const { t } = useLocale();
 
@@ -23,17 +24,21 @@ export function SessionsCard({ onStopAll }: SessionsCardProps) {
     });
   }, [loadSessions]);
 
-  // Handle session-updated events from backend
-  const handleSessionUpdated = useCallback(
-    (payload: SessionUpdatePayload) => {
-      // Update the session status in the store
-      updateSessionStatus(payload.id, payload.status as Session['status']);
+  // Handle session lifecycle events from backend — reload full list for reliability
+  const handleSessionLifecycleEvent = useCallback(
+    () => {
+      loadSessions().catch((err) => {
+        console.error('Failed to reload sessions:', err);
+      });
     },
-    [updateSessionStatus]
+    [loadSessions]
   );
 
-  // Listen to session-updated events
-  useSessionUpdatedEvent(handleSessionUpdated);
+  // Listen to all session lifecycle events
+  useSessionUpdatedEvent(handleSessionLifecycleEvent);
+  useTaskCompletedEvent(handleSessionLifecycleEvent);
+  useTaskErrorEvent(handleSessionLifecycleEvent);
+  useSessionInterruptedEvent(handleSessionLifecycleEvent);
 
   // Handle focus session
   const handleFocusSession = async (sessionId: string) => {

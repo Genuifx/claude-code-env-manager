@@ -309,6 +309,8 @@
     "expandPlan": "Expand All",
     "collapsePlan": "Collapse",
     "copyCode": "Copy",
-    "copied": "Copied"
+    "copied": "Copied",
+    "resume": "Resume",
+    "resumed": "Resumed ✓"
   }
 }

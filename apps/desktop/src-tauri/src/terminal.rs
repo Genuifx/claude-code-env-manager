@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::OnceLock;
 
 /// Supported terminal types on macOS
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -182,8 +183,121 @@ pub fn set_preferred_terminal(terminal: TerminalType) -> Result<(), String> {
     Ok(())
 }
 
+// ============================================
+// ccem launch support detection
+// ============================================
+
+/// Cached result of ccem launch support check
+static CCEM_LAUNCH_SUPPORTED: OnceLock<bool> = OnceLock::new();
+
+/// Compare a parsed semver tuple against a minimum requirement.
+fn version_gte(major: u32, minor: u32, patch: u32, req_major: u32, req_minor: u32, req_patch: u32) -> bool {
+    (major, minor, patch) >= (req_major, req_minor, req_patch)
+}
+
+/// Run `ccem --version`, parse the output, and check if >= 1.9.0.
+fn check_ccem_launch_support() -> bool {
+    // macOS GUI apps don't inherit shell PATH — try common locations
+    let ccem_path = resolve_ccem_path().unwrap_or_else(|| "ccem".to_string());
+    println!("[ccem-launch] resolved ccem path: {}", ccem_path);
+
+    let output = match Command::new(&ccem_path).arg("--version").output() {
+        Ok(o) if o.status.success() => o,
+        Ok(o) => {
+            println!("[ccem-launch] ccem --version failed with status: {}", o.status);
+            return false;
+        }
+        Err(e) => {
+            println!("[ccem-launch] ccem --version error: {}", e);
+            return false;
+        }
+    };
+
+    let version_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    println!("[ccem-launch] ccem version output: '{}'", version_str);
+
+    // Output is typically "1.9.0" or "ccem/1.9.0" — extract the version part
+    let version_part = version_str
+        .rsplit('/')
+        .next()
+        .unwrap_or(&version_str)
+        .trim();
+
+    let parts: Vec<&str> = version_part.split('.').collect();
+    if parts.len() < 2 {
+        println!("[ccem-launch] could not parse version: '{}'", version_part);
+        return false;
+    }
+
+    let major = parts[0].parse::<u32>().unwrap_or(0);
+    let minor = parts[1].parse::<u32>().unwrap_or(0);
+    let patch = parts.get(2).and_then(|p| p.parse::<u32>().ok()).unwrap_or(0);
+
+    let supported = version_gte(major, minor, patch, 1, 9, 0);
+    println!("[ccem-launch] version {}.{}.{} >= 1.9.0 = {}", major, minor, patch, supported);
+    supported
+}
+
+/// Resolve the full path to the `ccem` binary.
+/// macOS GUI apps launched from Finder/Dock don't inherit the user's shell PATH,
+/// so we check common Node.js binary locations.
+fn resolve_ccem_path() -> Option<String> {
+    // First try: use `which` with a full shell PATH
+    if let Ok(output) = Command::new("/bin/sh")
+        .args(["-l", "-c", "which ccem"])
+        .output()
+    {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Some(path);
+            }
+        }
+    }
+
+    // Fallback: check common locations
+    let home = dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    let candidates = [
+        format!("{}/.local/bin/ccem", home),
+        format!("{}/.npm-global/bin/ccem", home),
+        "/usr/local/bin/ccem".to_string(),
+        "/opt/homebrew/bin/ccem".to_string(),
+    ];
+
+    for candidate in &candidates {
+        if std::path::Path::new(candidate).exists() {
+            return Some(candidate.clone());
+        }
+    }
+
+    None
+}
+
+/// Returns whether the installed ccem supports the `launch` command.
+/// Result is cached for the lifetime of the process.
+pub fn is_ccem_launch_supported() -> bool {
+    *CCEM_LAUNCH_SUPPORTED.get_or_init(check_ccem_launch_support)
+}
+
+/// Build the short `ccem launch` command string.
+fn build_launch_command(env_name: &str, perm_mode: Option<&str>, session_id: &str, working_dir: &str, resume_session_id: Option<&str>) -> String {
+    let ccem = resolve_ccem_path().unwrap_or_else(|| "ccem".to_string());
+    let mut cmd = format!("'{}' launch --env '{}' --session-id '{}'", ccem, env_name, session_id);
+    if let Some(perm) = perm_mode {
+        cmd.push_str(&format!(" --perm '{}'", perm));
+    }
+    if let Some(resume_id) = resume_session_id {
+        let escaped_id = resume_id.replace("'", "'\\''");
+        cmd.push_str(&format!(" --resume-session '{}'", escaped_id));
+    }
+    // Escape single quotes in working_dir
+    let escaped_dir = working_dir.replace("'", "'\\''");
+    cmd.push_str(&format!(" --working-dir '{}'", escaped_dir));
+    cmd
+}
+
 /// Build the shell command to set environment variables and launch Claude
-fn build_shell_command(env_vars: &HashMap<String, String>, working_dir: &str, session_id: &str) -> String {
+fn build_shell_command(env_vars: &HashMap<String, String>, working_dir: &str, session_id: &str, resume_session_id: Option<&str>) -> String {
     let mut parts = Vec::new();
 
     // Ensure sessions directory exists
@@ -193,6 +307,9 @@ fn build_shell_command(env_vars: &HashMap<String, String>, working_dir: &str, se
     let escaped_dir = working_dir.replace("\\", "\\\\").replace("\"", "\\\"");
     parts.push(format!("cd \"{}\"", escaped_dir));
 
+    // Unset CLAUDECODE to prevent "nested session" detection error
+    parts.push("unset CLAUDECODE".to_string());
+
     // Export environment variables
     for (key, value) in env_vars {
         // Escape single quotes in values
@@ -200,21 +317,29 @@ fn build_shell_command(env_vars: &HashMap<String, String>, working_dir: &str, se
         parts.push(format!("export {}='{}'", key, escaped_value));
     }
 
-    // Launch claude and write exit code to file after it exits
+    // Launch claude (with optional --resume) and write exit code to file after it exits
     let escaped_session_id = session_id.replace("'", "'\\''");
-    parts.push(format!("claude; echo $? > ~/.ccem/sessions/'{}'.exit", escaped_session_id));
+    let claude_cmd = if let Some(resume_id) = resume_session_id {
+        let escaped_resume = resume_id.replace("'", "'\\''");
+        format!("claude --resume '{}'", escaped_resume)
+    } else {
+        "claude".to_string()
+    };
+    parts.push(format!("{}; echo $? > ~/.ccem/sessions/'{}'.exit", claude_cmd, escaped_session_id));
 
     parts.join(" && ")
 }
 
 /// Generate AppleScript for Terminal.app
+/// Returns the window ID as a string for later tracking
 fn terminal_app_script(shell_command: &str) -> String {
     // IMPORTANT: Escape backslashes FIRST, then double quotes
     let escaped = shell_command.replace("\\", "\\\\").replace("\"", "\\\"");
     format!(
         r#"tell application "Terminal"
-    do script "{}"
+    set theTab to do script "{}"
     activate
+    return id of window of theTab as string
 end tell"#,
         escaped
     )
@@ -245,9 +370,12 @@ end tell"#,
 ///
 /// # Arguments
 /// * `terminal` - The terminal to launch in
-/// * `env_vars` - Environment variables to set
+/// * `env_vars` - Environment variables to set (used as fallback)
 /// * `working_dir` - Working directory for the session
 /// * `session_id` - Session ID (used for exit status tracking)
+/// * `env_name` - Environment name for `ccem launch`
+/// * `perm_mode` - Optional permission mode for `ccem launch`
+/// * `resume_session_id` - Optional session ID to resume via `claude --resume`
 ///
 /// # Returns
 /// * `Ok((Option<String>, Option<String>))` - (window_id, iterm_session_id) on success
@@ -257,8 +385,15 @@ pub fn launch_in_terminal(
     env_vars: HashMap<String, String>,
     working_dir: &str,
     session_id: &str,
+    env_name: &str,
+    perm_mode: Option<&str>,
+    resume_session_id: Option<&str>,
 ) -> Result<(Option<String>, Option<String>), String> {
-    let shell_command = build_shell_command(&env_vars, working_dir, session_id);
+    let shell_command = if is_ccem_launch_supported() {
+        build_launch_command(env_name, perm_mode, session_id, working_dir, resume_session_id)
+    } else {
+        build_shell_command(&env_vars, working_dir, session_id, resume_session_id)
+    };
 
     let script = match terminal {
         TerminalType::TerminalApp => terminal_app_script(&shell_command),
@@ -280,7 +415,7 @@ pub fn launch_in_terminal(
         ));
     }
 
-    // For iTerm2, parse "windowId|sessionId" format
+    // Parse window ID / session ID from AppleScript output
     match terminal {
         TerminalType::ITerm2 => {
             let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -291,7 +426,14 @@ pub fn launch_in_terminal(
                 Ok((Some(raw), None))
             }
         }
-        TerminalType::TerminalApp => Ok((None, None)),
+        TerminalType::TerminalApp => {
+            let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if raw.is_empty() {
+                Ok((None, None))
+            } else {
+                Ok((Some(raw), None))
+            }
+        }
     }
 }
 
@@ -339,6 +481,36 @@ end tell"#,
 /// Batch query all iTerm2 window IDs (single AppleScript call for performance)
 pub fn list_iterm_sessions() -> Vec<String> {
     let script = r#"tell application "iTerm2"
+    if not running then return ""
+    set windowIds to {}
+    repeat with aWindow in windows
+        set end of windowIds to (id of aWindow as string)
+    end repeat
+    return windowIds
+end tell"#;
+
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output();
+
+    match output {
+        Ok(result) if result.status.success() => {
+            let stdout = String::from_utf8_lossy(&result.stdout);
+            stdout
+                .trim()
+                .split(", ")
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Batch query all Terminal.app window IDs (single AppleScript call for performance)
+pub fn list_terminal_app_windows() -> Vec<String> {
+    let script = r#"tell application "Terminal"
     if not running then return ""
     set windowIds to {}
     repeat with aWindow in windows
@@ -859,7 +1031,7 @@ mod tests {
         env_vars.insert("KEY1".to_string(), "value1".to_string());
         env_vars.insert("KEY2".to_string(), "value2".to_string());
 
-        let cmd = build_shell_command(&env_vars, "/home/user", "test-session-123");
+        let cmd = build_shell_command(&env_vars, "/home/user", "test-session-123", None);
 
         assert!(cmd.contains("mkdir -p ~/.ccem/sessions"));
         assert!(cmd.contains("cd \"/home/user\""));

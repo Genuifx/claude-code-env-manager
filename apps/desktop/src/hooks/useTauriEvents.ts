@@ -67,6 +67,33 @@ export function useSessionUpdatedEvent(
 }
 
 /**
+ * Hook to listen for task-completed events (session exited with code 0)
+ */
+export function useTaskCompletedEvent(
+  handler: (session: SessionUpdatePayload) => void
+) {
+  useTauriEvent<SessionUpdatePayload>('task-completed', handler);
+}
+
+/**
+ * Hook to listen for task-error events (session exited with non-zero code)
+ */
+export function useTaskErrorEvent(
+  handler: (session: SessionUpdatePayload) => void
+) {
+  useTauriEvent<SessionUpdatePayload>('task-error', handler);
+}
+
+/**
+ * Hook to listen for session-interrupted events (terminal window closed)
+ */
+export function useSessionInterruptedEvent(
+  handler: (session: SessionUpdatePayload) => void
+) {
+  useTauriEvent<SessionUpdatePayload>('session-interrupted', handler);
+}
+
+/**
  * Hook to listen for env-changed events
  */
 export function useEnvChangedEvent(

@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { MessageSquare } from 'lucide-react';
+import { MessageSquare, Play, Check } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { HistoryList, type HistorySessionItem } from '@/components/history/HistoryList';
 import { MessageBubble, type ConversationMessageData } from '@/components/history/MessageBubble';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
+import { useTauriCommands } from '@/hooks/useTauriCommands';
 
 interface ContentBlock {
   type: string;
@@ -77,6 +79,7 @@ function mergeToolResults(msgs: ConversationMessageData[]): ConversationMessageD
 
 export function History() {
   const { t } = useLocale();
+  const { launchClaudeCode } = useTauriCommands();
   const [sessions, setSessions] = useState<HistorySessionItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ConversationMessageData[]>([]);
@@ -85,6 +88,7 @@ export function History() {
   const [isLoadingSessions, setIsLoadingSessions] = useState(true);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [focusedSessionId, setFocusedSessionId] = useState<string | null>(null);
+  const [launched, setLaunched] = useState(false);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   // Load conversation history on mount
@@ -103,6 +107,20 @@ export function History() {
       setIsLoadingSessions(false);
     }
   }, []);
+
+  // Selected session info (needed by handleResume below)
+  const selectedSession = sessions.find(s => s.id === selectedId);
+
+  const handleResume = useCallback(async () => {
+    if (!selectedSession) return;
+    try {
+      await launchClaudeCode(selectedSession.project, selectedSession.id);
+      setLaunched(true);
+      setTimeout(() => setLaunched(false), 1200);
+    } catch (err) {
+      console.error('Failed to resume session:', err);
+    }
+  }, [selectedSession, launchClaudeCode]);
 
   // Load messages + segments when a session is selected
   const handleSelect = useCallback(async (id: string) => {
@@ -138,9 +156,6 @@ export function History() {
       messagesContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }, [activeSegment]);
-
-  // Selected session info
-  const selectedSession = sessions.find(s => s.id === selectedId);
 
   // Merge tool_use + tool_result pairs, then filter by active segment
   const visibleMessages = useMemo(() => {
@@ -232,13 +247,25 @@ export function History() {
           <>
             {/* Conversation header */}
             {selectedSession && (
-              <div className="px-5 py-3 glass-header glass-noise shrink-0">
-                <h3 className="text-sm font-medium text-foreground truncate">
-                  {selectedSession.display}
-                </h3>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  {selectedSession.projectName} · {new Date(selectedSession.timestamp).toLocaleString()}
-                </p>
+              <div className="px-5 py-3 glass-header glass-noise shrink-0 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="text-sm font-medium text-foreground truncate">
+                    {selectedSession.display}
+                  </h3>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    {selectedSession.projectName} · {new Date(selectedSession.timestamp).toLocaleString()}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant={launched ? 'ghost' : 'outline'}
+                  className="shrink-0 gap-1.5 text-xs"
+                  onClick={handleResume}
+                  disabled={launched}
+                >
+                  {launched ? <Check className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                  {launched ? t('history.resumed') : t('history.resume')}
+                </Button>
               </div>
             )}
 

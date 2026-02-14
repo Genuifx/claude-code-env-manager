@@ -1,10 +1,10 @@
 import fs from 'fs';
 import chalk from 'chalk';
 import Table from 'cli-table3';
-import { spawn } from 'child_process';
 import type { PermissionConfig, PermissionModeName, EnvConfig } from '@ccem/core';
-import { decrypt, PERMISSION_PRESETS, getPermissionModeNames } from '@ccem/core';
+import { PERMISSION_PRESETS, getPermissionModeNames } from '@ccem/core';
 import { getSettingsPath, ensureClaudeDir } from './utils.js';
+import { launchClaude } from './launcher.js';
 
 /**
  * 读取 settings 文件
@@ -194,50 +194,5 @@ export const runWithTempPermissions = async (
     process.exit(1);
   }
 
-  // 构建 Claude CLI 参数（用引号包裹，避免 shell 解析括号）
-  const args: string[] = [];
-
-  // 添加 permission mode
-  args.push('--permission-mode', preset.permissionMode);
-
-  if (preset.permissions.allow.length > 0) {
-    const quoted = preset.permissions.allow.map(t => `"${t}"`).join(' ');
-    args.push('--allowedTools', quoted);
-  }
-
-  if (preset.permissions.deny.length > 0) {
-    const quoted = preset.permissions.deny.map(t => `"${t}"`).join(' ');
-    args.push('--disallowedTools', quoted);
-  }
-
-  console.log(chalk.green(`已应用 ${preset.name}（临时）`));
-  console.log(chalk.gray(`说明: ${preset.description}`));
-  console.log('');
-
-  // 构建环境变量
-  const env = { ...process.env };
-  if (envConfig) {
-    if (envConfig.ANTHROPIC_BASE_URL) env.ANTHROPIC_BASE_URL = envConfig.ANTHROPIC_BASE_URL;
-    if (envConfig.ANTHROPIC_API_KEY) env.ANTHROPIC_API_KEY = decrypt(envConfig.ANTHROPIC_API_KEY);
-    if (envConfig.ANTHROPIC_MODEL) env.ANTHROPIC_MODEL = envConfig.ANTHROPIC_MODEL;
-    if (envConfig.ANTHROPIC_SMALL_FAST_MODEL) env.ANTHROPIC_SMALL_FAST_MODEL = envConfig.ANTHROPIC_SMALL_FAST_MODEL;
-  }
-
-  // 启动 Claude Code
-  return new Promise((resolve) => {
-    const child = spawn('claude', args, {
-      stdio: 'inherit',
-      shell: true,
-      env
-    });
-
-    child.on('exit', (code) => {
-      process.exit(code ?? 0);
-    });
-
-    child.on('error', (err) => {
-      console.error(chalk.red(`启动 Claude Code 失败: ${err.message}`));
-      process.exit(1);
-    });
-  });
+  await launchClaude({ envConfig, permMode: modeName });
 };

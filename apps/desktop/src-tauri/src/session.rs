@@ -216,8 +216,9 @@ pub fn start_session_monitor(app: AppHandle, manager: Arc<SessionManager>) {
                 }
             }
 
-            // 2. Batch query all active iTerm2 sessions (single AppleScript call)
+            // 2. Batch query all active terminal windows (single AppleScript call each)
             let active_iterm_sessions = terminal::list_iterm_sessions();
+            let active_terminal_app_windows = terminal::list_terminal_app_windows();
 
             // 3. Check terminal-based sessions
             let terminal_sessions = manager.get_running_terminal_sessions();
@@ -249,7 +250,8 @@ pub fn start_session_monitor(app: AppHandle, manager: Arc<SessionManager>) {
                 if let (Some(term_type), Some(wid)) = (&session.terminal_type, &session.window_id) {
                     let is_alive = match term_type.as_str() {
                         "iterm2" => active_iterm_sessions.contains(wid),
-                        _ => true, // Terminal.app cannot be precisely detected, assume alive
+                        "terminalapp" => active_terminal_app_windows.contains(wid),
+                        _ => true,
                     };
 
                     if !is_alive {
