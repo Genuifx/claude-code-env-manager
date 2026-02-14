@@ -1,9 +1,9 @@
 import { useState, useRef, useCallback } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ErrorBanner } from '@/components/ui/EmptyState';
 import { useTauriEvent } from '@/hooks/useTauriEvents';
+import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useLocale } from '@/locales';
 import { toast } from 'sonner';
 import { Sparkles, Loader2, Bot, Wrench, Clock, FolderOpen, FileText, Pencil, Check } from 'lucide-react';
@@ -27,6 +27,7 @@ interface AiCronPanelProps {
 
 export function AiCronPanel({ onTaskCreated, onEdit }: AiCronPanelProps) {
   const { t } = useLocale();
+  const { addCronTask, generateCronTaskStream } = useTauriCommands();
   const [query, setQuery] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const isGeneratingRef = useRef(false);
@@ -121,7 +122,7 @@ export function AiCronPanel({ onTaskCreated, onEdit }: AiCronPanelProps) {
     setError(null);
 
     try {
-      await invoke('generate_cron_task_stream', { query: query.trim() });
+      await generateCronTaskStream(query.trim());
     } catch (err) {
       setError(String(err));
       isGeneratingRef.current = false;
@@ -140,22 +141,12 @@ export function AiCronPanel({ onTaskCreated, onEdit }: AiCronPanelProps) {
     if (!generatedTask || isCreating) return;
     setIsCreating(true);
     try {
-      const fullTask = {
-        id: crypto.randomUUID(),
+      await addCronTask({
         name: generatedTask.name,
         cronExpression: generatedTask.cronExpression,
         prompt: generatedTask.prompt,
         workingDir: generatedTask.workingDir,
-        envName: null,
-        enabled: true,
-        timeoutSecs: 300,
-        templateId: null,
-        triggerType: 'schedule',
-        parentTaskId: null,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      await invoke('add_cron_task', { task: fullTask });
+      });
       toast.success(t('cron.aiCreated'));
       setGeneratedTask(null);
       setStreamMessages([]);
