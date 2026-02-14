@@ -52,6 +52,7 @@ import {
 } from './skills.js';
 import { runSkillSelector } from './components/index.js';
 import { loadFromRemote } from './remote.js';
+import { CCEM_CRON_SKILL_CONTENT } from './cron-skill.js';
 
 const program = new Command();
 
@@ -639,6 +640,44 @@ setupCmd
     } catch (err) {
       console.error(chalk.red(`✗ 迁移失败: ${err}`));
     }
+  });
+
+setupCmd
+  .command('cron')
+  .description('安装 ccem-cron skill 到 Claude Code（~/.claude/skills/）')
+  .option('--force', '强制覆盖已有文件')
+  .action(async function(this: any) {
+    const options = this.opts();
+    const skillDir = path.join(process.env.HOME || '~', '.claude', 'skills');
+    const targetPath = path.join(skillDir, 'ccem-cron.md');
+
+    // 确保目录存在
+    if (!fs.existsSync(skillDir)) {
+      fs.mkdirSync(skillDir, { recursive: true });
+      console.log(chalk.gray(`创建目录: ${skillDir}`));
+    }
+
+    // 检查文件是否已存在
+    if (fs.existsSync(targetPath) && !options.force) {
+      const { overwrite } = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'overwrite',
+          message: `${targetPath} 已存在，是否覆盖？`,
+          default: false
+        }
+      ]);
+      if (!overwrite) {
+        console.log(chalk.yellow('已取消'));
+        return;
+      }
+    }
+
+    // 写入 skill 文件
+    fs.writeFileSync(targetPath, CCEM_CRON_SKILL_CONTENT, 'utf-8');
+    console.log(chalk.green(`✓ 已安装 ccem-cron skill`));
+    console.log(chalk.gray(`  路径: ${targetPath}`));
+    console.log(chalk.cyan(`\n在 Claude Code 中使用 /ccem-cron 即可调用此 skill`));
   });
 
 // skill 命令组（管理 Claude Code skills）
