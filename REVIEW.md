@@ -346,3 +346,157 @@ The ideal final implementation would fuse elements from all three:
 3. **虚拟滚动**：当会话历史很长时（数百条），卡片网格和 modal 内的消息列表都应考虑虚拟滚动（如 `@tanstack/react-virtual`）以保持性能。
 4. **消息搜索**：当前只能搜索会话标题和项目名，建议增加对消息内容的全文搜索能力（需要 Rust 后端支持）。
 5. **合并 Beta 的优点**：Beta 的 master-detail 布局在用户体验维度得分最高。可以考虑在 Gamma 的 modal 中借鉴 Beta 的双栏思路——modal 左侧放迷你会话列表，右侧放消息详情，兼得两者优势。
+
+---
+---
+
+# Cron Task 功能竞赛评审报告
+
+> **评审人**: Critic | **日期**: 2026-02-14
+> **范围**: Alpha / Beta / Gamma / Delta 四个方案实现 CCEM desktop app 的 Cron Task 定时调度功能（定时调用 `claude -p` 执行任务）
+
+---
+
+## 评审概要
+
+四个方案均实现了完整的 Cron Task 定时调度功能，包括 Rust 后端调度器、JSON 持久化、前端 CRUD 界面和 i18n 支持。整体质量较高，各方案在架构风格上与现有代码库保持了良好的一致性。Beta 方案在工程完整度和可观测性方面表现最为突出，Gamma 方案在用户体验创新上独树一帜，Alpha 方案以极简主义取胜，Delta 方案的链式执行概念最具前瞻性但也最复杂。
+
+---
+
+## 各方案详评
+
+### Alpha — 轻量内存调度
+
+**总分: 7.20 / 10**
+
+| 维度 | 分数 | 评价 |
+|------|-----|------|
+| 架构设计 | 7 | CronManager 采用 `Arc<Mutex<Vec>>` 模式，与 SessionManager 完全一致。自研 cron 解析器约 100 行，覆盖标准五字段语法。调度器用 `std::thread` + 30 秒轮询，通过 `(year,month,day,hour,minute)` 元组去重，设计简洁可靠。但 CronManager 同时持有 tasks 和 runs 两把 Mutex，在高频写入时存在潜在的锁竞争。 |
+| 代码质量 | 7 | Rust 代码惯用写法良好，错误处理完整。`describe_cron` 函数是个不错的工具函数但未被前端使用。`next_run_time` 通过暴力遍历 366 天的分钟数来计算下次执行时间，虽然正确但效率不高。前端 `CronTasks.tsx` 中 `RunsPanel` 的 `useEffect` 依赖 `getCronTaskRuns` 但未处理竞态。 |
+| 功能完整性 | 7 | 6 个 Tauri 命令覆盖完整 CRUD + toggle + runs 查询。有执行历史记录（500 条上限）。缺少手动触发（Run Now）功能，缺少 Tauri 事件通知（前端靠 60 秒轮询刷新）。 |
+| 用户体验 | 7 | Glass card 风格与现有页面一致，AddTaskDialog 有 cron 预设快捷按钮。RunsPanel 支持展开查看 stdout/stderr。但删除确认交互较简陋（inline confirm 按钮），缺少编辑已有任务的功能。EmptyState 使用了项目标准组件。 |
+| 创新性与实用性 | 7 | 零依赖自研 cron 解析器是亮点，保持了项目的轻量风格。但整体功能较为基础，没有超出"最小可行产品"的范畴。 |
+
+**亮点**:
+- 与现有 SessionManager 模式高度一致的 CronManager 设计
+- 自研 cron 解析器零外部依赖，代码紧凑
+- 500 条执行历史上限防止磁盘无限增长
+- Skeleton loading 遵循项目规范
+
+**不足**:
+- 无 Tauri 事件通知，前端依赖 60 秒轮询，实时性差
+- 缺少手动触发（Run Now）和编辑任务功能
+- `next_run_time` 暴力遍历效率低
+- 前端状态管理放在 Zustand 全局 store 中但 cron 数据其实不需要跨页面共享
+
+---
+
+### Beta — 持久化调度 + 执行历史
+
+**总分: 8.10 / 10**
+
+| 维度 | 分数 | 评价 |
+|------|-----|------|
+| 架构设计 | 8 | 采用无状态 Tauri 命令 + 文件直读模式（每次命令都从磁盘读取），避免了内存缓存与磁盘不一致的问题。Per-task 独立 runs 文件（`~/.ccem/cron-runs/{task_id}.json`）是优秀的设计，隔离了历史数据，删除任务时清理简单。CronScheduler 仅持有 `last_fired` HashMap 用于去重，职责单一。调度器接收 `AppHandle` 参数用于事件发射，架构清晰。 |
+| 代码质量 | 8 | Rust 代码质量高。`serde(rename)` 直接在结构体上做 camelCase 映射，避免了前端手动转换。`update_cron_task` 使用 Option 参数实现部分更新，API 设计灵活。`update_run` 使用闭包更新器模式，代码优雅。`next_fire_time` 实现正确地从下一分钟开始搜索并清零秒数。前端使用 `cn()` 工具函数和 `listen()` 事件监听，代码规范。 |
+| 功能完整性 | 9 | 8 个 Tauri 命令，包含 `retry_cron_task`（手动重试）和 `get_cron_run_detail`（单条 run 详情）。支持 timeout 配置。Tauri 事件通知（`cron-task-started/completed/failed`）实现前端实时更新。支持任务编辑。Per-task 50 条 run 保留。功能最为完整。 |
+| 用户体验 | 8 | Master-detail 分栏布局是四个方案中最专业的 UI 设计。左侧任务列表带状态指示点（绿/黄/红），右侧详情面板展示配置 + 执行历史。StatusBadge 组件带图标和颜色编码。支持编辑和重试。删除有独立确认对话框。`formatDuration` 智能格式化执行时长。 |
+| 创新性与实用性 | 8 | Timeout 配置是实用功能（claude -p 可能长时间运行）。Per-task runs 文件隔离是工程上的好决策。Master-detail 布局适合管理型页面。Retry 功能对调试很有价值。 |
+
+**亮点**:
+- Per-task 独立 runs 文件，数据隔离清晰
+- Master-detail 分栏布局，信息密度高且不拥挤
+- 完整的事件通知系统（started/completed/failed）
+- Timeout 配置 + Retry 功能，实用性强
+- `serde(rename)` 直接处理 camelCase 映射
+
+**不足**:
+- 前端使用了硬编码颜色（`text-emerald-400`, `text-red-400`, `text-amber-400`），违反了设计系统规范（应使用 token）
+- `cron_matches` 中 `*/N` 的实现有 bug：`value % step == 0` 对于 `*/30` 在 minute=0 时会匹配，但标准 cron 中 `*/30` 应该只匹配 0 和 30
+- PageHeader 标题硬编码为 "Cron" 而非使用 `t()` 国际化
+- 无状态命令模式意味着每次操作都有磁盘 I/O，高频场景下可能有性能问题
+
+---
+
+### Gamma — 模板驱动 + 可视化 Cron 编辑器
+
+**总分: 7.80 / 10**
+
+| 维度 | 分数 | 评价 |
+|------|-----|------|
+| 架构设计 | 7 | CronScheduler 持有 tasks 的内存缓存，通过 `reload()` 从磁盘同步。调度逻辑基于 `next_run` 时间比较而非实时 cron 匹配，这意味着如果 `next_run` 计算有误，任务可能永远不会触发。单一 `cron-tasks.json` 文件同时存储 tasks 和 runs，数据耦合度高。模板系统作为 Rust 常量定义，扩展性有限但足够简单。 |
+| 代码质量 | 7 | `next_runs` 函数使用 `format!` 解析时间字段而非 chrono 的原生方法，略显笨拙。`execute_task` 将 stdout 和 stderr 合并为单一字段，丢失了结构化信息。前端 `CronTasks.tsx` 选择不使用 Zustand store 而是本地 state + 直接 `invoke()`，这与项目约定不一致但避免了 store 膨胀。CronEditor 组件设计良好，状态管理清晰。 |
+| 功能完整性 | 8 | 8 个 Tauri 命令，包含 `list_cron_templates` 和 `get_cron_next_runs`（预览下次执行时间）。5 个内置模板覆盖常见场景。支持编辑任务。但缺少手动触发（Run Now）和 Retry 功能。CronTaskRun 的 stdout 字段是 `Option<String>` 且截断到 10KB，合理但丢失了 stderr 独立信息。 |
+| 用户体验 | 9 | 可视化 Cron 编辑UX 亮点。频率选择器（Minute/Hourly/Daily/Weekly/Monthly）+ 动态时间选择器 + 人类可读描述 + 下 5 次执行预览，极大降低了 cron 表达式的使用门槛。模板快速创建条（横向滚动 glass card）提供了优秀的 FTUE 体验。高级模式切换允许手动编辑原始表达式。 |
+| 创新性与实用性 | 9 | 模板系统 + 可视化编辑器的组合是最具创新性的设计。对于不熟悉 cron 语法的用户，这大幅降低了使用门槛。5 个内置模板（Code Review、Test Runner、Doc Generator、Security Scan、Changelog）都是 Claude Code 的实际使用场景，非常贴合产品定位。 |
+
+**亮点**:
+- CronEditor 可视化编辑器，频率选择 + 时间选择 + 人类可读描述 + 下 5 次执行预览
+- 5 个内置模板精准匹配 Claude Code 使用场景
+- 模板快速创建条的 FTUE 体验优秀
+- 高级/可视化模式切换，兼顾新手和高级用户
+- `get_cron_next_runs` 后端命令支持前端预览
+
+**不足**:
+- 调度逻辑基于 `next_run` 时间比较而非实时 cron 匹配，如果时间计算有偏差可能导致任务不触发
+- 前端不使用 Zustand store，与项目约定不一致
+- 单一 JSON 文件存储 tasks + runs，数据量大时性能下降
+- 缺少 Run Now / Retry 功能
+- Zustand store 中没有添加 cron 相关状态，页面切换后状态丢失
+- 删除任务没有确认对话框，误操作风险高
+
+---
+
+### Delta — 事件驱动 + 链式任务
+
+**总分: 7.50 / 10**
+
+| 维度 | 分数 | 评价 |
+|------|-----|------|
+| 架构设计 | 8 | 链式执行是四个方案中最有野心的架构设计。`trigger_type`（schedule/on_success/on_failure/on_complete）+ `parent_task_id` 构成了有向无环图。`execute_chain_children` 递归触发子任务，`collect_descendant_ids` 实现级联删除。`cron_expression` 设为 `Option<String>`（链式子任务不需要 cron 表达式）是正确的建模。但递归执行没有深度限制，理论上可能导致栈溢出。 |
+| 代码质量 | 7 | Rust 代码结构清晰，`serde(default)` 处理向后兼容。但 `cron_matches_now` 使用 `%u`（1=Mon..7=Sun）而非标准 cron 的 0=Sun..6=Sat，这是一个语义 bug。`update_cron_task` 的 `cron_expression` 参数类型为 `Option<Option<String>>`，虽然正确但 API 不够直观。前端 Zustand store 中添加了 `addCronTask/removeCronTask/updateCronTask/toggleCronTask` 等冗余方法（与 `setCronTasks` 功能重叠）。 |
+| 功能完整性 | 8 | 8 个 Tauri 命令，包含 `run_cron_task_now`（手动触发 + 链式执行）和 `get_task_chain`（获取任务链）。链式执行、级联删除、事件通知（started/completed/failed/chain-completed）功能完整。但缺少任务编辑功能。stdout 截断到 2KB 偏小。 |
+| 用户体验 | 7 | 双视图切换（List/Chain）是好的设计。Chain View 用缩进 + 箭头展示任务依赖关系，Zap 图标标记根节点。TriggerBadge 颜色编码清晰。但 Chain View 的树形渲染在深层嵌套时可能不够直观。AddTaskDialog 在创建链式子任务时自动继承父任务的 workingDir 和 envName，体验细腻。按钮会触发完整链式执行，这是强大但也危险的功能（缺少确认）。 |
+| 创新性与实用性 | 8 | 链式执行是最具前瞻性的设计，"测试失败 -> 自动修复 -> 重新测试"这样的工作流很有想象空间。但对于 V1 版本来说可能过度设计——大多数用户只需要简单的定时任务。链式任务的调试和错误追踪也比单任务复杂得多。 |
+
+**亮点**:
+- 链式执行架构（on_success/on_failure/on_complete）是独特且有前瞻性的设计
+- 级联删除正确处理了任务依赖关系
+- Chain View 可视化展示任务依赖图
+- `run_cron_task_now` 触发完整链式执行
+- 事件通知系统完整（包含 chain-completed）
+- 孤儿任务检测（orphanChains）
+
+**不足**:
+- `cron_matches_now` 使用 `%u`（1-7）而非标准 cron 的 0-6 星期编码，这是一个会导致星期匹配错误的 bug
+- 递归链式执行没有深度限制，可能导致栈溢出
+- 缺少任务编辑功能
+- stdout 截断到 2KB 偏小
+- Zustand store 中 cron 相关方法过多，与项目的简洁 setter 模式不一致
+- 链式任务的复杂性对于 V1 来说可能是过度设计
+
+---
+
+## 最终排名
+
+| 排名 | 方案 | 加权总分 | 推荐理由 |
+|------|------|---------|------- Beta | **8.10** | 工程完整度最高：per-task runs 文件、事件通知、timeout、retry、master-detail UI，是最接近生产就绪的方案 |
+| 2 | Gamma | **7.80** | 用户体验最佳：可视化 Cron 编辑器 + 模板系统大幅降低使用门槛，创新性最强 |
+| 3 | Delta | **7.50** | 架构最有前瞻性：链式执行概念独特，但 V1 阶段复杂度过高，且存在 cron 星期匹配 bug |
+| 4 | Alpha | **7.20** | 最轻量简洁：零依赖、代码量最小，但功能偏基础，缺少事件通知和手动触发 |
+
+加权计算方式：架构设计 x 0.25 + 代码质量 x 0.20 + 功能完整性 x 0.20 + 用户体验 x 0.20 + 创新性与实用性 x 0.15
+
+## 推荐方案与改进建议
+
+**推荐 Beta 作为最终实现基础**，同时从 Gamma 借鉴以下优点：
+
+1. **从 Gamma 移植 CronEditor 可视化编辑器**：这是四个方案中最有价值的单一组件。将 `CronEditor.tsx` 和 `get_cron_next_runs` 后端命令集成到 Beta 的 TaskDialog 中，替换当前的纯文本输入 + preset 按钮。
+
+2. **从 Gamma 借鉴模板系统**：将 5 个内置模板作为口，降低新用户的上手门槛。模板可以作为前端常量而非后端命令，减少 IPC 开销。
+
+3. **修复 Beta 的设计系统违规**：将硬编码颜色（`text-emerald-400` 等）替换为项目 token，PageHeader 标题使用 `t()` 国际化。
+
+4. **从 Delta 保留链式执行的概念设计**：不在 V1 实现，但在数据模型中预留 `trigger_type` 和 `parent_task_id` 字段（设为 optional），为 V2 的链式执行做准备。
+
+5. **修复 cron 解析器的边界问题**：Beta 的 `*/N` 匹配逻辑和 Delta 的星期编码都有 bug，最终实现应使用 Gamma 的解析器（最完整正确，支持 next_runs 计算）或统一修复。
