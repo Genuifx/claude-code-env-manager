@@ -341,10 +341,56 @@ fn execute_task(app: AppHandle, task: CronTask) {
     let env_vars = build_env_vars(&task.env_name);
     let start = std::time::Instant::now();
 
+    // Expand PATH to include common Node.js/nvm/fnm/volta install locations
+    // since Tauri processes don't inherit the user's shell PATH
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/Users/default".to_string());
+    let current_path = std::env::var("PATH").unwrap_or_default();
+    let mut extra_paths: Vec<String> = vec![
+        format!("{home}/.volta/bin"),
+        format!("{home}/.npm-global/bin"),
+        format!("{home}/.local/bin"),
+        "/usr/local/bin".to_string(),
+        "/opt/homebrew/bin".to_string(),
+    ];
+    // Resolve nvm/fnm glob-like paths: pick the latest version directory
+    for pattern_dir in &[
+        format!("{home}/.nvm/versions/node"),
+        format!("{home}/.fnm/node-versions"),
+    ] {
+        if let Ok(entries) = std::fs::read_dir(pattern_dir) {
+            let mut versions: Vec<std::path::PathBuf> = entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.is_dir())
+                .collect();
+            versions.sort();
+            if let Some(latest) = versions.last() {
+                // nvm: node/<version>/bin, fnm: <version>/installation/bin
+                let bin = latest.join("bin");
+                let fnm_bin = latest.join("installation/bin");
+                if bin.exists() {
+                    extra_paths.insert(0, bin.to_string_lossy().to_string());
+                } else if fnm_bin.exists() {
+                    extra_paths.insert(0, fnm_bin.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    let expanded_path = format!("{}:{}", extra_paths.join(":"), current_path);
+
+    let working_dir = if task.working_dir.starts_with('~') {
+        task.working_dir.replacen('~', &home, 1)
+    } else {
+        task.working_dir.clone()
+    };
+
     let mut cmd = Command::new("claude");
     cmd.arg("-p").arg(&task.prompt);
-    cmd.current_dir(&task.working_dir);
+    cmd.current_dir(&working_dir);
     cmd.envs(&env_vars);
+    cmd.env("PATH", &expanded_path);
+    // Remove CLAUDECODE env var to avoid "nested session" detection
+    cmd.env_remove("CLAUDECODE");
 
     // Capture stdout and stderr separately
     cmd.stdout(std::process::Stdio::piped());

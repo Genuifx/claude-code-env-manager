@@ -185,7 +185,19 @@ function RunHistoryPanel({ taskId }: { taskId: string }) {
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium text-foreground">{t('cron.runHistory')}</h3>
         <button
-          onClick={() => retryCronTask(taskId)}
+          onClick={async () => {
+            await retryCronTask(taskId);
+            // Immediately load to show "running" state, then poll for completion
+            await loadCronTaskRuns(taskId);
+            const poll = setInterval(async () => {
+              const runs = await loadCronTaskRuns(taskId);
+              // Stop polling once no run is in "running" state
+              const store = useAppStore.getState();
+              const current = store.cronRuns[taskId] || [];
+              if (!current.some((r: { status: string }) => r.status === 'running')) clearInterval(poll);
+            }, 2000);
+            setTimeout(() => clearInterval(poll), 600000); // safety: stop after 10min
+          }}
           className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-2xs bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
         >
           <Play className="w-3 h-3" />
