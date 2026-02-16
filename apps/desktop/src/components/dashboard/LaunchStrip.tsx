@@ -187,8 +187,8 @@ export function LaunchStrip({
           className={cn(
             'h-14 px-7 rounded-none rounded-r-2xl gap-2.5 font-semibold text-sm shadow-none transition-all duration-200',
             launched
-              ? 'bg-success hover:bg-success shadow-[0_0_20px_hsl(var(--success)/0.3)]'
-              : 'glass-launch-btn hover:shadow-[0_0_24px_hsl(var(--primary)/0.35)]'
+              ? 'bg-success hover:bg-success text-success-foreground shadow-[0_0_20px_hsl(var(--success)/0.3)]'
+              : 'bg-primary text-primary-foreground glass-launch-btn hover:shadow-[0_0_24px_hsl(var(--primary)/0.35)]'
           )}
         >
           {launched ? (

@@ -108,7 +108,7 @@ export function QuickLaunchGrid({ onLaunch }: QuickLaunchGridProps) {
                   >
                     {/* Left accent bar */}
                     <div
-                      className="absolute left-0 top-3 bottom-3 w-[3px] rounded-r-full opacity-50 group-hover:opacity-80 transition-opacity"
+                      className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full opacity-60 group-hover:opacity-100 transition-opacity"
                       style={{ background: `hsl(${color})` }}
                     />
 
