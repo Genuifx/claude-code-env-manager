@@ -29,14 +29,14 @@ export function HeroMetricCard({
 
   return (
     <div
-      className="stat-card glass-noise cursor-pointer interactive-card group relative overflow-hidden p-4"
+      className="stat-card glass-noise cursor-pointer interactive-card group relative overflow-hidden p-3.5"
       onClick={onClick}
     >
       {/* Ambient glow */}
       <div className="absolute -top-16 -right-16 w-32 h-32 bg-primary/[0.12] rounded-full blur-[50px] pointer-events-none" />
 
       {/* Top row: icon + label + trend */}
-      <div className="relative flex items-center justify-between mb-3">
+      <div className="relative flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-primary/[0.12] group-hover:bg-primary/[0.18] transition-colors">
             <Icon className="w-3.5 h-3.5 text-primary" />

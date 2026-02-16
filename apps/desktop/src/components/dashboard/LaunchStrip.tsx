@@ -73,7 +73,7 @@ export function LaunchStrip({
       />
 
       {/* Row 1: Config selectors */}
-      <div className="flex items-center gap-3 px-5 pt-4 pb-2.5">
+      <div className="flex items-center gap-2.5 px-4 pt-3.5 pb-2">
         {/* Environment */}
         <Select value={currentEnv} onValueChange={onSwitchEnv}>
           <SelectTrigger variant="badge" badgeColor={envColor} className="hover:bg-white/[0.08]">
@@ -159,12 +159,12 @@ export function LaunchStrip({
       </div>
 
       {/* Row 2: Launch button — full width, prominent */}
-      <div className="px-4 pb-4 pt-1">
+      <div className="px-3.5 pb-3.5 pt-0.5">
         <button
           onClick={onLaunch}
           title={t('dashboard.launchShortcut')}
           className={cn(
-            'w-full h-11 rounded-xl flex items-center justify-center gap-2.5',
+            'w-full h-10 rounded-xl flex items-center justify-center gap-2.5',
             'font-semibold text-sm tracking-wide',
             'transition-all duration-200 cursor-pointer',
             launched

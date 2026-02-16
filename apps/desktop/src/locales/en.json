@@ -69,7 +69,8 @@
     "tabJetBrains": "JetBrains",
     "syncedProjects": "Synced {count} projects",
     "noFavorites": "No favorites yet",
-    "addFirstFavorite": "Add your first favorite project"
+    "addFirstFavorite": "Add your first favorite project",
+    "quickAccessHint": "Quick access to your favorite projects"
   },
   "sessions": {
     "confirmClose": "Are you sure you want to close this session?",
