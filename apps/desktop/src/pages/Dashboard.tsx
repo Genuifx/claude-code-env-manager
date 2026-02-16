@@ -93,8 +93,8 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
   }
 
   return (
-    <div className="page-transition-enter space-y-4">
-      {/* Zone 1: Launch Strip */}
+    <div className="page-transition-enter flex flex-col gap-5">
+      {/* Zone 1: Launch Strip — hero area */}
       <LaunchStrip
         currentEnv={currentEnv}
         environments={environments}
@@ -109,7 +109,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
         onLaunch={handleLaunchClick}
       />
 
-      {/* Zone 2: Metrics Row */}
+      {/* Zone 2: Metrics Row — tighter gap to launch strip */}
       <MetricsRow onNavigate={onNavigate} />
 
       {/* Zone 3: Quick Launch Grid */}

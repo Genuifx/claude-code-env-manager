@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FolderOpen, Play, Star, X, RefreshCw, Plus } from 'lucide-react';
+import { FolderOpen, Play, Star, X, RefreshCw, Plus, Code2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
@@ -59,29 +59,37 @@ export function AllProjectsModal({ open, onOpenChange, onLaunch }: AllProjectsMo
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => onOpenChange(false)} />
+      <div
+        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+        onClick={() => onOpenChange(false)}
+      />
 
       {/* Modal */}
-      <div className="relative frosted-panel glass-noise rounded-2xl w-[520px] max-h-[480px] flex flex-col shadow-elevation-4">
+      <div className="relative frosted-panel glass-noise rounded-2xl w-[540px] max-h-[500px] flex flex-col shadow-elevation-4">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.08]">
-          <h2 className="text-base font-semibold text-foreground">{t('dashboard.allProjects')}</h2>
-          <Button variant="ghost" size="icon" className="w-7 h-7" onClick={() => onOpenChange(false)}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+          <h2 className="text-sm font-semibold text-foreground tracking-wide">{t('dashboard.allProjects')}</h2>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="w-7 h-7 text-muted-foreground/60 hover:text-foreground"
+            onClick={() => onOpenChange(false)}
+          >
             <X className="w-4 h-4" />
           </Button>
         </div>
 
         {/* Tabs */}
-        <div className="flex items-center gap-1 px-5 py-2 border-b border-white/[0.08]">
+        <div className="flex items-center gap-0.5 px-5 py-2.5 border-b border-white/[0.06]">
           {tabs.map((tab) => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
               className={cn(
-                'px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+                'px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150',
                 activeTab === tab.key
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-white/[0.04]'
+                  ? 'seg-active text-foreground'
+                  : 'text-muted-foreground/70 seg-hover'
               )}
             >
               {tab.label}
@@ -93,11 +101,11 @@ export function AllProjectsModal({ open, onOpenChange, onLaunch }: AllProjectsMo
             <Button
               variant="ghost"
               size="sm"
-              className="ml-auto h-7 text-xs gap-1.5"
+              className="ml-auto h-6 text-2xs gap-1.5 text-muted-foreground hover:text-foreground px-2"
               onClick={() => handleSync(activeTab)}
               disabled={syncing !== null}
             >
-              <RefreshCw className={cn('w-3.5 h-3.5', syncing === activeTab && 'animate-spin')} />
+              <RefreshCw className={cn('w-3 h-3', syncing === activeTab && 'animate-spin')} />
               {t('dashboard.syncProjects')}
             </Button>
           )}
@@ -106,10 +114,10 @@ export function AllProjectsModal({ open, onOpenChange, onLaunch }: AllProjectsMo
             <Button
               variant="ghost"
               size="sm"
-              className="ml-auto h-7 text-xs gap-1.5"
+              className="ml-auto h-6 text-2xs gap-1.5 text-muted-foreground hover:text-foreground px-2"
               onClick={handleAddFavorite}
             >
-              <Plus className="w-3.5 h-3.5" />
+              <Plus className="w-3 h-3" />
               {t('dashboard.addFavorite')}
             </Button>
           )}
@@ -117,7 +125,7 @@ export function AllProjectsModal({ open, onOpenChange, onLaunch }: AllProjectsMo
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-3">
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             {activeTab === 'favorites' && favorites.map((project) => (
               <ProjectRow
                 key={project.path}
@@ -128,7 +136,7 @@ export function AllProjectsModal({ open, onOpenChange, onLaunch }: AllProjectsMo
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="w-7 h-7 text-muted-foreground hover:text-destructive hover:bg-destructive/[0.08]"
+                    className="w-7 h-7 text-muted-foreground/40 hover:text-destructive hover:bg-destructive/[0.08]"
                     onClick={() => removeFavoriteProject(project.path)}
                   >
                     <X className="w-3.5 h-3.5" />
@@ -148,7 +156,7 @@ export function AllProjectsModal({ open, onOpenChange, onLaunch }: AllProjectsMo
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="w-7 h-7 text-muted-foreground hover:text-primary hover:bg-primary/[0.08]"
+                    className="w-7 h-7 text-muted-foreground/40 hover:text-primary hover:bg-primary/[0.08]"
                     onClick={() => addFavoriteProject(project.path, getProjectName(project.path))}
                   >
                     <Star className="w-3.5 h-3.5" />
@@ -167,7 +175,7 @@ export function AllProjectsModal({ open, onOpenChange, onLaunch }: AllProjectsMo
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="w-7 h-7 text-muted-foreground hover:text-primary hover:bg-primary/[0.08]"
+                    className="w-7 h-7 text-muted-foreground/40 hover:text-primary hover:bg-primary/[0.08]"
                     onClick={() => addFavoriteProject(project.path, getProjectName(project.path))}
                   >
                     <Star className="w-3.5 h-3.5" />
@@ -187,7 +195,7 @@ export function AllProjectsModal({ open, onOpenChange, onLaunch }: AllProjectsMo
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="w-7 h-7 text-muted-foreground hover:text-primary hover:bg-primary/[0.08]"
+                    className="w-7 h-7 text-muted-foreground/40 hover:text-primary hover:bg-primary/[0.08]"
                     onClick={() => addFavoriteProject(project.path, getProjectName(project.path))}
                   >
                     <Star className="w-3.5 h-3.5" />
@@ -216,18 +224,20 @@ function ProjectRow({
   trailing?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between p-2.5 rounded-lg hover:bg-white/[0.04] transition-colors group">
+    <div className="flex items-center justify-between p-2.5 rounded-xl hover:bg-white/[0.04] transition-colors group">
       <div className="flex items-center gap-3 min-w-0 flex-1">
-        <FolderOpen className="w-4 h-4 text-muted-foreground/60 flex-shrink-0" />
+        <div className="w-7 h-7 rounded-lg bg-white/[0.06] flex items-center justify-center flex-shrink-0 group-hover:bg-white/[0.10] transition-colors">
+          <Code2 className="w-3.5 h-3.5 text-muted-foreground/60" />
+        </div>
         <div className="min-w-0">
           <div className="text-sm font-medium text-foreground truncate">{name}</div>
-          <div className="text-2xs text-muted-foreground truncate">
+          <div className="text-2xs text-muted-foreground/50 truncate">
             {truncatePath(path)}
-            {subtitle && <> · <span className="text-primary">{subtitle}</span></>}
+            {subtitle && <> · <span className="text-primary/70">{subtitle}</span></>}
           </div>
         </div>
       </div>
-      <div className="flex items-center gap-1 flex-shrink-0">
+      <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
         <Button
           variant="ghost"
           size="icon"
