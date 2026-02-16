@@ -26,7 +26,6 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
     recent,
     isLoadingEnvs,
     isLoadingStats,
-    sessions,
   } = useAppStore();
 
   const { openDirectoryPicker, switchEnvironment, loadCronTasks } = useTauriCommands();
@@ -89,16 +88,13 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
       .slice(0, 5);
   }, [recent]);
 
-  // Check if there are running sessions
-  const hasRunningSessions = sessions.some(s => s.status === 'running');
-
   if (isLoadingEnvs || isLoadingStats) {
     return <DashboardSkeleton />;
   }
 
   return (
-    <div className="page-transition-enter flex flex-col gap-5 min-h-0">
-      {/* Zone 1: Launch Strip — hero command bar */}
+    <div className="page-transition-enter flex flex-col gap-4 min-h-0">
+      {/* Zone 1: Launch Strip */}
       <LaunchStrip
         currentEnv={currentEnv}
         environments={environments}
@@ -113,25 +109,14 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
         onLaunch={handleLaunchClick}
       />
 
-      {/* Zone 2+3: Bento Grid Layout — Metrics + Quick Launch */}
-      <div className="grid grid-cols-2 gap-4 min-h-0 flex-1">
-        {/* Left column: Metrics */}
-        <div className="flex flex-col gap-4">
-          <MetricsRow onNavigate={onNavigate} />
-
-          {/* Live Sessions appears in left column when active */}
-          {hasRunningSessions && (
-            <div className="flex-1 min-h-0">
-              <LiveSessions onNavigate={onNavigate} />
-            </div>
-          )}
-        </div>
-
-        {/* Right column: Quick Launch */}
-        <div>
-          <QuickLaunchGrid onLaunch={onLaunchWithDir} />
-        </div>
+      {/* Zone 2: Bento Grid — Metrics left + Projects right */}
+      <div className="grid grid-cols-2 gap-3 items-start min-h-0">
+        <MetricsRow onNavigate={onNavigate} />
+        <QuickLaunchGrid onLaunch={onLaunchWithDir} />
       </div>
+
+      {/* Zone 3: Live Sessions — full width, only when active */}
+      <LiveSessions onNavigate={onNavigate} />
     </div>
   );
 }

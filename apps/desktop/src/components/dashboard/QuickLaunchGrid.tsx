@@ -50,16 +50,16 @@ export function QuickLaunchGrid({ onLaunch }: QuickLaunchGridProps) {
 
   return (
     <>
-      <div className="h-full flex flex-col glass-card glass-noise rounded-2xl overflow-hidden">
+      <div className="flex flex-col glass-card glass-noise rounded-2xl overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
-          <div className="flex items-center gap-2.5">
-            <Star className="w-4 h-4 text-primary/70" />
-            <h3 className="text-sm font-semibold text-foreground tracking-wide">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06]">
+          <div className="flex items-center gap-2">
+            <Star className="w-3.5 h-3.5 text-primary/60" />
+            <h3 className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-widest">
               {t('dashboard.favorites')}
             </h3>
             {visibleFavorites.length > 0 && (
-              <span className="text-2xs font-medium bg-white/[0.06] text-muted-foreground px-2 py-0.5 rounded-full tabular-nums">
+              <span className="text-2xs font-semibold bg-primary/[0.12] text-primary px-2 py-0.5 rounded-full tabular-nums">
                 {favorites.length}
               </span>
             )}
@@ -68,41 +68,44 @@ export function QuickLaunchGrid({ onLaunch }: QuickLaunchGridProps) {
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground px-2.5"
+              className="h-6 text-2xs gap-1.5 text-muted-foreground hover:text-foreground px-2"
               onClick={handleAddFavorite}
             >
-              <Plus className="w-3.5 h-3.5" />
+              <Plus className="w-3 h-3" />
               {t('dashboard.addFavorite')}
             </Button>
           </div>
         </div>
 
         {/* Content */}
-        <div className="flex-1 p-4 overflow-y-auto">
+        <div className="flex-1 p-3 overflow-y-auto">
           {visibleFavorites.length === 0 ? (
             <button
               onClick={handleAddFavorite}
-              className="w-full h-full min-h-[200px] rounded-xl glass-ghost-card flex flex-col items-center justify-center gap-3 text-muted-foreground hover:text-foreground transition-all"
+              className="w-full h-full min-h-[140px] rounded-xl glass-ghost-card flex flex-col items-center justify-center gap-2.5 text-muted-foreground hover:text-foreground transition-all"
             >
-              <div className="w-12 h-12 rounded-xl bg-primary/[0.08] flex items-center justify-center">
-                <Sparkles className="w-6 h-6 text-primary/60" />
+              <div className="w-10 h-10 rounded-xl bg-primary/[0.08] flex items-center justify-center">
+                <Sparkles className="w-5 h-5 text-primary/60" />
               </div>
               <div className="text-center">
                 <div className="text-sm font-medium">{t('dashboard.addFirstFavorite')}</div>
                 <div className="text-2xs text-muted-foreground/60 mt-1">
-                  Quick access to your favorite projects
+                  {t('dashboard.quickAccessHint')}
                 </div>
               </div>
             </button>
           ) : (
-            <div className="grid grid-cols-2 gap-3">
+            <div className={cn(
+              'grid gap-2.5',
+              visibleFavorites.length >= 4 ? 'grid-cols-2' : 'grid-cols-1'
+            )}>
               {visibleFavorites.map((project, i) => {
                 const color = PROJECT_COLORS[i % PROJECT_COLORS.length];
                 return (
                   <button
                     key={project.path}
                     onClick={() => handleLaunch(project.path)}
-                    className="group relative glass-subtle rounded-xl p-4 text-left transition-all duration-200 hover:bg-white/[0.06] hover:scale-[1.01] active:scale-[0.99] overflow-hidden"
+                    className="group relative glass-subtle rounded-xl p-3 text-left transition-all duration-200 hover:bg-white/[0.06] hover:scale-[1.01] active:scale-[0.99] overflow-hidden"
                     style={{ '--project-color': color } as React.CSSProperties}
                     title={project.path}
                   >
@@ -121,11 +124,11 @@ export function QuickLaunchGrid({ onLaunch }: QuickLaunchGridProps) {
                     <div className="relative flex items-start gap-3">
                       {/* Icon */}
                       <div
-                        className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-110"
+                        className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-110"
                         style={{ background: `hsl(${color} / 0.12)` }}
                       >
                         <Code2
-                          className="w-4 h-4"
+                          className="w-3.5 h-3.5"
                           style={{ color: `hsl(${color})` }}
                         />
                       </div>
@@ -144,13 +147,13 @@ export function QuickLaunchGrid({ onLaunch }: QuickLaunchGridProps) {
                     {/* Hover play overlay */}
                     <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200 bg-black/10 backdrop-blur-[2px] rounded-xl">
                       <div
-                        className="w-10 h-10 rounded-full flex items-center justify-center shadow-lg"
+                        className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg"
                         style={{
                           background: `hsl(${color} / 0.9)`,
-                          boxShadow: `0 0 20px hsl(${color} / 0.4)`
+                          boxShadow: `0 0 16px hsl(${color} / 0.4)`
                         }}
                       >
-                        <Play className="w-4 h-4 text-white ml-0.5" />
+                        <Play className="w-3.5 h-3.5 text-white ml-0.5" />
                       </div>
                     </div>
                   </button>
@@ -162,7 +165,7 @@ export function QuickLaunchGrid({ onLaunch }: QuickLaunchGridProps) {
 
         {/* Footer with recent projects */}
         {recentFiltered.length > 0 && (
-          <div className="border-t border-white/[0.06] px-5 py-3">
+          <div className="border-t border-white/[0.06] px-4 py-2.5">
             <div className="flex items-center gap-3">
               <span className="text-2xs text-muted-foreground/50 uppercase tracking-widest flex-shrink-0 font-medium">
                 {t('dashboard.recentHistory')}
@@ -197,7 +200,7 @@ export function QuickLaunchGrid({ onLaunch }: QuickLaunchGridProps) {
 
         {/* View all when no recent */}
         {recentFiltered.length === 0 && visibleFavorites.length > 0 && (
-          <div className="border-t border-white/[0.06] px-5 py-3 flex justify-end">
+          <div className="border-t border-white/[0.06] px-4 py-2.5 flex justify-end">
             <button
               onClick={() => setModalOpen(true)}
               className="flex items-center gap-1 text-2xs text-primary/60 hover:text-primary transition-colors font-medium"

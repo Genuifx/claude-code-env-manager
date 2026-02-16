@@ -18,13 +18,12 @@ export function MetricsRow({ onNavigate }: MetricsRowProps) {
   const weekTokens = (usageStats?.week.inputTokens ?? 0) + (usageStats?.week.outputTokens ?? 0);
   const weekCost = usageStats?.week.cost ?? 0;
 
-  // Cron stats
   const enabledTasks = cronTasks.filter(t => t.enabled);
   const hasCron = enabledTasks.length > 0;
 
   return (
-    <div className="flex flex-col gap-3">
-      {/* Hero card — Today's usage overview */}
+    <div className="flex flex-col gap-2.5">
+      {/* Hero card — Today's usage */}
       <HeroMetricCard
         icon={Activity}
         label={t('dashboard.todayTokens')}
@@ -35,53 +34,45 @@ export function MetricsRow({ onNavigate }: MetricsRowProps) {
         onClick={() => onNavigate('analytics')}
       />
 
-      {/* 2x2 Grid for secondary metrics */}
-      <div className="grid grid-cols-2 gap-2.5">
-        <div className="card-stagger" style={{ animationDelay: '60ms' }}>
-          <MetricCard
-            icon={Zap}
-            iconColor="text-primary"
-            label={t('dashboard.runningSessions')}
-            value={activeSessions}
-            formatValue={(v) => String(v)}
-            sublabel={`${sessions.length} ${t('dashboard.totalSessions')}`}
-            onClick={() => onNavigate('sessions')}
-          />
-        </div>
-        <div className="card-stagger" style={{ animationDelay: '120ms' }}>
-          <MetricCard
-            icon={Flame}
-            iconColor="text-chart-6"
-            label={t('dashboard.streak')}
-            value={continuousUsageDays}
-            formatValue={(v) => `${v}`}
-            sublabel={t('dashboard.streakDays')}
-            sublabelColor={continuousUsageDays >= 7 ? 'text-success' : undefined}
-            onClick={() => onNavigate('analytics')}
-          />
-        </div>
-        <div className="card-stagger" style={{ animationDelay: '180ms' }}>
-          <MetricCard
-            icon={DollarSign}
-            iconColor="text-warning"
-            label={t('dashboard.weekTotal')}
-            value={Math.round(weekCost * 100)}
-            formatValue={(v) => `$${(v / 100).toFixed(2)}`}
-            sublabel={weekTokens > 0 ? `${(weekTokens / 1000).toFixed(0)}K tokens` : undefined}
-            onClick={() => onNavigate('analytics')}
-          />
-        </div>
-        <div className="card-stagger" style={{ animationDelay: '240ms' }}>
-          <MetricCard
-            icon={Timer}
-            iconColor="text-info"
-            label={t('dashboard.cronStatus')}
-            value={hasCron ? enabledTasks.length : 0}
-            formatValue={(v) => hasCron ? `${v}` : '—'}
-            sublabel={hasCron ? t('dashboard.cronAllGood') : t('dashboard.cronNotConfigured')}
-            onClick={() => onNavigate('cron')}
-          />
-        </div>
+      {/* 2x2 compact grid */}
+      <div className="grid grid-cols-2 gap-2">
+        <MetricCard
+          icon={Zap}
+          iconColor="text-primary"
+          label={t('dashboard.runningSessions')}
+          value={activeSessions}
+          formatValue={(v) => String(v)}
+          sublabel={`${sessions.length} ${t('dashboard.totalSessions')}`}
+          onClick={() => onNavigate('sessions')}
+        />
+        <MetricCard
+          icon={Flame}
+          iconColor="text-chart-6"
+          label={t('dashboard.streak')}
+          value={continuousUsageDays}
+          formatValue={(v) => `${v}`}
+          sublabel={t('dashboard.streakDays')}
+          sublabelColor={continuousUsageDays >= 7 ? 'text-success' : undefined}
+          onClick={() => onNavigate('analytics')}
+        />
+        <MetricCard
+          icon={DollarSign}
+          iconColor="text-warning"
+          label={t('dashboard.weekTotal')}
+          value={Math.round(weekCost * 100)}
+          formatValue={(v) => `$${(v / 100).toFixed(2)}`}
+          sublabel={weekTokens > 0 ? `${(weekTokens / 1000).toFixed(0)}K tokens` : undefined}
+          onClick={() => onNavigate('analytics')}
+        />
+        <MetricCard
+          icon={Timer}
+          iconColor="text-info"
+          label={t('dashboard.cronStatus')}
+          value={hasCron ? enabledTasks.length : 0}
+          formatValue={(v) => hasCron ? `${v}` : '—'}
+          sublabel={hasCron ? t('dashboard.cronAllGood') : t('dashboard.cronNotConfigured')}
+          onClick={() => onNavigate('cron')}
+        />
       </div>
     </div>
   );
