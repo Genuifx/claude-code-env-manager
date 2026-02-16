@@ -1,6 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
 import { FolderOpen, ChevronDown, Globe, Shield, Play, Check, Clock, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useLocale } from '@/locales';
 import { getProjectName } from '@/lib/utils';
 import { PERMISSION_PRESETS } from '@ccem/core/browser';
@@ -96,44 +103,38 @@ export function LaunchStrip({
           />
         </div>
 
-        {/* Environment badge + native select */}
+        {/* Environment badge with Select */}
         <div className="flex items-center px-3.5 border-r border-white/[0.06] h-full">
-          <div className="relative">
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-primary/[0.12] text-primary cursor-pointer transition-colors hover:bg-primary/[0.18]">
+          <Select value={currentEnv} onValueChange={onSwitchEnv}>
+            <SelectTrigger variant="badge" badgeColor="var(--primary)" className="hover:bg-primary/[0.18]">
               <Globe className="w-3.5 h-3.5" />
-              {currentEnv}
-              <ChevronDown className="w-3 h-3 opacity-50" />
-            </div>
-            <select
-              className="absolute inset-0 opacity-0 cursor-pointer"
-              value={currentEnv}
-              onChange={(e) => onSwitchEnv(e.target.value)}
-            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
               {environments.map(env => (
-                <option key={env.name} value={env.name}>{env.name}</option>
+                <SelectItem key={env.name} value={env.name}>
+                  {env.name}
+                </SelectItem>
               ))}
-            </select>
-          </div>
+            </SelectContent>
+          </Select>
         </div>
 
-        {/* Permission badge + native select */}
+        {/* Permission badge with Select */}
         <div className="flex items-center px-3 border-r border-white/[0.06] h-full">
-          <div className="relative">
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-chart-4/[0.12] text-chart-4 cursor-pointer transition-colors hover:bg-chart-4/[0.18]">
+          <Select value={permissionMode} onValueChange={(v) => onSetPermMode(v as PermissionModeName)}>
+            <SelectTrigger variant="badge" badgeColor="var(--chart-4)" className="hover:bg-chart-4/[0.18]">
               <Shield className="w-3.5 h-3.5" />
-              {permissionMode}
-              <ChevronDown className="w-3 h-3 opacity-50" />
-            </div>
-            <select
-              className="absolute inset-0 opacity-0 cursor-pointer"
-              value={permissionMode}
-              onChange={(e) => onSetPermMode(e.target.value as PermissionModeName)}
-            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
               {Object.keys(PERMISSION_PRESETS).map((mode) => (
-                <option key={mode} value={mode}>{mode}</option>
+                <SelectItem key={mode} value={mode}>
+                  {mode}
+                </SelectItem>
               ))}
-            </select>
-          </div>
+            </SelectContent>
+          </Select>
         </div>
 
         {/* Directory section with dropdown */}
