@@ -20,10 +20,10 @@ export function DashboardSkeleton() {
       {/* Launch Strip */}
       <Bone className="h-14 w-full rounded-2xl" />
 
-      {/* Bento Grid — 5 cols left + 7 cols right */}
-      <div className="grid grid-cols-12 gap-4 min-h-0 flex-1">
-        {/* Left column: Metrics — 5 cols */}
-        <div className="col-span-5 flex flex-col gap-3">
+      {/* Bento Grid — equal 2 cols */}
+      <div className="grid grid-cols-2 gap-4 min-h-0 flex-1">
+        {/* Left column: Metrics */}
+        <div className="flex flex-col gap-3">
           {/* Hero card */}
           <Card className="p-5">
             <div className="flex items-center justify-between mb-4">
@@ -52,8 +52,8 @@ export function DashboardSkeleton() {
           </div>
         </div>
 
-        {/* Right column: Quick Launch — 7 cols */}
-        <div className="col-span-7">
+        {/* Right column: Quick Launch */}
+        <div>
           <Card className="h-full flex flex-col p-0 overflow-hidden">
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">

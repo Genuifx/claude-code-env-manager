@@ -114,9 +114,9 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
       />
 
       {/* Zone 2+3: Bento Grid Layout — Metrics + Quick Launch */}
-      <div className="grid grid-cols-12 gap-4 min-h-0 flex-1">
-        {/* Left column: Metrics — 5 cols */}
-        <div className="col-span-5 flex flex-col gap-4">
+      <div className="grid grid-cols-2 gap-4 min-h-0 flex-1">
+        {/* Left column: Metrics */}
+        <div className="flex flex-col gap-4">
           <MetricsRow onNavigate={onNavigate} />
 
           {/* Live Sessions appears in left column when active */}
@@ -127,8 +127,8 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
           )}
         </div>
 
-        {/* Right column: Quick Launch — 7 cols */}
-        <div className="col-span-7">
+        {/* Right column: Quick Launch */}
+        <div>
           <QuickLaunchGrid onLaunch={onLaunchWithDir} />
         </div>
       </div>
