@@ -16,30 +16,65 @@ function Bone({ className }: { className?: string }) {
 
 export function DashboardSkeleton() {
   return (
-    <div className="animate-pulse space-y-4">
+    <div className="animate-pulse flex flex-col gap-5 min-h-0">
       {/* Launch Strip */}
-      <Bone className="h-12 w-full rounded-xl" />
+      <Bone className="h-14 w-full rounded-2xl" />
 
-      {/* Metrics Row — 5 cards */}
-      <div className="grid grid-cols-5 gap-3">
-        {[1, 2, 3, 4, 5].map((i) => (
-          <Card key={i} className="p-4">
-            <Bone className="h-3 w-20 mb-2" />
-            <Bone className="h-7 w-14" />
-            <Bone className="h-2.5 w-24 mt-2" />
+      {/* Bento Grid — 5 cols left + 7 cols right */}
+      <div className="grid grid-cols-12 gap-4 min-h-0 flex-1">
+        {/* Left column: Metrics — 5 cols */}
+        <div className="col-span-5 flex flex-col gap-3">
+          {/* Hero card */}
+          <Card className="p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2.5">
+                <Bone className="w-8 h-8 rounded-lg" />
+                <Bone className="h-3 w-24" />
+              </div>
+              <Bone className="h-5 w-16 rounded-full" />
+            </div>
+            <Bone className="h-10 w-32 mb-2" />
+            <Bone className="h-4 w-40" />
           </Card>
-        ))}
-      </div>
 
-      {/* Quick Launch Grid */}
-      <Card className="p-4">
-        <Bone className="h-4 w-28 mb-3" />
-        <div className="grid grid-cols-3 gap-2">
-          {[1, 2, 3].map((i) => (
-            <Bone key={i} className="h-12 w-full" />
-          ))}
+          {/* 2x2 grid */}
+          <div className="grid grid-cols-2 gap-2.5">
+            {[1, 2, 3, 4].map((i) => (
+              <Card key={i} className="p-3.5">
+                <div className="flex items-center gap-1.5 mb-2.5">
+                  <Bone className="w-6 h-6 rounded-md" />
+                  <Bone className="h-3 w-14" />
+                </div>
+                <Bone className="h-5 w-12 mb-1" />
+                <Bone className="h-2.5 w-20" />
+              </Card>
+            ))}
+          </div>
         </div>
-      </Card>
+
+        {/* Right column: Quick Launch — 7 cols */}
+        <div className="col-span-7">
+          <Card className="h-full flex flex-col p-0 overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+              <div className="flex items-center gap-2.5">
+                <Bone className="w-4 h-4 rounded" />
+                <Bone className="h-4 w-20" />
+                <Bone className="h-4 w-8 rounded-full" />
+              </div>
+              <Bone className="h-7 w-24 rounded" />
+            </div>
+            {/* Content */}
+            <div className="flex-1 p-4">
+              <div className="grid grid-cols-2 gap-3">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="h-20 rounded-xl bg-muted/50" />
+                ))}
+              </div>
+            </div>
+          </Card>
+        </div>
+      </div>
     </div>
   );
 }
