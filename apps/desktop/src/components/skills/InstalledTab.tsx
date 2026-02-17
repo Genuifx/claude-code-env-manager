@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { SkillCard } from './SkillCard';
+import { useTauriEvent } from '@/hooks/useTauriEvents';
 import { useLocale } from '@/locales';
 import { useAppStore } from '@/store';
 import { toast } from 'sonner';
@@ -25,21 +26,38 @@ export function InstalledTab() {
     loadSkills();
   }, []);
 
-  const handleUninstall = async (name: string) => {
-    setUninstallingNames(prev => new Set(prev).add(name));
+  // Listen for uninstall completion events from Rust backend
+  useTauriEvent<string>('skill-uninstall-done', async (raw) => {
     try {
-      await invoke('uninstall_skill', { name, global: true });
-      toast.success(t('skills.uninstallSuccess').replace('{name}', name));
-      await loadSkills();
-    } catch (err) {
-      toast.error(t('skills.uninstallError').replace('{error}', String(err)));
-    } finally {
+      const data = JSON.parse(raw);
+      const skillName = data.name || '';
+
+      if (data.success) {
+        toast.success(t('skills.uninstallSuccess').replace('{name}', skillName));
+        await loadSkills();
+      } else {
+        const msg = String(data.message || '');
+        const clean = msg
+          .replace(/\x1b\[[0-9;]*[a-zA-Z]|\[\?25[hl]|\[999D|\[J/g, '')
+          .replace(/[◒◐◓◑■│┌└◇─╔╗╚╝║═█▓░▒███████╗╚══════╝]/g, '')
+          .trim();
+        toast.error(t('skills.uninstallError').replace('{error}', clean || 'Uninstall failed'));
+      }
+
       setUninstallingNames(prev => {
         const next = new Set(prev);
-        next.delete(name);
+        next.delete(skillName);
         return next;
       });
+    } catch {
+      // Malformed event payload
     }
+  });
+
+  const handleUninstall = (name: string) => {
+    setUninstallingNames(prev => new Set(prev).add(name));
+    // Fire-and-forget — result comes via "skill-uninstall-done" event
+    invoke('uninstall_skill', { name, global: true }).catch(() => {});
   };
 
   if (installedSkills.length === 0) {

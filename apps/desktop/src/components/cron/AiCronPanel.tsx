@@ -1,12 +1,11 @@
 import { useState, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { ErrorBanner } from '@/components/ui/EmptyState';
 import { useTauriEvent } from '@/hooks/useTauriEvents';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useLocale } from '@/locales';
 import { toast } from 'sonner';
-import { Sparkles, Loader2, Bot, Wrench, Clock, FolderOpen, FileText, Pencil, Check } from 'lucide-react';
+import { Sparkles, Loader2, Bot, Wrench, FolderOpen, FileText, Pencil, Check, X } from 'lucide-react';
 
 interface StreamMessage {
   type: 'thinking' | 'tool' | 'result' | 'error';
@@ -21,11 +20,13 @@ interface GeneratedTask {
 }
 
 interface AiCronPanelProps {
+  open: boolean;
+  onClose: () => void;
   onTaskCreated: () => void;
   onEdit: (task: GeneratedTask) => void;
 }
 
-export function AiCronPanel({ onTaskCreated, onEdit }: AiCronPanelProps) {
+export function AiCronPanel({ open, onClose, onTaskCreated, onEdit }: AiCronPanelProps) {
   const { t } = useLocale();
   const { addCronTask, generateCronTaskStream } = useTauriCommands();
   const [query, setQuery] = useState('');
@@ -151,6 +152,7 @@ export function AiCronPanel({ onTaskCreated, onEdit }: AiCronPanelProps) {
       setGeneratedTask(null);
       setStreamMessages([]);
       setQuery('');
+      onClose();
       onTaskCreated();
     } catch (err) {
       toast.error(String(err));
@@ -159,106 +161,132 @@ export function AiCronPanel({ onTaskCreated, onEdit }: AiCronPanelProps) {
     }
   };
 
+  if (!open) return null;
+
   return (
-    <div className="space-y-3">
-      {/* Input bar */}
-      <div className="flex gap-2">
-        <div className="relative flex-1">
-          <Sparkles className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={t('cron.aiPlaceholder')}
-            className="w-full h-10 pl-9 pr-4 rounded-lg bg-surface-raised border border-[hsl(var(--glass-border-light)/0.15)] text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-            disabled={isGenerating}
-          />
-        </div>
-        <Button
-          onClick={handleGenerate}
-          disabled={!query.trim() || isGenerating}
-          className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/25 border border-[hsl(var(--glass-border-light)/0.15)]"
-        >
-          {isGenerating ? (
-            <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
-          ) : (
-            <Sparkles className="w-4 h-4 mr-1.5" />
-          )}
-          {isGenerating ? t('cron.aiGenerating') : t('cron.aiGenerate')}
-        </Button>
-      </div>
-
-      {/* Error */}
-      {error && (
-        <ErrorBanner
-          message={error}
-          onRetry={() => { setError(null); handleGenerate(); }}
-          retryLabel={t('common.retry')}
-        />
-      )}
-
-      {/* Stream output */}
-      {streamMessages.length > 0 && (
-        <Card className="p-4 max-h-48 overflow-y-auto">
-          <div className="space-y-2 text-sm">
-            {streamMessages.map((msg, i) => (
-              <div key={i} className="flex items-start gap-2">
-                {msg.type === 'thinking' && (
-                  <>
-                    <Bot className="w-3.5 h-3.5 mt-0.5 text-primary shrink-0" />
-                    <span className="text-muted-foreground whitespace-pre-wrap">{msg.content}</span>
-                  </>
-                )}
-                {msg.type === 'tool' && (
-                  <>
-                    <Wrench className="w-3.5 h-3.5 mt-0.5 text-amber-500 shrink-0" />
-                    <span className="text-amber-500">{msg.content}</span>
-                  </>
-                )}
-                {msg.type === 'result' && (
-                  <>
-                    <Sparkles className="w-3.5 h-3.5 mt-0.5 text-emerald-500 shrink-0" />
-                    <span className="text-emerald-500">{msg.content}</span>
-                  </>
-                )}
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="relative rounded-2xl max-w-lg w-full mx-4 max-h-[85vh] overflow-hidden shadow-elevation-4 border border-[hsl(var(--glass-border-light)/0.25)]"
+        style={{ background: 'hsl(var(--surface-overlay))' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header with gradient accent */}
+        <div className="relative px-5 pt-5 pb-4">
+          <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-purple-500/5" />
+          <div className="relative flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-primary/15 flex items-center justify-center">
+                <Sparkles className="w-4 h-4 text-primary" />
               </div>
-            ))}
-            <div ref={streamEndRef} />
-          </div>
-        </Card>
-      )}
-
-      {/* Generated task preview */}
-      {generatedTask && (
-        <Card className="p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <h4 className="font-medium text-foreground">{generatedTask.name}</h4>
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Clock className="w-3.5 h-3.5" />
-              <code>{generatedTask.cronExpression}</code>
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">{t('cron.aiCreate')}</h2>
+                <p className="text-2xs text-muted-foreground mt-0.5">{t('cron.aiPlaceholder')}</p>
+              </div>
             </div>
+            <button onClick={onClose} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/[0.06] transition-colors">
+              <X className="w-4 h-4" />
+            </button>
           </div>
-          <div className="flex items-start gap-2 text-sm text-muted-foreground">
-            <FileText className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-            <p className="line-clamp-2">{generatedTask.prompt}</p>
-          </div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <FolderOpen className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">{generatedTask.workingDir}</span>
-          </div>
-          <div className="flex justify-end gap-2 pt-2 border-t border-[hsl(var(--glass-border-light)/0.1)]">
-            <Button variant="outline" size="sm" onClick={() => onEdit(generatedTask)}>
-              <Pencil className="w-3.5 h-3.5 mr-1" />
-              {t('cron.aiEdit')}
+        </div>
+
+        {/* Content */}
+        <div className="px-5 pb-5 space-y-3 overflow-y-auto max-h-[calc(85vh-80px)]">
+          {/* Input bar */}
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Bot className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary/60" />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={t('cron.aiPlaceholder')}
+                className="w-full h-10 pl-9 pr-4 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-foreground text-sm placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 transition-all"
+                disabled={isGenerating}
+              />
+            </div>
+            <Button
+              onClick={handleGenerate}
+              disabled={!query.trim() || isGenerating}
+              className="h-10 px-4 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20"
+            >
+              {isGenerating ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Sparkles className="w-4 h-4" />
+              )}
             </Button>
-            <Button size="sm" onClick={handleConfirm} disabled={isCreating}>
-              {isCreating ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Check className="w-3.5 h-3.5 mr-1" />}
-              {t('cron.aiConfirm')}
-            </Button>
           </div>
-        </Card>
-      )}
+
+          {/* Error */}
+          {error && (
+            <ErrorBanner
+              message={error}
+              onRetry={() => { setError(null); handleGenerate(); }}
+              retryLabel={t('common.retry')}
+            />
+          )}
+
+          {/* Stream output */}
+          {streamMessages.length > 0 && (
+            <div className="rounded-xl bg-black/[0.02] dark:bg-white/[0.03] border border-black/[0.06] dark:border-white/[0.06] p-3.5 max-h-44 overflow-y-auto">
+              <div className="space-y-2 text-sm">
+                {streamMessages.map((msg, i) => (
+                  <div key={i} className="flex items-start gap-2">
+                    {msg.type === 'thinking' && (
+                      <>
+                        <Bot className="w-3.5 h-3.5 mt-0.5 text-primary shrink-0" />
+                        <span className="text-muted-foreground whitespace-pre-wrap leading-relaxed">{msg.content}</span>
+                      </>
+                    )}
+                    {msg.type === 'tool' && (
+                      <>
+                        <Wrench className="w-3.5 h-3.5 mt-0.5 text-amber-500 shrink-0" />
+                        <span className="text-amber-600 dark:text-amber-500">{msg.content}</span>
+                      </>
+                    )}
+                    {msg.type === 'result' && (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5 mt-0.5 text-emerald-500 shrink-0" />
+                        <span className="text-emerald-600 dark:text-emerald-500 font-medium">{msg.content}</span>
+                      </>
+                    )}
+                  </div>
+                ))}
+                <div ref={streamEndRef} />
+              </div>
+            </div>
+          )}
+
+          {/* Generated task preview */}
+          {generatedTask && (
+            <div className="rounded-xl border border-primary/20 bg-primary/[0.03] dark:bg-primary/[0.06] p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-semibold text-foreground">{generatedTask.name}</h4>
+                <code className="text-2xs px-2 py-0.5 rounded-md bg-primary/10 text-primary font-mono">{generatedTask.cronExpression}</code>
+              </div>
+              <div className="flex items-start gap-2 text-sm text-muted-foreground">
+                <FileText className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/50" />
+                <p className="line-clamp-2 leading-relaxed">{generatedTask.prompt}</p>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <FolderOpen className="w-3.5 h-3.5 shrink-0 text-primary/50" />
+                <span className="truncate font-mono">{generatedTask.workingDir}</span>
+              </div>
+              <div className="flex justify-end gap-2 pt-3 border-t border-primary/10">
+                <Button variant="outline" size="sm" className="rounded-lg" onClick={() => { onEdit(generatedTask); onClose(); }}>
+                  <Pencil className="w-3.5 h-3.5 mr-1.5" />
+                  {t('cron.aiEdit')}
+                </Button>
+                <Button size="sm" className="rounded-lg shadow-sm" onClick={handleConfirm} disabled={isCreating}>
+                  {isCreating ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Check className="w-3.5 h-3.5 mr-1.5" />}
+                  {t('cron.aiConfirm')}
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

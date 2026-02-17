@@ -11,6 +11,7 @@
     "local": "本地"
   },
   "dashboard": {
+    "subtitle": "Claude Code 工作区总览",
     "currentEnv": "当前环境",
     "permissions": "权限",
     "sessionsRunning": "个会话运行中",
@@ -32,7 +33,7 @@
     "continueWork": "继续工作",
     "noProjects": "还没有项目记录",
     "selectDirToStart": "选择一个目录开始",
-    "viewAll": "查看全部 →",
+    "viewAll": "查看全部",
     "tokensToday": "tokens",
     "costToday": "today",
     "sessionsActive": "个会话活跃",
@@ -73,6 +74,7 @@
     "quickAccessHint": "快速访问你的常用项目"
   },
   "sessions": {
+    "subtitle": "管理运行中的 Claude Code 会话",
     "confirmClose": "确定要关闭此会话吗？",
     "confirmCloseAll": "确定要关闭所有会话吗？",
     "confirmTerminate": "确定要终止此会话？",
@@ -174,6 +176,7 @@
     "optional": "选填",
     "presetSelect": "选择预设以快速填充",
     "presetNeedApiKey": "选择后仍需填写 API Key",
+    "getApiKey": "获取 API Key",
     "serverUrl": "服务器地址",
     "serverSync": "同步",
     "serverPlaceholder": "https://your-server.com/api/config",
@@ -245,6 +248,8 @@
     "searchPlaceholder": "描述你想要的能力，例如：React 测试、代码审查...",
     "search": "搜索",
     "searching": "搜索中...",
+    "searchStarting": "正在启动搜索引擎...",
+    "searchConnected": "已连接，正在分析需求...",
     "searchHint": "通过 Claude 智能搜索 skills.sh 生态中的技能",
     "thinking": "正在思考...",
     "toolRunning": "正在搜索技能库...",
@@ -254,6 +259,7 @@
     "noResults": "未找到匹配的技能",
     "tryDifferent": "尝试不同的描述",
     "install": "安装",
+    "installStarted": "正在安装 {name}，请稍候...",
     "installing": "安装中...",
     "installed": "已安装",
     "installSuccess": "技能 {name} 安装成功",
@@ -303,6 +309,7 @@
     "upToDate": "当前已是最新版本 v2.0.0"
   },
   "history": {
+    "subtitle": "浏览历史对话和消息记录",
     "searchPlaceholder": "搜索会话...",
     "allProjects": "所有项目",
     "noResults": "没有匹配的会话",
@@ -336,7 +343,16 @@
     "resumed": "已恢复 ✓"
   },
   "sideRail": {
-    "cron": "定时任务"
+    "dashboard": "仪表盘",
+    "sessions": "会话",
+    "environments": "环境",
+    "skills": "技能",
+    "history": "历史",
+    "cron": "定时任务",
+    "analytics": "分析",
+    "settings": "设置",
+    "groupWorkspace": "工作区",
+    "groupInsights": "洞察"
   },
   "cron": {
     "title": "定时任务",

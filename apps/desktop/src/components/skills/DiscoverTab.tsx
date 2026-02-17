@@ -7,6 +7,7 @@ import { ErrorBanner } from '@/components/ui/EmptyState';
 import { SkillCard, type DiscoverSkillInfo } from './SkillCard';
 import { useTauriEvent } from '@/hooks/useTauriEvents';
 import { useLocale } from '@/locales';
+import { useAppStore } from '@/store';
 import { toast } from 'sonner';
 import { Search, Sparkles, Loader2, Bot, Wrench } from 'lucide-react';
 
@@ -61,9 +62,19 @@ export function DiscoverTab() {
       if (data.type === 'assistant' && data.message?.content) {
         for (const block of data.message.content) {
           if (block.type === 'text' && block.text) {
-            setStreamMessages(prev => [...prev, { type: 'thinking', content: block.text }]);
+            // If text contains a JSON array, parse as results instead of showing raw text
+            const jsonMatch = block.text.match(/\[[\s\S]*\]/);
+            if (jsonMatch) {
+              tryParseResults(jsonMatch[0]);
+            } else {
+              setStreamMessages(prev => [...prev, { type: 'thinking', content: block.text }]);
+            }
           } else if (block.type === 'tool_use') {
-            setStreamMessages(prev => [...prev, { type: 'tool', content: t('skills.toolRunning') }]);
+            const cmd = block.input?.command || block.input?.pattern || '';
+            const label = cmd
+              ? `${t('skills.toolRunning')} ${cmd}`
+              : t('skills.toolRunning');
+            setStreamMessages(prev => [...prev, { type: 'tool', content: label }]);
           }
         }
       } else if (data.type === 'content_block_delta' && data.delta?.text) {
@@ -81,8 +92,10 @@ export function DiscoverTab() {
         } else {
           tryParseResults(resultText);
         }
+      } else if (data.type === 'system' && data.subtype === 'init') {
+        // Replace the initial "starting" message once CLI is connected
+        setStreamMessages([{ type: 'thinking', content: t('skills.searchConnected') }]);
       }
-      // Skip system events silently
     } catch {
       // Non-JSON line — try to extract results from raw text
       if (line.trim().startsWith('[')) {
@@ -111,7 +124,7 @@ export function DiscoverTab() {
 
     isSearchingRef.current = true;
     setIsSearching(true);
-    setStreamMessages([]);
+    setStreamMessages([{ type: 'thinking', content: t('skills.searchStarting') }]);
     setResults([]);
     setError(null);
 
@@ -124,22 +137,49 @@ export function DiscoverTab() {
     }
   };
 
-  const handleInstall = async (packageId: string) => {
-    setInstallingIds(prev => new Set(prev).add(packageId));
+  // Listen for install completion events from Rust backend
+  useTauriEvent<string>('skill-install-done', async (raw) => {
     try {
-      await invoke('install_skill', { packageId, global: true });
-      setInstalledIds(prev => new Set(prev).add(packageId));
-      const skill = results.find(s => s.package_id === packageId);
-      toast.success(t('skills.installSuccess').replace('{name}', skill?.name || packageId));
-    } catch (err) {
-      toast.error(t('skills.installError').replace('{error}', String(err)));
-    } finally {
+      const data = JSON.parse(raw);
+      const pid = data.package_id || '';
+      const skill = results.find(s => s.package_id === pid);
+      const displayName = skill?.name || pid;
+
+      if (data.success) {
+        setInstalledIds(prev => new Set(prev).add(pid));
+        toast.success(t('skills.installSuccess').replace('{name}', displayName));
+        // Refresh installed skills list in store
+        try {
+          const skills = await invoke<any[]>('list_installed_skills');
+          useAppStore.getState().setInstalledSkills(skills);
+        } catch { /* ignore refresh error */ }
+      } else {
+        // Strip ANSI escape codes from error message
+        const msg = String(data.message || '');
+        const clean = msg
+          .replace(/\x1b\[[0-9;]*[a-zA-Z]|\[\?25[hl]|\[999D|\[J/g, '')
+          .replace(/[◒◐◓◑■│┌└◇─╔╗╚╝║═█▓░▒███████╗╚══════╝]/g, '')
+          .trim();
+        toast.error(t('skills.installError').replace('{error}', clean || 'Installation failed'));
+      }
+
       setInstallingIds(prev => {
         const next = new Set(prev);
-        next.delete(packageId);
+        next.delete(pid);
         return next;
       });
+    } catch {
+      // Malformed event payload
     }
+  });
+
+  const handleInstall = (packageId: string) => {
+    setInstallingIds(prev => new Set(prev).add(packageId));
+    const skill = results.find(s => s.package_id === packageId);
+    const displayName = skill?.name || packageId;
+    toast.info(t('skills.installStarted').replace('{name}', displayName), { duration: 4000 });
+    // Fire-and-forget — result comes via "skill-install-done" event
+    invoke('install_skill', { packageId, global: true }).catch(() => {});
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

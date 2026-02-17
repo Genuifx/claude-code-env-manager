@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Moon, Sun, MonitorSmartphone, Lightbulb, Terminal, CheckCircle2, XCircle, Copy } from 'lucide-react';
+import { Moon, Sun, MonitorSmartphone, Lightbulb, Terminal, CheckCircle2, XCircle, Copy, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store';
@@ -9,6 +9,27 @@ import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { useLocale } from '../locales';
 import { SettingsSkeleton } from '@/components/ui/skeleton-states';
+
+const MODE_DISPLAY_NAMES: Record<PermissionModeName, string> = {
+  yolo: 'YOLO',
+  dev: 'Developer',
+  readonly: 'Read Only',
+  safe: 'Safe',
+  ci: 'CI / CD',
+  audit: 'Audit',
+};
+
+function getModeIcon(mode: PermissionModeName): typeof Shield {
+  const iconMap: Record<PermissionModeName, typeof Shield> = {
+    yolo: ShieldOff,
+    dev: ShieldCheck,
+    readonly: ShieldBan,
+    safe: ShieldAlert,
+    ci: ShieldCheck,
+    audit: Search,
+  };
+  return iconMap[mode] || Shield;
+}
 
 export function Settings() {
   const { defaultMode, setDefaultMode, isLoadingSettings } = useAppStore();
@@ -103,137 +124,151 @@ export function Settings() {
   ];
 
   return (
-    <div className="page-transition-enter space-y-6">
-      <div className="max-w-lg space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-foreground mb-2">
-          Settings
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          {t('settings.subtitle')}
-        </p>
-      </div>
+    <div className="page-transition-enter space-y-5">
+      {/* Row 1: Appearance + Application side by side */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        {/* Appearance */}
+        <Card className="p-5">
+          <h3 className="text-sm font-semibold text-foreground mb-4">
+            {t('settings.appearance')}
+          </h3>
+          <div className="space-y-4">
+            {/* Theme -- segmented control */}
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-2">
+                {t('settings.theme')}
+              </label>
+              <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg glass-subtle">
+                {themeOptions.map(({ key, icon: Icon, label }) => (
+                  <button
+                    key={key}
+                    onClick={() => setTheme(key)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-all duration-150 ${
+                      theme === key
+                        ? 'seg-active text-foreground'
+                        : 'seg-hover text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" /> {label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-      {/* Appearance */}
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold text-foreground mb-4">
-          {t('settings.appearance')}
-        </h3>
-        <div className="space-y-4">
-          {/* Theme -- segmented control */}
-          <div>
-            <label className="block text-sm font-medium text-muted-foreground mb-2">
-              {t('settings.theme')}
-            </label>
-            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg glass-subtle">
-              {themeOptions.map(({ key, icon: Icon, label }) => (
+            {/* Language -- segmented control */}
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-2">
+                语言 / Language
+              </label>
+              <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg glass-subtle">
                 <button
-                  key={key}
-                  onClick={() => setTheme(key)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-all duration-150 ${
-                    theme === key
+                  onClick={() => setLang('zh')}
+                className={`px-3 py-1.5 rounded-md text-sm transition-all duration-150 ${
+                    lang === 'zh'
                       ? 'seg-active text-foreground'
                       : 'seg-hover text-muted-foreground hover:text-foreground'
                   }`}
                 >
-                  <Icon className="w-4 h-4" /> {label}
+                  中文
                 </button>
-              ))}
+                <button
+                  onClick={() => setLang('en')}
+                  className={`px-3 py-1.5 rounded-md text-sm transition-all duration-150 ${
+                    lang === 'en'
+                      ? 'seg-active text-foreground'
+                      : 'seg-hover text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  English
+                </button>
+              </div>
             </div>
           </div>
+        </Card>
 
-          {/* Language -- segmented control */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">
-              语言 / Language
-            </label>
-            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg glass-subtle">
+        {/* Application */}
+        <Card className="p-5">
+          <h3 className="text-sm font-semibold text-foreground mb-4">
+            {t('settings.application')}
+          </h3>
+          <div className="space-y-4">
+            <ToggleSetting
+              checked={autoStart}
+              onChange={setAutoStart}
+              title={t('settings.autoStart')}
+              description={t('settings.autoStartDesc')}
+            />
+            <ToggleSetting
+              checked={startMinimized}
+              onChange={setStartMinimized}
+              title={t('settings.startMinimized')}
+              description={t('settings.startMinimizedDesc')}
+            />
+            <ToggleSetting
+              checked={closeToTray}
+              onChange={setCloseToTray}
+              title={t('settings.closeToTray')}
+              description={t('settings.closeToTrayDesc')}
+            />
+          </div>
+        </Card>
+      </div>
+
+      {/* Row 2: Default Permission — full width card grid */}
+      <Card className="p-5">
+        <div className="flex items-baseline justify-between mb-4">
+          <h3 className="text-sm font-semibold text-foreground">
+            {t('settings.defaultPermission')}
+          </h3>
+          <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+            <Lightbulb className="w-3 h-3 text-primary" />
+            {t('settings.defaultPermissionHint')}
+          </p>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          {Object.entries(PERMISSION_PRESETS).map(([key]) => {
+            const mode = key as PermissionModeName;
+            const isActive = (defaultMode || 'dev') === mode;
+            const ModeIcon = getModeIcon(mode);
+            const displayName = MODE_DISPLAY_NAMES[mode] || key;
+            return (
               <button
-                onClick={() => setLang('zh')}
-                className={`px-3 py-1.5 rounded-md text-sm transition-all duration-150 ${
-                  lang === 'zh'
-                    ? 'seg-active text-foreground'
-                    : 'seg-hover text-muted-foreground hover:text-foreground'
+                key={key}
+                type="button"
+                onClick={() => setDefaultMode(mode)}
+                className={`text-left p-3.5 rounded-lg cursor-pointer glass-mode-card ${
+                  isActive ? 'active' : ''
                 }`}
               >
-                中文
+                <div className="flex items-center gap-2 mb-1">
+                  <ModeIcon className={`w-3.5 h-3.5 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
+                  <span className={`text-sm font-semibold ${isActive ? 'text-primary' : 'text-foreground'}`}>
+                    {displayName}
+                  </span>
+                  <span className="font-mono text-[10px] text-muted-foreground/60 ml-auto">
+                    {key}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground line-clamp-2">
+                  {t(`environments.permMode_${key}_desc`)}
+                </p>
+                {isActive && (
+                  <p className="text-[11px] text-muted-foreground/80 leading-relaxed border-t glass-divider pt-2 mt-2">
+                    {t(`environments.permMode_${key}_detail`)}
+                  </p>
+                )}
               </button>
-              <button
-                onClick={() => setLang('en')}
-                className={`px-3 py-1.5 rounded-md text-sm transition-all duration-150 ${
-                  lang === 'en'
-                    ? 'seg-active text-foreground'
-                    : 'seg-hover text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                English
-              </button>
-            </div>
-          </div>
+            );
+          })}
         </div>
       </Card>
 
-      {/* Application */}
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold text-foreground mb-4">
-          {t('settings.application')}
-        </h3>
-        <div className="space-y-4">
-          <ToggleSetting
-            checked={autoStart}
-            onChange={setAutoStart}
-            title={t('settings.autoStart')}
-            description={t('settings.autoStartDesc')}
-          />
-          <ToggleSetting
-            checked={startMinimized}
-            onChange={setStartMinimized}
-            title={t('settings.startMinimized')}
-            description={t('settings.startMinimizedDesc')}
-          />
-          <ToggleSetting
-            checked={closeToTray}
-            onChange={setCloseToTray}
-            title={t('settings.closeToTray')}
-            description={t('settings.closeToTrayDesc')}
-          />
-        </div>
-      </Card>
-
-      {/* Default Permission */}
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold text-foreground mb-4">
-          {t('settings.defaultPermission')}
-        </h3>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-muted-foreground mb-2">
-              {t('settings.defaultPermissionMode')}
-            </label>
-            <select
-              value={defaultMode || 'dev'}
-              onChange={(e) => setDefaultMode(e.target.value as PermissionModeName)}
-              className="w-full px-3 py-2 rounded-lg glass-select text-sm"
-            >
-              {Object.entries(PERMISSION_PRESETS).map(([key, preset]) => (
-                <option key={key} value={key}>
-                  {key} - {preset.description}
-                </option>
-              ))}
-            </select>
-            <p className="mt-2 text-xs text-muted-foreground">
-              <Lightbulb className="w-3.5 h-3.5 inline mr-1 text-primary" /> {t('settings.defaultPermissionHint')}
-            </p>
-          </div>
-        </div>
-      </Card>
-
-      {/* About */}
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold text-foreground mb-4">
+      {/* Row 3: About */}
+      <Card className="p-5">
+        <h3 className="text-sm font-semibold text-foreground mb-4">
           {t('settings.about')}
         </h3>
-        <div className="space-y-4">
+        <div className="space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">
               {t('settings.version')}
@@ -279,7 +314,7 @@ export function Settings() {
               {t('settings.cliInstallHint')}
             </p>
           )}
-          <div className="flex gap-2">
+          <div className="flex gap-2 pt-1">
             <Button variant="outline" size="sm" className="glass-btn-outline" onClick={() => toast.info(t('settings.upToDate'))}>
               {t('settings.checkUpdate')}
             </Button>
@@ -292,7 +327,6 @@ export function Settings() {
           </div>
         </div>
       </Card>
-      </div>
     </div>
   );
 }
