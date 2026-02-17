@@ -110,7 +110,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
       />
 
       {/* Zone 2: Bento Grid — Metrics left + Projects right */}
-      <div className="grid grid-cols-2 gap-3 items-start min-h-0">
+      <div className="grid grid-cols-2 gap-3 min-h-0">
         <MetricsRow onNavigate={onNavigate} />
         <QuickLaunchGrid onLaunch={onLaunchWithDir} />
       </div>
