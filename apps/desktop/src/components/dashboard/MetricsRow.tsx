@@ -56,15 +56,6 @@ export function MetricsRow({ onNavigate }: MetricsRowProps) {
           onClick={() => onNavigate('analytics')}
         />
         <MetricCard
-          icon={DollarSign}
-          iconColor="text-warning"
-          label={t('dashboard.weekTotal')}
-          value={Math.round(weekCost * 100)}
-          formatValue={(v) => `$${(v / 100).toFixed(2)}`}
-          sublabel={weekTokens > 0 ? `${(weekTokens / 1000).toFixed(0)}K tokens` : undefined}
-          onClick={() => onNavigate('analytics')}
-        />
-        <MetricCard
           icon={Timer}
           iconColor="text-info"
           label={t('dashboard.cronStatus')}
@@ -72,6 +63,15 @@ export function MetricsRow({ onNavigate }: MetricsRowProps) {
           formatValue={(v) => hasCron ? `${v}` : '—'}
           sublabel={hasCron ? t('dashboard.cronAllGood') : t('dashboard.cronNotConfigured')}
           onClick={() => onNavigate('cron')}
+        />
+        <MetricCard
+          icon={DollarSign}
+          iconColor="text-warning"
+          label={t('dashboard.weekTotal')}
+          value={Math.round(weekCost * 100)}
+          formatValue={(v) => `$${(v / 100).toFixed(2)}`}
+          sublabel={weekTokens > 0 ? `${(weekTokens / 1000).toFixed(0)}K tokens` : undefined}
+          onClick={() => onNavigate('analytics')}
         />
       </div>
     </div>
