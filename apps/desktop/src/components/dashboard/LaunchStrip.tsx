@@ -1,30 +1,41 @@
-import { FolderOpen, ChevronDown, Globe, Shield } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { useState } from 'react';
+import { FolderOpen, ChevronDown, Globe, Shield, Check, Clock, Rocket } from 'lucide-react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import * as Popover from '@radix-ui/react-popover';
 import { useLocale } from '@/locales';
 import { getProjectName } from '@/lib/utils';
 import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
+import { cn } from '@/lib/utils';
 
 interface LaunchStripProps {
   currentEnv: string;
   environments: { name: string }[];
   permissionMode: PermissionModeName;
   selectedWorkingDir: string | null;
+  recentDirs: string[];
   launched: boolean;
   onSwitchEnv: (name: string) => void;
   onSetPermMode: (mode: PermissionModeName) => void;
   onSelectDir: () => void;
+  onPickRecentDir: (dir: string) => void;
   onLaunch: () => void;
 }
 
-function getEnvColorClass(envName: string): string {
+function getEnvColorVar(envName: string): string {
   const lower = envName.toLowerCase();
-  if (lower === 'official') return 'bg-chart-1';
-  if (lower.includes('glm')) return 'bg-chart-2';
-  if (lower.includes('deepseek')) return 'bg-chart-3';
-  if (lower.includes('kimi')) return 'bg-chart-4';
-  if (lower.includes('minimax')) return 'bg-chart-5';
-  return 'bg-primary';
+  if (lower === 'official') return 'var(--chart-1)';
+  if (lower.includes('glm')) return 'var(--chart-2)';
+  if (lower.includes('deepseek')) return 'var(--chart-3)';
+  if (lower.includes('kimi')) return 'var(--chart-4)';
+  if (lower.includes('minimax')) return 'var(--chart-5)';
+  return 'var(--primary)';
 }
 
 export function LaunchStrip({
@@ -32,83 +43,168 @@ export function LaunchStrip({
   environments,
   permissionMode,
   selectedWorkingDir,
+  recentDirs,
   launched,
   onSwitchEnv,
   onSetPermMode,
   onSelectDir,
+  onPickRecentDir,
   onLaunch,
 }: LaunchStripProps) {
   const { t } = useLocale();
+  const [dirOpen, setDirOpen] = useState(false);
+
+  const dirDisplay = selectedWorkingDir
+    ? getProjectName(selectedWorkingDir)
+    : null;
+
+  const envColor = getEnvColorVar(currentEnv);
 
   return (
-    <div className="h-14 flex items-center gap-0 rounded-lg bg-card border border-border overflow-hidden">
-      {/* Environment color bar */}
-      <div className={`w-[3px] self-stretch ${getEnvColorClass(currentEnv)}`} />
+    <div className="hero-gradient glass-noise relative overflow-visible rounded-2xl">
+      {/* Ambient glow orb — env colored, top-right */}
+      <div
+        className="absolute -top-8 -right-8 w-40 h-40 rounded-full blur-[60px] pointer-events-none opacity-[0.15]"
+        style={{ background: `hsl(${envColor})` }}
+      />
+      {/* Secondary glow — bottom-left */}
+      <div
+        className="absolute -bottom-6 -left-6 w-32 h-32 rounded-full blur-[50px] pointer-events-none opacity-[0.08]"
+        style={{ background: `hsl(${envColor})` }}
+      />
 
-      {/* Environment badge + native select */}
-      <div className="flex items-center gap-2 px-4 border-r border-border/50">
-        <div className="relative">
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-primary/10 text-primary">
-            <Globe className="w-3.5 h-3.5" />
-            {currentEnv}
-            <ChevronDown className="w-3 h-3 opacity-60" />
-          </div>
-          <select
-            className="absolute inset-0 opacity-0 cursor-pointer"
-            value={currentEnv}
-            onChange={(e) => onSwitchEnv(e.target.value)}
-          >
-            {environments.map(env => (
-              <option key={env.name} value={env.name}>{env.name}</option>
-            ))}
-          </select>
-        </div>
-      </div>
+      {/* Top edge glow line */}
+      <div
+        className="absolute top-0 left-6 right-6 h-[2px] rounded-full"
+        style={{
+          background: `linear-gradient(90deg, transparent 0%, hsl(${envColor}) 30%, hsl(${envColor}) 70%, transparent 100%)`,
+          boxShadow: `0 0 16px hsl(${envColor} / 0.5)`,
+        }}
+      />
 
-      {/* Permission badge + native select */}
-      <div className="flex items-center gap-2 px-4 border-r border-border/50">
-        <div className="relative">
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-chart-4/10 text-chart-4">
-            <Shield className="w-3.5 h-3.5" />
-            {permissionMode}
-            <ChevronDown className="w-3 h-3 opacity-60" />
-          </div>
-          <select
-            className="absolute inset-0 opacity-0 cursor-pointer"
-            value={permissionMode}
-            onChange={(e) => onSetPermMode(e.target.value as PermissionModeName)}
-          >
-            {Object.keys(PERMISSION_PRESETS).map((mode) => (
-              <option key={mode} value={mode}>{mode}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* Directory section */}
-      <div className="flex-1 flex items-center gap-2 px-4 min-w-0">
+      <div className="relative flex flex-col items-center px-6 pt-6 pb-5">
+        {/* Launch button — hero CTA */}
         <button
-          onClick={onSelectDir}
-          className="flex items-center gap-2 min-w-0 text-sm text-muted-foreground hover:text-foreground transition-colors"
-          title={selectedWorkingDir || t('dashboard.selectDirPlaceholder')}
+          onClick={onLaunch}
+          title={t('dashboard.launchShortcut')}
+          className={cn(
+            'w-full max-w-[320px] h-12 rounded-2xl flex items-center justify-center gap-3',
+            'font-bold text-[15px] tracking-wide',
+            'transition-all duration-300 cursor-pointer',
+            'relative overflow-hidden',
+            launched
+              ? 'bg-success text-success-foreground shadow-[0_0_24px_hsl(var(--success)/0.3)] ripple-success'
+              : 'bg-primary text-primary-foreground launch-hero-btn hover:scale-[1.02] active:scale-[0.98]'
+          )}
         >
-          <FolderOpen className="w-4 h-4 flex-shrink-0" />
-          <span className="truncate">
-            {selectedWorkingDir
-              ? getProjectName(selectedWorkingDir)
-              : t('dashboard.selectDirPlaceholder')}
-          </span>
+          {/* Inner shimmer on hover */}
+          {!launched && (
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/[0.08] to-transparent translate-x-[-200%] hover-shimmer" />
+          )}
+          {launched ? (
+            <>
+              <Check className="w-5 h-5" />
+              {t('dashboard.launchBtnDone')}
+            </>
+          ) : (
+            <>
+              <Rocket className="w-[18px] h-[18px]" />
+              {t('dashboard.launchBtn')}
+              <kbd className="ml-1.5 text-2xs opacity-50 font-mono bg-white/[0.15] px-2 py-0.5 rounded-md">⌘↵</kbd>
+            </>
+          )}
         </button>
-      </div>
 
-      {/* Launch button — NO Rocket icon (taste spec) */}
-      <Button
-        onClick={onLaunch}
-        title={t('dashboard.launchShortcut')}
-        className="h-14 px-6 rounded-none rounded-r-xl gap-2 font-medium text-sm shadow-none hover:shadow-none active:translate-y-0.5 active:shadow-md transition-all duration-150"
-      >
-        {launched ? t('dashboard.launchBtnDone') : t('dashboard.launchBtn')}
-      </Button>
+        {/* Config selectors — secondary row */}
+        <div className="flex items-center justify-center gap-2 mt-4 flex-wrap">
+          {/* Environment */}
+          <Select value={currentEnv} onValueChange={onSwitchEnv}>
+            <SelectTrigger variant="badge" badgeColor={envColor} className="hover:bg-white/[0.08]">
+              <Globe className="w-3.5 h-3.5" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {environments.map(env => (
+                <SelectItem key={env.name} value={env.name}>
+                  {env.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <span className="text-muted-foreground/20 text-xs select-none">·</span>
+
+          {/* Permission */}
+          <Select value={permissionMode} onValueChange={(v) => onSetPermMode(v as PermissionModeName)}>
+            <SelectTrigger variant="badge" badgeColor="var(--chart-4)" className="hover:bg-white/[0.08]">
+              <Shield className="w-3.5 h-3.5" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.keys(PERMISSION_PRESETS).map((mode) => (
+                <SelectItem key={mode} value={mode}>
+                  {mode}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <span className="text-muted-foreground/20 text-xs select-none">·</span>
+
+          {/* Directory */}
+          <Popover.Root open={dirOpen} onOpenChange={setDirOpen}>
+            <Popover.Trigger asChild>
+              <button
+                className={cn(
+                  'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-colors',
+                  'bg-white/[0.06] text-muted-foreground hover:bg-white/[0.10] hover:text-foreground'
+                )}
+                title={selectedWorkingDir || t('dashboard.selectDirPlaceholder')}
+              >
+                <FolderOpen className="w-3.5 h-3.5" />
+                <span className="truncate max-w-[160px]">
+                  {dirDisplay || t('dashboard.selectDirPlaceholder')}
+                </span>
+                <ChevronDown className="w-3 h-3 opacity-50" />
+              </button>
+            </Popover.Trigger>
+
+            <Popover.Portal>
+              <Popover.Content
+                className="w-72 rounded-xl glass-dropdown glass-noise z-50 py-1.5 animate-in fade-in slide-in-from-top-2 duration-150"
+                sideOffset={8}
+                align="center"
+              >
+                {recentDirs.length > 0 && (
+                  <>
+                    <div className="px-3.5 py-1.5 text-2xs text-muted-foreground/70 uppercase tracking-wider font-medium">
+                      {t('dashboard.recentDirs')}
+                    </div>
+                    {recentDirs.map((dir) => (
+                      <button
+                        key={dir}
+                        onClick={() => { onPickRecentDir(dir); setDirOpen(false); }}
+                        className="glass-dropdown-item w-full text-left px-3.5 py-2 text-sm flex items-center gap-2.5 rounded-lg mx-1 max-w-[calc(100%-8px)] cursor-pointer"
+                      >
+                        <Clock className="w-3.5 h-3.5 text-muted-foreground/60 flex-shrink-0" />
+                        <span className="truncate">{getProjectName(dir)}</span>
+                      </button>
+                    ))}
+                    <div className="border-t border-white/[0.06] my-1.5 mx-3" />
+                  </>
+                )}
+                <button
+                  onClick={() => { onSelectDir(); setDirOpen(false); }}
+                  className="glass-dropdown-item w-full text-left px-3.5 py-2 text-sm flex items-center gap-2.5 rounded-lg mx-1 max-w-[calc(100%-8px)] cursor-pointer"
+                >
+                  <FolderOpen className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                  <span className="font-medium">{t('dashboard.browse')}</span>
+                </button>
+              </Popover.Content>
+            </Popover.Portal>
+          </Popover.Root>
+        </div>
+      </div>
     </div>
   );
 }

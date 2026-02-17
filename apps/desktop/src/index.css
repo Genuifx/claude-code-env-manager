@@ -1222,6 +1222,35 @@
     0 0 0 1px hsl(var(--primary) / 0.18);
 }
 
+/* --- Hero Launch Button (dashboard hero CTA with prominent glow) --- */
+.launch-hero-btn {
+  box-shadow:
+    0 4px 20px hsl(var(--primary) / 0.35),
+    0 0 0 1px hsl(var(--primary) / 0.18),
+    inset 0 1px 0 0 hsl(0 0% 100% / 0.12);
+  transition:
+    box-shadow var(--duration-base) var(--ease-default),
+    transform var(--duration-fast) var(--ease-default);
+}
+.launch-hero-btn:hover {
+  box-shadow:
+    0 6px 32px hsl(var(--primary) / 0.45),
+    0 0 0 1px hsl(var(--primary) / 0.25),
+    inset 0 1px 0 0 hsl(0 0% 100% / 0.15);
+}
+.light .launch-hero-btn {
+  box-shadow:
+    0 4px 20px hsl(var(--primary) / 0.25),
+    0 0 0 1px hsl(var(--primary) / 0.15),
+    inset 0 1px 0 0 hsl(0 0% 100% / 0.25);
+}
+.light .launch-hero-btn:hover {
+  box-shadow:
+    0 6px 32px hsl(var(--primary) / 0.35),
+    0 0 0 1px hsl(var(--primary) / 0.22),
+    inset 0 1px 0 0 hsl(0 0% 100% / 0.30);
+}
+
 /* === Glass Outline Button (for outline buttons in glass context) === */
 .glass-btn-outline {
   background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.3));
