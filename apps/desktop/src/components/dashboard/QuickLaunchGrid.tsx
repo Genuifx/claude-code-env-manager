@@ -50,7 +50,7 @@ export function QuickLaunchGrid({ onLaunch }: QuickLaunchGridProps) {
 
   return (
     <>
-      <div className="flex flex-col glass-card glass-noise rounded-2xl overflow-hidden">
+      <div className="h-full flex flex-col glass-card glass-noise rounded-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06]">
           <div className="flex items-center gap-2">
