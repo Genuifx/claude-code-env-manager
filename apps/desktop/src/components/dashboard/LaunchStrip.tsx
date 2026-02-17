@@ -82,7 +82,10 @@ export function LaunchStrip({
         }}
       />
 
-      <div className="relative flex flex-col items-center px-6 pt-6 pb-5">
+      <div className="relative flex flex-col items-center px-6 pt-12 pb-8">
+        {/* App icon — light mode only */}
+        <img src="/logo.png" alt="" aria-hidden="true" className="dashboard-brand-mark mb-8" />
+
         {/* Launch button — hero CTA */}
         <button
           onClick={onLaunch}

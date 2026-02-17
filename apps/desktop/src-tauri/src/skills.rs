@@ -2,9 +2,14 @@ use serde::{Deserialize, Serialize};
 use std::io::BufRead;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter};
 
 use crate::config;
+
+/// Cached user PATH — login shell is expensive on macOS (1-3s),
+/// only resolve once per process lifetime.
+static USER_PATH: OnceLock<String> = OnceLock::new();
 
 // ============================================
 // Types
@@ -22,20 +27,22 @@ pub struct InstalledSkill {
 // Helpers
 // ============================================
 
-/// Get the user's full PATH from their login shell.
+/// Get the user's full PATH from their login shell (cached).
 /// macOS GUI apps don't inherit shell PATH, so we need to source it.
-fn get_user_path() -> String {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    let output = Command::new(&shell)
-        .args(["-l", "-c", "echo $PATH"])
-        .output();
+fn get_user_path() -> &'static str {
+    USER_PATH.get_or_init(|| {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        let output = Command::new(&shell)
+            .args(["-l", "-c", "echo $PATH"])
+            .output();
 
-    match output {
-        Ok(out) if out.status.success() => {
-            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        match output {
+            Ok(out) if out.status.success() => {
+                String::from_utf8_lossy(&out.stdout).trim().to_string()
+            }
+            _ => std::env::var("PATH").unwrap_or_default(),
         }
-        _ => std::env::var("PATH").unwrap_or_default(),
-    }
+    })
 }
 
 /// Parse YAML frontmatter from SKILL.md content.
@@ -228,48 +235,110 @@ pub fn list_installed_skills() -> Result<Vec<InstalledSkill>, String> {
     Ok(all_skills)
 }
 
-/// Install a skill via npx skills add.
+/// Install a skill via npx skills add (async, event-driven).
+/// Emits "skill-install-done" with { package_id, success, message }.
 #[tauri::command]
-pub fn install_skill(package_id: String, global: bool) -> Result<String, String> {
-    let mut args = vec!["skills", "add", &package_id, "-y"];
-    if global {
-        args.push("-g");
-    }
+pub fn install_skill(app: AppHandle, package_id: String, global: bool) {
+    std::thread::spawn(move || {
+        let mut args = vec![
+            "skills".to_string(),
+            "add".to_string(),
+            package_id.clone(),
+            "-y".to_string(),
+        ];
+        if global {
+            args.push("-g".to_string());
+        }
 
-    let user_path = get_user_path();
-    let output = Command::new("npx")
-        .args(&args)
-        .env("PATH", &user_path)
-        .output()
-        .map_err(|e| format!("Failed to run npx: {}", e))?;
+        let user_path = get_user_path();
+        let result = Command::new("npx")
+            .args(&args)
+            .env("PATH", user_path)
+            .output();
 
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).to_string())
-    }
+        let payload = match result {
+            Ok(output) => {
+                // npx skills add writes progress/spinners to stderr even on success,
+                // so only check exit code — ignore stderr warnings.
+                if output.status.success() {
+                    serde_json::json!({
+                        "package_id": package_id,
+                        "success": true,
+                        "message": String::from_utf8_lossy(&output.stdout).to_string()
+                    })
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                    serde_json::json!({
+                        "package_id": package_id,
+                        "success": false,
+                        "message": if stderr.is_empty() { stdout } else { stderr }
+                    })
+                }
+            }
+            Err(e) => {
+                serde_json::json!({
+                    "package_id": package_id,
+                    "success": false,
+                    "message": format!("Failed to run npx: {}", e)
+                })
+            }
+        };
+
+        let _ = app.emit("skill-install-done", payload.to_string());
+    });
 }
 
-/// Uninstall a skill via npx skills remove.
+/// Uninstall a skill via npx skills remove (async, event-driven).
+/// Emits "skill-uninstall-done" with { name, success, message }.
 #[tauri::command]
-pub fn uninstall_skill(name: String, global: bool) -> Result<String, String> {
-    let mut args = vec!["skills", "remove", &name, "-y"];
-    if global {
-        args.push("-g");
-    }
+pub fn uninstall_skill(app: AppHandle, name: String, global: bool) {
+    std::thread::spawn(move || {
+        let mut args = vec![
+            "skills".to_string(),
+            "remove".to_string(),
+            name.clone(),
+            "-y".to_string(),
+        ];
+        if global {
+            args.push("-g".to_string());
+        }
 
-    let user_path = get_user_path();
-    let output = Command::new("npx")
-        .args(&args)
-        .env("PATH", &user_path)
-        .output()
-        .map_err(|e| format!("Failed to run npx: {}", e))?;
+        let user_path = get_user_path();
+        let result = Command::new("npx")
+            .args(&args)
+            .env("PATH", user_path)
+            .output();
 
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).to_string())
-    }
+        let payload = match result {
+            Ok(output) => {
+                if output.status.success() {
+                    serde_json::json!({
+                        "name": name,
+                        "success": true,
+                        "message": String::from_utf8_lossy(&output.stdout).to_string()
+                    })
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                    serde_json::json!({
+                        "name": name,
+                        "success": false,
+                        "message": if stderr.is_empty() { stdout } else { stderr }
+                    })
+                }
+            }
+            Err(e) => {
+                serde_json::json!({
+                    "name": name,
+                    "success": false,
+                    "message": format!("Failed to run npx: {}", e)
+                })
+            }
+        };
+
+        let _ = app.emit("skill-uninstall-done", payload.to_string());
+    });
 }
 
 // ============================================

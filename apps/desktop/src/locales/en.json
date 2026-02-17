@@ -11,6 +11,7 @@
     "local": "Local"
   },
   "dashboard": {
+    "subtitle": "Overview of your Claude Code workspace",
     "currentEnv": "Current Environment",
     "permissions": "Permission",
     "sessionsRunning": "sessions running",
@@ -32,7 +33,7 @@
     "continueWork": "Continue",
     "noProjects": "No projects yet",
     "selectDirToStart": "Select a directory to start",
-    "viewAll": "View all →",
+    "viewAll": "View all",
     "tokensToday": "tokens",
     "costToday": "today",
     "sessionsActive": "sessions active",
@@ -73,6 +74,7 @@
     "quickAccessHint": "Quick access to your favorite projects"
   },
   "sessions": {
+    "subtitle": "Manage running Claude Code sessions",
     "confirmClose": "Are you sure you want to close this session?",
     "confirmCloseAll": "Are you sure you want to close all sessions?",
     "confirmTerminate": "Terminate this session?",
@@ -174,6 +176,7 @@
     "optional": "Optional",
     "presetSelect": "Select a preset to quick-fill",
     "presetNeedApiKey": "You still need to provide your API Key after selecting",
+    "getApiKey": "Get API Key",
     "serverUrl": "Server URL",
     "serverSync": "Sync",
     "serverPlaceholder": "https://your-server.com/api/config",
@@ -245,6 +248,8 @@
     "searchPlaceholder": "Describe what you need, e.g.: React testing, code review...",
     "search": "Search",
     "searching": "Searching...",
+    "searchStarting": "Starting search engine...",
+    "searchConnected": "Connected, analyzing your request...",
     "searchHint": "Smart search across the skills.sh ecosystem via Claude",
     "thinking": "Thinking...",
     "toolRunning": "Searching skill registry...",
@@ -254,6 +259,7 @@
     "noResults": "No matching skills found",
     "tryDifferent": "Try a different description",
     "install": "Install",
+    "installStarted": "Installing {name}, please wait...",
     "installing": "Installing...",
     "installed": "Installed",
     "installSuccess": "Skill {name} installed successfully",
@@ -303,6 +309,7 @@
     "upToDate": "Already on the latest version v2.0.0"
   },
   "history": {
+    "subtitle": "Browse past conversations and messages",
     "searchPlaceholder": "Search conversations...",
     "allProjects": "All Projects",
     "noResults": "No matching conversations",
@@ -336,7 +343,16 @@
     "resumed": "Resumed ✓"
   },
   "sideRail": {
-    "cron": "Cron Tasks"
+    "dashboard": "Dashboard",
+    "sessions": "Sessions",
+    "environments": "Environments",
+    "skills": "Skills",
+    "history": "History",
+    "cron": "Cron Tasks",
+    "analytics": "Analytics",
+    "settings": "Settings",
+    "groupWorkspace": "Workspace",
+    "groupInsights": "Insights"
   },
   "cron": {
     "title": "Cron Tasks",

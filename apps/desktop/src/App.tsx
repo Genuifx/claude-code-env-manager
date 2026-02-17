@@ -149,16 +149,16 @@ function App() {
     }
   }, [launchClaudeCode]);
 
-  // Global keyboard shortcuts (Cmd+1..6 for tabs, Cmd+Enter/N for launch, Cmd+, for settings)
+  // Global keyboard shortcuts (Cmd+1..8 for tabs, Cmd+Enter/N for launch, Cmd+, for settings)
   const globalShortcuts = useMemo(() => ({
     'meta+1': () => setActiveTab('dashboard'),
     'meta+2': () => setActiveTab('sessions'),
     'meta+3': () => setActiveTab('environments'),
-    'meta+4': () => setActiveTab('analytics'),
-    'meta+5': () => setActiveTab('skills'),
-    'meta+6': () => setActiveTab('history'),
-    'meta+7': () => setActiveTab('settings'),
-    'meta+8': () => setActiveTab('cron'),
+    'meta+4': () => setActiveTab('skills'),
+    'meta+5': () => setActiveTab('history'),
+    'meta+6': () => setActiveTab('cron'),
+    'meta+7': () => setActiveTab('analytics'),
+    'meta+8': () => setActiveTab('settings'),
     'meta+enter': () => handleLaunch(),
     'meta+n': () => handleLaunch(),
     'meta+,': () => setActiveTab('settings'),
@@ -223,19 +223,6 @@ function App() {
     return env;
   };
 
-  // Derive page title from active tab
-  const pageTitleMap: Record<string, string> = {
-    dashboard: 'Home',
-    sessions: 'Sessions',
-    environments: 'Environments',
-    analytics: 'Analytics',
-    skills: 'Skills',
-    history: 'History',
-    cron: 'Cron',
-    settings: 'Settings',
-  };
-  const pageTitle = pageTitleMap[activeTab] || 'Home';
-
   // Render page based on active tab
   const renderPage = () => {
     switch (activeTab) {
@@ -274,7 +261,7 @@ function App() {
 
   return (
     <LocaleProvider>
-      <AppLayout activeTab={activeTab} onTabChange={setActiveTab} pageTitle={pageTitle}>
+      <AppLayout activeTab={activeTab} onTabChange={setActiveTab}>
         <div key={activeTab}>
           {renderPage()}
         </div>

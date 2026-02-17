@@ -24,6 +24,7 @@ import {
   ArrowRight,
   RefreshCw,
   Terminal,
+  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { Environment } from "@/store";
@@ -44,6 +45,14 @@ const PRESET_DESCRIPTIONS: Record<string, { zh: string; en: string }> = {
   DeepSeek: { zh: "DeepSeek AI 深度求索", en: "DeepSeek AI" },
 };
 
+// 各预设的 API Key 获取地址
+const PRESET_API_KEY_URLS: Record<string, string> = {
+  GLM: "https://bigmodel.cn/usercenter/proj-mgmt/apikeys",
+  KIMI: "https://platform.moonshot.cn/console/api-keys",
+  MiniMax: "https://www.minimaxi.com/user-center/basic-information/interface-key",
+  DeepSeek: "https://platform.deepseek.com/api_keys",
+};
+
 export function EnvironmentDialog({
   open,
   onOpenChange,
@@ -54,6 +63,7 @@ export function EnvironmentDialog({
 }: EnvironmentDialogProps) {
   const { t, lang } = useLocale();
   const [activeTab, setActiveTab] = React.useState("manual");
+  const [selectedPreset, setSelectedPreset] = React.useState<string | null>(null);
   const [name, setName] = React.useState("");
   const [baseUrl, setBaseUrl] = React.useState("");
   const [apiKey, setApiKey] = React.useState("");
@@ -72,6 +82,7 @@ export function EnvironmentDialog({
         setApiKey(environment.apiKey || "");
         setModel(environment.model);
         setSmallModel(environment.smallModel || "");
+        setSelectedPreset(null);
       } else {
         setName("");
         setBaseUrl("");
@@ -82,6 +93,7 @@ export function EnvironmentDialog({
         setServerUrl("");
         setServerSecret("");
         setServerLoading(false);
+        setSelectedPreset(null);
       }
     }
   }, [open, mode, environment]);
@@ -89,6 +101,7 @@ export function EnvironmentDialog({
   const handlePresetSelect = (presetKey: string) => {
     const preset = ENV_PRESETS[presetKey];
     if (!preset) return;
+    setSelectedPreset(presetKey);
     setName(presetKey);
     setBaseUrl(preset.ANTHROPIC_BASE_URL ?? "");
     setModel(preset.ANTHROPIC_MODEL ?? "");
@@ -174,13 +187,27 @@ export function EnvironmentDialog({
       </div>
 
       <div className="grid gap-2">
-        <Label htmlFor="apiKey" className="flex items-center gap-1.5">
-          <Key className="h-3.5 w-3.5 text-muted-foreground" />
-          {t("environmentDialog.apiKey")}{" "}
-          <span className="text-xs text-muted-foreground">
-            {t("environmentDialog.optional")}
-          </span>
-        </Label>
+        <div className="flex items-center justify-between">
+          <Label htmlFor="apiKey" className="flex items-center gap-1.5">
+            <Key className="h-3.5 w-3.5 text-muted-foreground" />
+            {t("environmentDialog.apiKey")}{" "}
+            <span className="text-xs text-muted-foreground">
+              {t("environmentDialog.optional")}
+            </span>
+          </Label>
+          {selectedPreset && PRESET_API_KEY_URLS[selectedPreset] && (
+            <a
+              href={PRESET_API_KEY_URLS[selectedPreset]}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 transition-colors"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {t("environmentDialog.getApiKey")}
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          )}
+        </div>
         <Input
           id="apiKey"
           type="password"

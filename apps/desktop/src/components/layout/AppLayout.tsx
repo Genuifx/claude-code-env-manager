@@ -1,15 +1,30 @@
 import { ReactNode } from 'react';
 import { SideRail } from './SideRail';
+import { useLocale } from '@/locales';
 
 interface AppLayoutProps {
   children: ReactNode;
   activeTab: string;
   onTabChange: (tab: string) => void;
-  pageTitle: string;
   pageActions?: ReactNode;
 }
 
-export function AppLayout({ children, activeTab, onTabChange, pageTitle, pageActions }: AppLayoutProps) {
+export function AppLayout({ children, activeTab, onTabChange, pageActions }: AppLayoutProps) {
+  const { t } = useLocale();
+  const isDashboard = activeTab === 'dashboard';
+  const pageTitle = isDashboard ? undefined : (t(`sideRail.${activeTab}`) || t('sideRail.dashboard'));
+
+  const subtitleKeyMap: Record<string, string> = {
+    dashboard: 'dashboard.subtitle',
+    sessions: 'sessions.subtitle',
+    environments: 'environments.description',
+    skills: 'skills.subtitle',
+    history: 'history.subtitle',
+    analytics: 'analytics.subtitle',
+    cron: 'cron.subtitle',
+    settings: 'settings.subtitle',
+  };
+  const subtitle = subtitleKeyMap[activeTab] ? t(subtitleKeyMap[activeTab]) : undefined;
   return (
     <div className="h-screen flex overflow-hidden relative">
       {/* Full-width drag region at top — sits above everything for window dragging */}
@@ -30,7 +45,14 @@ export function AppLayout({ children, activeTab, onTabChange, pageTitle, pageAct
 
         {/* Titlebar spacer + page title */}
         <div className="h-[52px] shrink-0 flex items-end px-8 pb-2 relative z-10">
-          <h1 className="text-lg font-semibold text-foreground">{pageTitle}</h1>
+          <div className="flex items-baseline gap-3">
+            {pageTitle && (
+              <h1 className="text-lg font-semibold text-foreground">{pageTitle}</h1>
+            )}
+            {subtitle && (
+              <span className="text-sm text-muted-foreground">{subtitle}</span>
+            )}
+          </div>
           {pageActions && (
             <div className="flex items-center gap-3 ml-auto relative z-[110]">
               {pageActions}

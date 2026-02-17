@@ -53,30 +53,21 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
         />
       )}
 
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-foreground tracking-tight">
-            {t('environments.title')}
-          </h2>
-          <p className="text-muted-foreground mt-1">
-            {t('environments.description')}
-          </p>
-        </div>
-        <Button
-          className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/25 border border-[hsl(var(--glass-border-light)/0.15)]"
-          onClick={onAddEnv}
-        >
-          <Plus className="w-4 h-4 mr-1.5" />
-          {t('environments.addEnv')}
-        </Button>
-      </div>
-
       {/* Environment list */}
       <div>
-        <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-4">
-          {t('environments.configuredEnvs')}
-        </h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+            {t('environments.configuredEnvs')}
+          </h3>
+          <Button
+            size="sm"
+            className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/25 border border-[hsl(var(--glass-border-light)/0.15)]"
+            onClick={onAddEnv}
+          >
+            <Plus className="w-3.5 h-3.5 mr-1" />
+            {t('environments.addEnv')}
+          </Button>
+        </div>
         <EnvList onEdit={onEditEnv} onDelete={onDeleteEnv} />
 
         {/* FTUE: Ghost card for adding first environment */}

@@ -15,16 +15,6 @@ export function Skills() {
 
   return (
     <div className="page-transition-enter space-y-6">
-      {/* Header */}
-      <div>
-        <h2 className="text-2xl font-bold text-foreground tracking-tight">
-          Skills
-        </h2>
-        <p className="text-muted-foreground mt-1">
-          {t('skills.subtitle')}
-        </p>
-      </div>
-
       {/* Tabs */}
       <Tabs defaultValue="discover">
         <TabsList>
@@ -32,11 +22,11 @@ export function Skills() {
           <TabsTrigger value="installed">{t('skills.tabInstalled')}</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="discover">
+        <TabsContent value="discover" forceMount className="data-[state=inactive]:hidden">
           <DiscoverTab />
         </TabsContent>
 
-        <TabsContent value="installed">
+        <TabsContent value="installed" forceMount className="data-[state=inactive]:hidden">
           <InstalledTab />
         </TabsContent>
       </Tabs>

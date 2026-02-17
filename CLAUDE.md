@@ -15,7 +15,7 @@ packages/core/     # Shared logic — presets, types, encryption (used by both)
 docs/plans/        # Design documents
 ```
 
-Managed with pnpm workspaces (`pnpm-workspace.yaml`).
+Managed with pnpm workspaces (`pnpm-workspace.yaml`). Requires `pnpm@10.27.0` (locked via `packageManager` field in root `package.json`).
 
 ## Commands
 
@@ -59,22 +59,33 @@ ESM-based, built with tsup. Key libraries:
 - **inquirer** — Interactive prompts
 - **ink/react** — Terminal UI (SkillSelector tab component)
 
-Config stored via `conf` package with project name `claude-code-env-manager`. API keys encrypted with AES-256-CBC before storage. Config migrated to `~/.ccem/` path.
+Config stored at `~/.ccem/config.json` (migrated from legacy `conf` path). API keys encrypted with AES-256-CBC before storage.
 
 CLI detects TTY vs piped output (`process.stdout.isTTY`): TTY shows tables/colors, piped outputs raw export commands for `eval $(ccem env)`.
+
+**CLI commands**:
+- `ccem ls` / `use <name>` / `add <name>` / `del <name>` / `rename <old> <new>` / `cp <source> <target>` — environment CRUD
+- `ccem env` — export current env vars (pipe-friendly)
+- `ccem current` — show active environment
+- `ccem run <command...>` — run a command with current env injected
+- `ccem perms` / `default-mode` — permission mode management
+- `ccem usage` — standalone usage stats (`--json` for machine output)
+- `ccem setup init` / `setup migrate` (`--clean`, `--force`) / `setup cron` — setup & migration
+- `ccem skill add [url]` / `skill ls` / `skill rm <name>` / `skill load <url>` — skill management
+- `ccem launch` — hidden command used by desktop app (not in help)
 
 ### Desktop App (`apps/desktop`)
 
 **Frontend** (React 18 + TypeScript):
-- **Vite** dev server on port 1420
+- **Vite** dev server on port 1421 (path alias: `@` → `./src`)
 - **Tailwind CSS** with CSS custom properties (HSL format) for theming — "Frosted Glass / macOS Sequoia" design system
-- **Zustand** store (`src/store/index.ts`) — single store for environments, sessions, permissions, analytics, projects, plus per-domain loading flags (`isLoadingEnvs`, `isLoadingSessions`, `isLoadingStats`, `isLoadingSkills`, `isLoadingSettings`)
+- **Zustand** store (`src/store/index.ts`) — single store for environments, sessions, permissions, analytics, projects, cron tasks, plus per-domain loading flags (`isLoadingEnvs`, `isLoadingSessions`, `isLoadingStats`, `isLoadingSkills`, `isLoadingSettings`)
 - **shadcn/ui pattern** — Radix UI primitives + `cva` (class-variance-authority) in `src/components/ui/`
 - **Lucide React** — all icons (no emoji in UI)
 - **Recharts** — token usage charts
 - **sonner** — toast notifications
 - Layout: AppShell pattern with `SideRail` (72px vertical nav) + `PageHeader` (48px sticky) + scrolling main content
-- Pages: Dashboard, Sessions, Environments, Analytics, Skills, Settings
+- Pages: Dashboard, Sessions, Environments, Analytics, History, Skills, CronTasks, Settings
 
 **Frontend data flow**: `App.tsx` → `useTauriCommands` hook → `invoke()` (Tauri IPC) → Rust backend. The hook maps Rust snake_case responses to TypeScript camelCase and updates the Zustand store. On window `focus`, the app re-syncs with the CLI config file to stay consistent when both are running.
 
@@ -102,12 +113,26 @@ CLI detects TTY vs piped output (`process.stdout.isTTY`): TTY shows tables/color
 - `crypto.rs` — AES-256-CBC matching CLI's encryption
 - `session.rs` — session lifecycle management
 - `analytics.rs` — parses Claude's JSONL logs from `~/.claude/projects/`, incremental caching in `~/.ccem/usage-cache.json`. Usage costs calculated via LiteLLM price data cached in `~/.ccem/model-prices.json`
+- `history.rs` — reads `~/.claude/history.jsonl` for conversation list and per-project JSONL for messages; supports `/compact` segmentation boundaries
+- `skills.rs` — skill search (streaming), install/uninstall from GitHub or presets
+- `cron.rs` — scheduled task management with cron expressions, task runs, templates, and AI-generated task streaming
 - `tray.rs` — system tray with environment/permission menus
-- `terminal.rs` — terminal detection (iTerm2/Terminal.app)
+- `terminal.rs` — terminal detection (iTerm2/Terminal.app), session arrange layouts
 - Uses `tauri-plugin-shell` for launching Claude Code and `tauri-plugin-mcp-bridge` for MCP tool connectivity
+- `window-vibrancy` + `tauri-plugin-decorum` — macOS native vibrancy and window decoration for glassmorphism
+- Tauri window: 900×700 default, 880×640 minimum, `titleBarStyle: "Overlay"` + `transparent: true` for custom title bar
 
 **Key Tauri commands** (invoked from frontend via `invoke()`):
-`get_environments`, `set_current_env`, `add_environment`, `delete_environment`, `launch_claude_code`, `get_sessions`, `get_usage_stats`, `get_continuous_usage_days`, `get_app_config`, `save_settings`
+- Environment CRUD: `get_environments`, `get_current_env`, `set_current_env`, `add_environment`, `update_environment`, `delete_environment`
+- App config: `get_app_config`, `add_favorite`, `remove_favorite`, `add_recent`, `save_settings`
+- Sessions: `launch_claude_code`, `list_sessions`, `stop_session`, `remove_session`, `focus_session`, `close_session`, `minimize_session`, `arrange_sessions`, `check_arrange_support`
+- Analytics: `get_usage_stats`, `get_usage_history`, `get_continuous_usage_days`
+- History: `get_conversation_history`, `get_conversation_messages`, `get_conversation_segments`
+- Skills: `skills::search_skills_stream`, `skills::list_installed_skills`, `skills::install_skill`, `skills::uninstall_skill`
+- Cron: `cron::list_cron_tasks`, `cron::add_cron_task`, `cron::update_cron_task`, `cron::delete_cron_task`, `cron::toggle_cron_task`, `cron::get_cron_task_runs`, `cron::retry_cron_task`, `cron::get_cron_run_detail`, `cron::list_cron_templates`, `cron::get_cron_next_runs`, `cron::generate_cron_task_stream`
+- Terminal: `detect_terminals`, `get_preferred_terminal`, `set_preferred_terminal`
+- IDE sync: `sync_vscode_projects`, `sync_jetbrains_projects`, `open_directory_dialog`
+- Remote: `load_from_remote`, `check_ccem_installed`
 
 ### Environment Variables Managed
 

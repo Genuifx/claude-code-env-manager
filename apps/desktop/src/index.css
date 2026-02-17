@@ -787,6 +787,15 @@
     0 2px 8px hsl(var(--glass-shadow-base) / 0.08);
 }
 
+/* === Dashboard Brand Mark — centered above launch button === */
+.dashboard-brand-mark {
+  display: block;
+  width: 128px;
+  height: 128px;
+  pointer-events: none;
+  user-select: none;
+}
+
 /* === Heatmap Fade-In === */
 .heatmap-enter {
   animation: heatmapFadeIn var(--duration-slow) var(--ease-decelerate);

@@ -5,12 +5,12 @@ import { useAppStore, type CronTask, type CronTaskRun, type CronTemplate } from 
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { CronEditor } from '@/components/cron';
 import { AiCronPanel } from '@/components/cron/AiCronPanel';
-import { PageHeader } from '@/components/layout';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { EmptyState } from '@/components/ui/EmptyState';
 import {
   Clock, Plus, Play, Trash2, ChevronRight, CheckCircle2, XCircle,
   Timer, AlertTriangle, FolderOpen, ChevronDown, GitPullRequest,
-  FlaskConical, FileText, Shield, Newspaper, Sparkles,
+  FlaskConical, FileText, Shield, Newspaper, Sparkles, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -70,7 +70,7 @@ function StatusDot({ task, runs }: { task: CronTask; runs?: CronTaskRun[] }) {
   return <span className="w-2 h-2 rounded-full bg-destructive" />;
 }
 
-const INPUT_CLS = 'w-full px-3 py-2 rounded-lg bg-white/[0.06] border border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50';
+const INPUT_CLS = 'w-full px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 transition-all';
 
 function TaskDialog({ open, onClose, onSave, editTask, environments }: {
   open: boolean;
@@ -121,47 +121,76 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
-      <div className="frosted-panel glass-noise rounded-xl p-6 max-w-lg w-full mx-4 space-y-4 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-base font-semibold text-foreground">{editTask ? t('cron.editTask') : t('cron.addTask')}</h2>
-        <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground">{t('cron.taskName')}</label>
-          <input className={INPUT_CLS} value={name} onChange={(e) => setName(e.target.value)} placeholder={t('cron.taskNamePlaceholder')} />
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground">{t('cron.schedule')}</label>
-          <CronEditor value={cronExpr} onChange={setCronExpr} />
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground">{t('cron.prompt')}</label>
-          <textarea className={cn(INPUT_CLS, 'min-h-[80px] resize-y')} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('cron.promptPlaceholder')} rows={3} />
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground">{t('cron.workingDir')}</label>
-          <div className="flex gap-2">
-            <input className={cn(INPUT_CLS, 'flex-1 font-mono')} value={workDir} onChange={(e) => setWorkDir(e.target.value)} placeholder="/path/to/project" />
-            <button type="button" onClick={async () => { const d = await openDirectoryPicker(); if (d) setWorkDir(d); }} className="px-3 py-2 rounded-lg glass-outline-btn text-sm text-foreground shrink-0"><FolderOpen className="w-4 h-4" /></button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="relative rounded-2xl max-w-lg w-full mx-4 max-h-[85vh] overflow-hidden shadow-elevation-4 border border-[hsl(var(--glass-border-light)/0.25)]"
+        style={{ background: 'hsl(var(--surface-overlay))' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="relative px-5 pt-5 pb-4">
+          <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-purple-500/5" />
+          <div className="relative flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-primary/15 flex items-center justify-center">
+                <Clock className="w-4 h-4 text-primary" />
+              </div>
+              <h2 className="text-sm font-semibold text-foreground">{editTask ? t('cron.editTask') : t('cron.addTask')}</h2>
+            </div>
+            <button onClick={onClose} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/[0.06] transition-colors">
+              <X className="w-4 h-4" />
+            </button>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+
+        {/* Form */}
+        <div className="px-5 pb-5 space-y-4 overflow-y-auto max-h-[calc(85vh-80px)]">
           <div className="space-y-1.5">
-            <label className="text-xs text-muted-foreground">{t('cron.environment')}</label>
-            <select className={INPUT_CLS} value={envName} onChange={(e) => setEnvName(e.target.value)}>
-              <option value="">{t('cron.envDefault')}</option>
-              {environments.map((env) => <option key={env.name} value={env.name}>{env.name}</option>)}
-            </select>
+            <label className="text-xs font-medium text-muted-foreground">{t('cron.taskName')}</label>
+            <input className={INPUT_CLS} value={name} onChange={(e) => setName(e.target.value)} placeholder={t('cron.taskNamePlaceholder')} />
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs text-muted-foreground">{t('cron.timeout')}</label>
-            <div className="flex items-center gap-2">
-              <input type="number" className={INPUT_CLS} value={timeoutSecs} onChange={(e) => setTimeoutSecs(Number(e.target.value) || 300)} min={30} max={3600} />
-              <span className="text-2xs text-muted-foreground shrink-0">{t('cron.timeoutUnit')}</span>
+            <label className="text-xs font-medium text-muted-foreground">{t('cron.schedule')}</label>
+            <CronEditor value={cronExpr} onChange={setCronExpr} />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">{t('cron.prompt')}</label>
+            <textarea className={cn(INPUT_CLS, 'min-h-[80px] resize-y')} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('cron.promptPlaceholder')} rows={3} />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">{t('cron.workingDir')}</label>
+            <div className="flex gap-2">
+              <input className={cn(INPUT_CLS, 'flex-1 font-mono')} value={workDir} onChange={(e) => setWorkDir(e.target.value)} placeholder="/path/to/project" />
+              <button type="button" onClick={async () => { const d = await openDirectoryPicker(); if (d) setWorkDir(d); }} className="px-3 py-2 rounded-xl border border-black/[0.08] dark:border-white/[0.08] bg-black/[0.03] dark:bg-white/[0.06] text-foreground hover:bg-black/[0.06] dark:hover:bg-white/[0.1] transition-colors shrink-0">
+                <FolderOpen className="w-4 h-4" />
+              </button>
             </div>
           </div>
-        </div>
-        <div className="flex justify-end gap-2 pt-2">
-          <button className="px-4 py-2 text-sm rounded-lg glass-outline-btn text-foreground transition-colors" onClick={onClose}>{t('common.cancel')}</button>
-          <button className="px-4 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50" onClick={doSave} disabled={saving || !name.trim() || !prompt.trim() || !workDir.trim()}>{saving ? t('common.loading') : t('common.save')}</button>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">{t('cron.environment')}</label>
+              <Select value={envName || '__default__'} onValueChange={(v) => setEnvName(v === '__default__' ? '' : v)}>
+                <SelectTrigger className="w-full h-auto px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm">
+                  <SelectValue placeholder={t('cron.envDefault')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__default__">{t('cron.envDefault')}</SelectItem>
+                  {environments.map((env) => <SelectItem key={env.name} value={env.name}>{env.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">{t('cron.timeout')}</label>
+              <div className="flex items-center gap-2">
+                <input type="number" className={INPUT_CLS} value={timeoutSecs} onChange={(e) => setTimeoutSecs(Number(e.target.value) || 300)} min={30} max={3600} />
+                <span className="text-2xs text-muted-foreground shrink-0">{t('cron.timeoutUnit')}</span>
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-3 border-t border-black/[0.06] dark:border-white/[0.06]">
+            <button className="px-4 py-2 text-sm rounded-xl border border-black/[0.08] dark:border-white/[0.08] text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors" onClick={onClose}>{t('common.cancel')}</button>
+            <button className="px-4 py-2 text-sm rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm transition-colors disabled:opacity-50" onClick={doSave} disabled={saving || !name.trim() || !prompt.trim() || !workDir.trim()}>{saving ? t('common.loading') : t('common.save')}</button>
+          </div>
         </div>
       </div>
     </div>
@@ -351,51 +380,47 @@ export function CronTasks() {
   const selectedTask = cronTasks.find((tk) => tk.id === selectedTaskId);
 
   return (
-    <div className="flex flex-col h-full">
-      <PageHeader title={t('cron.title')}>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setShowAiPanel(!showAiPanel)} className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors', showAiPanel ? 'bg-primary/20 text-primary' : 'glass-outline-btn text-foreground hover:bg-white/[0.06]')}>
-            <Sparkles className="w-4 h-4" />
-            {t('cron.aiCreate')}
-          </button>
-          <button onClick={handleAdd} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-sm hover:bg-primary/90 transition-colors">
-            <Plus className="w-4 h-4" />
-            {t('cron.addTask')}
-          </button>
+    <div className="space-y-4">
+      <div className="flex items-center justify-start gap-2 pb-3 border-b border-black/[0.06] dark:border-white/[0.06]">
+        <button onClick={() => setShowAiPanel(!showAiPanel)} className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors', showAiPanel ? 'bg-primary/20 text-primary' : 'glass-outline-btn text-foreground hover:bg-white/[0.06]')}>
+          <Sparkles className="w-4 h-4" />
+          {t('cron.aiCreate')}
+        </button>
+        <button onClick={handleAdd} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-sm hover:bg-primary/90 transition-colors">
+          <Plus className="w-4 h-4" />
+          {t('cron.addTask')}
+        </button>
+      </div>
+      {showAiPanel && (
+        <AiCronPanel
+          open={showAiPanel}
+          onClose={() => setShowAiPanel(false)}
+          onTaskCreated={() => { loadCronTasks(); setShowAiPanel(false); }}
+          onEdit={handleAiEdit}
+        />
+      )}
+
+      {templates.length > 0 && cronTasks.length === 0 && (
+        <div className="shrink-0">
+          <p className="text-xs text-muted-foreground mb-2">{t('cron.templates')}</p>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {templates.map((tpl) => {
+              const TplIcon = getTemplateIcon(tpl.id);
+              return (
+                <button key={tpl.id} onClick={() => handleTemplateCreate(tpl)} className="glass-card glass-noise rounded-xl px-4 py-3 flex items-center gap-2.5 shrink-0 text-left hover:ring-1 hover:ring-primary/30 transition-all">
+                  <TplIcon className="w-4 h-4 text-primary shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-foreground truncate">{tpl.name}</p>
+                    <p className="text-2xs text-muted-foreground truncate">{tpl.description}</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </PageHeader>
+      )}
 
-      <div className="flex-1 flex flex-col gap-4 p-4 overflow-hidden">
-        {showAiPanel && (
-          <div className="shrink-0">
-            <AiCronPanel
-              onTaskCreated={() => { loadCronTasks(); setShowAiPanel(false); }}
-              onEdit={handleAiEdit}
-            />
-          </div>
-        )}
-
-        {templates.length > 0 && cronTasks.length === 0 && (
-          <div className="shrink-0">
-            <p className="text-xs text-muted-foreground mb-2">{t('cron.templates')}</p>
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {templates.map((tpl) => {
-                const TplIcon = getTemplateIcon(tpl.id);
-                return (
-                  <button key={tpl.id} onClick={() => handleTemplateCreate(tpl)} className="glass-card glass-noise rounded-xl px-4 py-3 flex items-center gap-2.5 shrink-0 text-left hover:ring-1 hover:ring-primary/30 transition-all">
-                    <TplIcon className="w-4 h-4 text-primary shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-xs font-medium text-foreground truncate">{tpl.name}</p>
-                      <p className="text-2xs text-muted-foreground truncate">{tpl.description}</p>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        <div className="flex-1 flex gap-4 overflow-hidden">
+      <div className="flex gap-4" style={{ height: 'calc(100vh - 170px)' }}>
           <div className="w-[340px] shrink-0 flex flex-col gap-2 overflow-y-auto">
             {isLoadingCron ? (
               <div className="space-y-2">
@@ -486,17 +511,31 @@ export function CronTasks() {
             )}
           </div>
         </div>
-      </div>
 
       <TaskDialog open={dialogOpen} onClose={() => setDialogOpen(false)} onSave={handleSave} editTask={editingTask} environments={environments} />
 
       {pendingDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setPendingDelete(null)}>
-          <div className="frosted-panel glass-noise rounded-xl p-6 max-w-sm w-full mx-4 space-y-4" onClick={(e) => e.stopPropagation()}>
-            <p className="text-foreground text-sm">{t('cron.confirmDelete').replace('{name}', pendingDelete.name)}</p>
-            <div className="flex justify-end gap-2">
-              <button className="px-4 py-2 text-sm rounded-lg glass-outline-btn text-foreground transition-colors" onClick={() => setPendingDelete(null)}>{t('common.cancel')}</button>
-              <button className="px-4 py-2 text-sm rounded-lg bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors" onClick={handleDelete}>{t('common.delete')}</button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setPendingDelete(null)}>
+          <div
+            className="relative rounded-2xl max-w-sm w-full mx-4 overflow-hidden shadow-elevation-4 border border-[hsl(var(--glass-border-light)/0.25)]"
+            style={{ background: 'hsl(var(--surface-overlay))' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="relative px-5 pt-5 pb-4">
+              <div className="absolute inset-0 bg-gradient-to-br from-destructive/10 via-transparent to-transparent" />
+              <div className="relative flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-destructive/15 flex items-center justify-center">
+                  <Trash2 className="w-4 h-4 text-destructive" />
+                </div>
+                <h2 className="text-sm font-semibold text-foreground">{t('common.delete')}</h2>
+              </div>
+            </div>
+            <div className="px-5 pb-5 space-y-4">
+              <p className="text-foreground text-sm">{t('cron.confirmDelete').replace('{name}', pendingDelete.name)}</p>
+              <div className="flex justify-end gap-2 pt-1">
+                <button className="px-4 py-2 text-sm rounded-xl border border-black/[0.08] dark:border-white/[0.08] text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors" onClick={() => setPendingDelete(null)}>{t('common.cancel')}</button>
+                <button className="px-4 py-2 text-sm rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-sm transition-colors" onClick={handleDelete}>{t('common.delete')}</button>
+              </div>
             </div>
           </div>
         </div>

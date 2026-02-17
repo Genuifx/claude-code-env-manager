@@ -221,10 +221,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
       <div className="stat-card glass-noise p-5">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-2xl font-bold text-foreground">
-              {t('sessions.title')}
-            </h2>
-            <p className="text-sm text-muted-foreground mt-0.5">
+            <p className="text-sm text-muted-foreground">
               {t('sessions.runningCount').replace('{count}', String(runningCount))}
             </p>
           </div>

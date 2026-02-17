@@ -958,7 +958,7 @@ fn main() {
                 let main_window = app.get_webview_window("main").unwrap();
                 main_window.create_overlay_titlebar().unwrap();
                 // Position traffic lights — offset to align inside the inset sidebar panel
-                main_window.set_traffic_lights_inset(20.0, 24.0).unwrap();
+                main_window.set_traffic_lights_inset(24.0, 28.0).unwrap();
                 // Make window transparent so vibrancy can show through
                 main_window.make_transparent().unwrap();
 
