@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FolderOpen, Play, Star, X, RefreshCw, Plus, Code2 } from 'lucide-react';
+import { Play, Star, X, RefreshCw, Plus, Code2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';

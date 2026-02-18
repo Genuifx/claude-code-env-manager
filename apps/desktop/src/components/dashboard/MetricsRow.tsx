@@ -1,4 +1,4 @@
-import { Zap, TrendingUp, DollarSign, Flame, Timer, Activity } from 'lucide-react';
+import { Zap, DollarSign, Flame, Timer, Activity } from 'lucide-react';
 import { MetricCard } from './MetricCard';
 import { HeroMetricCard } from './HeroMetricCard';
 import { useAppStore } from '@/store';

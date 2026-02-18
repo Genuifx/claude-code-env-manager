@@ -6,7 +6,7 @@ import { useLocale } from '@/locales';
 import { cn } from '@/lib/utils';
 
 interface LiveSessionsProps {
-  onNavigate: (tab: string) => void;
+  onNavigate?: (tab: string) => void;
 }
 
 function getEnvDotColor(envName: string): string {
@@ -19,7 +19,7 @@ function getEnvDotColor(envName: string): string {
   return 'bg-primary';
 }
 
-export function LiveSessions({ onNavigate }: LiveSessionsProps) {
+export function LiveSessions({ onNavigate: _onNavigate }: LiveSessionsProps) {
   const { t } = useLocale();
   const { sessions } = useAppStore();
   const { focusSession, closeSession, arrangeSessions } = useTauriCommands();
