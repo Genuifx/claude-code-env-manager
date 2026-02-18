@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronRight, Brain, CheckCircle2, XCircle, User, Bot, Circle, Scissors, ChevronsUpDown, ClipboardList, ChevronDown, Terminal, Sparkles, Users, AlertCircle } from 'lucide-react';
+import { ChevronRight, Brain, CheckCircle2, XCircle, User, Circle, Scissors, ChevronsUpDown, ClipboardList, ChevronDown, Terminal, Sparkles, Users, AlertCircle } from 'lucide-react';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ModelIcon } from './ModelIcon';
 import { cn } from '@/lib/utils';

@@ -158,7 +158,6 @@ export function MarkdownRenderer({ content, className, variant = 'default' }: Ma
                     </span>
                     <CopyButton text={codeString} dark />
                   </div>
-                  {/* @ts-expect-error -- React 18/19 JSX type mismatch with SyntaxHighlighter */}
                   <SyntaxHighlighter
                     style={codeTheme}
                     language={language}

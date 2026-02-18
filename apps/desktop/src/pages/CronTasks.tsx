@@ -221,6 +221,7 @@ function RunHistoryPanel({ taskId }: { taskId: string }) {
             await loadCronTaskRuns(taskId);
             const poll = setInterval(async () => {
               const runs = await loadCronTaskRuns(taskId);
+              void runs; // consumed by store update
               // Stop polling once no run is in "running" state
               const store = useAppStore.getState();
               const current = store.cronRuns[taskId] || [];

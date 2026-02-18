@@ -8,7 +8,7 @@ interface ModelIconProps {
   className?: string;
 }
 
-type IconEntry = { icon: typeof Claude; color: string };
+type IconEntry = { icon: any; color: string };
 
 /** Map a model ID string to the corresponding lobe-icons component + brand color */
 function resolveIcon(model: string | undefined): IconEntry | null {

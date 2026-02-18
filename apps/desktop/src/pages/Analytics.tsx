@@ -19,7 +19,7 @@ import {
 import { useLocale } from '../locales';
 import { AnalyticsSkeleton } from '@/components/ui/skeleton-states';
 import { useCountUp } from '@/hooks/useCountUp';
-import type { ChartDataPoint, DailyActivity, Milestone, UsageStats } from '@/types/analytics';
+import type { ChartDataPoint, DailyActivity, Milestone, TokenUsageWithCost, UsageStats } from '@/types/analytics';
 
 type TimeGranularity = 'hour' | 'day' | 'week' | 'month';
 

@@ -78,7 +78,7 @@ export function ModelDistribution({ byModel }: ModelDistributionProps) {
               dataKey="value"
               innerRadius="60%"
               outerRadius="80%"
-              activeIndex={activeIndex}
+              {...{ activeIndex } as any}
               activeShape={renderActiveShape}
               onMouseEnter={onPieEnter}
               onMouseLeave={onPieLeave}
