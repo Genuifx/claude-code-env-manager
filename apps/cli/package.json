@@ -8,11 +8,17 @@
     "email": "genuifx@gmail.com",
     "url": "https://genuifx.com"
   },
-  "files": ["dist", "model-prices.json", "scripts"],
+  "files": [
+    "dist",
+    "model-prices.json",
+    "scripts"
+  ],
   "bin": {
     "ccem": "./dist/index.js"
   },
   "scripts": {
+    "generate-logo": "bash scripts/generate-logo.sh",
+    "prebuild": "pnpm run generate-logo",
     "build": "tsup",
     "dev": "tsup --watch",
     "start": "node dist/index.js",
@@ -30,13 +36,15 @@
     "ink": "^6.6.0",
     "ink-select-input": "^6.2.0",
     "inquirer": "^8.2.6",
-    "react": "^19.2.3"
+    "react": "^19.2.3",
+    "terminal-image": "^4.2.0"
   },
   "devDependencies": {
     "@types/inquirer": "^9.0.7",
     "@types/node": "^20.11.24",
     "@types/react": "^19.2.9",
     "@vitest/coverage-v8": "^4.0.18",
+    "asciify-image": "^0.1.10",
     "tsup": "^8.0.2",
     "typescript": "^5.3.3",
     "vitest": "^4.0.18"
