@@ -7,6 +7,7 @@ import Table from 'cli-table3';
 import type { PermissionModeName, UsageStats, TokenUsageWithCost } from '@ccem/core';
 import { PERMISSION_PRESETS } from '@ccem/core';
 import { formatTokens, formatCost, getTotalTokens } from './usage.js';
+import { LOGO_FULL, LOGO_COMPACT, LOGO_MINIMAL, type LogoVariant } from './logo-generated.js';
 
 // 颜色主题 - 柔和但有对比度
 const theme = {
@@ -47,25 +48,22 @@ export const stopSpinner = (): void => {
   }
 };
 
-// CCEM Logo - Claude Code 风格 + 绅士帽
+// CCEM Logo - 使用 chafa 生成的彩色 logo
 export const renderLogo = (): string => {
-  const face = chalk.hex('#89B4FA');     // 脸 - 亮蓝
-  const hat = chalk.hex('#45475A');      // 帽子 - 暗灰
-  const spark = chalk.hex('#6C7086');    // 星星 - 中灰
-
-  const lines = [
-    `   ${spark('*')}   ${hat('▄█▄')}  ${spark('*')}`,
-    `   ${spark('*')}  ${hat('▀▀▀▀▀')} ${spark('*')}`,
-    `  ${spark('*')} ${face('▐▛█████▜▌')} ${spark('*')}`,
-    ` ${spark('*')} ${face('▝▜███████▛▘')} ${spark('*')}`,
-    `  ${spark('*')}  ${face('▘▘   ▝▝')}  ${spark('*')}`,
-  ];
-  return lines.join('\n');
+  const logo = selectLogo(getTerminalWidth());
+  return logo.ansi;
 };
 
 // 获取终端宽度
 const getTerminalWidth = (): number => {
   return process.stdout.columns || 80;
+};
+
+// 选择合适的 logo 变体
+const selectLogo = (termWidth: number): LogoVariant => {
+  if (termWidth < 45) return LOGO_MINIMAL;
+  if (termWidth < 60) return LOGO_COMPACT;
+  return LOGO_FULL;
 };
 
 // Logo + 环境信息面板 横向布局
@@ -79,13 +77,13 @@ export const renderLogoWithEnvPanel = (
   },
   defaultMode?: PermissionModeName | null
 ): string => {
-  const face = chalk.hex('#89B4FA');     // 脸 - 亮蓝
-  const hat = chalk.hex('#45475A');      // 帽子 - 暗灰
-  const spark = chalk.hex('#6C7086');    // 星星 - 中灰
-
   const termWidth = getTerminalWidth();
   const isNarrow = termWidth < 60;
   const isVeryNarrow = termWidth < 45;
+
+  // 选择合适的 logo 变体
+  const logo = selectLogo(termWidth);
+  const logoLines = logo.ansi.split('\n').filter(l => l.length > 0);
 
   // 右侧环境信息
   const title = theme.primary('CCEM') + '   ' + theme.muted('Claude Code Env Manager');
@@ -145,10 +143,7 @@ export const renderLogoWithEnvPanel = (
 
   if (isVeryNarrow) {
     // 非常窄：纯垂直布局
-    lines.push(`   ${spark('*')}   ${hat('▄█▄')}  ${spark('*')}`);
-    lines.push(`  ${spark('*')} ${face('▐▛█████▜▌')} ${spark('*')}`);
-    lines.push(` ${spark('*')} ${face('▝▜███████▛▘')} ${spark('*')}`);
-    lines.push(`  ${spark('*')}  ${face('▘▘   ▝▝')}  ${spark('*')}`);
+    logoLines.forEach(line => lines.push(line));
     lines.push('');
     lines.push(titleShort);
     lines.push('');
@@ -157,18 +152,53 @@ export const renderLogoWithEnvPanel = (
     // 横向布局
     const gap = isNarrow ? '  ' : '    ';
 
-    // 第一行: 帽子 + title
+    // 添加空行
     lines.push('');
-    lines.push(`       ${hat('▄██▄')}      ${gap}${isNarrow ? titleShort : title}`);
-    // 第二行: 脸上部 + env[0]
-    lines.push(`  ${spark('*')} ${face('▐▛█████▜▌')} ${spark('*')}  ${gap}${envLines[0] || ''}`);
-    // 第三行: 脸下部 + env[1]
-    lines.push(` ${spark('*')} ${face('▝▜███████▛▘')} ${spark('*')} ${gap}${envLines[1] || ''}`);
-    // 第四行: 底部 + env[2]
-    lines.push(`  ${spark('*')}  ${face('▘▘   ▝▝')}  ${spark('*')}  ${gap}${envLines[2] || ''}`);
-    // 第五行（宽屏）: 空白 + env[3]（19 字符宽度与 logo 对齐）
-    if (envLines[3]) {
-      lines.push(`                 ${gap}${envLines[3]}`);
+
+    // Logo 行 + 环境信息行(标题和右侧都向下偏移)
+    const maxLines = Math.max(logoLines.length, envLines.length + 3);
+    for (let i = 0; i < maxLines; i++) {
+      const logoLine = logoLines[i] || '';
+
+      // 第一行:只显示 logo
+      if (i === 0) {
+        const visibleWidth = logoLine
+          .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+          .length;
+        const padding = ' '.repeat(Math.max(0, logo.width - visibleWidth));
+        lines.push(logoLine + padding);
+        continue;
+      }
+
+      // 第二行:标题行与 logo 第二行对齐
+      if (i === 1) {
+        const visibleWidth = logoLine
+          .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+          .length;
+        const padding = ' '.repeat(Math.max(0, logo.width - visibleWidth));
+        lines.push(logoLine + padding + gap + (isNarrow ? titleShort : title));
+        continue;
+      }
+
+      // 第 3-4 行:只显示 logo,右侧空白
+      if (i === 2) {
+        const visibleWidth = logoLine
+          .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+          .length;
+        const padding = ' '.repeat(Math.max(0, logo.width - visibleWidth));
+        lines.push(logoLine + padding);
+        continue;
+      }
+
+      // 第 4 行及以后:logo + 环境信息
+      const envLine = envLines[i - 3] || '';
+
+      const visibleWidth = logoLine
+        .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+        .length;
+      const padding = ' '.repeat(Math.max(0, logo.width - visibleWidth));
+
+      lines.push(logoLine + padding + gap + envLine);
     }
   }
 
