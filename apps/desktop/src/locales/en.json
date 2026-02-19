@@ -275,7 +275,9 @@
     "skillPath": "Path",
     "scopeGlobal": "Global",
     "scopeProject": "Project",
-    "from": "from"
+    "from": "from",
+    "needWorkingDir": "Please set a default working directory in Settings first",
+    "goToSettings": "Go to Settings"
   },
   "settings": {
     "subtitle": "App configuration and preferences",
@@ -291,6 +293,9 @@
     "startMinimizedDesc": "Do not show main window on startup",
     "closeToTray": "Minimize on Close (instead of quit)",
     "closeToTrayDesc": "Keep app running in background when close button is clicked",
+    "defaultWorkingDir": "Default Working Directory",
+    "defaultWorkingDirDesc": "Working directory for Claude CLI when searching skills or generating cron tasks. These features may not work without it",
+    "selectDir": "Select Directory",
     "defaultPermission": "Default Permission",
     "defaultPermissionMode": "Default Permission Mode",
     "defaultPermissionHint": "Default permission when launching Claude, can be temporarily overridden on Home page",
@@ -433,6 +438,8 @@
     "aiConfirm": "Confirm",
     "aiComplete": "Analysis complete",
     "aiCreated": "Task created",
-    "aiError": "Generation failed"
+    "aiError": "Generation failed",
+    "needWorkingDir": "Please set a default working directory in Settings first",
+    "goToSettings": "Go to Settings"
   }
 }

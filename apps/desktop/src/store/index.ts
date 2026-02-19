@@ -128,6 +128,10 @@ interface AppState {
   removeFavorite: (path: string) => void;
   setSelectedWorkingDir: (dir: string | null) => void;
 
+  // Default Working Directory (for skills search & cron AI)
+  defaultWorkingDir: string | null;
+  setDefaultWorkingDir: (dir: string | null) => void;
+
   // Skills
   installedSkills: InstalledSkill[];
   setInstalledSkills: (skills: InstalledSkill[]) => void;
@@ -221,6 +225,10 @@ export const useAppStore = create<AppState>((set) => ({
       favorites: state.favorites.filter((f) => f.path !== path),
     })),
   setSelectedWorkingDir: (dir) => set({ selectedWorkingDir: dir }),
+
+  // Default Working Directory
+  defaultWorkingDir: null,
+  setDefaultWorkingDir: (dir) => set({ defaultWorkingDir: dir }),
 
   // Skills
   installedSkills: [],

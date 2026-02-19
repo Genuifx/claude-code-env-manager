@@ -4,8 +4,10 @@ import { ErrorBanner } from '@/components/ui/EmptyState';
 import { useTauriEvent } from '@/hooks/useTauriEvents';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useLocale } from '@/locales';
+import { useAppStore } from '@/store';
+import { emit } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
-import { Sparkles, Loader2, Bot, Wrench, FolderOpen, FileText, Pencil, Check, X } from 'lucide-react';
+import { Sparkles, Loader2, Bot, Wrench, FolderOpen, FileText, Pencil, Check, X, AlertTriangle, Settings } from 'lucide-react';
 
 interface StreamMessage {
   type: 'thinking' | 'tool' | 'result' | 'error';
@@ -28,6 +30,7 @@ interface AiCronPanelProps {
 
 export function AiCronPanel({ open, onClose, onTaskCreated, onEdit }: AiCronPanelProps) {
   const { t } = useLocale();
+  const { defaultWorkingDir } = useAppStore();
   const { addCronTask, generateCronTaskStream } = useTauriCommands();
   const [query, setQuery] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -191,6 +194,21 @@ export function AiCronPanel({ open, onClose, onTaskCreated, onEdit }: AiCronPane
 
         {/* Content */}
         <div className="px-5 pb-5 space-y-3 overflow-y-auto max-h-[calc(85vh-80px)]">
+          {/* Working directory hint */}
+          {!defaultWorkingDir && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-sm">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+              <span className="text-amber-700 dark:text-amber-400 flex-1 text-xs">{t('cron.needWorkingDir')}</span>
+              <button
+                onClick={() => { emit('navigate-to-settings'); onClose(); }}
+                className="inline-flex items-center gap-1 text-xs font-medium text-amber-600 dark:text-amber-400 hover:underline shrink-0"
+              >
+                <Settings className="w-3 h-3" />
+                {t('cron.goToSettings')}
+              </button>
+            </div>
+          )}
+
           {/* Input bar */}
           <div className="flex gap-2">
             <div className="relative flex-1">

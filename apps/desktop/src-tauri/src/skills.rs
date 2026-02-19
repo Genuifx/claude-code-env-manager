@@ -165,6 +165,13 @@ pub fn search_skills_stream(app: AppHandle, query: String) {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
+        // Set working directory to avoid running in `/`
+        if let Some(dir) = config::get_default_working_dir() {
+            cmd.current_dir(&dir);
+        } else if let Some(home) = dirs::home_dir() {
+            cmd.current_dir(home);
+        }
+
         // Inject current environment's API config
         if let Ok(cfg) = config::read_config() {
             if let Some(env_name) = &cfg.current {

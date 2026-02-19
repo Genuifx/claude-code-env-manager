@@ -275,7 +275,9 @@
     "skillPath": "路径",
     "scopeGlobal": "全局",
     "scopeProject": "项目",
-    "from": "来自"
+    "from": "来自",
+    "needWorkingDir": "请先在设置中配置默认工作目录",
+    "goToSettings": "前往设置"
   },
   "settings": {
     "subtitle": "应用配置和偏好设置",
@@ -291,6 +293,9 @@
     "startMinimizedDesc": "应用启动时不显示主窗口",
     "closeToTray": "关闭窗口时最小化（而非退出）",
     "closeToTrayDesc": "点击关闭按钮时保持应用在后台运行",
+    "defaultWorkingDir": "默认工作目录",
+    "defaultWorkingDirDesc": "技能搜索和 AI 创建定时任务时，Claude CLI 使用的工作目录。未配置时这些功能可能无法正常工作",
+    "selectDir": "选择目录",
     "defaultPermission": "默认权限",
     "defaultPermissionMode": "默认权限模式",
     "defaultPermissionHint": "启动 Claude 时默认使用此权限，可在 Home 页临时覆盖",
@@ -433,6 +438,8 @@
     "aiConfirm": "确认创建",
     "aiComplete": "分析完成",
     "aiCreated": "任务已创建",
-    "aiError": "生成失败"
+    "aiError": "生成失败",
+    "needWorkingDir": "请先在设置中配置默认工作目录",
+    "goToSettings": "前往设置"
   }
 }

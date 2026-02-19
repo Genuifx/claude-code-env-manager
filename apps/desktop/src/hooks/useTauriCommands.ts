@@ -72,6 +72,7 @@ export function useTauriCommands() {
     setCronTasks,
     setCronRuns,
     setLoadingCron,
+    setDefaultWorkingDir,
   } = useAppStore();
 
   const loadEnvironments = useCallback(async () => {
@@ -287,7 +288,14 @@ export function useTauriCommands() {
     } catch (err) {
       console.error('Failed to load app config:', err);
     }
-  }, [setFavorites, setRecent, setVSCodeProjects, setJetBrainsProjects]);
+    // Also load default working dir
+    try {
+      const dir = await invoke<string | null>('get_default_working_dir');
+      setDefaultWorkingDir(dir);
+    } catch {
+      // ignore
+    }
+  }, [setFavorites, setRecent, setVSCodeProjects, setJetBrainsProjects, setDefaultWorkingDir]);
 
   const addFavoriteProject = useCallback(async (path: string, name: string) => {
     try {
@@ -455,6 +463,15 @@ export function useTauriCommands() {
     await invoke('generate_cron_task_stream', { query });
   }, []);
 
+  const saveDefaultWorkingDir = useCallback(async (path: string | null) => {
+    try {
+      await invoke('set_default_working_dir', { path });
+      setDefaultWorkingDir(path);
+    } catch (err) {
+      console.error('Failed to save default working dir:', err);
+    }
+  }, [setDefaultWorkingDir]);
+
   return {
     loadEnvironments,
     loadCurrentEnv,
@@ -489,5 +506,6 @@ export function useTauriCommands() {
     getCronNextRuns,
     listCronTemplates,
     generateCronTaskStream,
+    saveDefaultWorkingDir,
   };
 }
