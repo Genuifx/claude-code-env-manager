@@ -794,7 +794,7 @@ pub fn get_cron_next_runs(cron_expression: String, count: Option<usize>) -> Resu
 fn get_user_path() -> String {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let output = Command::new(&shell)
-        .args(["-l", "-c", "echo $PATH"])
+        .args(["-li", "-c", "echo $PATH"])
         .output();
 
     match output {

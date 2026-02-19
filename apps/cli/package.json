@@ -1,6 +1,6 @@
 {
   "name": "ccem",
-  "version": "1.9.0",
+  "version": "2.0.0-beta",
   "type": "module",
   "description": "Claude Code Environment Manager",
   "author": {
@@ -18,7 +18,6 @@
   },
   "scripts": {
     "generate-logo": "bash scripts/generate-logo.sh",
-    "prebuild": "pnpm run generate-logo",
     "build": "tsup",
     "dev": "tsup --watch",
     "start": "node dist/index.js",
