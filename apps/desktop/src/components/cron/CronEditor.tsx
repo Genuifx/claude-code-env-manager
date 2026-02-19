@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useLocale } from '@/locales';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { cn } from '@/lib/utils';
@@ -13,44 +13,46 @@ interface CronEditorProps {
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+/** Check whether a cron expression can be represented in visual mode */
+function parseVisual(expr: string): { frequency: Frequency; minute: number; hour: number; dayOfMonth: number; dayOfWeek: number } | null {
+  const parts = expr.split(/\s+/);
+  if (parts.length !== 5) return null;
+  const [min, hr, dom, , dow] = parts;
+  const isSingleInt = (s: string) => /^\d+$/.test(s);
+
+  if (min === '*' && hr === '*') {
+    return { frequency: 'minute', minute: 0, hour: 9, dayOfMonth: 1, dayOfWeek: 1 };
+  } else if (isSingleInt(min) && hr === '*') {
+    return { frequency: 'hourly', minute: parseInt(min), hour: 9, dayOfMonth: 1, dayOfWeek: 1 };
+  } else if (isSingleInt(min) && isSingleInt(hr) && dom === '*' && dow === '*') {
+    return { frequency: 'daily', minute: parseInt(min), hour: parseInt(hr), dayOfMonth: 1, dayOfWeek: 1 };
+  } else if (isSingleInt(min) && isSingleInt(hr) && dom === '*' && isSingleInt(dow)) {
+    return { frequency: 'weekly', minute: parseInt(min), hour: parseInt(hr), dayOfMonth: 1, dayOfWeek: parseInt(dow) };
+  } else if (isSingleInt(min) && isSingleInt(hr) && isSingleInt(dom) && dow === '*') {
+    return { frequency: 'monthly', minute: parseInt(min), hour: parseInt(hr), dayOfMonth: parseInt(dom), dayOfWeek: 1 };
+  }
+  return null; // complex — needs advanced mode
+}
+
 export function CronEditor({ value, onChange }: CronEditorProps) {
   const { t } = useLocale();
   const { getCronNextRuns } = useTauriCommands();
-  const [advancedMode, setAdvancedMode] = useState(false);
-  const [frequency, setFrequency] = useState<Frequency>('daily');
-  const [minute, setMinute] = useState(0);
-  const [hour, setHour] = useState(9);
-  const [dayOfMonth, setDayOfMonth] = useState(1);
-  const [dayOfWeek, setDayOfWeek] = useState(1);
-  const [nextRuns, setNextRuns] = useState<string[]>([]);
 
-  // Parse initial value into visual state on mount
-  useEffect(() => {
-    if (!value) return;
-    const parts = value.split(/\s+/);
-    if (parts.length !== 5) return;
-    const [min, hr, dom, , dow] = parts;
-    if (min === '*' && hr === '*') {
-      setFrequency('minute');
-    } else if (min !== '*' && hr === '*') {
-      setFrequency('hourly');
-      setMinute(parseInt(min) || 0);
-    } else if (dom === '*' && dow === '*') {
-      setFrequency('daily');
-      setMinute(parseInt(min) || 0);
-      setHour(parseInt(hr) || 9);
-    } else if (dom === '*' && dow !== '*') {
-      setFrequency('weekly');
-      setMinute(parseInt(min) || 0);
-      setHour(parseInt(hr) || 9);
-      setDayOfWeek(parseInt(dow) || 1);
-    } else if (dom !== '*') {
-      setFrequency('monthly');
-      setMinute(parseInt(min) || 0);
-      setHour(parseInt(hr) || 9);
-      setDayOfMonth(parseInt(dom) || 1);
-    }
-  }, []);
+  // Determine initial mode synchronously from the value prop
+  const initial = parseVisual(value);
+
+  const [advancedMode, setAdvancedMode] = useState(initial === null);
+  const [frequency, setFrequency] = useState<Frequency>(initial?.frequency ?? 'daily');
+  const [minute, setMinute] = useState(initial?.minute ?? 0);
+  const [hour, setHour] = useState(initial?.hour ?? 9);
+  const [dayOfMonth, setDayOfMonth] = useState(initial?.dayOfMonth ?? 1);
+  const [dayOfWeek, setDayOfWeek] = useState(initial?.dayOfWeek ?? 1);
+  const [nextRuns, setNextRuns] = useState<string[]>([]);
+  const nextRunsTimer = useRef<ReturnType<typeof setTimeout>>();
+  const initialized = useRef(false);
+
+  // Mark initialized after first render
+  useEffect(() => { initialized.current = true; }, []);
 
   // Build cron expression from visual state
   const expression = useMemo(() => {
@@ -65,23 +67,28 @@ export function CronEditor({ value, onChange }: CronEditorProps) {
     }
   }, [advancedMode, frequency, minute, hour, dayOfMonth, dayOfWeek, value]);
 
-  // Sync expression to parent
+  // Sync expression to parent — skip the very first render to avoid overwriting value
   useEffect(() => {
+    if (!initialized.current) return;
     if (!advancedMode) {
       onChange(expression);
     }
   }, [expression, advancedMode]);
 
-  // Fetch next runs preview
+  // Fetch next runs preview (debounced)
   useEffect(() => {
     const expr = advancedMode ? value : expression;
     if (!expr || expr.trim().split(/\s+/).length !== 5) {
       setNextRuns([]);
       return;
     }
-    getCronNextRuns(expr, 5)
-      .then(setNextRuns)
-      .catch(() => setNextRuns([]));
+    clearTimeout(nextRunsTimer.current);
+    nextRunsTimer.current = setTimeout(() => {
+      getCronNextRuns(expr, 5)
+        .then(setNextRuns)
+        .catch(() => setNextRuns([]));
+    }, 300);
+    return () => clearTimeout(nextRunsTimer.current);
   }, [expression, value, advancedMode, getCronNextRuns]);
 
   const humanReadable = useMemo(() => {

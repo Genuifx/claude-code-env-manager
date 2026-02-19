@@ -11,6 +11,21 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Sync theme before React loads to prevent dark-mode flash
+      (function() {
+        try {
+          var saved = localStorage.getItem('ccem-settings');
+          var theme = 'light';
+          if (saved) {
+            theme = JSON.parse(saved).theme || 'light';
+          }
+          if (theme === 'light' || (theme === 'system' && !window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('light');
+          }
+        } catch (e) {}
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
