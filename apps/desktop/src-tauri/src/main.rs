@@ -874,6 +874,19 @@ fn load_from_remote(url: String, secret: String) -> Result<LoadResult, String> {
     })
 }
 
+#[tauri::command]
+fn get_default_working_dir() -> Result<Option<String>, String> {
+    let cfg = config::read_app_config()?;
+    Ok(cfg.default_working_dir)
+}
+
+#[tauri::command]
+fn set_default_working_dir(path: Option<String>) -> Result<(), String> {
+    let mut cfg = config::read_app_config()?;
+    cfg.default_working_dir = path;
+    config::write_app_config(&cfg)
+}
+
 fn main() {
     // Create SessionManager wrapped in Arc for sharing with monitor
     let session_manager = Arc::new(SessionManager::default());
@@ -940,7 +953,9 @@ fn main() {
             cron::get_cron_run_detail,
             cron::list_cron_templates,
             cron::get_cron_next_runs,
-            cron::generate_cron_task_stream
+            cron::generate_cron_task_stream,
+            get_default_working_dir,
+            set_default_working_dir
         ])
         .setup(move |app| {
             // Clean up stale exit files from previous sessions

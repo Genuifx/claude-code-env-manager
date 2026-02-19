@@ -86,6 +86,8 @@ pub struct AppConfig {
     pub vscode_projects: Vec<VSCodeProject>,
     #[serde(rename = "jetbrainsProjects", default)]
     pub jetbrains_projects: Vec<JetBrainsProject>,
+    #[serde(rename = "defaultWorkingDir", default)]
+    pub default_working_dir: Option<String>,
 }
 
 /// Get ~/.ccem/ directory path
@@ -211,6 +213,14 @@ pub fn get_env_with_decrypted_key(env: &EnvConfig) -> EnvConfig {
         model: env.model.clone(),
         small_model: env.small_model.clone(),
     }
+}
+
+/// Get default working directory from app config (validated)
+pub fn get_default_working_dir() -> Option<String> {
+    read_app_config()
+        .ok()
+        .and_then(|cfg| cfg.default_working_dir)
+        .filter(|d| !d.is_empty() && std::path::Path::new(d).is_dir())
 }
 
 /// Create environment config with encrypted API key

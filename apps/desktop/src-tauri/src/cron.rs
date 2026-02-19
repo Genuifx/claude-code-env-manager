@@ -298,8 +298,10 @@ fn next_runs(expression: &str, count: usize) -> Vec<String> {
 
 fn build_env_vars(env_name: &Option<String>) -> HashMap<String, String> {
     let mut env_vars: HashMap<String, String> = HashMap::new();
-    if let Some(name) = env_name {
-        if let Ok(cfg) = config::read_config() {
+    if let Ok(cfg) = config::read_config() {
+        // Use the task's explicit env, or fall back to the current active environment
+        let resolved_name = env_name.as_ref().or(cfg.current.as_ref());
+        if let Some(name) = resolved_name {
             if let Some(env) = cfg.registries.get(name) {
                 let decrypted = config::get_env_with_decrypted_key(env);
                 if let Some(url) = decrypted.base_url {
@@ -829,6 +831,13 @@ pub fn generate_cron_task_stream(app: AppHandle, query: String) {
             .env_remove("CLAUDECODE")
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
+
+        // Set working directory to avoid running in `/`
+        if let Some(dir) = config::get_default_working_dir() {
+            cmd.current_dir(&dir);
+        } else if let Some(home) = dirs::home_dir() {
+            cmd.current_dir(home);
+        }
 
         // Inject current environment's API config
         if let Ok(cfg) = config::read_config() {

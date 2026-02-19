@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { emit } from '@tauri-apps/api/event';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -9,7 +10,7 @@ import { useTauriEvent } from '@/hooks/useTauriEvents';
 import { useLocale } from '@/locales';
 import { useAppStore } from '@/store';
 import { toast } from 'sonner';
-import { Search, Sparkles, Loader2, Bot, Wrench } from 'lucide-react';
+import { Search, Sparkles, Loader2, Bot, Wrench, AlertTriangle, Settings } from 'lucide-react';
 
 interface StreamMessage {
   type: 'thinking' | 'tool' | 'result' | 'error';
@@ -18,6 +19,7 @@ interface StreamMessage {
 
 export function DiscoverTab() {
   const { t } = useLocale();
+  const { defaultWorkingDir } = useAppStore();
   const [query, setQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const isSearchingRef = useRef(false);
@@ -191,6 +193,21 @@ export function DiscoverTab() {
 
   return (
     <div className="space-y-4">
+      {/* Working directory hint */}
+      {!defaultWorkingDir && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-sm">
+          <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+          <span className="text-amber-700 dark:text-amber-400 flex-1">{t('skills.needWorkingDir')}</span>
+          <button
+            onClick={() => emit('navigate-to-settings')}
+            className="inline-flex items-center gap-1 text-xs font-medium text-amber-600 dark:text-amber-400 hover:underline shrink-0"
+          >
+            <Settings className="w-3 h-3" />
+            {t('skills.goToSettings')}
+          </button>
+        </div>
+      )}
+
       {/* Search bar */}
       <div className="flex gap-2">
         <div className="relative flex-1">

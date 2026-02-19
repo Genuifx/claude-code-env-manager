@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Moon, Sun, MonitorSmartphone, Lightbulb, Terminal, CheckCircle2, XCircle, Copy, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search } from 'lucide-react';
+import { Moon, Sun, MonitorSmartphone, Lightbulb, Terminal, CheckCircle2, XCircle, Copy, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search, FolderOpen, X } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store';
@@ -9,6 +9,7 @@ import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { useLocale } from '../locales';
 import { SettingsSkeleton } from '@/components/ui/skeleton-states';
+import { useTauriCommands } from '@/hooks/useTauriCommands';
 
 const MODE_DISPLAY_NAMES: Record<PermissionModeName, string> = {
   yolo: 'YOLO',
@@ -32,9 +33,10 @@ function getModeIcon(mode: PermissionModeName): typeof Shield {
 }
 
 export function Settings() {
-  const { defaultMode, setDefaultMode, isLoadingSettings } = useAppStore();
+  const { defaultMode, setDefaultMode, isLoadingSettings, defaultWorkingDir } = useAppStore();
   const { t, lang, setLang } = useLocale();
-  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
+  const { openDirectoryPicker, saveDefaultWorkingDir } = useTauriCommands();
+  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('light');
   const [autoStart, setAutoStart] = useState(false);
   const [startMinimized, setStartMinimized] = useState(false);
   const [closeToTray, setCloseToTray] = useState(true);
@@ -210,6 +212,50 @@ export function Settings() {
               title={t('settings.closeToTray')}
               description={t('settings.closeToTrayDesc')}
             />
+
+            {/* Default Working Directory */}
+            <div className="pt-2 border-t glass-divider">
+              <div className="mb-2">
+                <div className="text-sm font-medium text-foreground">{t('settings.defaultWorkingDir')}</div>
+                <div className="text-xs text-muted-foreground mt-0.5">{t('settings.defaultWorkingDirDesc')}</div>
+              </div>
+              {defaultWorkingDir ? (
+                <div className="flex items-center gap-2">
+                  <FolderOpen className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <span className="text-sm font-mono text-foreground truncate flex-1">{defaultWorkingDir}</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="glass-btn-outline h-7 text-xs"
+                    onClick={async () => {
+                      const path = await openDirectoryPicker();
+                      if (path) await saveDefaultWorkingDir(path);
+                    }}
+                  >
+                    {t('dashboard.changeDir')}
+                  </Button>
+                  <button
+                    onClick={() => saveDefaultWorkingDir(null)}
+                    className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/[0.06] transition-colors"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="glass-btn-outline"
+                  onClick={async () => {
+                    const path = await openDirectoryPicker();
+                    if (path) await saveDefaultWorkingDir(path);
+                  }}
+                >
+                  <FolderOpen className="w-3.5 h-3.5 mr-1.5" />
+                  {t('settings.selectDir')}
+                </Button>
+              )}
+            </div>
           </div>
         </Card>
       </div>
