@@ -95,7 +95,7 @@ export function Analytics() {
     useAppStore();
 
   // Granularity state lives here and is passed down to TokenChart
-  const [granularity, setGranularity] = useState<TimeGranularity>('hour');
+  const [granularity, setGranularity] = useState<TimeGranularity>('day');
 
   // Dynamic mock indicator — true only when real data failed to load
   const [isUsingMockData, setIsUsingMockData] = useState(false);

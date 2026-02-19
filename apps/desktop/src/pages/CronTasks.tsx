@@ -205,7 +205,8 @@ function RunHistoryPanel({ taskId }: { taskId: string }) {
 
   useEffect(() => {
     loadCronTaskRuns(taskId);
-  }, [taskId, loadCronTaskRuns]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskId]);
 
   const runs = cronRuns[taskId] || [];
   const sortedRuns = [...runs].reverse();
@@ -243,41 +244,46 @@ function RunHistoryPanel({ taskId }: { taskId: string }) {
         </div>
       ) : (
         <div className="space-y-1.5">
-          {sortedRuns.map((run) => (
-            <div key={run.id} className="glass-subtle glass-noise rounded-lg overflow-hidden">
-              <button
-                onClick={() => setExpandedRun(expandedRun === run.id ? null : run.id)}
-                className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-white/[0.03] transition-colors"
-              >
-                <StatusBadge status={run.status} />
-                <span className="text-2xs text-muted-foreground flex-1 truncate">{formatTime(run.startedAt)}</span>
-                <span className="text-2xs text-muted-foreground">{formatDuration(run.durationMs)}</span>
-                <ChevronDown className={cn('w-3.5 h-3.5 text-muted-foreground transition-transform', expandedRun === run.id && 'rotate-180')} />
-              </button>
-              {expandedRun === run.id && (
-                <div className="px-3 pb-3 space-y-2 border-t border-white/[0.06]">
-                  {run.exitCode !== undefined && run.exitCode !== null && (
-                    <div className="flex items-center gap-2 pt-2">
-                      <span className="text-2xs text-muted-foreground">{t('cron.exitCode')}:</span>
-                      <span className="text-2xs font-mono text-foreground">{run.exitCode}</span>
+          {sortedRuns.map((run) => {
+            const isExpanded = expandedRun === run.id;
+            return (
+              <div key={run.id} className="rounded-lg overflow-hidden bg-white/[0.03] border border-white/[0.06]">
+                <button
+                  onClick={() => setExpandedRun(isExpanded ? null : run.id)}
+                  className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-white/[0.03] transition-colors"
+                >
+                  <StatusBadge status={run.status} />
+                  <span className="text-2xs text-muted-foreground flex-1 truncate">{formatTime(run.startedAt)}</span>
+                  <span className="text-2xs text-muted-foreground">{formatDuration(run.durationMs)}</span>
+                  <ChevronDown className={cn('w-3.5 h-3.5 text-muted-foreground transition-transform', isExpanded && 'rotate-180')} />
+                </button>
+                <div className={cn('grid transition-[grid-template-rows] duration-200 ease-out', isExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]')}>
+                  <div className="overflow-hidden">
+                    <div className="px-3 pb-3 space-y-2 border-t border-white/[0.06]">
+                      {run.exitCode !== undefined && run.exitCode !== null && (
+                        <div className="flex items-center gap-2 pt-2">
+                          <span className="text-2xs text-muted-foreground">{t('cron.exitCode')}:</span>
+                          <span className="text-2xs font-mono text-foreground">{run.exitCode}</span>
+                        </div>
+                      )}
+                      {run.stdout && (
+                        <div className="space-y-1">
+                          <span className="text-2xs text-muted-foreground">{t('cron.stdout')}</span>
+                          <pre className="text-2xs font-mono text-foreground/80 bg-black/20 rounded-md p-2 max-h-[200px] overflow-auto whitespace-pre-wrap break-all">{run.stdout.slice(0, 5000)}</pre>
+                        </div>
+                      )}
+                      {run.stderr && (
+                        <div className="space-y-1">
+                          <span className="text-2xs text-destructive">{t('cron.stderr')}</span>
+                          <pre className="text-2xs font-mono text-destructive/80 bg-destructive/5 rounded-md p-2 max-h-[200px] overflow-auto whitespace-pre-wrap break-all">{run.stderr.slice(0, 5000)}</pre>
+                        </div>
+                      )}
                     </div>
-                  )}
-                  {run.stdout && (
-                    <div className="space-y-1">
-                      <span className="text-2xs text-muted-foreground">{t('cron.stdout')}</span>
-                      <pre className="text-2xs font-mono text-foreground/80 bg-black/20 rounded-md p-2 max-h-[200px] overflow-auto whitespace-pre-wrap break-all">{run.stdout.slice(0, 5000)}</pre>
-                    </div>
-                  )}
-                  {run.stderr && (
-                    <div className="space-y-1">
-                      <span className="text-2xs text-destructive">{t('cron.stderr')}</span>
-                      <pre className="text-2xs font-mono text-destructive/80 bg-destructive/5 rounded-md p-2 max-h-[200px] overflow-auto whitespace-pre-wrap break-all">{run.stderr.slice(0, 5000)}</pre>
-                    </div>
-                  )}
+                  </div>
                 </div>
-              )}
-            </div>
-          ))}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

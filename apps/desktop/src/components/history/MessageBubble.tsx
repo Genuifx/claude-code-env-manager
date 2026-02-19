@@ -332,7 +332,7 @@ function PlanCard({ content, t, spacingClass }: { content: string; t: (key: stri
   const title = titleMatch?.[1]?.trim();
 
   return (
-    <div className={cn('max-w-[90%]', spacingClass)}>
+    <div className={cn('max-w-[90%] mx-auto', spacingClass)}>
       <div className="glass-card glass-noise rounded-2xl overflow-hidden border-l-[3px] border-primary">
         {/* Header */}
         <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/[0.06]">
