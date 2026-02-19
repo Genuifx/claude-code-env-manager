@@ -15,7 +15,7 @@ use analytics::{get_usage_stats, get_usage_history, get_continuous_usage_days};
 use history::{get_conversation_history, get_conversation_messages, get_conversation_segments};
 use config::{EnvConfig, get_env_with_decrypted_key, create_env_with_encrypted_key, AppConfig, FavoriteProject, RecentProject, VSCodeProject, JetBrainsProject};
 use cron::{CronScheduler, start_cron_scheduler};
-use session::{Session, SessionManager, start_session_monitor, cleanup_exit_file, cleanup_stale_exit_files};
+use session::{Session, SessionManager, start_session_monitor, cleanup_exit_file, cleanup_stale_exit_files_except};
 use std::sync::Arc;
 use std::collections::HashMap;
 use std::process::Command;
@@ -888,8 +888,8 @@ fn set_default_working_dir(path: Option<String>) -> Result<(), String> {
 }
 
 fn main() {
-    // Create SessionManager wrapped in Arc for sharing with monitor
-    let session_manager = Arc::new(SessionManager::default());
+    // Create SessionManager from persisted sessions (or empty if first run)
+    let session_manager = Arc::new(SessionManager::load_from_disk());
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -958,8 +958,11 @@ fn main() {
             set_default_working_dir
         ])
         .setup(move |app| {
-            // Clean up stale exit files from previous sessions
-            cleanup_stale_exit_files();
+            // Clean up stale exit files not belonging to any persisted session
+            cleanup_stale_exit_files_except(&session_manager);
+
+            // Validate persisted sessions against actual terminal state
+            session_manager.validate_and_reconcile();
 
             // Auto-migrate configuration if needed
             if let Err(e) = config::migrate_if_needed() {

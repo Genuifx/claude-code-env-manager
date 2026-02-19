@@ -6,6 +6,13 @@ use tauri::{AppHandle, Emitter};
 
 use crate::terminal;
 
+/// Return the path to ~/.ccem/sessions.json
+fn get_sessions_file_path() -> std::path::PathBuf {
+    dirs::home_dir()
+        .map(|h| h.join(".ccem/sessions.json"))
+        .unwrap_or_default()
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Session {
     pub id: String,
@@ -34,20 +41,75 @@ impl Default for SessionManager {
 }
 
 impl SessionManager {
+    /// Load sessions from ~/.ccem/sessions.json, returning a new SessionManager.
+    /// Returns an empty manager if the file doesn't exist or is corrupted.
+    pub fn load_from_disk() -> Self {
+        let path = get_sessions_file_path();
+        let sessions = if path.exists() {
+            match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    serde_json::from_str::<Vec<Session>>(&content).unwrap_or_else(|e| {
+                        eprintln!("Failed to parse sessions.json: {}", e);
+                        vec![]
+                    })
+                }
+                Err(e) => {
+                    eprintln!("Failed to read sessions.json: {}", e);
+                    vec![]
+                }
+            }
+        } else {
+            vec![]
+        };
+        Self {
+            sessions: Mutex::new(sessions),
+        }
+    }
+
+    /// Persist current sessions to ~/.ccem/sessions.json.
+    /// Errors are logged but never panic.
+    fn save_to_disk(&self) {
+        let path = get_sessions_file_path();
+        let sessions = self.sessions.lock().unwrap().clone();
+        if let Some(parent) = path.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                eprintln!("Failed to create sessions dir: {}", e);
+                return;
+            }
+        }
+        match serde_json::to_string_pretty(&sessions) {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(&path, json) {
+                    eprintln!("Failed to write sessions.json: {}", e);
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to serialize sessions: {}", e);
+            }
+        }
+    }
+
     pub fn add_session(&self, session: Session) {
         self.sessions.lock().unwrap().push(session);
+        self.save_to_disk();
     }
 
     pub fn remove_session(&self, id: &str) {
-        let mut sessions = self.sessions.lock().unwrap();
-        sessions.retain(|s| s.id != id);
+        {
+            let mut sessions = self.sessions.lock().unwrap();
+            sessions.retain(|s| s.id != id);
+        }
+        self.save_to_disk();
     }
 
     pub fn update_session_status(&self, id: &str, status: &str) {
-        let mut sessions = self.sessions.lock().unwrap();
-        if let Some(session) = sessions.iter_mut().find(|s| s.id == id) {
-            session.status = status.to_string();
+        {
+            let mut sessions = self.sessions.lock().unwrap();
+            if let Some(session) = sessions.iter_mut().find(|s| s.id == id) {
+                session.status = status.to_string();
+            }
         }
+        self.save_to_disk();
     }
 
     pub fn list_sessions(&self) -> Vec<Session> {
@@ -82,18 +144,24 @@ impl SessionManager {
 
     /// Update the iTerm2 session ID for a session
     pub fn update_session_iterm_id(&self, id: &str, iterm_session_id: &str) {
-        let mut sessions = self.sessions.lock().unwrap();
-        if let Some(session) = sessions.iter_mut().find(|s| s.id == id) {
-            session.iterm_session_id = Some(iterm_session_id.to_string());
+        {
+            let mut sessions = self.sessions.lock().unwrap();
+            if let Some(session) = sessions.iter_mut().find(|s| s.id == id) {
+                session.iterm_session_id = Some(iterm_session_id.to_string());
+            }
         }
+        self.save_to_disk();
     }
 
     /// Update the window ID for a session (used after arrange merges windows)
     pub fn update_session_window_id(&self, id: &str, window_id: &str) {
-        let mut sessions = self.sessions.lock().unwrap();
-        if let Some(session) = sessions.iter_mut().find(|s| s.id == id) {
-            session.window_id = Some(window_id.to_string());
+        {
+            let mut sessions = self.sessions.lock().unwrap();
+            if let Some(session) = sessions.iter_mut().find(|s| s.id == id) {
+                session.window_id = Some(window_id.to_string());
+            }
         }
+        self.save_to_disk();
     }
 
     /// Get all running sessions that have terminal metadata
@@ -105,6 +173,49 @@ impl SessionManager {
             .filter(|s| s.status == "running" && s.terminal_type.is_some())
             .cloned()
             .collect()
+    }
+
+    /// Validate persisted sessions against actual terminal state on app startup.
+    /// - Removes stopped/interrupted sessions (stale from previous run)
+    /// - Checks running sessions against live terminal windows
+    /// - Marks orphaned sessions as stopped or interrupted
+    pub fn validate_and_reconcile(&self) {
+        let active_iterm_sessions = terminal::list_iterm_sessions();
+        let active_terminal_windows = terminal::list_terminal_app_windows();
+
+        {
+            let mut sessions = self.sessions.lock().unwrap();
+
+            // Remove already-finished sessions from previous run
+            sessions.retain(|s| s.status == "running");
+
+            // Validate each remaining running session
+            for session in sessions.iter_mut() {
+                match (&session.terminal_type, &session.window_id) {
+                    (Some(term_type), Some(wid)) => {
+                        let is_alive = match term_type.as_str() {
+                            "iterm2" => active_iterm_sessions.contains(wid),
+                            "terminalapp" => active_terminal_windows.contains(wid),
+                            _ => false,
+                        };
+
+                        if !is_alive {
+                            if check_exit_file(&session.id).is_some() {
+                                session.status = "stopped".to_string();
+                                cleanup_exit_file(&session.id);
+                            } else {
+                                session.status = "interrupted".to_string();
+                            }
+                        }
+                    }
+                    _ => {
+                        // No terminal metadata — can't verify, mark interrupted
+                        session.status = "interrupted".to_string();
+                    }
+                }
+            }
+        }
+        self.save_to_disk();
     }
 }
 
@@ -161,14 +272,32 @@ pub fn cleanup_exit_file(session_id: &str) {
     let _ = std::fs::remove_file(exit_file);
 }
 
-/// Clean up all stale exit files on app startup
-pub fn cleanup_stale_exit_files() {
+/// Clean up stale exit files that don't belong to any persisted session.
+/// Called on startup after load_from_disk, before validate_and_reconcile,
+/// so that known sessions' exit files are preserved for reconciliation.
+pub fn cleanup_stale_exit_files_except(manager: &SessionManager) {
     let sessions_dir = get_sessions_dir();
-    if sessions_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&sessions_dir) {
-            for entry in entries.flatten() {
-                if entry.path().extension().map(|e| e == "exit").unwrap_or(false) {
-                    let _ = std::fs::remove_file(entry.path());
+    if !sessions_dir.exists() {
+        return;
+    }
+
+    let known_ids: std::collections::HashSet<String> = manager
+        .sessions
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|s| s.id.clone())
+        .collect();
+
+    if let Ok(entries) = std::fs::read_dir(&sessions_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map(|e| e == "exit").unwrap_or(false) {
+                // Extract session ID from filename (e.g. "session-123456.exit" -> "session-123456")
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    if !known_ids.contains(stem) {
+                        let _ = std::fs::remove_file(&path);
+                    }
                 }
             }
         }
