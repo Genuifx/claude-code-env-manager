@@ -27,13 +27,15 @@ pub struct InstalledSkill {
 // Helpers
 // ============================================
 
-/// Get the user's full PATH from their login shell (cached).
+/// Get the user's full PATH from their interactive login shell (cached).
 /// macOS GUI apps don't inherit shell PATH, so we need to source it.
+/// Uses `-li` (login + interactive) to ensure .zshrc is loaded — needed for
+/// nvm, fnm, volta and other version managers that only init in .zshrc.
 fn get_user_path() -> &'static str {
     USER_PATH.get_or_init(|| {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
         let output = Command::new(&shell)
-            .args(["-l", "-c", "echo $PATH"])
+            .args(["-li", "-c", "echo $PATH"])
             .output();
 
         match output {
