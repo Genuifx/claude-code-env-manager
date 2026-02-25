@@ -53,7 +53,12 @@ fn greet(name: &str) -> String {
 #[tauri::command]
 fn get_environments() -> Result<HashMap<String, EnvConfig>, String> {
     let cfg = config::read_config()?;
-    Ok(cfg.registries)
+    let decrypted: HashMap<String, EnvConfig> = cfg
+        .registries
+        .iter()
+        .map(|(k, v)| (k.clone(), config::get_env_with_decrypted_key(v)))
+        .collect();
+    Ok(decrypted)
 }
 
 #[tauri::command]
@@ -752,15 +757,59 @@ fn extract_jetbrains_projects(
 
 #[tauri::command]
 fn check_ccem_installed() -> bool {
-    #[cfg(unix)]
-    let result = Command::new("which").arg("ccem").output();
-    #[cfg(windows)]
-    let result = Command::new("where").arg("ccem").output();
+    resolve_ccem_path_main().is_some()
+}
 
-    match result {
-        Ok(output) => output.status.success(),
-        Err(_) => false,
+/// Resolve ccem binary path — same logic as terminal.rs but for main.rs context.
+/// Tries login+interactive shell first, then login-only, then common paths.
+fn resolve_ccem_path_main() -> Option<String> {
+    #[cfg(unix)]
+    {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        for flags in &[&["-li", "-c", "which ccem"][..], &["-l", "-c", "which ccem"][..]] {
+            if let Ok(output) = Command::new(&shell).args(*flags).output() {
+                if output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    if let Some(path) = stdout.lines().rev().find(|l| !l.trim().is_empty()) {
+                        let path = path.trim().to_string();
+                        if path.starts_with('/') && std::path::Path::new(&path).exists() {
+                            return Some(path);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback: check common locations
+        let home = dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+        for candidate in &[
+            format!("{}/.local/bin/ccem", home),
+            format!("{}/.npm-global/bin/ccem", home),
+            "/usr/local/bin/ccem".to_string(),
+            "/opt/homebrew/bin/ccem".to_string(),
+        ] {
+            if std::path::Path::new(candidate).exists() {
+                return Some(candidate.clone());
+            }
+        }
     }
+
+    #[cfg(windows)]
+    {
+        if let Ok(output) = Command::new("where").arg("ccem").output() {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if let Some(path) = stdout.lines().next() {
+                    let path = path.trim().to_string();
+                    if !path.is_empty() {
+                        return Some(path);
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -788,8 +837,8 @@ struct RemoteEnvironments {
 #[tauri::command]
 fn load_from_remote(url: String, secret: String) -> Result<LoadResult, String> {
     // Path A: try CLI if installed
-    if check_ccem_installed() {
-        let output = Command::new("ccem")
+    if let Some(ccem_path) = resolve_ccem_path_main() {
+        let output = Command::new(&ccem_path)
             .args(["load", &url, "--secret", &secret])
             .output();
 

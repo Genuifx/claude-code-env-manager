@@ -86,6 +86,7 @@ export function useTauriCommands() {
         model: config.ANTHROPIC_MODEL || '',
         smallModel: config.ANTHROPIC_SMALL_FAST_MODEL,
       }));
+      envList.sort((a, b) => a.name.localeCompare(b.name));
       setEnvironments(envList);
       setError(null);
     } catch (err) {

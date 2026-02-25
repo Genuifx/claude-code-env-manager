@@ -129,16 +129,19 @@ function App() {
 
   // Re-sync with CLI config when window regains focus
   // This ensures desktop stays in sync when user modifies env via `ccem add/del/use` in terminal
+  // Skip environment reload when a dialog is open to avoid resetting in-progress edits
   useEffect(() => {
     const handleFocus = () => {
-      loadEnvironments().catch(() => {});
+      if (!dialogOpen) {
+        loadEnvironments().catch(() => {});
+      }
       loadCurrentEnv().catch(() => {});
       loadSessions().catch(() => {});
     };
 
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
-  }, [loadEnvironments, loadCurrentEnv, loadSessions]);
+  }, [loadEnvironments, loadCurrentEnv, loadSessions, dialogOpen]);
 
   // Handle launch
   const handleLaunch = useCallback(async () => {
