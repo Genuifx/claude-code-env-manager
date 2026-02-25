@@ -726,7 +726,7 @@ export function MessageBubble({ message, prevRole }: MessageBubbleProps) {
 
         {/* Bubble */}
         <div className={cn(
-          'rounded-2xl max-w-[85%] min-w-0',
+          'rounded-2xl max-w-[85%] min-w-0 break-words [overflow-wrap:anywhere]',
           isCommandOnly
             ? 'px-0 py-0'
             : 'px-3.5 py-2.5',

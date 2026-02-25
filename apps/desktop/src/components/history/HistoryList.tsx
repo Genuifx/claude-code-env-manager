@@ -2,6 +2,7 @@ import { useState, useMemo, useRef, useEffect } from 'react';
 import { Search, Clock, FolderOpen, MessageSquare, Scissors } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 export interface HistorySessionItem {
   id: string;
@@ -134,16 +135,18 @@ export function HistoryList({ sessions, selectedId, onSelect, focusedId }: Histo
 
         {/* Project filter */}
         {projectNames.length > 1 && (
-          <select
-            value={projectFilter}
-            onChange={e => setProjectFilter(e.target.value)}
-            className="w-full h-7 px-2 text-xs rounded-md bg-white/[0.04] border border-white/[0.08] text-foreground focus:outline-none focus:border-primary/40"
-          >
-            <option value="all">{t('history.allProjects')}</option>
-            {projectNames.map(name => (
-              <option key={name} value={name}>{name}</option>
-            ))}
-          </select>
+          <Select value={projectFilter} onValueChange={setProjectFilter}>
+            <SelectTrigger className="w-full h-7 text-xs">
+              <FolderOpen className="w-3 h-3 text-muted-foreground shrink-0" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t('history.allProjects')}</SelectItem>
+              {projectNames.map(name => (
+                <SelectItem key={name} value={name}>{name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         )}
       </div>
 

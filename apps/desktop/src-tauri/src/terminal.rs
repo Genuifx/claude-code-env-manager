@@ -240,17 +240,25 @@ fn check_ccem_launch_support() -> bool {
 
 /// Resolve the full path to the `ccem` binary.
 /// macOS GUI apps launched from Finder/Dock don't inherit the user's shell PATH,
-/// so we check common Node.js binary locations.
+/// so we source the user's shell config to get the full PATH.
+/// Uses `-li` (login+interactive) to ensure .zshrc is loaded (nvm/fnm/volta).
+/// Parses only the last line of stdout to avoid shell banner/motd contamination.
 fn resolve_ccem_path() -> Option<String> {
-    // First try: use `which` with a full shell PATH
-    if let Ok(output) = Command::new("/bin/sh")
-        .args(["-l", "-c", "which ccem"])
-        .output()
-    {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Some(path);
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+
+    // Try login+interactive first (sources .zshrc for nvm/fnm/volta)
+    // Then fallback to login-only (in case shell doesn't support -i with -c)
+    for flags in &[&["-li", "-c", "which ccem"][..], &["-l", "-c", "which ccem"][..]] {
+        if let Ok(output) = Command::new(&shell).args(*flags).output() {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                // Take only the last non-empty line — shell banners/motd appear before it
+                if let Some(path) = stdout.lines().rev().find(|l| !l.trim().is_empty()) {
+                    let path = path.trim().to_string();
+                    if path.starts_with('/') && std::path::Path::new(&path).exists() {
+                        return Some(path);
+                    }
+                }
             }
         }
     }
