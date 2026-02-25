@@ -1,6 +1,6 @@
 {
   "name": "ccem",
-  "version": "2.0.0-beta",
+  "version": "2.0.0-beta.2",
   "type": "module",
   "description": "Claude Code Environment Manager",
   "author": {
@@ -27,7 +27,6 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@ccem/core": "workspace:*",
     "chalk": "^4.1.2",
     "cli-table3": "^0.6.3",
     "commander": "^12.0.0",
@@ -39,6 +38,7 @@
     "terminal-image": "^4.2.0"
   },
   "devDependencies": {
+    "@ccem/core": "workspace:*",
     "@types/inquirer": "^9.0.7",
     "@types/node": "^20.11.24",
     "@types/react": "^19.2.9",
