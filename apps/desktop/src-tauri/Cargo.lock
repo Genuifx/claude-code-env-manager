@@ -460,7 +460,7 @@ dependencies = [
 
 [[package]]
 name = "ccem-desktop"
-version = "2.0.0-beta"
+version = "2.0.0-beta.2"
 dependencies = [
  "aes",
  "base64 0.22.1",

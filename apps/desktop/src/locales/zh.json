@@ -71,7 +71,8 @@
     "syncedProjects": "已同步 {count} 个项目",
     "noFavorites": "还没有收藏项目",
     "addFirstFavorite": "添加你的第一个收藏项目",
-    "quickAccessHint": "快速访问你的常用项目"
+    "quickAccessHint": "快速访问你的常用项目",
+    "favoriteRemoved": "已从收藏中移除"
   },
   "sessions": {
     "subtitle": "管理运行中的 Claude Code 会话",

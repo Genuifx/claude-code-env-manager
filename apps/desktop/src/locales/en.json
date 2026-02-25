@@ -71,7 +71,8 @@
     "syncedProjects": "Synced {count} projects",
     "noFavorites": "No favorites yet",
     "addFirstFavorite": "Add your first favorite project",
-    "quickAccessHint": "Quick access to your favorite projects"
+    "quickAccessHint": "Quick access to your favorite projects",
+    "favoriteRemoved": "Removed from favorites"
   },
   "sessions": {
     "subtitle": "Manage running Claude Code sessions",

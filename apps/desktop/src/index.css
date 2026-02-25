@@ -1335,8 +1335,22 @@
   animation: msg-fade-in var(--duration-fast) var(--ease-default) both;
 }
 
+/* === Card Remove Animation === */
+@keyframes card-remove {
+  0% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.97); }
+  100% { opacity: 0; transform: scale(0.93) translateY(4px); }
+}
+.card-removing {
+  animation: card-remove var(--duration-base, 250ms) ease-out forwards;
+}
+
 /* === Reduced Motion === */
 @media (prefers-reduced-motion: reduce) {
+  .card-removing {
+    animation: none;
+    opacity: 0;
+  }
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
