@@ -9,6 +9,9 @@
     "shell:allow-execute",
     "dialog:default",
     "notification:default",
-    "mcp-bridge:default"
+    "mcp-bridge:default",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
   ]
 }

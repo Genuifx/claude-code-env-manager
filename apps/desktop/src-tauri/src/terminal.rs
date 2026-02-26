@@ -231,7 +231,11 @@ fn check_ccem_launch_support() -> bool {
 
     let major = parts[0].parse::<u32>().unwrap_or(0);
     let minor = parts[1].parse::<u32>().unwrap_or(0);
-    let patch = parts.get(2).and_then(|p| p.parse::<u32>().ok()).unwrap_or(0);
+    // Strip pre-release suffix (e.g., "0-beta.2" → "0")
+    let patch = parts.get(2)
+        .map(|p| p.split('-').next().unwrap_or("0"))
+        .and_then(|p| p.parse::<u32>().ok())
+        .unwrap_or(0);
 
     let supported = version_gte(major, minor, patch, 1, 9, 0);
     println!("[ccem-launch] version {}.{}.{} >= 1.9.0 = {}", major, minor, patch, supported);
@@ -243,7 +247,7 @@ fn check_ccem_launch_support() -> bool {
 /// so we source the user's shell config to get the full PATH.
 /// Uses `-li` (login+interactive) to ensure .zshrc is loaded (nvm/fnm/volta).
 /// Parses only the last line of stdout to avoid shell banner/motd contamination.
-fn resolve_ccem_path() -> Option<String> {
+pub fn resolve_ccem_path() -> Option<String> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
 
     // Try login+interactive first (sources .zshrc for nvm/fnm/volta)

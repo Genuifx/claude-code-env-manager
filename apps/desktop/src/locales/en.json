@@ -312,7 +312,8 @@
     "saveSettings": "Save Settings",
     "settingsSaved": "Settings saved",
     "settingsSavedLocal": "Settings saved (local)",
-    "upToDate": "Already on the latest version v2.0.0"
+    "upToDate": "Already on the latest version v2.0.0",
+    "saveFailed": "Failed to save settings, stored locally"
   },
   "history": {
     "subtitle": "Browse past conversations and messages",

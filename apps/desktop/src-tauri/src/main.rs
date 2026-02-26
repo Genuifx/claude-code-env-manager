@@ -13,13 +13,13 @@ mod tray;
 
 use analytics::{get_usage_stats, get_usage_history, get_continuous_usage_days};
 use history::{get_conversation_history, get_conversation_messages, get_conversation_segments};
-use config::{EnvConfig, get_env_with_decrypted_key, create_env_with_encrypted_key, AppConfig, FavoriteProject, RecentProject, VSCodeProject, JetBrainsProject};
+use config::{EnvConfig, get_env_with_decrypted_key, create_env_with_encrypted_key, AppConfig, FavoriteProject, RecentProject, VSCodeProject, JetBrainsProject, DesktopSettings};
 use cron::{CronScheduler, start_cron_scheduler};
 use session::{Session, SessionManager, start_session_monitor, cleanup_exit_file, cleanup_stale_exit_files_except};
 use std::sync::Arc;
 use std::collections::HashMap;
 use std::process::Command;
-use tauri::{Manager, State};
+use tauri::{Manager, State, WindowEvent};
 use terminal::{TerminalInfo, TerminalType, ArrangeLayout, ArrangeSessionInfo};
 use tray::create_tray;
 
@@ -757,59 +757,7 @@ fn extract_jetbrains_projects(
 
 #[tauri::command]
 fn check_ccem_installed() -> bool {
-    resolve_ccem_path_main().is_some()
-}
-
-/// Resolve ccem binary path — same logic as terminal.rs but for main.rs context.
-/// Tries login+interactive shell first, then login-only, then common paths.
-fn resolve_ccem_path_main() -> Option<String> {
-    #[cfg(unix)]
-    {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-        for flags in &[&["-li", "-c", "which ccem"][..], &["-l", "-c", "which ccem"][..]] {
-            if let Ok(output) = Command::new(&shell).args(*flags).output() {
-                if output.status.success() {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    if let Some(path) = stdout.lines().rev().find(|l| !l.trim().is_empty()) {
-                        let path = path.trim().to_string();
-                        if path.starts_with('/') && std::path::Path::new(&path).exists() {
-                            return Some(path);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Fallback: check common locations
-        let home = dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-        for candidate in &[
-            format!("{}/.local/bin/ccem", home),
-            format!("{}/.npm-global/bin/ccem", home),
-            "/usr/local/bin/ccem".to_string(),
-            "/opt/homebrew/bin/ccem".to_string(),
-        ] {
-            if std::path::Path::new(candidate).exists() {
-                return Some(candidate.clone());
-            }
-        }
-    }
-
-    #[cfg(windows)]
-    {
-        if let Ok(output) = Command::new("where").arg("ccem").output() {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                if let Some(path) = stdout.lines().next() {
-                    let path = path.trim().to_string();
-                    if !path.is_empty() {
-                        return Some(path);
-                    }
-                }
-            }
-        }
-    }
-
-    None
+    terminal::resolve_ccem_path().is_some()
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -837,7 +785,7 @@ struct RemoteEnvironments {
 #[tauri::command]
 fn load_from_remote(url: String, secret: String) -> Result<LoadResult, String> {
     // Path A: try CLI if installed
-    if let Some(ccem_path) = resolve_ccem_path_main() {
+    if let Some(ccem_path) = terminal::resolve_ccem_path() {
         let output = Command::new(&ccem_path)
             .args(["load", &url, "--secret", &secret])
             .output();
@@ -936,6 +884,48 @@ fn set_default_working_dir(path: Option<String>) -> Result<(), String> {
     config::write_app_config(&cfg)
 }
 
+// ============================================
+// Settings Commands
+// ============================================
+
+#[tauri::command]
+fn get_settings(app: tauri::AppHandle) -> Result<DesktopSettings, String> {
+    let mut settings = config::read_settings()?;
+    // Merge defaultMode from config.json (source of truth for permission mode)
+    let cfg = config::read_config()?;
+    settings.default_mode = cfg.default_mode;
+    // Reflect actual system autostart state
+    {
+        use tauri_plugin_autostart::ManagerExt;
+        let autostart = app.autolaunch();
+        if let Ok(enabled) = autostart.is_enabled() {
+            settings.auto_start = enabled;
+        }
+    }
+    Ok(settings)
+}
+
+#[tauri::command]
+fn save_settings(app: tauri::AppHandle, settings: DesktopSettings) -> Result<(), String> {
+    // Save defaultMode to config.json (shared with CLI)
+    if let Ok(mut cfg) = config::read_config() {
+        cfg.default_mode = settings.default_mode.clone();
+        let _ = config::write_config(&cfg);
+    }
+    // Sync autostart with system
+    {
+        use tauri_plugin_autostart::ManagerExt;
+        let autostart = app.autolaunch();
+        if settings.auto_start {
+            let _ = autostart.enable();
+        } else {
+            let _ = autostart.disable();
+        }
+    }
+    // Save desktop-specific settings to settings.json
+    config::write_settings(&settings)
+}
+
 fn main() {
     // Create SessionManager from persisted sessions (or empty if first run)
     let session_manager = Arc::new(SessionManager::load_from_disk());
@@ -944,7 +934,11 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_decorum::init());
+        .plugin(tauri_plugin_decorum::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ));
 
     #[cfg(debug_assertions)]
     {
@@ -1004,8 +998,24 @@ fn main() {
             cron::get_cron_next_runs,
             cron::generate_cron_task_stream,
             get_default_working_dir,
-            set_default_working_dir
+            set_default_working_dir,
+            get_settings,
+            save_settings
         ])
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                // Only intercept the main window
+                if window.label() == "main" {
+                    let close_to_tray = config::read_settings()
+                        .map(|s| s.close_to_tray)
+                        .unwrap_or(true);
+                    if close_to_tray {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                }
+            }
+        })
         .setup(move |app| {
             // Clean up stale exit files not belonging to any persisted session
             cleanup_stale_exit_files_except(&session_manager);
@@ -1016,6 +1026,20 @@ fn main() {
             // Auto-migrate configuration if needed
             if let Err(e) = config::migrate_if_needed() {
                 eprintln!("Config migration warning: {}", e);
+            }
+
+            // Load desktop settings once for startup logic
+            let startup_settings = config::read_settings().unwrap_or_default();
+
+            // Sync autostart state from settings
+            {
+                use tauri_plugin_autostart::ManagerExt;
+                let autostart = app.autolaunch();
+                if startup_settings.auto_start {
+                    let _ = autostart.enable();
+                } else {
+                    let _ = autostart.disable();
+                }
             }
 
             // Configure macOS overlay titlebar with inset traffic lights + vibrancy
@@ -1033,6 +1057,13 @@ fn main() {
                 use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
                 apply_vibrancy(&main_window, NSVisualEffectMaterial::Sidebar, None, None)
                     .expect("Failed to apply vibrancy");
+            }
+
+            // startMinimized: hide window immediately after setup (platform-independent)
+            if startup_settings.start_minimized {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.hide();
+                }
             }
 
             let _ = create_tray(app.handle())?;

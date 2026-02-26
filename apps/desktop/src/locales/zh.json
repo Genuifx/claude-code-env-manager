@@ -312,7 +312,8 @@
     "saveSettings": "保存设置",
     "settingsSaved": "设置已保存",
     "settingsSavedLocal": "设置已保存 (本地)",
-    "upToDate": "当前已是最新版本 v2.0.0"
+    "upToDate": "当前已是最新版本 v2.0.0",
+    "saveFailed": "设置保存失败，已暂存到本地"
   },
   "history": {
     "subtitle": "浏览历史对话和消息记录",
