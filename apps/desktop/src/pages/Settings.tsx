@@ -108,8 +108,10 @@ export function Settings() {
     (async () => {
       try {
         await invoke('save_settings', { settings });
-      } catch {
+      } catch (e) {
+        // Fallback to localStorage but notify user
         localStorage.setItem('ccem-settings', JSON.stringify(settings));
+        toast.error(t('settings.saveFailed'));
       }
     })();
   }, [theme, autoStart, startMinimized, closeToTray, defaultMode]);

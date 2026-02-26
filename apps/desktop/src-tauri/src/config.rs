@@ -223,6 +223,61 @@ pub fn get_default_working_dir() -> Option<String> {
         .filter(|d| !d.is_empty() && std::path::Path::new(d).is_dir())
 }
 
+// ============================================================================
+// Desktop Settings (stored in ~/.ccem/settings.json)
+// ============================================================================
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DesktopSettings {
+    #[serde(default = "default_theme")]
+    pub theme: String,
+    #[serde(rename = "autoStart", default)]
+    pub auto_start: bool,
+    #[serde(rename = "startMinimized", default)]
+    pub start_minimized: bool,
+    #[serde(rename = "closeToTray", default = "default_close_to_tray")]
+    pub close_to_tray: bool,
+    #[serde(rename = "defaultMode", default)]
+    pub default_mode: Option<String>,
+}
+
+fn default_theme() -> String { "system".to_string() }
+fn default_close_to_tray() -> bool { true }
+
+impl Default for DesktopSettings {
+    fn default() -> Self {
+        Self {
+            theme: default_theme(),
+            auto_start: false,
+            start_minimized: false,
+            close_to_tray: default_close_to_tray(),
+            default_mode: None,
+        }
+    }
+}
+
+pub fn get_settings_path() -> PathBuf {
+    get_ccem_dir().join("settings.json")
+}
+
+pub fn read_settings() -> Result<DesktopSettings, String> {
+    let path = get_settings_path();
+    if !path.exists() {
+        return Ok(DesktopSettings::default());
+    }
+    let content = fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read settings: {}", e))?;
+    serde_json::from_str(&content).map_err(|e| format!("Failed to parse settings: {}", e))
+}
+
+pub fn write_settings(settings: &DesktopSettings) -> Result<(), String> {
+    ensure_ccem_dir().map_err(|e| format!("Failed to create config dir: {}", e))?;
+    let content = serde_json::to_string_pretty(settings)
+        .map_err(|e| format!("Failed to serialize settings: {}", e))?;
+    fs::write(get_settings_path(), content)
+        .map_err(|e| format!("Failed to write settings: {}", e))
+}
+
 /// Create environment config with encrypted API key
 pub fn create_env_with_encrypted_key(
     base_url: Option<String>,
