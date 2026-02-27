@@ -23,7 +23,7 @@ use std::process::Command;
 
 /// Global flag: when true, CloseRequested should NOT be intercepted.
 static FORCE_QUIT: AtomicBool = AtomicBool::new(false);
-use tauri::{Manager, State, WindowEvent};
+use tauri::{Manager, RunEvent, State, WindowEvent};
 use terminal::{TerminalInfo, TerminalType, ArrangeLayout, ArrangeSessionInfo};
 use tray::create_tray;
 
@@ -1110,6 +1110,15 @@ fn main() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // macOS Dock icon click should reopen/show the main window.
+            if let RunEvent::Reopen { .. } = event {
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+        });
 }
