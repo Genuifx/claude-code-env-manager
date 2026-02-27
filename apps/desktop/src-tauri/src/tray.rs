@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use serde::Serialize;
 use tauri::{
     menu::{Menu, MenuItem, Submenu, PredefinedMenuItem},
@@ -228,6 +229,7 @@ pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, tauri::Error> {
                 }
             }
             "quit" => {
+                crate::FORCE_QUIT.store(true, Ordering::SeqCst);
                 app.exit(0);
             }
             id if id.starts_with("session:") => {

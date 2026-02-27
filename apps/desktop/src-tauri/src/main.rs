@@ -17,8 +17,12 @@ use config::{EnvConfig, get_env_with_decrypted_key, create_env_with_encrypted_ke
 use cron::{CronScheduler, start_cron_scheduler};
 use session::{Session, SessionManager, start_session_monitor, cleanup_exit_file, cleanup_stale_exit_files_except};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::HashMap;
 use std::process::Command;
+
+/// Global flag: when true, CloseRequested should NOT be intercepted.
+static FORCE_QUIT: AtomicBool = AtomicBool::new(false);
 use tauri::{Manager, State, WindowEvent};
 use terminal::{TerminalInfo, TerminalType, ArrangeLayout, ArrangeSessionInfo};
 use tray::create_tray;
@@ -907,23 +911,49 @@ fn get_settings(app: tauri::AppHandle) -> Result<DesktopSettings, String> {
 
 #[tauri::command]
 fn save_settings(app: tauri::AppHandle, settings: DesktopSettings) -> Result<(), String> {
+    let mut errors: Vec<String> = Vec::new();
+
     // Save defaultMode to config.json (shared with CLI)
-    if let Ok(mut cfg) = config::read_config() {
-        cfg.default_mode = settings.default_mode.clone();
-        let _ = config::write_config(&cfg);
+    match config::read_config() {
+        Ok(mut cfg) => {
+            cfg.default_mode = settings.default_mode.clone();
+            if let Err(e) = config::write_config(&cfg) {
+                errors.push(format!("config.json: {}", e));
+            }
+        }
+        Err(e) => errors.push(format!("read config: {}", e)),
     }
+
     // Sync autostart with system
     {
         use tauri_plugin_autostart::ManagerExt;
         let autostart = app.autolaunch();
-        if settings.auto_start {
-            let _ = autostart.enable();
+        let result = if settings.auto_start {
+            autostart.enable()
         } else {
-            let _ = autostart.disable();
+            autostart.disable()
+        };
+        if let Err(e) = result {
+            errors.push(format!("autostart: {}", e));
         }
     }
+
     // Save desktop-specific settings to settings.json
-    config::write_settings(&settings)
+    config::write_settings(&settings)?;
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("Partial save failures: {}", errors.join("; ")))
+    }
+}
+
+/// Force-quit the app, bypassing closeToTray.
+/// Called from frontend Cmd+Q handler.
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    FORCE_QUIT.store(true, Ordering::SeqCst);
+    app.exit(0);
 }
 
 fn main() {
@@ -1000,12 +1030,13 @@ fn main() {
             get_default_working_dir,
             set_default_working_dir,
             get_settings,
-            save_settings
+            save_settings,
+            quit_app
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                // Only intercept the main window
-                if window.label() == "main" {
+                // Only intercept the main window, and never when force-quit is requested
+                if window.label() == "main" && !FORCE_QUIT.load(Ordering::SeqCst) {
                     let close_to_tray = config::read_settings()
                         .map(|s| s.close_to_tray)
                         .unwrap_or(true);

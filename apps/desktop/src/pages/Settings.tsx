@@ -54,7 +54,7 @@ export function Settings() {
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const settings = await invoke<{ theme: string; autoStart: boolean; startMinimized: boolean; closeToTray: boolean; defaultMode: string }>('get_settings');
+        const settings = await invoke<{ theme: string; autoStart: boolean; startMinimized: boolean; closeToTray: boolean; defaultMode: string | null }>('get_settings');
         setTheme(settings.theme as 'light' | 'dark' | 'system');
         setAutoStart(settings.autoStart);
         setStartMinimized(settings.startMinimized);

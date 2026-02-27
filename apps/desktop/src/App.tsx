@@ -165,6 +165,7 @@ function App() {
     'meta+enter': () => handleLaunch(),
     'meta+n': () => handleLaunch(),
     'meta+,': () => setActiveTab('settings'),
+    'meta+q': () => invoke('quit_app'),
   }), [handleLaunch]);
 
   useKeyboardShortcuts(globalShortcuts);

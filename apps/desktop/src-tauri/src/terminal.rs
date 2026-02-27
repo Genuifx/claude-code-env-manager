@@ -213,15 +213,20 @@ fn check_ccem_launch_support() -> bool {
         }
     };
 
-    let version_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    println!("[ccem-launch] ccem version output: '{}'", version_str);
+    // Check both stdout and stderr — some CLI tools print version to stderr
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let version_str = if stdout.is_empty() { &stderr } else { &stdout };
+    println!("[ccem-launch] ccem version output: '{}' (stderr: '{}')", stdout, stderr);
 
-    // Output is typically "1.9.0" or "ccem/1.9.0" — extract the version part
+    // Output formats: "1.9.0", "ccem/1.9.0", "v2.0.0-beta.2", "ccem/v2.0.0-beta.2"
+    // Extract the version part after the last '/'
     let version_part = version_str
         .rsplit('/')
         .next()
-        .unwrap_or(&version_str)
-        .trim();
+        .unwrap_or(version_str)
+        .trim()
+        .trim_start_matches('v'); // Strip leading 'v'
 
     let parts: Vec<&str> = version_part.split('.').collect();
     if parts.len() < 2 {
