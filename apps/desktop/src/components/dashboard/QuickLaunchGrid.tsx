@@ -174,7 +174,7 @@ export function QuickLaunchGrid({ onLaunch }: QuickLaunchGridProps) {
 
   return (
     <>
-      <div className="h-full flex flex-col glass-card glass-noise rounded-2xl overflow-hidden">
+      <div className="flex flex-col glass-card glass-noise rounded-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06]">
           <div className="flex items-center gap-2">
@@ -202,7 +202,7 @@ export function QuickLaunchGrid({ onLaunch }: QuickLaunchGridProps) {
         </div>
 
         {/* Content */}
-        <div className="flex-1 p-3 overflow-y-auto flex flex-col justify-center">
+        <div className="flex-1 p-3 overflow-y-auto flex flex-col">
           {visibleFavorites.length === 0 ? (
             <button
               onClick={handleAddFavorite}

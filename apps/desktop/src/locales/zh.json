@@ -302,6 +302,8 @@
     "defaultPermissionHint": "启动 Claude 时默认使用此权限，可在 Home 页临时覆盖",
     "about": "关于",
     "version": "版本",
+    "webkitVersion": "WebKit",
+    "notAvailable": "N/A",
     "cliStatus": "CLI 工具",
     "cliInstalled": "已安装",
     "cliNotInstalled": "未安装",

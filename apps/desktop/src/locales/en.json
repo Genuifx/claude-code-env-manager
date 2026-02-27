@@ -302,6 +302,8 @@
     "defaultPermissionHint": "Default permission when launching Claude, can be temporarily overridden on Home page",
     "about": "About",
     "version": "Version",
+    "webkitVersion": "WebKit",
+    "notAvailable": "N/A",
     "cliStatus": "CLI Tool",
     "cliInstalled": "Installed",
     "cliNotInstalled": "Not Installed",
