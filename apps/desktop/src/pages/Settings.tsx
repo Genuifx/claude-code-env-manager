@@ -41,6 +41,7 @@ export function Settings() {
   const [startMinimized, setStartMinimized] = useState(false);
   const [closeToTray, setCloseToTray] = useState(true);
   const [ccemInstalled, setCcemInstalled] = useState<boolean | null>(null);
+  const [webkitVersion, setWebkitVersion] = useState<string | null>(null);
   const loaded = useRef(false);
 
   // Check if ccem CLI is installed
@@ -48,6 +49,12 @@ export function Settings() {
     invoke<boolean>('check_ccem_installed')
       .then(setCcemInstalled)
       .catch(() => setCcemInstalled(false));
+  }, []);
+
+  // Surface runtime WebKit version for desktop debugging.
+  useEffect(() => {
+    const match = navigator.userAgent.match(/AppleWebKit\/([\d.]+)/i);
+    setWebkitVersion(match?.[1] ?? null);
   }, []);
 
   // Load settings on mount
@@ -323,6 +330,14 @@ export function Settings() {
             </span>
             <span className="text-sm font-medium text-foreground">
               v2.0.0
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">
+              {t('settings.webkitVersion')}
+            </span>
+            <span className="text-sm font-medium text-foreground font-mono">
+              {webkitVersion ?? t('settings.notAvailable')}
             </span>
           </div>
           <div className="flex items-center justify-between">

@@ -247,18 +247,22 @@ function ToolCallBlock({ block, t }: { block: ContentBlock; t: (key: string) => 
     <div className="my-1">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-1.5 py-1 text-xs hover:bg-white/[0.03] rounded transition-colors group text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="w-full min-w-0 flex items-center gap-1.5 py-1 text-xs hover:bg-white/[0.03] rounded transition-colors group text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       >
         <Circle className={cn(
           'w-[5px] h-[5px] shrink-0 fill-current',
           isError ? 'text-destructive' : 'text-primary'
         )} />
-        <span className="font-medium text-foreground/90">{block.name || 'Tool'}</span>
-        {summary && (
-          <span className="text-muted-foreground font-mono text-[11px] min-w-0 truncate">
-            ({summary})
+        <div className="min-w-0 flex-1 flex items-center gap-1.5">
+          <span className="font-medium text-foreground/90 whitespace-nowrap truncate">
+            {block.name || 'Tool'}
           </span>
-        )}
+          {summary && (
+            <span className="text-muted-foreground font-mono text-[11px] whitespace-nowrap truncate">
+              ({summary})
+            </span>
+          )}
+        </div>
         <span className="ml-auto shrink-0 flex items-center gap-1">
           {hasResult && (
             isError
@@ -383,6 +387,8 @@ function PlanCard({ content, t, spacingClass }: { content: string; t: (key: stri
 
 /** Matches insight blocks: backtick-wrapped ★ header line, content, backtick-wrapped closing line */
 const INSIGHT_RE = /`★\s*Insight\s*─+`\n([\s\S]*?)\n`─+`/g;
+/** Matches think tags in text payloads from desktop history snapshots. */
+const THINK_RE = /<think>([\s\S]*?)<\/think>/gi;
 
 /** Render an insight block as a frosted glass callout card */
 function InsightBlock({ content }: { content: string }) {
@@ -528,29 +534,79 @@ function splitInsightBlocks(text: string): Array<{ type: 'md' | 'insight'; conte
   return parts;
 }
 
-function renderTextContent(text: string, isUser = false, standalone = false) {
+function splitThinkBlocks(text: string): Array<{ type: 'md' | 'think'; content: string }> {
+  const parts: Array<{ type: 'md' | 'think'; content: string }> = [];
+  let lastIndex = 0;
+
+  THINK_RE.lastIndex = 0;
+  for (const match of text.matchAll(THINK_RE)) {
+    const before = text.slice(lastIndex, match.index);
+    if (before.trim()) parts.push({ type: 'md', content: before });
+    parts.push({ type: 'think', content: match[1] || '' });
+    lastIndex = match.index! + match[0].length;
+  }
+
+  const after = text.slice(lastIndex);
+  if (after.trim()) parts.push({ type: 'md', content: after });
+
+  return parts;
+}
+
+function renderAssistantMarkdown(text: string, keyPrefix = 'md') {
+  if (INSIGHT_RE.test(text)) {
+    INSIGHT_RE.lastIndex = 0;
+    const parts = splitInsightBlocks(text);
+    return (
+      <>
+        {parts.map((part, i) =>
+          part.type === 'insight'
+            ? <InsightBlock key={`${keyPrefix}-insight-${i}`} content={part.content} />
+            : <MarkdownRenderer key={`${keyPrefix}-md-${i}`} content={part.content.trim()} />
+        )}
+      </>
+    );
+  }
+
+  return <MarkdownRenderer content={text} />;
+}
+
+function renderTextContent(text: string, t: (key: string) => string, isUser = false, standalone = false) {
   const { cleanText, command } = parseMessageText(text);
   if (command && !cleanText) {
     return <CommandChip name={command.name} output={command.output} isUser={isUser} standalone={standalone} />;
   }
   if (!cleanText) return null;
 
-  // Check for insight blocks in assistant messages
-  if (!isUser && INSIGHT_RE.test(cleanText)) {
-    INSIGHT_RE.lastIndex = 0;
-    const parts = splitInsightBlocks(cleanText);
+  // Render <think> blocks from history snapshots as collapsible thinking cards.
+  if (!isUser && /<think>/i.test(cleanText)) {
+    const thinkParts = splitThinkBlocks(cleanText);
     return (
       <>
-        {parts.map((part, i) =>
-          part.type === 'insight'
-            ? <InsightBlock key={`insight-${i}`} content={part.content} />
-            : <MarkdownRenderer key={`md-${i}`} content={part.content.trim()} />
+        {thinkParts.map((part, i) =>
+          part.type === 'think'
+            ? (
+              <CollapsibleBlock
+                key={`think-${i}`}
+                icon={Brain}
+                label={t('history.thinking')}
+                iconClassName="text-amber-400"
+              >
+                <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px] leading-relaxed max-h-[300px] overflow-y-auto">
+                  {part.content.trim()}
+                </pre>
+              </CollapsibleBlock>
+            )
+            : <div key={`think-md-${i}`}>{renderAssistantMarkdown(part.content.trim(), `think-${i}`)}</div>
         )}
       </>
     );
   }
 
-  return <MarkdownRenderer content={cleanText} variant={isUser ? 'user' : 'default'} />;
+  if (isUser) {
+    return <MarkdownRenderer content={cleanText} variant="user" />;
+  }
+
+  return renderAssistantMarkdown(cleanText);
 }
 
 function renderContentBlocks(blocks: ContentBlock[], t: (key: string) => string, isUser = false) {
@@ -580,7 +636,7 @@ function renderContentBlocks(blocks: ContentBlock[], t: (key: string) => string,
 
     switch (block.type) {
       case 'text':
-        result.push(<div key={i}>{renderTextContent(block.text || '', isUser)}</div>);
+        result.push(<div key={i}>{renderTextContent(block.text || '', t, isUser)}</div>);
         break;
 
       case 'thinking':
@@ -671,7 +727,7 @@ export function MessageBubble({ message, prevRole }: MessageBubbleProps) {
     collectTeammate(content);
     const { cleanText, command } = parseMessageText(content);
     isCommandOnly = !!(command && !cleanText);
-    renderedContent = renderTextContent(content, isUser, isCommandOnly);
+    renderedContent = renderTextContent(content, t, isUser, isCommandOnly);
   } else if (Array.isArray(content)) {
     // Collect teammate messages from all text blocks
     for (const block of content as ContentBlock[]) {
@@ -684,7 +740,7 @@ export function MessageBubble({ message, prevRole }: MessageBubbleProps) {
       isCommandOnly = !!(command && !cleanText);
     }
     renderedContent = isCommandOnly
-      ? renderTextContent((content as ContentBlock[])[0].text || '', isUser, true)
+      ? renderTextContent((content as ContentBlock[])[0].text || '', t, isUser, true)
       : renderContentBlocks(content as ContentBlock[], t, isUser);
   } else if (content && typeof content === 'object') {
     // Single content block
