@@ -1,12 +1,16 @@
-use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use std::thread;
-use std::fs::{self, OpenOptions};
-use tauri::{AppHandle, Emitter};
 use fs2::FileExt;
+use serde::{Deserialize, Serialize};
+use std::fs::{self, OpenOptions};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+use tauri::{AppHandle, Emitter};
 
 use crate::terminal;
+
+fn default_client() -> String {
+    "claude".to_string()
+}
 
 /// Return the path to ~/.ccem/sessions.json
 fn get_sessions_file_path() -> std::path::PathBuf {
@@ -19,7 +23,9 @@ fn get_sessions_file_path() -> std::path::PathBuf {
 pub struct Session {
     pub id: String,
     pub pid: Option<u32>,
-    #[serde(alias = "env_name")]  // 兼容旧的 snake_case
+    #[serde(default = "default_client")]
+    pub client: String, // "claude" | "codex"
+    #[serde(alias = "env_name")] // 兼容旧的 snake_case
     pub env_name: String,
     #[serde(alias = "perm_mode")]
     pub perm_mode: String,
@@ -30,9 +36,9 @@ pub struct Session {
     pub status: String, // "running", "stopped", "interrupted"
     // Terminal metadata for window control
     #[serde(alias = "terminal_type")]
-    pub terminal_type: Option<String>,  // "iterm2" | "terminalapp"
+    pub terminal_type: Option<String>, // "iterm2" | "terminalapp"
     #[serde(alias = "window_id")]
-    pub window_id: Option<String>,      // iTerm2 window ID for operations
+    pub window_id: Option<String>, // iTerm2 window ID for operations
     #[serde(alias = "iterm_session_id")]
     pub iterm_session_id: Option<String>, // iTerm2 session unique ID for move_session API
 }
@@ -56,12 +62,10 @@ impl SessionManager {
         let path = get_sessions_file_path();
         let sessions = if path.exists() {
             match std::fs::read_to_string(&path) {
-                Ok(content) => {
-                    serde_json::from_str::<Vec<Session>>(&content).unwrap_or_else(|e| {
-                        eprintln!("Failed to parse sessions.json: {}", e);
-                        vec![]
-                    })
-                }
+                Ok(content) => serde_json::from_str::<Vec<Session>>(&content).unwrap_or_else(|e| {
+                    eprintln!("Failed to parse sessions.json: {}", e);
+                    vec![]
+                }),
                 Err(e) => {
                     eprintln!("Failed to read sessions.json: {}", e);
                     vec![]
@@ -92,10 +96,7 @@ impl SessionManager {
         }
 
         // 获取文件锁
-        let lock_result = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .open(&path);
+        let lock_result = OpenOptions::new().create(true).write(true).open(&path);
 
         let lock_file = match lock_result {
             Ok(f) => f,
@@ -158,7 +159,12 @@ impl SessionManager {
     }
 
     pub fn get_session(&self, id: &str) -> Option<Session> {
-        self.sessions.lock().unwrap().iter().find(|s| s.id == id).cloned()
+        self.sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|s| s.id == id)
+            .cloned()
     }
 
     /// Get all running sessions with PIDs for monitoring
@@ -356,10 +362,7 @@ fn send_notification(title: &str, body: &str) {
         body.replace("\"", "\\\""),
         title.replace("\"", "\\\"")
     );
-    let _ = Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
-        .output();
+    let _ = Command::new("osascript").arg("-e").arg(&script).output();
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -430,7 +433,10 @@ pub fn start_session_monitor(app: AppHandle, manager: Arc<SessionManager>) {
                         if let Some(updated_session) = manager.get_session(&session.id) {
                             let _ = app.emit("session-interrupted", &updated_session);
                         }
-                        send_notification("Session Interrupted", &format!("{} window was closed", session.env_name));
+                        send_notification(
+                            "Session Interrupted",
+                            &format!("{} window was closed", session.env_name),
+                        );
                     }
                 }
             }

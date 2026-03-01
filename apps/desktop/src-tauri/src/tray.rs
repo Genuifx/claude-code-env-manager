@@ -1,8 +1,8 @@
-use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use serde::Serialize;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use tauri::{
-    menu::{Menu, MenuItem, Submenu, PredefinedMenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::{TrayIcon, TrayIconBuilder, TrayIconId},
     AppHandle, Emitter, Manager,
 };
@@ -33,7 +33,13 @@ pub struct SessionFocusPayload {
 fn read_config_state() -> (String, Vec<String>, String) {
     let cfg = match config::read_config() {
         Ok(c) => c,
-        Err(_) => return ("official".to_string(), vec!["official".to_string()], "dev".to_string()),
+        Err(_) => {
+            return (
+                "official".to_string(),
+                vec!["official".to_string()],
+                "dev".to_string(),
+            )
+        }
     };
 
     let current_env = cfg.current.unwrap_or_else(|| "official".to_string());
@@ -47,16 +53,24 @@ fn read_config_state() -> (String, Vec<String>, String) {
         }
     }
     envs.sort_by(|a, b| {
-        if a == "official" { std::cmp::Ordering::Less }
-        else if b == "official" { std::cmp::Ordering::Greater }
-        else { a.cmp(b) }
+        if a == "official" {
+            std::cmp::Ordering::Less
+        } else if b == "official" {
+            std::cmp::Ordering::Greater
+        } else {
+            a.cmp(b)
+        }
     });
 
     (current_env, envs, current_perm)
 }
 
 /// Build the environment submenu dynamically
-fn build_env_menu(app: &AppHandle, current: &str, envs: Vec<String>) -> Result<Submenu<tauri::Wry>, tauri::Error> {
+fn build_env_menu(
+    app: &AppHandle,
+    current: &str,
+    envs: Vec<String>,
+) -> Result<Submenu<tauri::Wry>, tauri::Error> {
     let mut items: Vec<MenuItem<tauri::Wry>> = Vec::new();
 
     for env_name in &envs {
@@ -69,7 +83,10 @@ fn build_env_menu(app: &AppHandle, current: &str, envs: Vec<String>) -> Result<S
     let title = format!("Environment: {}", current);
 
     // Convert Vec<MenuItem> to Vec<&dyn IsMenuItem>
-    let item_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = items.iter().map(|i| i as &dyn tauri::menu::IsMenuItem<tauri::Wry>).collect();
+    let item_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = items
+        .iter()
+        .map(|i| i as &dyn tauri::menu::IsMenuItem<tauri::Wry>)
+        .collect();
 
     Submenu::with_items(app, &title, true, &item_refs)
 }
@@ -89,7 +106,10 @@ fn build_perm_menu(app: &AppHandle, current: &str) -> Result<Submenu<tauri::Wry>
     let title = format!("Permission: {}", current);
 
     // Convert Vec<MenuItem> to Vec<&dyn IsMenuItem>
-    let item_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = items.iter().map(|i| i as &dyn tauri::menu::IsMenuItem<tauri::Wry>).collect();
+    let item_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = items
+        .iter()
+        .map(|i| i as &dyn tauri::menu::IsMenuItem<tauri::Wry>)
+        .collect();
 
     Submenu::with_items(app, &title, true, &item_refs)
 }
@@ -102,7 +122,13 @@ fn build_sessions_menu(app: &AppHandle) -> Result<Submenu<tauri::Wry>, tauri::Er
         None => {
             // Return empty submenu if no manager
             let title = "Sessions (0)";
-            let no_sessions = MenuItem::with_id(app, "no_sessions", "No active sessions", false, None::<&str>)?;
+            let no_sessions = MenuItem::with_id(
+                app,
+                "no_sessions",
+                "No active sessions",
+                false,
+                None::<&str>,
+            )?;
             return Submenu::with_items(app, title, true, &[&no_sessions]);
         }
     };
@@ -113,7 +139,13 @@ fn build_sessions_menu(app: &AppHandle) -> Result<Submenu<tauri::Wry>, tauri::Er
     let title = format!("Sessions ({})", running_count);
 
     if sessions.is_empty() {
-        let no_sessions = MenuItem::with_id(app, "no_sessions", "No active sessions", false, None::<&str>)?;
+        let no_sessions = MenuItem::with_id(
+            app,
+            "no_sessions",
+            "No active sessions",
+            false,
+            None::<&str>,
+        )?;
         return Submenu::with_items(app, &title, true, &[&no_sessions]);
     }
 
@@ -122,18 +154,25 @@ fn build_sessions_menu(app: &AppHandle) -> Result<Submenu<tauri::Wry>, tauri::Er
     // Show up to 5 most recent sessions
     for session in sessions.iter().take(5) {
         // Extract project name from working directory
-        let project_name = session.working_dir
+        let project_name = session
+            .working_dir
             .split('/')
             .last()
             .unwrap_or(&session.working_dir);
 
-        let label = format!("{} ({} + {})", project_name, session.env_name, session.perm_mode);
+        let label = format!(
+            "{} ({} + {})",
+            project_name, session.env_name, session.perm_mode
+        );
         let id = format!("session:{}", session.id);
         items.push(MenuItem::with_id(app, &id, &label, true, None::<&str>)?);
     }
 
     // Convert Vec<MenuItem> to Vec<&dyn IsMenuItem>
-    let item_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = items.iter().map(|i| i as &dyn tauri::menu::IsMenuItem<tauri::Wry>).collect();
+    let item_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = items
+        .iter()
+        .map(|i| i as &dyn tauri::menu::IsMenuItem<tauri::Wry>)
+        .collect();
 
     Submenu::with_items(app, &title, true, &item_refs)
 }
@@ -173,7 +212,8 @@ fn build_tray_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
 
     // Main action items
     let launch_item = MenuItem::with_id(app, "launch", "🚀 启动 Claude Code", true, None::<&str>)?;
-    let open_window_item = MenuItem::with_id(app, "open_window", "🏠 打开主窗口", true, None::<&str>)?;
+    let open_window_item =
+        MenuItem::with_id(app, "open_window", "🏠 打开主窗口", true, None::<&str>)?;
     let settings_item = MenuItem::with_id(app, "settings", "⚙️ 设置", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "❌ 退出", true, None::<&str>)?;
 
@@ -331,9 +371,12 @@ fn handle_env_switch(app: &AppHandle, env_name: &str) {
             println!("Switched to environment: {}", env_name);
 
             // Emit event to frontend
-            let _ = app.emit("env-changed", EnvChangedPayload {
-                env: env_name.to_string(),
-            });
+            let _ = app.emit(
+                "env-changed",
+                EnvChangedPayload {
+                    env: env_name.to_string(),
+                },
+            );
 
             // Rebuild tray menu to show updated selection
             if let Err(e) = rebuild_tray_menu(app) {
@@ -354,9 +397,12 @@ fn handle_perm_switch(app: &AppHandle, perm_mode: &str) {
             println!("Switched to permission mode: {}", perm_mode);
 
             // Emit event to frontend
-            let _ = app.emit("perm-changed", PermChangedPayload {
-                perm: perm_mode.to_string(),
-            });
+            let _ = app.emit(
+                "perm-changed",
+                PermChangedPayload {
+                    perm: perm_mode.to_string(),
+                },
+            );
 
             // Rebuild tray menu to show updated selection
             if let Err(e) = rebuild_tray_menu(app) {

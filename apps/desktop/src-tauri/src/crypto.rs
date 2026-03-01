@@ -1,6 +1,6 @@
 use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
-use scrypt::{scrypt, Params};
 use rand::Rng;
+use scrypt::{scrypt, Params};
 use std::sync::OnceLock;
 
 type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
@@ -38,7 +38,9 @@ pub fn encrypt(plaintext: &str) -> String {
 
     let len = buffer.len();
     let cipher = Aes256CbcEnc::new(&key.into(), &iv.into());
-    cipher.encrypt_padded_mut::<aes::cipher::block_padding::NoPadding>(&mut buffer, len).unwrap();
+    cipher
+        .encrypt_padded_mut::<aes::cipher::block_padding::NoPadding>(&mut buffer, len)
+        .unwrap();
 
     format!("enc:{}:{}", hex::encode(iv), hex::encode(&buffer))
 }
@@ -87,13 +89,14 @@ pub fn decrypt(ciphertext: &str) -> Result<String, String> {
 /// Key: scrypt(secret, "ccem-salt", 32) with N=16384,r=8,p=1
 /// Input: base64(IV_16_bytes || ciphertext), AES-256-CBC
 pub fn decrypt_remote(encrypted_base64: &str, secret: &str) -> Result<String, String> {
-    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
 
     let mut key = [0u8; 32];
     let params = Params::new(14, 8, 1, 32).unwrap();
     scrypt(secret.as_bytes(), b"ccem-salt", &params, &mut key).unwrap();
 
-    let data = STANDARD.decode(encrypted_base64)
+    let data = STANDARD
+        .decode(encrypted_base64)
         .map_err(|e| format!("Invalid base64: {}", e))?;
 
     if data.len() < 17 {
@@ -149,7 +152,7 @@ mod tests {
     #[test]
     fn test_decrypt_remote_roundtrip() {
         use aes::cipher::{BlockEncryptMut, KeyIvInit};
-        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
 
         let secret = "my-test-secret";
         let plaintext = r#"{"environments":{"test":{"ANTHROPIC_BASE_URL":"https://example.com"}}}"#;

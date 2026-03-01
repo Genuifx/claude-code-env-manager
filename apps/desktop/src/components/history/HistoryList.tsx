@@ -1,11 +1,15 @@
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { useDeferredValue, useState, useMemo, useRef, useEffect } from 'react';
 import { Search, Clock, FolderOpen, MessageSquare, Scissors } from 'lucide-react';
+import { Claude, Codex } from '@lobehub/icons';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
+export type HistorySource = 'claude' | 'codex';
+
 export interface HistorySessionItem {
   id: string;
+  source: HistorySource;
   display: string;
   timestamp: number;
   project: string;
@@ -15,10 +19,21 @@ export interface HistorySessionItem {
 
 interface HistoryListProps {
   sessions: HistorySessionItem[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-  focusedId?: string | null;
+  selectedKey: string | null;
+  onSelect: (session: HistorySessionItem) => void;
+  focusedKey?: string | null;
   onFocusChange?: (id: string | null) => void;
+}
+
+function getSessionKey(session: HistorySessionItem): string {
+  return `${session.source}:${session.id}`;
+}
+
+function SourceIcon({ source }: { source: HistorySource }) {
+  if (source === 'codex') {
+    return <Codex.Color size={12} />;
+  }
+  return <Claude size={12} style={{ color: '#D97757' }} />;
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -75,9 +90,10 @@ function groupByTime(sessions: HistorySessionItem[]): TimeGroup[] {
   return result;
 }
 
-export function HistoryList({ sessions, selectedId, onSelect, focusedId }: HistoryListProps) {
+export function HistoryList({ sessions, selectedKey, onSelect, focusedKey }: HistoryListProps) {
   const { t } = useLocale();
   const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search);
   const [projectFilter, setProjectFilter] = useState<string>('all');
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -93,25 +109,27 @@ export function HistoryList({ sessions, selectedId, onSelect, focusedId }: Histo
 
   // Filter sessions
   const filtered = useMemo(() => {
+    const normalizedSearch = deferredSearch.toLowerCase();
     return sessions.filter(s => {
-      const matchesSearch = !search ||
-        s.display.toLowerCase().includes(search.toLowerCase()) ||
-        s.projectName.toLowerCase().includes(search.toLowerCase());
+      const matchesSearch = !normalizedSearch ||
+        s.display.toLowerCase().includes(normalizedSearch) ||
+        s.projectName.toLowerCase().includes(normalizedSearch) ||
+        s.source.toLowerCase().includes(normalizedSearch);
       const matchesProject = projectFilter === 'all' || s.projectName === projectFilter;
       return matchesSearch && matchesProject;
     });
-  }, [sessions, search, projectFilter]);
+  }, [sessions, deferredSearch, projectFilter]);
 
   // Time-grouped sessions
   const timeGroups = useMemo(() => groupByTime(filtered), [filtered]);
 
   // Scroll focused item into view
   useEffect(() => {
-    if (focusedId && listRef.current) {
-      const el = listRef.current.querySelector(`[data-session-id="${focusedId}"]`);
+    if (focusedKey && listRef.current) {
+      const el = listRef.current.querySelector(`[data-session-id="${focusedKey}"]`);
       el?.scrollIntoView({ block: 'nearest' });
     }
-  }, [focusedId]);
+  }, [focusedKey]);
 
   return (
     <div className="flex flex-col h-full">
@@ -166,26 +184,33 @@ export function HistoryList({ sessions, selectedId, onSelect, focusedId }: Histo
                 </div>
                 {group.sessions.map(session => (
                   <button
-                    key={session.id}
-                    data-session-id={session.id}
-                    onClick={() => onSelect(session.id)}
+                    key={getSessionKey(session)}
+                    data-session-id={getSessionKey(session)}
+                    onClick={() => onSelect(session)}
                     className={cn(
-                      'w-full text-left px-3 py-1.5 transition-colors duration-[var(--duration-fast)] group',
-                      selectedId === session.id
+                      'w-full text-left px-3 py-1.5 transition-colors duration-[var(--duration-fast)] group history-item-virtualized',
+                      selectedKey === getSessionKey(session)
                         ? 'bg-primary/10 border-l-2 border-l-primary'
-                        : focusedId === session.id
+                        : focusedKey === getSessionKey(session)
                           ? 'ring-1 ring-primary/30 ring-inset border-l-2 border-l-transparent'
                           : 'hover:bg-white/[0.04] border-l-2 border-l-transparent'
                     )}
                   >
                     <p className={cn(
                       'text-[13px] leading-snug truncate',
-                      selectedId === session.id ? 'text-foreground font-medium' : 'text-foreground/80'
+                      selectedKey === getSessionKey(session) ? 'text-foreground font-medium' : 'text-foreground/80'
                     )}>
                       {session.display}
                     </p>
                     <div className="flex items-center gap-2 mt-0.5">
-                      <span className="flex items-center gap-1 text-[11px] text-muted-foreground truncate opacity-0 group-hover:opacity-100 transition-opacity duration-[var(--duration-fast)]">
+                      <span
+                        className="inline-flex items-center justify-center rounded-md bg-white/[0.04] px-1.5 py-1 shrink-0"
+                        title={session.source === 'codex' ? 'Codex (OpenAI)' : 'Claude'}
+                        aria-label={session.source === 'codex' ? 'Codex (OpenAI)' : 'Claude'}
+                      >
+                        <SourceIcon source={session.source} />
+                      </span>
+                      <span className="flex items-center gap-1 text-[11px] text-muted-foreground truncate">
                         <FolderOpen className="w-3 h-3 shrink-0" />
                         {session.projectName}
                       </span>

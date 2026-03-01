@@ -88,7 +88,9 @@ fn is_app_installed(app_name: &str) -> bool {
         .output()
     {
         let stdout = String::from_utf8_lossy(&output.stdout);
-        return stdout.lines().any(|line| line.contains(&format!("{}.app", app_name)));
+        return stdout
+            .lines()
+            .any(|line| line.contains(&format!("{}.app", app_name)));
     }
 
     false
@@ -159,10 +161,7 @@ pub fn set_preferred_terminal(terminal: TerminalType) -> Result<(), String> {
         .iter()
         .any(|t| t.terminal_type == terminal && t.installed)
     {
-        return Err(format!(
-            "{} is not installed",
-            terminal.display_name()
-        ));
+        return Err(format!("{} is not installed", terminal.display_name()));
     }
 
     let prefs = TerminalPrefs {
@@ -177,8 +176,7 @@ pub fn set_preferred_terminal(terminal: TerminalType) -> Result<(), String> {
             .map_err(|e| format!("Failed to create preferences directory: {}", e))?;
     }
 
-    fs::write(&prefs_path, content)
-        .map_err(|e| format!("Failed to write preferences: {}", e))?;
+    fs::write(&prefs_path, content).map_err(|e| format!("Failed to write preferences: {}", e))?;
 
     Ok(())
 }
@@ -191,7 +189,14 @@ pub fn set_preferred_terminal(terminal: TerminalType) -> Result<(), String> {
 static CCEM_LAUNCH_SUPPORTED: OnceLock<bool> = OnceLock::new();
 
 /// Compare a parsed semver tuple against a minimum requirement.
-fn version_gte(major: u32, minor: u32, patch: u32, req_major: u32, req_minor: u32, req_patch: u32) -> bool {
+fn version_gte(
+    major: u32,
+    minor: u32,
+    patch: u32,
+    req_major: u32,
+    req_minor: u32,
+    req_patch: u32,
+) -> bool {
     (major, minor, patch) >= (req_major, req_minor, req_patch)
 }
 
@@ -204,7 +209,10 @@ fn check_ccem_launch_support() -> bool {
     let output = match Command::new(&ccem_path).arg("--version").output() {
         Ok(o) if o.status.success() => o,
         Ok(o) => {
-            println!("[ccem-launch] ccem --version failed with status: {}", o.status);
+            println!(
+                "[ccem-launch] ccem --version failed with status: {}",
+                o.status
+            );
             return false;
         }
         Err(e) => {
@@ -217,7 +225,10 @@ fn check_ccem_launch_support() -> bool {
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     let version_str = if stdout.is_empty() { &stderr } else { &stdout };
-    println!("[ccem-launch] ccem version output: '{}' (stderr: '{}')", stdout, stderr);
+    println!(
+        "[ccem-launch] ccem version output: '{}' (stderr: '{}')",
+        stdout, stderr
+    );
 
     // Output formats: "1.9.0", "ccem/1.9.0", "v2.0.0-beta.2", "ccem/v2.0.0-beta.2"
     // Extract the version part after the last '/'
@@ -237,27 +248,31 @@ fn check_ccem_launch_support() -> bool {
     let major = parts[0].parse::<u32>().unwrap_or(0);
     let minor = parts[1].parse::<u32>().unwrap_or(0);
     // Strip pre-release suffix (e.g., "0-beta.2" → "0")
-    let patch = parts.get(2)
+    let patch = parts
+        .get(2)
         .map(|p| p.split('-').next().unwrap_or("0"))
         .and_then(|p| p.parse::<u32>().ok())
         .unwrap_or(0);
 
     let supported = version_gte(major, minor, patch, 1, 9, 0);
-    println!("[ccem-launch] version {}.{}.{} >= 1.9.0 = {}", major, minor, patch, supported);
+    println!(
+        "[ccem-launch] version {}.{}.{} >= 1.9.0 = {}",
+        major, minor, patch, supported
+    );
     supported
 }
 
-/// Resolve the full path to the `ccem` binary.
-/// macOS GUI apps launched from Finder/Dock don't inherit the user's shell PATH,
-/// so we source the user's shell config to get the full PATH.
-/// Uses `-li` (login+interactive) to ensure .zshrc is loaded (nvm/fnm/volta).
-/// Parses only the last line of stdout to avoid shell banner/motd contamination.
-pub fn resolve_ccem_path() -> Option<String> {
+/// Resolve a CLI binary path from shell + common fallback locations.
+fn resolve_binary_path(binary: &str, candidates: &[String]) -> Option<String> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let which_cmd = format!("which {}", binary);
 
     // Try login+interactive first (sources .zshrc for nvm/fnm/volta)
     // Then fallback to login-only (in case shell doesn't support -i with -c)
-    for flags in &[&["-li", "-c", "which ccem"][..], &["-l", "-c", "which ccem"][..]] {
+    for flags in &[
+        &["-li", "-c", which_cmd.as_str()][..],
+        &["-l", "-c", which_cmd.as_str()][..],
+    ] {
         if let Ok(output) = Command::new(&shell).args(*flags).output() {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
@@ -272,22 +287,42 @@ pub fn resolve_ccem_path() -> Option<String> {
         }
     }
 
-    // Fallback: check common locations
-    let home = dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-    let candidates = [
-        format!("{}/.local/bin/ccem", home),
-        format!("{}/.npm-global/bin/ccem", home),
-        "/usr/local/bin/ccem".to_string(),
-        "/opt/homebrew/bin/ccem".to_string(),
-    ];
-
-    for candidate in &candidates {
+    for candidate in candidates {
         if std::path::Path::new(candidate).exists() {
             return Some(candidate.clone());
         }
     }
 
     None
+}
+
+/// Resolve the full path to the `ccem` binary.
+pub fn resolve_ccem_path() -> Option<String> {
+    let home = dirs::home_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let candidates = vec![
+        format!("{}/.local/bin/ccem", home),
+        format!("{}/.npm-global/bin/ccem", home),
+        "/usr/local/bin/ccem".to_string(),
+        "/opt/homebrew/bin/ccem".to_string(),
+    ];
+    resolve_binary_path("ccem", &candidates)
+}
+
+/// Resolve the full path to the `codex` binary.
+pub fn resolve_codex_path() -> Option<String> {
+    let home = dirs::home_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let candidates = vec![
+        format!("{}/.local/bin/codex", home),
+        format!("{}/.npm-global/bin/codex", home),
+        format!("{}/.cargo/bin/codex", home),
+        "/usr/local/bin/codex".to_string(),
+        "/opt/homebrew/bin/codex".to_string(),
+    ];
+    resolve_binary_path("codex", &candidates)
 }
 
 /// Returns whether the installed ccem supports the `launch` command.
@@ -297,9 +332,18 @@ pub fn is_ccem_launch_supported() -> bool {
 }
 
 /// Build the short `ccem launch` command string.
-fn build_launch_command(env_name: &str, perm_mode: Option<&str>, session_id: &str, working_dir: &str, resume_session_id: Option<&str>) -> String {
+fn build_launch_command(
+    env_name: &str,
+    perm_mode: Option<&str>,
+    session_id: &str,
+    working_dir: &str,
+    resume_session_id: Option<&str>,
+) -> String {
     let ccem = resolve_ccem_path().unwrap_or_else(|| "ccem".to_string());
-    let mut cmd = format!("'{}' launch --env '{}' --session-id '{}'", ccem, env_name, session_id);
+    let mut cmd = format!(
+        "'{}' launch --env '{}' --session-id '{}'",
+        ccem, env_name, session_id
+    );
     if let Some(perm) = perm_mode {
         cmd.push_str(&format!(" --perm '{}'", perm));
     }
@@ -314,7 +358,12 @@ fn build_launch_command(env_name: &str, perm_mode: Option<&str>, session_id: &st
 }
 
 /// Build the shell command to set environment variables and launch Claude
-fn build_shell_command(env_vars: &HashMap<String, String>, working_dir: &str, session_id: &str, resume_session_id: Option<&str>) -> String {
+fn build_shell_command(
+    env_vars: &HashMap<String, String>,
+    working_dir: &str,
+    session_id: &str,
+    resume_session_id: Option<&str>,
+) -> String {
     let mut parts = Vec::new();
 
     // Ensure sessions directory exists
@@ -342,7 +391,30 @@ fn build_shell_command(env_vars: &HashMap<String, String>, working_dir: &str, se
     } else {
         "claude".to_string()
     };
-    parts.push(format!("{}; echo $? > ~/.ccem/sessions/'{}'.exit", claude_cmd, escaped_session_id));
+    parts.push(format!(
+        "{}; echo $? > ~/.ccem/sessions/'{}'.exit",
+        claude_cmd, escaped_session_id
+    ));
+
+    parts.join(" && ")
+}
+
+/// Build the shell command to launch Codex and write exit code for session tracking.
+fn build_codex_shell_command(working_dir: &str, session_id: &str) -> String {
+    let mut parts = Vec::new();
+    parts.push("mkdir -p ~/.ccem/sessions".to_string());
+
+    let escaped_dir = working_dir.replace("\\", "\\\\").replace("\"", "\\\"");
+    parts.push(format!("cd \"{}\"", escaped_dir));
+    parts.push("unset CLAUDECODE".to_string());
+
+    let codex_path = resolve_codex_path().unwrap_or_else(|| "codex".to_string());
+    let escaped_codex = codex_path.replace("'", "'\\''");
+    let escaped_session_id = session_id.replace("'", "'\\''");
+    parts.push(format!(
+        "'{}'; echo $? > ~/.ccem/sessions/'{}'.exit",
+        escaped_codex, escaped_session_id
+    ));
 
     parts.join(" && ")
 }
@@ -405,9 +477,21 @@ pub fn launch_in_terminal(
     env_name: &str,
     perm_mode: Option<&str>,
     resume_session_id: Option<&str>,
+    client: &str,
 ) -> Result<(Option<String>, Option<String>), String> {
-    let shell_command = if is_ccem_launch_supported() {
-        build_launch_command(env_name, perm_mode, session_id, working_dir, resume_session_id)
+    let shell_command = if client == "codex" {
+        if resume_session_id.is_some() {
+            return Err("Codex resume is not supported yet".to_string());
+        }
+        build_codex_shell_command(working_dir, session_id)
+    } else if is_ccem_launch_supported() {
+        build_launch_command(
+            env_name,
+            perm_mode,
+            session_id,
+            working_dir,
+            resume_session_id,
+        )
     } else {
         build_shell_command(&env_vars, working_dir, session_id, resume_session_id)
     };
@@ -426,10 +510,7 @@ pub fn launch_in_terminal(
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
-            "AppleScript failed: {}",
-            stderr.trim()
-        ));
+        return Err(format!("AppleScript failed: {}", stderr.trim()));
     }
 
     // Parse window ID / session ID from AppleScript output
@@ -457,11 +538,10 @@ pub fn launch_in_terminal(
 /// Focus a terminal window by window ID
 pub fn focus_terminal_window(terminal: TerminalType, window_id: &str) -> Result<(), String> {
     let script = match terminal {
-        TerminalType::TerminalApp => {
-            r#"tell application "Terminal"
+        TerminalType::TerminalApp => r#"tell application "Terminal"
     activate
-end tell"#.to_string()
-        }
+end tell"#
+            .to_string(),
         TerminalType::ITerm2 => {
             format!(
                 r#"tell application "iTerm2"
@@ -506,10 +586,7 @@ pub fn list_iterm_sessions() -> Vec<String> {
     return windowIds
 end tell"#;
 
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg(script)
-        .output();
+    let output = Command::new("osascript").arg("-e").arg(script).output();
 
     match output {
         Ok(result) if result.status.success() => {
@@ -536,10 +613,7 @@ pub fn list_terminal_app_windows() -> Vec<String> {
     return windowIds
 end tell"#;
 
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg(script)
-        .output();
+    let output = Command::new("osascript").arg("-e").arg(script).output();
 
     match output {
         Ok(result) if result.status.success() => {
@@ -594,9 +668,10 @@ end tell"#,
 /// Minimize a terminal window by window ID
 pub fn minimize_terminal_window(terminal: TerminalType, window_id: &str) -> Result<(), String> {
     match terminal {
-        TerminalType::TerminalApp => {
-            Err("Terminal.app does not support precise window control. Please minimize manually.".to_string())
-        }
+        TerminalType::TerminalApp => Err(
+            "Terminal.app does not support precise window control. Please minimize manually."
+                .to_string(),
+        ),
         TerminalType::ITerm2 => {
             let script = format!(
                 r#"tell application "iTerm2"
@@ -635,10 +710,10 @@ end tell"#,
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ArrangeLayout {
-    Horizontal2,  // [A | B] side by side
-    Vertical2,    // [A] / [B] stacked
-    Grid4,        // 2×2 grid
-    LeftMain3,    // A large left + B/C stacked right
+    Horizontal2, // [A | B] side by side
+    Vertical2,   // [A] / [B] stacked
+    Grid4,       // 2×2 grid
+    LeftMain3,   // A large left + B/C stacked right
 }
 
 /// Session info needed for arranging
@@ -671,8 +746,14 @@ end tell"#;
         return Err(format!("Unexpected screen size format: {}", raw));
     }
 
-    let w = parts[0].trim().parse::<i32>().map_err(|_| "Invalid screen width".to_string())?;
-    let h = parts[1].trim().parse::<i32>().map_err(|_| "Invalid screen height".to_string())?;
+    let w = parts[0]
+        .trim()
+        .parse::<i32>()
+        .map_err(|_| "Invalid screen width".to_string())?;
+    let h = parts[1]
+        .trim()
+        .parse::<i32>()
+        .map_err(|_| "Invalid screen height".to_string())?;
     Ok((w, h))
 }
 
@@ -729,7 +810,7 @@ end tell"#;
         .map_err(|e| format!("Failed to check iTerm2: {}", e))?;
 
     if !output.status.success() {
- return Ok(false);
+        return Ok(false);
     }
 
     let version_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -770,7 +851,11 @@ pub fn arrange_iterm_sessions(
     // Collect session IDs (all must have iterm_session_id)
     let session_ids: Vec<&str> = sessions
         .iter()
-        .map(|s| s.iterm_session_id.as_deref().ok_or("Missing iTerm2 session ID"))
+        .map(|s| {
+            s.iterm_session_id
+                .as_deref()
+                .ok_or("Missing iTerm2 session ID")
+        })
         .collect::<Result<Vec<_>, _>>()?;
 
     let script = match layout {
@@ -969,19 +1054,19 @@ pub fn arrange_terminal_app_sessions(
             let half_w = screen_w / 2;
             let half_h = usable_h / 2;
             vec![
-                (0, menu_bar, half_w, menu_bar + half_h),           // top-left
-                (half_w, menu_bar, screen_w, menu_bar + half_h),    // top-right
-                (0, menu_bar + half_h, half_w, screen_h),           // bottom-left
-                (half_w, menu_bar + half_h, screen_w, screen_h),    // bottom-right
+                (0, menu_bar, half_w, menu_bar + half_h),        // top-left
+                (half_w, menu_bar, screen_w, menu_bar + half_h), // top-right
+                (0, menu_bar + half_h, half_w, screen_h),        // bottom-left
+                (half_w, menu_bar + half_h, screen_w, screen_h), // bottom-right
             ]
         }
         ArrangeLayout::LeftMain3 => {
             let main_w = (screen_w as f64 * 0.55) as i32;
             let side_h = usable_h / 2;
             vec![
-                (0, menu_bar, main_w, screen_h),                          // left main
-                (main_w, menu_bar, screen_w, menu_bar + side_h),          // right top
-                (main_w, menu_bar + side_h, screen_w, screen_h),          // right bottom
+                (0, menu_bar, main_w, screen_h),                 // left main
+                (main_w, menu_bar, screen_w, menu_bar + side_h), // right top
+                (main_w, menu_bar + side_h, screen_w, screen_h), // right bottom
             ]
         }
     };

@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { ENV_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { AppLayout } from '@/components/layout';
-import { Dashboard, Environments, Sessions, Analytics, Settings, Skills, History, CronTasks } from '@/pages';
+import { Dashboard } from '@/pages/Dashboard';
+import { Environments } from '@/pages/Environments';
+import { Sessions } from '@/pages/Sessions';
+import { Settings } from '@/pages/Settings';
 import { useAppStore, type Environment } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
@@ -12,6 +15,20 @@ import { EnvironmentDialog } from '@/components/EnvironmentDialog';
 import { Toaster, toast } from 'sonner';
 import { LocaleProvider, useLocale } from '@/locales';
 import type { UsageStats } from '@/types/analytics';
+import { shallow } from 'zustand/shallow';
+
+const AnalyticsPage = lazy(async () =>
+  import('@/pages/Analytics').then((m) => ({ default: m.Analytics }))
+);
+const SkillsPage = lazy(async () =>
+  import('@/pages/Skills').then((m) => ({ default: m.Skills }))
+);
+const HistoryPage = lazy(async () =>
+  import('@/pages/History').then((m) => ({ default: m.History }))
+);
+const CronTasksPage = lazy(async () =>
+  import('@/pages/CronTasks').then((m) => ({ default: m.CronTasks }))
+);
 
 function App() {
   const FOCUS_SYNC_INTERVAL_MS = 5000;
@@ -22,15 +39,19 @@ function App() {
   const [pendingDeleteEnv, setPendingDeleteEnv] = useState<string | null>(null);
   const lastFocusSyncAtRef = useRef(0);
 
-  const {
-    setEnvironments,
-    setCurrentEnv,
-    setPermissionMode,
-    setUsageStats,
-    environments,
-    error,
-    setError,
-  } = useAppStore();
+  const { setEnvironments, setCurrentEnv, setPermissionMode, setUsageStats, environments, launchClient, error, setError } = useAppStore(
+    (state) => ({
+      setEnvironments: state.setEnvironments,
+      setCurrentEnv: state.setCurrentEnv,
+      setPermissionMode: state.setPermissionMode,
+      setUsageStats: state.setUsageStats,
+      environments: state.environments,
+      launchClient: state.launchClient,
+      error: state.error,
+      setError: state.setError,
+    }),
+    shallow
+  );
 
   const {
     loadEnvironments,
@@ -110,8 +131,8 @@ function App() {
   }, []);
 
   // Load all data from backend (reusable for both init and refresh)
-  const refreshData = async () => {
-    loadEnvironments().catch(() => {
+  const refreshData = useCallback(async () => {
+    const envPromise = loadEnvironments().catch(() => {
       // Fallback to presets if Tauri is not available (dev mode)
       const envList: Environment[] = Object.entries(ENV_PRESETS).map(([name, config]) => ({
         name,
@@ -125,32 +146,51 @@ function App() {
       });
       setEnvironments(envList);
     });
-    loadCurrentEnv().catch(() => {
+    const currentEnvPromise = loadCurrentEnv().catch(() => {
       setCurrentEnv('official');
     });
-    loadSessions().catch((err) => {
+    const sessionsPromise = loadSessions().catch((err) => {
       console.error('Failed to load sessions:', err);
     });
-    loadAppConfig().catch((err) => {
+    const appConfigPromise = loadAppConfig().catch((err) => {
       console.error('Failed to load app config:', err);
     });
-    loadInstalledSkills().catch((err) => {
+    const skillsPromise = loadInstalledSkills().catch((err) => {
       console.error('Failed to load installed skills:', err);
     });
-    try {
-      const stats = await invoke('get_usage_stats');
-      if (stats) {
-        setUsageStats(stats as UsageStats);
-      }
-    } catch {
-      console.debug('Usage stats not available from backend, will use mock data when Analytics tab is opened');
-    }
-  };
+    const statsPromise = invoke<UsageStats>('get_usage_stats')
+      .then((stats) => {
+        if (stats) {
+          setUsageStats(stats);
+        }
+      })
+      .catch(() => {
+        console.debug('Usage stats not available from backend, will use mock data when Analytics tab is opened');
+      });
+
+    await Promise.allSettled([
+      envPromise,
+      currentEnvPromise,
+      sessionsPromise,
+      appConfigPromise,
+      skillsPromise,
+      statsPromise,
+    ]);
+  }, [
+    loadEnvironments,
+    loadCurrentEnv,
+    loadSessions,
+    loadAppConfig,
+    loadInstalledSkills,
+    setEnvironments,
+    setCurrentEnv,
+    setUsageStats,
+  ]);
 
   // Initialize data on mount
   useEffect(() => {
     refreshData();
-  }, []);
+  }, [refreshData]);
 
   // Re-sync with CLI config when window regains focus
   // This ensures desktop stays in sync when user modifies env via `ccem add/del/use` in terminal
@@ -177,11 +217,11 @@ function App() {
   // Handle launch
   const handleLaunch = useCallback(async () => {
     try {
-      await launchClaudeCode();
+      await launchClaudeCode(undefined, undefined, launchClient);
     } catch (err) {
       console.error('Launch failed:', err);
     }
-  }, [launchClaudeCode]);
+  }, [launchClaudeCode, launchClient]);
 
   // Global keyboard shortcuts (Cmd+1..8 for tabs, Cmd+Enter/N for launch, Cmd+, for settings)
   const globalShortcuts = useMemo(() => ({
@@ -204,7 +244,7 @@ function App() {
   // Handle launch with specific directory
   const handleLaunchWithDir = async (workingDir: string) => {
     try {
-      await launchClaudeCode(workingDir);
+      await launchClaudeCode(workingDir, undefined, launchClient);
     } catch (err) {
       console.error('Launch failed:', err);
     }
@@ -280,13 +320,13 @@ function App() {
           />
         );
       case 'analytics':
-        return <Analytics />;
+        return <AnalyticsPage />;
       case 'skills':
-        return <Skills />;
+        return <SkillsPage />;
       case 'history':
-        return <History />;
+        return <HistoryPage />;
       case 'cron':
-        return <CronTasks />;
+        return <CronTasksPage />;
       case 'settings':
         return <Settings />;
       default:
@@ -297,7 +337,9 @@ function App() {
   return (
     <LocaleProvider>
       <AppLayout activeTab={activeTab} onTabChange={setActiveTab}>
-        {renderPage()}
+        <Suspense fallback={<PageFallback />}>
+          {renderPage()}
+        </Suspense>
       </AppLayout>
 
       {/* Environment Dialog */}
@@ -322,6 +364,14 @@ function App() {
       {/* Toast notifications */}
       <Toaster position="top-center" richColors />
     </LocaleProvider>
+  );
+}
+
+function PageFallback() {
+  return (
+    <div className="h-full w-full flex items-center justify-center text-sm text-muted-foreground">
+      Loading...
+    </div>
   );
 }
 

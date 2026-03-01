@@ -11,9 +11,11 @@ export interface Environment {
 }
 
 export type ArrangeLayout = 'horizontal2' | 'vertical2' | 'grid4' | 'left_main3';
+export type LaunchClient = 'claude' | 'codex';
 
 export interface Session {
   id: string;
+  client: LaunchClient;
   envName: string;
   workingDir: string;
   pid?: number;
@@ -104,6 +106,8 @@ interface AppState {
   defaultMode: PermissionModeName | null;
   setPermissionMode: (mode: PermissionModeName) => void;
   setDefaultMode: (mode: PermissionModeName | null) => void;
+  launchClient: LaunchClient;
+  setLaunchClient: (client: LaunchClient) => void;
 
   // Sessions
   sessions: Session[];
@@ -189,6 +193,8 @@ export const useAppStore = create<AppState>((set) => ({
   defaultMode: null,
   setPermissionMode: (mode) => set({ permissionMode: mode }),
   setDefaultMode: (mode) => set({ defaultMode: mode }),
+  launchClient: 'claude',
+  setLaunchClient: (client) => set({ launchClient: client }),
 
   // Sessions
   sessions: [],

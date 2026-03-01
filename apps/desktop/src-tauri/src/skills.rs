@@ -117,10 +117,7 @@ fn scan_skills_dir(dir: &PathBuf, scope: &str) -> Vec<InstalledSkill> {
         let (name, description) = match std::fs::read_to_string(&skill_md) {
             Ok(content) => {
                 let (n, d) = parse_skill_frontmatter(&content);
-                (
-                    n.unwrap_or_else(|| dir_name.clone()),
-                    d.unwrap_or_default(),
-                )
+                (n.unwrap_or_else(|| dir_name.clone()), d.unwrap_or_default())
             }
             Err(_) => (dir_name.clone(), String::new()),
         };
@@ -456,7 +453,11 @@ Some content here.
         let skill_dir = dir.join("my-cool-skill");
         fs::create_dir_all(&skill_dir).unwrap();
         // SKILL.md without frontmatter
-        fs::write(skill_dir.join("SKILL.md"), "# Just a title\nNo frontmatter.").unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "# Just a title\nNo frontmatter.",
+        )
+        .unwrap();
 
         let skills = scan_skills_dir(&dir, "global");
         assert_eq!(skills.len(), 1);

@@ -7,24 +7,30 @@ mod cron;
 mod crypto;
 mod history;
 mod session;
-mod terminal;
 mod skills;
+mod terminal;
 mod tray;
 
-use analytics::{get_usage_stats, get_usage_history, get_continuous_usage_days};
+use analytics::{get_continuous_usage_days, get_usage_history, get_usage_stats};
+use config::{
+    create_env_with_encrypted_key, get_env_with_decrypted_key, AppConfig, DesktopSettings,
+    EnvConfig, FavoriteProject, JetBrainsProject, RecentProject, VSCodeProject,
+};
+use cron::{start_cron_scheduler, CronScheduler};
 use history::{get_conversation_history, get_conversation_messages, get_conversation_segments};
-use config::{EnvConfig, get_env_with_decrypted_key, create_env_with_encrypted_key, AppConfig, FavoriteProject, RecentProject, VSCodeProject, JetBrainsProject, DesktopSettings};
-use cron::{CronScheduler, start_cron_scheduler};
-use session::{Session, SessionManager, start_session_monitor, cleanup_exit_file, cleanup_stale_exit_files_except};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use session::{
+    cleanup_exit_file, cleanup_stale_exit_files_except, start_session_monitor, Session,
+    SessionManager,
+};
 use std::collections::HashMap;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 /// Global flag: when true, CloseRequested should NOT be intercepted.
 static FORCE_QUIT: AtomicBool = AtomicBool::new(false);
 use tauri::{Manager, RunEvent, State, WindowEvent};
-use terminal::{TerminalInfo, TerminalType, ArrangeLayout, ArrangeSessionInfo};
+use terminal::{ArrangeLayout, ArrangeSessionInfo, TerminalInfo, TerminalType};
 use tray::create_tray;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
@@ -112,12 +118,8 @@ fn add_environment(
         return Err(format!("Environment '{}' already exists", name));
     }
 
-    let env_config = create_env_with_encrypted_key(
-        Some(base_url),
-        api_key,
-        Some(model),
-        small_model,
-    );
+    let env_config =
+        create_env_with_encrypted_key(Some(base_url), api_key, Some(model), small_model);
 
     cfg.registries.insert(name, env_config);
     config::write_config(&cfg)
@@ -143,12 +145,8 @@ fn update_environment(
         return Err(format!("Environment '{}' already exists", name));
     }
 
-    let env_config = create_env_with_encrypted_key(
-        Some(base_url),
-        api_key,
-        Some(model),
-        small_model,
-    );
+    let env_config =
+        create_env_with_encrypted_key(Some(base_url), api_key, Some(model), small_model);
 
     // Remove old key if renamed
     if old_name != name {
@@ -217,10 +215,13 @@ fn add_recent(path: String) -> Result<(), String> {
     // Remove if already exists (will re-add at front)
     cfg.recent.retain(|r| r.path != path);
     // Add to front
-    cfg.recent.insert(0, RecentProject {
-        path,
-        last_used: chrono::Utc::now().to_rfc3339(),
-    });
+    cfg.recent.insert(
+        0,
+        RecentProject {
+            path,
+            last_used: chrono::Utc::now().to_rfc3339(),
+        },
+    );
     // Keep max 10
     cfg.recent.truncate(10);
     config::write_app_config(&cfg)
@@ -256,22 +257,50 @@ fn launch_claude_code(
     perm_mode: Option<String>,
     working_dir: Option<String>,
     resume_session_id: Option<String>,
+    client: Option<String>,
 ) -> Result<Session, String> {
+    let client_name = client
+        .unwrap_or_else(|| "claude".to_string())
+        .to_lowercase();
+    if client_name != "claude" && client_name != "codex" {
+        return Err(format!("Unsupported client '{}'", client_name));
+    }
+
     println!("=== launch_claude_code called ===");
-    println!("env_name: {}, perm_mode: {:?}, working_dir: {:?}, resume_session_id: {:?}", env_name, perm_mode, working_dir, resume_session_id);
+    println!(
+        "client: {}, env_name: {}, perm_mode: {:?}, working_dir: {:?}, resume_session_id: {:?}",
+        client_name, env_name, perm_mode, working_dir, resume_session_id
+    );
 
-    // Read environment configuration
-    let cfg = config::read_config()?;
-    println!("Config loaded, registries count: {}", cfg.registries.len());
-
-    // 校验环境是否存在
-    let env_config = cfg.registries.get(&env_name)
-        .ok_or_else(|| format!("Environment '{}' does not exist", env_name))?;
-    let env = get_env_with_decrypted_key(env_config);
+    if client_name == "codex" {
+        if resume_session_id
+            .as_ref()
+            .is_some_and(|id| !id.trim().is_empty())
+        {
+            return Err("Codex resume is not supported yet".to_string());
+        }
+        if perm_mode
+            .as_ref()
+            .is_some_and(|mode| !mode.trim().is_empty())
+        {
+            println!("Codex launch ignores permission mode");
+        }
+    }
 
     // Build environment variables map
     let mut env_vars: HashMap<String, String> = HashMap::new();
-    if let Some(env) = Some(env) {
+    if client_name == "claude" {
+        // Read environment configuration only for Claude launches.
+        let cfg = config::read_config()?;
+        println!("Config loaded, registries count: {}", cfg.registries.len());
+
+        // 校验环境是否存在
+        let env_config = cfg
+            .registries
+            .get(&env_name)
+            .ok_or_else(|| format!("Environment '{}' does not exist", env_name))?;
+        let env = get_env_with_decrypted_key(env_config);
+
         if let Some(url) = env.base_url {
             env_vars.insert("ANTHROPIC_BASE_URL".to_string(), url);
         }
@@ -292,7 +321,11 @@ fn launch_claude_code(
             .unwrap_or_else(|| "~".to_string())
     });
 
-    let perm = perm_mode.clone().unwrap_or_else(|| "dev".to_string());
+    let perm = if client_name == "claude" {
+        perm_mode.clone().unwrap_or_else(|| "dev".to_string())
+    } else {
+        "n/a".to_string()
+    };
 
     // Generate session ID first (needed for exit status tracking)
     let session_id = generate_session_id();
@@ -313,11 +346,15 @@ fn launch_claude_code(
         &env_name,
         perm_mode.as_deref(),
         resume_session_id.as_deref(),
+        &client_name,
     );
 
     let (window_id, iterm_session_id) = match &launch_result {
         Ok((wid, sid)) => {
-            println!("Terminal launch SUCCESS, window_id: {:?}, iterm_session_id: {:?}", wid, sid);
+            println!(
+                "Terminal launch SUCCESS, window_id: {:?}, iterm_session_id: {:?}",
+                wid, sid
+            );
             (wid.clone(), sid.clone())
         }
         Err(e) => {
@@ -335,13 +372,14 @@ fn launch_claude_code(
     let session = Session {
         id: session_id,
         pid: None, // Terminal-launched sessions don't have direct PID access
+        client: client_name,
         env_name,
         perm_mode: perm,
         working_dir: work_dir,
         start_time: chrono::Utc::now().to_rfc3339(),
         status: "running".to_string(),
         terminal_type: Some(terminal_type_str.to_string()),
-        window_id,  // Store window ID for later operations
+        window_id,        // Store window ID for later operations
         iterm_session_id, // Store iTerm2 session unique ID for arrange
     };
 
@@ -356,7 +394,8 @@ fn list_sessions(state: State<Arc<SessionManager>>) -> Vec<Session> {
 
 #[tauri::command]
 fn stop_session(state: State<Arc<SessionManager>>, session_id: String) -> Result<(), String> {
-    let session = state.get_session(&session_id)
+    let session = state
+        .get_session(&session_id)
         .ok_or_else(|| format!("Session not found: {}", session_id))?;
 
     if let Some(pid) = session.pid {
@@ -391,12 +430,17 @@ fn remove_session(state: State<Arc<SessionManager>>, session_id: String) {
 
 #[tauri::command]
 fn focus_session(state: State<Arc<SessionManager>>, session_id: String) -> Result<(), String> {
-    let session = state.get_session(&session_id)
+    let session = state
+        .get_session(&session_id)
         .ok_or_else(|| format!("Session not found: {}", session_id))?;
 
-    let terminal_type = session.terminal_type.as_ref()
+    let terminal_type = session
+        .terminal_type
+        .as_ref()
         .ok_or("Session has no terminal type")?;
-    let window_id = session.window_id.as_ref()
+    let window_id = session
+        .window_id
+        .as_ref()
         .ok_or("Session has no window ID")?;
 
     let term_type = match terminal_type.as_str() {
@@ -410,12 +454,17 @@ fn focus_session(state: State<Arc<SessionManager>>, session_id: String) -> Resul
 
 #[tauri::command]
 fn close_session(state: State<Arc<SessionManager>>, session_id: String) -> Result<(), String> {
-    let session = state.get_session(&session_id)
+    let session = state
+        .get_session(&session_id)
         .ok_or_else(|| format!("Session not found: {}", session_id))?;
 
-    let terminal_type = session.terminal_type.as_ref()
+    let terminal_type = session
+        .terminal_type
+        .as_ref()
         .ok_or("Session has no terminal type")?;
-    let window_id = session.window_id.as_ref()
+    let window_id = session
+        .window_id
+        .as_ref()
         .ok_or("Session has no window ID")?;
 
     let term_type = match terminal_type.as_str() {
@@ -434,12 +483,17 @@ fn close_session(state: State<Arc<SessionManager>>, session_id: String) -> Resul
 
 #[tauri::command]
 fn minimize_session(state: State<Arc<SessionManager>>, session_id: String) -> Result<(), String> {
-    let session = state.get_session(&session_id)
+    let session = state
+        .get_session(&session_id)
         .ok_or_else(|| format!("Session not found: {}", session_id))?;
 
-    let terminal_type = session.terminal_type.as_ref()
+    let terminal_type = session
+        .terminal_type
+        .as_ref()
         .ok_or("Session has no terminal type")?;
-    let window_id = session.window_id.as_ref()
+    let window_id = session
+        .window_id
+        .as_ref()
         .ok_or("Session has no window ID")?;
 
     let term_type = match terminal_type.as_str() {
@@ -473,14 +527,18 @@ fn arrange_sessions(
     let mut terminal_type: Option<TerminalType> = None;
 
     for sid in &request.session_ids {
-        let session = sessions.iter().find(|s| &s.id == sid)
+        let session = sessions
+            .iter()
+            .find(|s| &s.id == sid)
             .ok_or_else(|| format!("Session not found: {}", sid))?;
 
         if session.status != "running" {
             return Err(format!("Session {} is not running", sid));
         }
 
-        let term_type_str = session.terminal_type.as_ref()
+        let term_type_str = session
+            .terminal_type
+            .as_ref()
             .ok_or_else(|| format!("Session {} has no terminal type", sid))?;
         let term_type = match term_type_str.as_str() {
             "iterm2" => TerminalType::ITerm2,
@@ -497,7 +555,9 @@ fn arrange_sessions(
             terminal_type = Some(term_type);
         }
 
-        let window_id = session.window_id.clone()
+        let window_id = session
+            .window_id
+            .clone()
             .ok_or_else(|| format!("Session {} has no window ID", sid))?;
 
         // For iTerm2, try to get session ID (backfill if missing)
@@ -513,7 +573,10 @@ fn arrange_sessions(
                             Some(id)
                         }
                         Err(e) => {
-                            eprintln!("Warning: could not backfill iTerm2 session ID for {}: {}", sid, e);
+                            eprintln!(
+                                "Warning: could not backfill iTerm2 session ID for {}: {}",
+                                sid, e
+                            );
                             None
                         }
                     }
@@ -559,21 +622,18 @@ async fn open_directory_dialog(app: tauri::AppHandle) -> Result<Option<String>, 
 
     let (tx, rx) = std::sync::mpsc::channel();
 
-    app.dialog()
-        .file()
-        .pick_folder(move |folder_path| {
-            let _ = tx.send(folder_path.map(|p| p.to_string()));
-        });
+    app.dialog().file().pick_folder(move |folder_path| {
+        let _ = tx.send(folder_path.map(|p| p.to_string()));
+    });
 
-    rx.recv()
-        .map_err(|e| format!("Dialog error: {}", e))
+    rx.recv().map_err(|e| format!("Dialog error: {}", e))
 }
 
 #[tauri::command]
 fn sync_vscode_projects() -> Result<Vec<VSCodeProject>, String> {
     let home = dirs::home_dir().ok_or("Could not find home directory")?;
-    let storage_path = home
-        .join("Library/Application Support/Code/User/globalStorage/storage.json");
+    let storage_path =
+        home.join("Library/Application Support/Code/User/globalStorage/storage.json");
 
     if !storage_path.exists() {
         return Ok(vec![]);
@@ -687,7 +747,13 @@ fn sync_jetbrains_projects() -> Result<Vec<JetBrainsProject>, String> {
                 if recent_path.exists() {
                     if let Ok(content) = std::fs::read_to_string(&recent_path) {
                         // Parse XML to extract project paths
-                        extract_jetbrains_projects(&content, ide, &mut projects, &mut seen_paths, &now);
+                        extract_jetbrains_projects(
+                            &content,
+                            ide,
+                            &mut projects,
+                            &mut seen_paths,
+                            &now,
+                        );
                     }
                 }
             }
@@ -744,10 +810,12 @@ fn extract_jetbrains_projects(
                         if attr.key.as_ref() == b"key" {
                             let value = String::from_utf8_lossy(&attr.value);
                             // Path format: $USER_HOME$/path/to/project
-                            let path = value
-                                .replace("$USER_HOME$", &dirs::home_dir()
+                            let path = value.replace(
+                                "$USER_HOME$",
+                                &dirs::home_dir()
                                     .map(|p| p.to_string_lossy().to_string())
-                                    .unwrap_or_else(|| "~".to_string()));
+                                    .unwrap_or_else(|| "~".to_string()),
+                            );
 
                             if !seen_paths.contains(&path) && std::path::Path::new(&path).exists() {
                                 seen_paths.insert(path.clone());
@@ -786,6 +854,11 @@ fn extract_jetbrains_projects(
 #[tauri::command]
 fn check_ccem_installed() -> bool {
     terminal::resolve_ccem_path().is_some()
+}
+
+#[tauri::command]
+fn check_codex_installed() -> bool {
+    terminal::resolve_codex_path().is_some()
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -856,13 +929,14 @@ fn load_from_remote(url: String, secret: String) -> Result<LoadResult, String> {
         return Err(format!("Server returned HTTP {}", status.as_u16()));
     }
 
-    let remote_resp: RemoteResponse = response.json()
+    let remote_resp: RemoteResponse = response
+        .json()
         .map_err(|e| format!("Invalid server response: {}", e))?;
 
     let decrypted = crypto::decrypt_remote(&remote_resp.encrypted, &secret)?;
 
-    let remote_envs: RemoteEnvironments = serde_json::from_str(&decrypted)
-        .map_err(|e| format!("Invalid environment data: {}", e))?;
+    let remote_envs: RemoteEnvironments =
+        serde_json::from_str(&decrypted).map_err(|e| format!("Invalid environment data: {}", e))?;
 
     let mut cfg = config::read_config()?;
     let mut loaded: Vec<LoadedEnv> = Vec::new();
@@ -881,12 +955,8 @@ fn load_from_remote(url: String, secret: String) -> Result<LoadResult, String> {
 
         let renamed = final_name != orig_name;
 
-        let env_config = create_env_with_encrypted_key(
-            env.base_url,
-            env.api_key,
-            env.model,
-            env.small_model,
-        );
+        let env_config =
+            create_env_with_encrypted_key(env.base_url, env.api_key, env.model, env.small_model);
 
         cfg.registries.insert(final_name.clone(), env_config);
         loaded.push(LoadedEnv {
@@ -1035,6 +1105,7 @@ fn main() {
             get_usage_history,
             get_continuous_usage_days,
             check_ccem_installed,
+            check_codex_installed,
             load_from_remote,
             arrange_sessions,
             check_arrange_support,

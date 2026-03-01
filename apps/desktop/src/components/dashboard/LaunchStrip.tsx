@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FolderOpen, ChevronDown, Globe, Shield, Check, Clock, Rocket } from 'lucide-react';
+import { FolderOpen, ChevronDown, Globe, Shield, Check, Clock, Rocket, TerminalSquare } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -13,14 +13,18 @@ import { getProjectName } from '@/lib/utils';
 import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { cn } from '@/lib/utils';
+import type { LaunchClient } from '@/store';
 
 interface LaunchStripProps {
+  launchClient: LaunchClient;
+  codexInstalled: boolean;
   currentEnv: string;
   environments: { name: string }[];
   permissionMode: PermissionModeName;
   selectedWorkingDir: string | null;
   recentDirs: string[];
   launched: boolean;
+  onSetLaunchClient: (client: LaunchClient) => void;
   onSwitchEnv: (name: string) => void;
   onSetPermMode: (mode: PermissionModeName) => void;
   onSelectDir: () => void;
@@ -39,12 +43,15 @@ function getEnvColorVar(envName: string): string {
 }
 
 export function LaunchStrip({
+  launchClient,
+  codexInstalled,
   currentEnv,
   environments,
   permissionMode,
   selectedWorkingDir,
   recentDirs,
   launched,
+  onSetLaunchClient,
   onSwitchEnv,
   onSetPermMode,
   onSelectDir,
@@ -53,6 +60,7 @@ export function LaunchStrip({
 }: LaunchStripProps) {
   const { t } = useLocale();
   const [dirOpen, setDirOpen] = useState(false);
+  const isCodex = launchClient === 'codex';
 
   const dirDisplay = selectedWorkingDir
     ? getProjectName(selectedWorkingDir)
@@ -120,37 +128,61 @@ export function LaunchStrip({
 
         {/* Config selectors — secondary row */}
         <div className="flex items-center justify-center gap-2 mt-4 flex-wrap">
-          {/* Environment */}
-          <Select value={currentEnv} onValueChange={onSwitchEnv}>
-            <SelectTrigger variant="badge" badgeColor={envColor} className="hover:bg-white/[0.08]">
-              <Globe className="w-3.5 h-3.5" />
+          {/* Client */}
+          <Select
+            value={launchClient}
+            onValueChange={(value) => onSetLaunchClient(value as LaunchClient)}
+          >
+            <SelectTrigger variant="badge" badgeColor="var(--chart-2)" className="hover:bg-white/[0.08]">
+              <TerminalSquare className="w-3.5 h-3.5" />
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {environments.map(env => (
-                <SelectItem key={env.name} value={env.name}>
-                  {env.name}
-                </SelectItem>
-              ))}
+              <SelectItem value="claude">Claude</SelectItem>
+              <SelectItem value="codex" disabled={!codexInstalled}>Codex</SelectItem>
             </SelectContent>
           </Select>
 
-          <span className="text-muted-foreground/20 text-xs select-none">·</span>
+          {!isCodex && (
+            <>
+              <span className="text-muted-foreground/20 text-xs select-none">·</span>
 
-          {/* Permission */}
-          <Select value={permissionMode} onValueChange={(v) => onSetPermMode(v as PermissionModeName)}>
-            <SelectTrigger variant="badge" badgeColor="var(--chart-4)" className="hover:bg-white/[0.08]">
-              <Shield className="w-3.5 h-3.5" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {Object.keys(PERMISSION_PRESETS).map((mode) => (
-                <SelectItem key={mode} value={mode}>
-                  {mode}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+              {/* Environment */}
+              <Select value={currentEnv} onValueChange={onSwitchEnv}>
+                <SelectTrigger variant="badge" badgeColor={envColor} className="hover:bg-white/[0.08]">
+                  <Globe className="w-3.5 h-3.5" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {environments.map(env => (
+                    <SelectItem key={env.name} value={env.name}>
+                      {env.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <span className="text-muted-foreground/20 text-xs select-none">·</span>
+
+              {/* Permission */}
+              <Select
+                value={permissionMode}
+                onValueChange={(v) => onSetPermMode(v as PermissionModeName)}
+              >
+                <SelectTrigger variant="badge" badgeColor="var(--chart-4)" className="hover:bg-white/[0.08]">
+                  <Shield className="w-3.5 h-3.5" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.keys(PERMISSION_PRESETS).map((mode) => (
+                    <SelectItem key={mode} value={mode}>
+                      {mode}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </>
+          )}
 
           <span className="text-muted-foreground/20 text-xs select-none">·</span>
 

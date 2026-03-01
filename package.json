@@ -18,9 +18,13 @@
     "check:i18n": "node scripts/check-i18n.js",
     "check:file-size": "bash scripts/check-file-size.sh",
     "check:all": "pnpm check:i18n && pnpm check:file-size",
-    "verify": "pnpm test:run && pnpm build && cd apps/desktop/src-tauri && cargo test"
+    "verify": "pnpm test:run && pnpm build && cd apps/desktop/src-tauri && cargo test",
+    "changeset": "changeset",
+    "version-packages": "changeset version && node scripts/sync-version.js",
+    "release": "pnpm build && pnpm test:run && pnpm changeset publish"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.29.8",
     "@tauri-apps/cli": "^2.9.6",
     "typescript": "^5.3.3"
   },

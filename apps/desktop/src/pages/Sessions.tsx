@@ -10,6 +10,7 @@ import { useLocale } from '../locales';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { SessionsSkeleton } from '@/components/ui/skeleton-states';
 import { toast } from 'sonner';
+import { shallow } from 'zustand/shallow';
 
 interface SessionsProps {
   onLaunch: () => void;
@@ -27,7 +28,24 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   const [isMultiLaunching, setIsMultiLaunching] = useState(false);
   const [launched, setLaunched] = useState(false);
   const launchedTimerRef = useRef<ReturnType<typeof setTimeout>>();
-  const { sessions, isLoadingSessions, arrangeLayout, setArrangeLayout, selectedWorkingDir, setSelectedWorkingDir } = useAppStore();
+  const {
+    sessions,
+    isLoadingSessions,
+    arrangeLayout,
+    setArrangeLayout,
+    selectedWorkingDir,
+    setSelectedWorkingDir,
+  } = useAppStore(
+    (state) => ({
+      sessions: state.sessions,
+      isLoadingSessions: state.isLoadingSessions,
+      arrangeLayout: state.arrangeLayout,
+      setArrangeLayout: state.setArrangeLayout,
+      selectedWorkingDir: state.selectedWorkingDir,
+      setSelectedWorkingDir: state.setSelectedWorkingDir,
+    }),
+    shallow
+  );
   const { focusSession, minimizeSession, closeSession, arrangeSessions, launchClaudeCode, openDirectoryPicker } = useTauriCommands();
 
   const runningSessions = sessions.filter(s => s.status === 'running');

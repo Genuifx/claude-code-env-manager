@@ -8,6 +8,7 @@ import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { DashboardSkeleton } from '@/components/ui/skeleton-states';
 import type { PermissionModeName } from '@ccem/core/browser';
+import { shallow } from 'zustand/shallow';
 
 interface DashboardProps {
   onNavigate: (tab: string) => void;
@@ -17,6 +18,8 @@ interface DashboardProps {
 
 export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardProps) {
   const {
+    launchClient,
+    setLaunchClient,
     currentEnv,
     environments,
     permissionMode,
@@ -26,9 +29,25 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
     recent,
     isLoadingEnvs,
     isLoadingStats,
-  } = useAppStore();
+  } = useAppStore(
+    (state) => ({
+      launchClient: state.launchClient,
+      setLaunchClient: state.setLaunchClient,
+      currentEnv: state.currentEnv,
+      environments: state.environments,
+      permissionMode: state.permissionMode,
+      setPermissionMode: state.setPermissionMode,
+      selectedWorkingDir: state.selectedWorkingDir,
+      setSelectedWorkingDir: state.setSelectedWorkingDir,
+      recent: state.recent,
+      isLoadingEnvs: state.isLoadingEnvs,
+      isLoadingStats: state.isLoadingStats,
+    }),
+    shallow
+  );
 
-  const { openDirectoryPicker, switchEnvironment, loadCronTasks } = useTauriCommands();
+  const { openDirectoryPicker, switchEnvironment, loadCronTasks, checkCodexInstalled } = useTauriCommands();
+  const [codexInstalled, setCodexInstalled] = useState(true);
 
   // Launch feedback
   const [launched, setLaunched] = useState(false);
@@ -44,6 +63,22 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
   useEffect(() => {
     loadCronTasks().catch(() => {});
   }, [loadCronTasks]);
+
+  useEffect(() => {
+    checkCodexInstalled()
+      .then((installed) => {
+        setCodexInstalled(installed);
+        if (!installed && launchClient === 'codex') {
+          setLaunchClient('claude');
+        }
+      })
+      .catch(() => {
+        setCodexInstalled(false);
+        if (launchClient === 'codex') {
+          setLaunchClient('claude');
+        }
+      });
+  }, [checkCodexInstalled, launchClient, setLaunchClient]);
 
   const handleSelectDirectory = useCallback(async () => {
     try {
@@ -96,12 +131,15 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
     <div className="page-transition-enter flex flex-col gap-4 min-h-0">
       {/* Zone 1: Launch Strip */}
       <LaunchStrip
+        launchClient={launchClient}
+        codexInstalled={codexInstalled}
         currentEnv={currentEnv}
         environments={environments}
         permissionMode={permissionMode as PermissionModeName}
         selectedWorkingDir={selectedWorkingDir}
         recentDirs={recentDirs}
         launched={launched}
+        onSetLaunchClient={setLaunchClient}
         onSwitchEnv={switchEnvironment}
         onSetPermMode={setPermissionMode}
         onSelectDir={handleSelectDirectory}
