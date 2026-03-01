@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { MessageSquare, Play, Check } from 'lucide-react';
+import { MessageSquare, Play, Check, Download } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { toast } from 'sonner';
 import { HistoryList, type HistorySessionItem } from '@/components/history/HistoryList';
 import { MessageBubble, type ConversationMessageData } from '@/components/history/MessageBubble';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -28,6 +29,12 @@ interface CompactSegment {
   trigger?: string;
   preTokens?: number;
   messageCount: number;
+}
+
+interface SessionTokenUsage {
+  input: number;
+  output: number;
+  total: number;
 }
 
 /**
@@ -90,6 +97,7 @@ export function History() {
   const [focusedSessionId, setFocusedSessionId] = useState<string | null>(null);
   const [launched, setLaunched] = useState(false);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const formatTokens = (v: number) => v.toLocaleString();
 
   // Load conversation history on mount
   useEffect(() => {
@@ -121,6 +129,60 @@ export function History() {
       console.error('Failed to resume session:', err);
     }
   }, [selectedSession, launchClaudeCode]);
+
+  // Merge tool_use + tool_result pairs, then filter by active segment
+  const mergedMessages = useMemo(() => mergeToolResults(messages), [messages]);
+  const sessionUsage = useMemo<SessionTokenUsage>(() => {
+    const usage = mergedMessages.reduce(
+      (acc, msg) => {
+        acc.input += msg.inputTokens ?? 0;
+        acc.output += msg.outputTokens ?? 0;
+        return acc;
+      },
+      { input: 0, output: 0 }
+    );
+    return {
+      ...usage,
+      total: usage.input + usage.output,
+    };
+  }, [mergedMessages]);
+
+  const handleExport = useCallback(() => {
+    if (!selectedSession) return;
+
+    try {
+      const payload = {
+        schemaVersion: 1,
+        exportedAt: new Date().toISOString(),
+        session: selectedSession,
+        segments,
+        messages: mergedMessages,
+      };
+
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: 'application/json;charset=utf-8',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+
+      const safeTitle = (selectedSession.display || 'conversation')
+        .replace(/[^\w\-.]+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 60) || selectedSession.id;
+      const date = new Date(selectedSession.timestamp).toISOString().slice(0, 10);
+      a.download = `${date}-${safeTitle}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success(t('history.exported'));
+    } catch (err) {
+      console.error('Failed to export conversation:', err);
+      toast.error(t('history.exportFailed'));
+    }
+  }, [selectedSession, segments, mergedMessages, t]);
 
   // Load messages + segments when a session is selected
   const handleSelect = useCallback(async (id: string) => {
@@ -157,12 +219,10 @@ export function History() {
     }
   }, [activeSegment]);
 
-  // Merge tool_use + tool_result pairs, then filter by active segment
   const visibleMessages = useMemo(() => {
-    const merged = mergeToolResults(messages);
-    if (activeSegment === null) return merged;
-    return merged.filter(m => m.segmentIndex === activeSegment);
-  }, [messages, activeSegment]);
+    if (activeSegment === null) return mergedMessages;
+    return mergedMessages.filter(m => m.segmentIndex === activeSegment);
+  }, [mergedMessages, activeSegment]);
 
   // Flat session ids for keyboard navigation
   const sessionIds = useMemo(() => sessions.map(s => s.id), [sessions]);
@@ -255,17 +315,47 @@ export function History() {
                   <p className="text-[11px] text-muted-foreground mt-0.5">
                     {selectedSession.projectName} · {new Date(selectedSession.timestamp).toLocaleString()}
                   </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground/75">
+                    <span className="inline-flex items-center gap-1 rounded-md bg-white/[0.03] px-1.5 py-0.5 max-w-[280px]">
+                      <span>{t('history.sessionId')}:</span>
+                      <span className="font-mono truncate" title={selectedSession.id}>{selectedSession.id}</span>
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-md bg-white/[0.03] px-1.5 py-0.5">
+                      <span>{t('history.tokensTotal')}:</span>
+                      <span className="font-mono">{formatTokens(sessionUsage.total)}</span>
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-md bg-white/[0.03] px-1.5 py-0.5">
+                      <span>{t('history.tokensInput')}:</span>
+                      <span className="font-mono">{formatTokens(sessionUsage.input)}</span>
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-md bg-white/[0.03] px-1.5 py-0.5">
+                      <span>{t('history.tokensOutput')}:</span>
+                      <span className="font-mono">{formatTokens(sessionUsage.output)}</span>
+                    </span>
+                  </div>
                 </div>
-                <Button
-                  size="sm"
-                  variant={launched ? 'ghost' : 'outline'}
-                  className="shrink-0 gap-1.5 text-xs"
-                  onClick={handleResume}
-                  disabled={launched}
-                >
-                  {launched ? <Check className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-                  {launched ? t('history.resumed') : t('history.resume')}
-                </Button>
+                <div className="shrink-0 flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5 text-xs"
+                    onClick={handleExport}
+                    disabled={isLoadingMessages}
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    {t('history.export')}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={launched ? 'ghost' : 'outline'}
+                    className="gap-1.5 text-xs"
+                    onClick={handleResume}
+                    disabled={launched}
+                  >
+                    {launched ? <Check className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                    {launched ? t('history.resumed') : t('history.resume')}
+                  </Button>
+                </div>
               </div>
             )}
 

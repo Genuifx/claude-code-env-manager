@@ -347,9 +347,17 @@
     "expandPlan": "展开全部",
     "collapsePlan": "收起",
     "copyCode": "复制",
+    "copyMessage": "复制消息",
     "copied": "已复制",
     "resume": "恢复会话",
-    "resumed": "已恢复 ✓"
+    "resumed": "已恢复 ✓",
+    "export": "导出 JSON",
+    "exported": "会话已导出",
+    "exportFailed": "导出失败",
+    "sessionId": "会话 ID",
+    "tokensTotal": "总 Token",
+    "tokensInput": "输入",
+    "tokensOutput": "输出"
   },
   "sideRail": {
     "dashboard": "仪表盘",
