@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import { ReactNode, useEffect, useRef, type UIEvent } from 'react';
 import { SideRail } from './SideRail';
 import { useLocale } from '@/locales';
 
@@ -11,6 +11,7 @@ interface AppLayoutProps {
 
 export function AppLayout({ children, activeTab, onTabChange, pageActions }: AppLayoutProps) {
   const { t } = useLocale();
+  const scrollEndTimerRef = useRef<number | null>(null);
   const isDashboard = activeTab === 'dashboard';
   const pageTitle = isDashboard ? undefined : (t(`sideRail.${activeTab}`) || t('sideRail.dashboard'));
 
@@ -25,6 +26,31 @@ export function AppLayout({ children, activeTab, onTabChange, pageActions }: App
     settings: 'settings.subtitle',
   };
   const subtitle = subtitleKeyMap[activeTab] ? t(subtitleKeyMap[activeTab]) : undefined;
+
+  useEffect(() => {
+    return () => {
+      if (scrollEndTimerRef.current !== null) {
+        window.clearTimeout(scrollEndTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleScrollActivity = (event: UIEvent<HTMLElement>) => {
+    const root = event.currentTarget;
+    if (root.dataset.scrolling !== 'true') {
+      root.dataset.scrolling = 'true';
+    }
+
+    if (scrollEndTimerRef.current !== null) {
+      window.clearTimeout(scrollEndTimerRef.current);
+    }
+
+    scrollEndTimerRef.current = window.setTimeout(() => {
+      root.dataset.scrolling = 'false';
+      scrollEndTimerRef.current = null;
+    }, 140);
+  };
+
   return (
     <div className="h-screen flex overflow-hidden relative">
       {/* Full-width drag region at top — sits above everything for window dragging */}
@@ -59,7 +85,11 @@ export function AppLayout({ children, activeTab, onTabChange, pageActions }: App
             </div>
           )}
         </div>
-        <main className="flex-1 overflow-y-auto px-8 py-4 relative z-10" style={{ willChange: 'transform' }}>
+        <main
+          className="scroll-glass-root flex-1 overflow-y-auto px-8 py-4 relative z-10"
+          data-scrolling="false"
+          onScrollCapture={handleScrollActivity}
+        >
           <div className="max-w-6xl">
             {children}
           </div>
