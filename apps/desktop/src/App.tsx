@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { ENV_PRESETS } from '@ccem/core/browser';
@@ -14,11 +14,13 @@ import { LocaleProvider, useLocale } from '@/locales';
 import type { UsageStats } from '@/types/analytics';
 
 function App() {
+  const FOCUS_SYNC_INTERVAL_MS = 5000;
   const [activeTab, setActiveTab] = useState('dashboard');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<'add' | 'edit'>('add');
   const [editingEnvName, setEditingEnvName] = useState<string | undefined>();
   const [pendingDeleteEnv, setPendingDeleteEnv] = useState<string | null>(null);
+  const lastFocusSyncAtRef = useRef(0);
 
   const {
     setEnvironments,
@@ -155,8 +157,14 @@ function App() {
   // Skip environment reload when a dialog is open to avoid resetting in-progress edits
   useEffect(() => {
     const handleFocus = () => {
+      const now = Date.now();
+      if (now - lastFocusSyncAtRef.current < FOCUS_SYNC_INTERVAL_MS) {
+        return;
+      }
+      lastFocusSyncAtRef.current = now;
+
       if (!dialogOpen) {
-        loadEnvironments().catch(() => {});
+        loadEnvironments({ silent: true }).catch(() => {});
       }
       loadCurrentEnv().catch(() => {});
       loadSessions().catch(() => {});

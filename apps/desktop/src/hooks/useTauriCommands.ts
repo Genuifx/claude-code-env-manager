@@ -75,8 +75,11 @@ export function useTauriCommands() {
     setDefaultWorkingDir,
   } = useAppStore();
 
-  const loadEnvironments = useCallback(async () => {
-    setLoading(true);
+  const loadEnvironments = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const envs = await invoke<Record<string, TauriEnvConfig>>('get_environments');
       const envList: Environment[] = Object.entries(envs).map(([name, config]) => ({
@@ -92,7 +95,9 @@ export function useTauriCommands() {
     } catch (err) {
       setError(`Failed to load environments: ${err}`);
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [setEnvironments, setLoading, setError]);
 
