@@ -1,20 +1,24 @@
 use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use scrypt::{scrypt, Params};
 use rand::Rng;
+use std::sync::OnceLock;
 
 type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
 type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
 
 const PASSWORD: &[u8] = b"claude-code-env-manager-secret";
 const SALT: &[u8] = b"salt";
+static LOCAL_KEY: OnceLock<[u8; 32]> = OnceLock::new();
 
 /// Derive the same 32-byte key as Node.js crypto.scryptSync
 fn derive_key() -> [u8; 32] {
-    let mut key = [0u8; 32];
-    // Node.js scrypt defaults: N=16384, r=8, p=1
-    let params = Params::new(14, 8, 1, 32).unwrap(); // log2(16384) = 14
-    scrypt(PASSWORD, SALT, &params, &mut key).unwrap();
-    key
+    *LOCAL_KEY.get_or_init(|| {
+        let mut key = [0u8; 32];
+        // Node.js scrypt defaults: N=16384, r=8, p=1
+        let params = Params::new(14, 8, 1, 32).unwrap(); // log2(16384) = 14
+        scrypt(PASSWORD, SALT, &params, &mut key).unwrap();
+        key
+    })
 }
 
 /// Encrypt plaintext using AES-256-CBC, returns "enc:iv_hex:ciphertext_hex"

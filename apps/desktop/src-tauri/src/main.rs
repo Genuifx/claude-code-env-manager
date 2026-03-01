@@ -55,14 +55,28 @@ fn greet(name: &str) -> String {
 }
 
 #[tauri::command]
-fn get_environments() -> Result<HashMap<String, EnvConfig>, String> {
-    let cfg = config::read_config()?;
-    let decrypted: HashMap<String, EnvConfig> = cfg
-        .registries
-        .iter()
-        .map(|(k, v)| (k.clone(), config::get_env_with_decrypted_key(v)))
-        .collect();
-    Ok(decrypted)
+async fn get_environments() -> Result<HashMap<String, EnvConfig>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let start = std::time::Instant::now();
+        let cfg = config::read_config()?;
+        let decrypted: HashMap<String, EnvConfig> = cfg
+            .registries
+            .iter()
+            .map(|(k, v)| (k.clone(), config::get_env_with_decrypted_key(v)))
+            .collect();
+
+        #[cfg(debug_assertions)]
+        {
+            let elapsed_ms = start.elapsed().as_millis();
+            if elapsed_ms > 100 {
+                eprintln!("CCEM perf: get_environments took {}ms", elapsed_ms);
+            }
+        }
+
+        Ok(decrypted)
+    })
+    .await
+    .map_err(|e| format!("Failed to join get_environments task: {}", e))?
 }
 
 #[tauri::command]
