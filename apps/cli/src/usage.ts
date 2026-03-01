@@ -3,7 +3,12 @@ import * as fsPromises from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import * as readline from 'readline';
+import { fileURLToPath } from 'url';
 import type { TokenUsage, TokenUsageWithCost, UsageStats, ModelPrice, UsageCache, FileMeta, FileStats, FileStatsEntry } from '@ccem/core';
+
+// ESM 兼容：获取 __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // ... (保持前面的 import 和常量定义不变) ...
 

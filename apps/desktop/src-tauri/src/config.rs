@@ -1,8 +1,9 @@
 use crate::crypto;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::path::PathBuf;
+use fs2::FileExt;  // 文件锁支持
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct EnvConfig {
@@ -156,7 +157,7 @@ pub fn migrate_if_needed() -> Result<bool, String> {
     Ok(true)
 }
 
-/// Read config from ~/.ccem/config.json
+/// Read config from ~/.ccem/config.json with file lock
 pub fn read_config() -> Result<CcemConfig, String> {
     let config_path = get_config_path();
 
@@ -164,20 +165,59 @@ pub fn read_config() -> Result<CcemConfig, String> {
         return Ok(CcemConfig::default());
     }
 
+    // 获取共享锁（允许多个读者）
+    let lock_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(&config_path)
+        .map_err(|e| format!("Failed to open config for locking: {}", e))?;
+
+    lock_file.lock_shared()
+        .map_err(|e| format!("Failed to acquire read lock: {}", e))?;
+
     let content = fs::read_to_string(&config_path)
         .map_err(|e| format!("Failed to read config: {}", e))?;
 
-    serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))
+    let config = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse config: {}", e))?;
+
+    // 锁会在 lock_file drop 时自动释放
+    Ok(config)
 }
 
-/// Write config to ~/.ccem/config.json
+/// Write config to ~/.ccem/config.json with file lock and atomic write
 pub fn write_config(config: &CcemConfig) -> Result<(), String> {
     ensure_ccem_dir().map_err(|e| format!("Failed to create config dir: {}", e))?;
 
+    let config_path = get_config_path();
+    let temp_path = config_path.with_extension("tmp");
+
+    // 序列化配置
     let content = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
-    fs::write(get_config_path(), content).map_err(|e| format!("Failed to write config: {}", e))
+    // 获取文件锁（如果文件不存在会创建）
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(&config_path)
+        .map_err(|e| format!("Failed to open config for locking: {}", e))?;
+
+    // 加排他锁
+    lock_file.lock_exclusive()
+        .map_err(|e| format!("Failed to acquire lock: {}", e))?;
+
+    // 写入临时文件
+    fs::write(&temp_path, &content)
+        .map_err(|e| format!("Failed to write temp config: {}", e))?;
+
+    // 原子替换（rename 是原子操作）
+    fs::rename(&temp_path, &config_path)
+        .map_err(|e| format!("Failed to rename temp config: {}", e))?;
+
+    // 锁会在 lock_file drop 时自动释放
+    Ok(())
 }
 
 /// Read app config from ~/.ccem/app.json

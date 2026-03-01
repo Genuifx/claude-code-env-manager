@@ -762,8 +762,21 @@ program
   .command('load <url>')
   .description('从远程服务器加载环境配置')
   .requiredOption('--secret <secret>', '解密密钥')
-  .action(async (url: string, options: { secret: string }) => {
-    await loadFromRemote(url, options.secret);
+  .option('--json', '以 JSON 格式输出结果（供程序调用）')
+  .action(async (url: string, options: { secret: string; json?: boolean }) => {
+    const results = await loadFromRemote(url, options.secret);
+
+    // 如果指定了 --json，输出 JSON 格式供程序解析
+    if (options.json) {
+      console.log(JSON.stringify({
+        count: results.length,
+        environments: results.map(r => ({
+          name: r.name,
+          original_name: r.originalName,  // 使用 snake_case 匹配 Rust 结构体
+          renamed: r.renamed,
+        })),
+      }));
+    }
   });
 
 // launch 命令 - Desktop app 调用的隐藏命令

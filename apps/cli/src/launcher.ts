@@ -115,7 +115,7 @@ export async function launchClaude(options: LaunchOptions): Promise<void> {
   return new Promise((resolve) => {
     const child = spawn('claude', args, {
       stdio: 'inherit',
-      shell: true,
+      shell: false,  // 直接执行二进制，避免 shell 注入风险
       env,
     });
 

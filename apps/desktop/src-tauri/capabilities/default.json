@@ -6,7 +6,6 @@
     "core:default",
     "core:window:allow-start-dragging",
     "shell:allow-open",
-    "shell:allow-execute",
     "dialog:default",
     "notification:default",
     "mcp-bridge:default",

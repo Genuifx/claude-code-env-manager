@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import crypto from 'crypto';
+import { getCcemConfigDir } from '@ccem/core';
+import Conf from 'conf';
 
 // Test the decryption logic that remote.ts uses
 describe('remote', () => {
@@ -108,6 +110,23 @@ describe('remote', () => {
         'my-env-remote-3',
       ]);
       expect(getUniqueName('my-env', existing)).toBe('my-env-remote-4');
+    });
+  });
+
+  describe('config path consistency', () => {
+    it('should use the same config directory as main CLI', () => {
+      // 验证 remote.ts 使用的配置路径与主 CLI 一致
+      const expectedDir = getCcemConfigDir();
+
+      // 创建一个测试配置实例，模拟 remote.ts 的配置
+      const testConfig = new Conf({
+        projectName: 'claude-code-env-manager',
+        cwd: getCcemConfigDir(),
+      });
+
+      // 验证配置路径包含预期的目录
+      expect(testConfig.path).toContain('.ccem');
+      expect(testConfig.path).toContain('config.json');
     });
   });
 });

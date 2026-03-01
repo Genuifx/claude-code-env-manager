@@ -72,6 +72,7 @@ export function EnvironmentDialog({
   const [serverUrl, setServerUrl] = React.useState("");
   const [serverSecret, setServerSecret] = React.useState("");
   const [serverLoading, setServerLoading] = React.useState(false);
+  const [serverPasteCommand, setServerPasteCommand] = React.useState("");
 
   // Reset form when dialog opens or environment changes
   React.useEffect(() => {
@@ -334,8 +335,11 @@ export function EnvironmentDialog({
                     </Label>
                     <Input
                       id="serverPasteCommand"
-                      value=""
-                      onChange={(e) => handlePasteCommand(e.target.value)}
+                      value={serverPasteCommand}
+                      onChange={(e) => {
+                        setServerPasteCommand(e.target.value);
+                        handlePasteCommand(e.target.value);
+                      }}
                       placeholder={t("environmentDialog.serverPasteCommandPlaceholder")}
                       disabled={serverLoading}
                       className="font-mono text-xs"

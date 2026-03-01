@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::thread;
+use std::fs::{self, OpenOptions};
 use tauri::{AppHandle, Emitter};
+use fs2::FileExt;
 
 use crate::terminal;
 
@@ -17,14 +19,21 @@ fn get_sessions_file_path() -> std::path::PathBuf {
 pub struct Session {
     pub id: String,
     pub pid: Option<u32>,
+    #[serde(alias = "env_name")]  // 兼容旧的 snake_case
     pub env_name: String,
+    #[serde(alias = "perm_mode")]
     pub perm_mode: String,
+    #[serde(alias = "working_dir")]
     pub working_dir: String,
+    #[serde(alias = "start_time")]
     pub start_time: String,
     pub status: String, // "running", "stopped", "interrupted"
     // Terminal metadata for window control
+    #[serde(alias = "terminal_type")]
     pub terminal_type: Option<String>,  // "iterm2" | "terminalapp"
+    #[serde(alias = "window_id")]
     pub window_id: Option<String>,      // iTerm2 window ID for operations
+    #[serde(alias = "iterm_session_id")]
     pub iterm_session_id: Option<String>, // iTerm2 session unique ID for move_session API
 }
 
@@ -66,27 +75,59 @@ impl SessionManager {
         }
     }
 
-    /// Persist current sessions to ~/.ccem/sessions.json.
+    /// Persist current sessions to ~/.ccem/sessions.json with atomic write.
     /// Errors are logged but never panic.
     fn save_to_disk(&self) {
         let path = get_sessions_file_path();
+        let temp_path = path.with_extension("tmp");
+
+        // 在锁内完成读取-序列化-写入
         let sessions = self.sessions.lock().unwrap().clone();
+
         if let Some(parent) = path.parent() {
             if let Err(e) = std::fs::create_dir_all(parent) {
                 eprintln!("Failed to create sessions dir: {}", e);
                 return;
             }
         }
+
+        // 获取文件锁
+        let lock_result = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(&path);
+
+        let lock_file = match lock_result {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("Failed to open sessions file for locking: {}", e);
+                return;
+            }
+        };
+
+        // 加排他锁
+        if let Err(e) = lock_file.lock_exclusive() {
+            eprintln!("Failed to acquire lock on sessions file: {}", e);
+            return;
+        }
+
+        // 序列化并写入临时文件
         match serde_json::to_string_pretty(&sessions) {
             Ok(json) => {
-                if let Err(e) = std::fs::write(&path, json) {
-                    eprintln!("Failed to write sessions.json: {}", e);
+                if let Err(e) = fs::write(&temp_path, json) {
+                    eprintln!("Failed to write temp sessions file: {}", e);
+                    return;
+                }
+                // 原子替换
+                if let Err(e) = fs::rename(&temp_path, &path) {
+                    eprintln!("Failed to rename temp sessions file: {}", e);
                 }
             }
             Err(e) => {
                 eprintln!("Failed to serialize sessions: {}", e);
             }
         }
+        // 锁会在 lock_file drop 时自动释放
     }
 
     pub fn add_session(&self, session: Session) {

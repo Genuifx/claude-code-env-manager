@@ -1,0 +1,146 @@
+name: CI
+
+on:
+  push:
+    branches: [main, refator]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test & Build
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.27.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'pnpm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Run tests
+        run: pnpm -r test:run
+
+      - name: Build all packages
+        run: pnpm -r build
+
+      - name: Run Rust tests
+        run: cd apps/desktop/src-tauri && cargo test
+
+  i18n-check:
+    name: i18n Key Consistency
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Check i18n key consistency
+        run: |
+          node -e "
+          const fs = require('fs');
+          const path = require('path');
+
+          const zhPath = 'apps/desktop/src/locales/zh.json';
+          const enPath = 'apps/desktop/src/locales/en.json';
+
+          if (!fs.existsSync(zhPath) || !fs.existsSync(enPath)) {
+            console.log('⚠️  Locale files not found, skipping check');
+            process.exit(0);
+          }
+
+          const zh = JSON.parse(fs.readFileSync(zhPath, 'utf8'));
+          const en = JSON.parse(fs.readFileSync(enPath, 'utf8'));
+
+          function flattenKeys(obj, prefix = '') {
+            let keys = [];
+            for (const [key, value] of Object.entries(obj)) {
+              const fullKey = prefix ? \`\${prefix}.\${key}\` : key;
+              if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                keys = keys.concat(flattenKeys(value, fullKey));
+              } else {
+                keys.push(fullKey);
+              }
+            }
+            return keys;
+          }
+
+          const zhKeys = new Set(flattenKeys(zh));
+          const enKeys = new Set(flattenKeys(en));
+
+          const missingInEn = [...zhKeys].filter(k => !enKeys.has(k));
+          const missingInZh = [...enKeys].filter(k => !zhKeys.has(k));
+
+          let hasError = false;
+
+          if (missingInEn.length > 0) {
+            console.error('❌ Keys missing in en.json:');
+            missingInEn.forEach(k => console.error('  - ' + k));
+            hasError = true;
+          }
+
+          if (missingInZh.length > 0) {
+            console.error('❌ Keys missing in zh.json:');
+            missingInZh.forEach(k => console.error('  - ' + k));
+            hasError = true;
+          }
+
+          if (!hasError) {
+            console.log('✅ i18n keys are consistent');
+          } else {
+            process.exit(1);
+          }
+          "
+
+  file-size-check:
+    name: File Size Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check file sizes
+        run: |
+          echo "Checking for files larger than 500 lines..."
+
+          # 查找所有 TypeScript/JavaScript/Rust 文件，排除构建产物和依赖
+          large_files=$(find apps packages -type f \
+            \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" -o -name "*.rs" \) \
+            ! -path "*/node_modules/*" \
+            ! -path "*/dist/*" \
+            ! -path "*/target/*" \
+            ! -path "*/.next/*" \
+            ! -path "*/build/*" \
+            -exec sh -c '
+            lines=$(wc -l < "$1")
+            if [ "$lines" -gt 500 ]; then
+              echo "$1: $lines lines"
+            fi
+          ' sh {} \;)
+
+          if [ -n "$large_files" ]; then
+            echo "❌ Files exceeding 500 lines (must be refactored or exempted):"
+            echo "$large_files"
+            echo ""
+            echo "Please refactor these files or add exemption documentation."
+            exit 1
+          else
+            echo "✅ All files are under 500 lines"
+          fi

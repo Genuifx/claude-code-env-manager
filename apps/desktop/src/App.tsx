@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { ENV_PRESETS } from '@ccem/core/browser';
+import type { PermissionModeName } from '@ccem/core/browser';
 import { AppLayout } from '@/components/layout';
 import { Dashboard, Environments, Sessions, Analytics, Settings, Skills, History, CronTasks } from '@/pages';
 import { useAppStore, type Environment } from '@/store';
@@ -54,24 +55,45 @@ function App() {
   // Listen for tray menu events
   useEffect(() => {
     const unlisteners: (() => void)[] = [];
+    let cancelled = false;
 
     const setupListeners = async () => {
       try {
-        unlisteners.push(await listen('tray-launch-claude', () => {
+        const listener1 = await listen('tray-launch-claude', () => {
           handleLaunch();
-        }));
+        });
+        if (cancelled) {
+          listener1();
+          return;
+        }
+        unlisteners.push(listener1);
 
-        unlisteners.push(await listen('navigate-to-settings', () => {
+        const listener2 = await listen('navigate-to-settings', () => {
           setActiveTab('settings');
-        }));
+        });
+        if (cancelled) {
+          listener2();
+          return;
+        }
+        unlisteners.push(listener2);
 
-        unlisteners.push(await listen<{ env: string }>('env-changed', (event) => {
+        const listener3 = await listen<{ env: string }>('env-changed', (event) => {
           setCurrentEnv(event.payload.env);
-        }));
+        });
+        if (cancelled) {
+          listener3();
+          return;
+        }
+        unlisteners.push(listener3);
 
-        unlisteners.push(await listen<{ perm: string }>('perm-changed', (event) => {
-          setPermissionMode(event.payload.perm as any);
-        }));
+        const listener4 = await listen<{ perm: string }>('perm-changed', (event) => {
+          setPermissionMode(event.payload.perm as PermissionModeName);
+        });
+        if (cancelled) {
+          listener4();
+          return;
+        }
+        unlisteners.push(listener4);
       } catch (err) {
         console.error('Failed to setup tray event listeners:', err);
       }
@@ -80,6 +102,7 @@ function App() {
     setupListeners();
 
     return () => {
+      cancelled = true;
       unlisteners.forEach(fn => fn());
     };
   }, []);
@@ -266,9 +289,7 @@ function App() {
   return (
     <LocaleProvider>
       <AppLayout activeTab={activeTab} onTabChange={setActiveTab}>
-        <div key={activeTab}>
-          {renderPage()}
-        </div>
+        {renderPage()}
       </AppLayout>
 
       {/* Environment Dialog */}
