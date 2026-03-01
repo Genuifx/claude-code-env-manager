@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronRight, Brain, CheckCircle2, XCircle, User, Circle, Scissors, ChevronsUpDown, ClipboardList, ChevronDown, Terminal, Sparkles, Users, AlertCircle } from 'lucide-react';
+import { ChevronRight, Brain, CheckCircle2, XCircle, User, Circle, Scissors, ChevronsUpDown, ClipboardList, ChevronDown, Terminal, Sparkles, Users, AlertCircle, Copy, Check } from 'lucide-react';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ModelIcon } from './ModelIcon';
 import { cn } from '@/lib/utils';
@@ -19,7 +19,7 @@ interface ParsedText {
   /** Cleaned text with all internal tags removed */
   cleanText: string;
   /** Extracted slash command info, if present */
-  command?: { name: string; output?: string };
+  command?: { name: string; output?: string; message?: string; args?: string };
   /** Extracted teammate messages */
   teammateMessages: TeammateMessage[];
 }
@@ -31,10 +31,18 @@ function parseMessageText(raw: string): ParsedText {
 
   // Extract command info before stripping
   const cmdMatch = text.match(/<command-name>\/?([\s\S]*?)<\/command-name>/);
+  const cmdMessageMatch = text.match(/<command-message>([\s\S]*?)<\/command-message>/);
+  const cmdArgsMatch = text.match(/<command-args>([\s\S]*?)<\/command-args>/);
   const stdoutMatch = text.match(/<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/);
 
-  const command = cmdMatch
-    ? { name: cmdMatch[1].trim(), output: stdoutMatch?.[1]?.trim() }
+  const commandName = cmdMatch?.[1]?.trim() || cmdMessageMatch?.[1]?.trim();
+  const command = commandName
+    ? {
+      name: commandName,
+      output: stdoutMatch?.[1]?.trim(),
+      message: cmdMessageMatch?.[1]?.trim(),
+      args: cmdArgsMatch?.[1]?.trim(),
+    }
     : undefined;
 
   // Extract teammate messages before stripping
@@ -82,6 +90,84 @@ function parseMessageText(raw: string): ParsedText {
   text = text.replace(/\n{3,}/g, '\n\n').trim();
 
   return { cleanText: text, command, teammateMessages };
+}
+
+function isCommandOnlyText(text: string): boolean {
+  const { cleanText, command } = parseMessageText(text);
+  const args = command?.args?.trim() || '';
+  return !!(command && !cleanText && !args);
+}
+
+function stringifyUnknown(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function extractTextForCopy(raw: string): string {
+  const { cleanText, command } = parseMessageText(raw);
+  if (!command) return cleanText;
+
+  const lines: string[] = [`/${command.name}`];
+  const args = command.args?.trim() || '';
+  const body = (cleanText || args).trim();
+  if (body) lines.push(body);
+  return lines.join('\n');
+}
+
+function blockToCopyText(block: ContentBlock): string {
+  if (block.type === 'text') {
+    return extractTextForCopy(block.text || '');
+  }
+  if (block.type === 'thinking') {
+    return block.thinking || block.text || '';
+  }
+  if (block.type === 'tool_use') {
+    const parts: string[] = [`[Tool] ${block.name || 'Tool'}`];
+    const input = stringifyUnknown(block.input);
+    if (input) parts.push(`Input:\n${input}`);
+    if ('_result' in block) {
+      const output = stringifyUnknown(block._result);
+      if (output) parts.push(`Output:\n${output}`);
+    }
+    return parts.join('\n\n');
+  }
+  return '';
+}
+
+function getMessageCopyText(
+  message: ConversationMessageData,
+  t: (key: string) => string,
+): string {
+  if (message.planContent) {
+    return message.planContent;
+  }
+  if (message.isCompactBoundary) {
+    return t('history.compactBoundary');
+  }
+  if (message.msgType === 'summary') {
+    return message.summary || t('history.summaryLabel');
+  }
+
+  const content = message.content;
+  if (typeof content === 'string') {
+    return extractTextForCopy(content);
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map(blockToCopyText)
+      .map(s => s.trim())
+      .filter(Boolean)
+      .join('\n\n');
+  }
+  if (content && typeof content === 'object') {
+    return blockToCopyText(content as ContentBlock).trim();
+  }
+  return '';
 }
 
 /** Inline chip for slash commands — adapts to bubble background via isUser */
@@ -150,6 +236,11 @@ export interface ConversationMessageData {
   content: ContentBlock[] | string | null;
   model?: string;
   summary?: string;
+  timestamp?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheCreationTokens?: number;
+  cacheReadTokens?: number;
   segmentIndex: number;
   isCompactBoundary: boolean;
   planContent?: string;
@@ -572,8 +663,22 @@ function renderAssistantMarkdown(text: string, keyPrefix = 'md') {
 
 function renderTextContent(text: string, t: (key: string) => string, isUser = false, standalone = false) {
   const { cleanText, command } = parseMessageText(text);
-  if (command && !cleanText) {
+  const commandArgs = command?.args?.trim() || '';
+  const commandBody = cleanText || commandArgs;
+
+  if (command && !commandBody) {
     return <CommandChip name={command.name} output={command.output} isUser={isUser} standalone={standalone} />;
+  }
+  if (command && commandBody) {
+    return (
+      <div className="space-y-1.5">
+        <CommandChip name={command.name} output={command.output} isUser={isUser} />
+        {isUser
+          ? <MarkdownRenderer content={commandBody} variant="user" />
+          : renderAssistantMarkdown(commandBody, 'cmd')
+        }
+      </div>
+    );
   }
   if (!cleanText) return null;
 
@@ -672,6 +777,10 @@ export function MessageBubble({ message, prevRole }: MessageBubbleProps) {
   const isUser = message.msgType === 'user' || message.msgType === 'human';
   const isSummary = message.msgType === 'summary';
   const currentRole = isUser ? 'user' : 'assistant';
+  const [copied, setCopied] = useState(false);
+  const timeLabel = message.timestamp && message.timestamp > 0
+    ? new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : null;
 
   // Dynamic spacing: same role → tight, role switch → wider
   const sameRole = prevRole === currentRole;
@@ -725,8 +834,7 @@ export function MessageBubble({ message, prevRole }: MessageBubbleProps) {
 
   if (typeof content === 'string') {
     collectTeammate(content);
-    const { cleanText, command } = parseMessageText(content);
-    isCommandOnly = !!(command && !cleanText);
+    isCommandOnly = isCommandOnlyText(content);
     renderedContent = renderTextContent(content, t, isUser, isCommandOnly);
   } else if (Array.isArray(content)) {
     // Collect teammate messages from all text blocks
@@ -736,8 +844,7 @@ export function MessageBubble({ message, prevRole }: MessageBubbleProps) {
     // Check if the only meaningful block is a command-only text
     const textBlocks = (content as ContentBlock[]).filter(b => b.type === 'text');
     if (textBlocks.length === 1 && textBlocks.length === content.length) {
-      const { cleanText, command } = parseMessageText(textBlocks[0].text || '');
-      isCommandOnly = !!(command && !cleanText);
+      isCommandOnly = isCommandOnlyText(textBlocks[0].text || '');
     }
     renderedContent = isCommandOnly
       ? renderTextContent((content as ContentBlock[])[0].text || '', t, isUser, true)
@@ -766,6 +873,18 @@ export function MessageBubble({ message, prevRole }: MessageBubbleProps) {
     return null;
   }
 
+  const handleCopyMessage = async () => {
+    const text = getMessageCopyText(message, t).trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (err) {
+      console.error('Failed to copy message:', err);
+    }
+  };
+
   return (
     <>
       <div className={cn('flex gap-2.5', spacingClass, isUser ? 'flex-row-reverse' : 'flex-row')}>
@@ -782,7 +901,7 @@ export function MessageBubble({ message, prevRole }: MessageBubbleProps) {
 
         {/* Bubble */}
         <div className={cn(
-          'rounded-2xl max-w-[85%] min-w-0 break-words [overflow-wrap:anywhere]',
+          'group/bubble rounded-2xl max-w-[85%] min-w-0 break-words [overflow-wrap:anywhere]',
           isCommandOnly
             ? 'px-0 py-0'
             : 'px-3.5 py-2.5',
@@ -793,12 +912,43 @@ export function MessageBubble({ message, prevRole }: MessageBubbleProps) {
               : 'glass-chat-assistant'
         )}>
           {renderedContent}
-          {/* Model tag for assistant */}
-          {!isUser && message.model && (
-            <p className="text-[10px] text-muted-foreground/50 mt-1.5 font-mono">
-              {message.model}
-            </p>
-          )}
+          <div className={cn('mt-1.5 flex items-center gap-2', isUser && 'justify-end')}>
+            {(!isUser && message.model) && (
+              <p className="text-[10px] text-muted-foreground/50 font-mono truncate">{message.model}</p>
+            )}
+            {timeLabel && (
+              <p className={cn(
+                'text-[10px] tabular-nums',
+                isUser ? 'text-white/50 mr-auto' : 'text-muted-foreground/45'
+              )}>
+                {timeLabel}
+              </p>
+            )}
+            <button
+              onClick={handleCopyMessage}
+              className={cn(
+                'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors',
+                'opacity-0 group-hover/bubble:opacity-100 focus-visible:opacity-100',
+                !isUser && 'ml-auto',
+                isUser
+                  ? 'text-white/50 hover:text-white/90 hover:bg-white/[0.08]'
+                  : 'text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted/50'
+              )}
+              aria-label={copied ? t('history.copied') : t('history.copyMessage')}
+            >
+              {copied ? (
+                <>
+                  <Check className="w-3 h-3" />
+                  {t('history.copied')}
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3 h-3" />
+                  {t('history.copyMessage')}
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
       {/* Teammate messages rendered outside the bubble */}

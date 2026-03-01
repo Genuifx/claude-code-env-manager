@@ -35,6 +35,11 @@ pub struct ConversationMessage {
     pub model: Option<String>,
     pub summary: Option<String>,
     pub plan_content: Option<String>,
+    pub timestamp: u64,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub cache_creation_tokens: Option<u64>,
+    pub cache_read_tokens: Option<u64>,
     pub segment_index: usize,
     pub is_compact_boundary: bool,
 }
@@ -324,6 +329,11 @@ fn parse_conversation_file(path: &PathBuf) -> Result<(Vec<ConversationMessage>, 
                     model: None,
                     summary: None,
                     plan_content: None,
+                    timestamp: ts,
+                    input_tokens: None,
+                    output_tokens: None,
+                    cache_creation_tokens: None,
+                    cache_read_tokens: None,
                     segment_index: current_segment,
                     is_compact_boundary: true,
                 });
@@ -351,23 +361,33 @@ fn parse_conversation_file(path: &PathBuf) -> Result<(Vec<ConversationMessage>, 
             continue;
         }
 
-        // Extract content and model from the message object
-        let (content, model) = if let Some(msg) = &parsed.message {
+        // Extract content/model/usage from the message object
+        let (content, model, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens) = if let Some(msg) = &parsed.message {
             let content = msg.get("content")
                 .cloned()
                 .unwrap_or(serde_json::Value::Null);
             let model = msg.get("model")
                 .and_then(|m| m.as_str())
                 .map(|s| s.to_string());
-            (content, model)
+            let (input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens) = extract_usage_fields(msg);
+            (
+                content,
+                model,
+                input_tokens,
+                output_tokens,
+                cache_creation_tokens,
+                cache_read_tokens,
+            )
         } else {
-            (serde_json::Value::Null, None)
+            (serde_json::Value::Null, None, None, None, None, None)
         };
 
         // Skip messages with no content (unless it's a summary)
         if content.is_null() && msg_type != "summary" && parsed.summary.is_none() {
             continue;
         }
+
+        let ts = parse_timestamp_value(&parsed.timestamp);
 
         // Track message count per segment
         if let Some(seg) = segments.get_mut(current_segment) {
@@ -381,6 +401,11 @@ fn parse_conversation_file(path: &PathBuf) -> Result<(Vec<ConversationMessage>, 
             model,
             summary: parsed.summary,
             plan_content: parsed.plan_content,
+            timestamp: ts,
+            input_tokens,
+            output_tokens,
+            cache_creation_tokens,
+            cache_read_tokens,
             segment_index: current_segment,
             is_compact_boundary: false,
         });
@@ -427,13 +452,146 @@ fn parse_timestamp_value(val: &Option<serde_json::Value>) -> u64 {
 
 /// Returns true if the display text is a CLI command or noise, not a real topic.
 fn is_noise_display(display: &str) -> bool {
-    let trimmed = display.trim().to_lowercase();
-    trimmed.is_empty()
-        || trimmed.starts_with("/clear")
-        || trimmed.starts_with("/compact")
-        || trimmed.starts_with("/help")
-        || trimmed.starts_with("/quit")
-        || trimmed.starts_with("/exit")
-        || trimmed == "clear"
-        || trimmed == "compact"
+    let trimmed = display.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+
+    let lowered = trimmed.to_lowercase();
+    if lowered == "clear" || lowered == "compact" {
+        return true;
+    }
+
+    if let Some((command, args)) = parse_slash_command(trimmed) {
+        return is_noise_slash_command(command, args);
+    }
+
+    if looks_like_bang_command(trimmed) {
+        return true;
+    }
+
+    false
+}
+
+/// Heuristic: slash command token such as /clear, /superpowers:executing-plans.
+/// Paths like /Users/g/... are excluded (they contain an additional '/').
+fn parse_slash_command(text: &str) -> Option<(&str, &str)> {
+    if !text.starts_with('/') {
+        return None;
+    }
+
+    let first_ws = text.char_indices().find(|(_, c)| c.is_whitespace()).map(|(i, _)| i);
+    let (token, args) = match first_ws {
+        Some(i) => (&text[..i], text[i..].trim()),
+        None => (text, ""),
+    };
+
+    if token.len() <= 1 {
+        return None;
+    }
+
+    let command = &token[1..];
+    if command.contains('/') {
+        return None;
+    }
+
+    let valid = command
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == ':' || c == '.');
+
+    if !valid {
+        return None;
+    }
+
+    Some((command, args))
+}
+
+/// System commands should not become conversation titles.
+/// Slash commands with arguments are treated as meaningful by default.
+fn is_noise_slash_command(command: &str, args: &str) -> bool {
+    let cmd = command.to_ascii_lowercase();
+
+    // Common built-in/session control commands that are not user intent topics.
+    const ALWAYS_NOISE: &[&str] = &[
+        "clear", "compact", "help", "quit", "exit", "new", "resume", "status", "stats",
+        "config", "mcp", "plugin", "skills",
+    ];
+    if ALWAYS_NOISE.contains(&cmd.as_str()) {
+        return true;
+    }
+
+    // Bare slash command with no arguments is usually command/control noise.
+    if args.is_empty() {
+        return true;
+    }
+
+    false
+}
+
+/// Heuristic: local shell command entered from Claude Code history, e.g. !ls, !open.
+fn looks_like_bang_command(text: &str) -> bool {
+    if !text.starts_with('!') {
+        return false;
+    }
+
+    let token = text.split_whitespace().next().unwrap_or("");
+    token.len() > 1
+}
+
+fn extract_usage_fields(message: &serde_json::Value) -> (Option<u64>, Option<u64>, Option<u64>, Option<u64>) {
+    let usage = match message.get("usage") {
+        Some(u) => u,
+        None => return (None, None, None, None),
+    };
+
+    let input_tokens = usage.get("input_tokens").and_then(|v| v.as_u64());
+    let output_tokens = usage.get("output_tokens").and_then(|v| v.as_u64());
+    let cache_creation_tokens = usage
+        .get("cache_creation_input_tokens")
+        .and_then(|v| v.as_u64());
+    let cache_read_tokens = usage
+        .get("cache_read_input_tokens")
+        .and_then(|v| v.as_u64());
+
+    (
+        input_tokens,
+        output_tokens,
+        cache_creation_tokens,
+        cache_read_tokens,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_noise_display;
+
+    #[test]
+    fn test_is_noise_display_for_system_commands() {
+        assert!(is_noise_display("/clear"));
+        assert!(is_noise_display("/resume "));
+        assert!(is_noise_display("/new"));
+        assert!(is_noise_display("/new my-topic"));
+        assert!(is_noise_display("/status"));
+        assert!(is_noise_display("!ls"));
+        assert!(is_noise_display("!open /tmp"));
+    }
+
+    #[test]
+    fn test_is_noise_display_for_meaningful_slash_inputs() {
+        assert!(!is_noise_display(
+            "/superpowers:executing-plans docs/plans/2026-03-01-whole-repo-refactor-implementation.md"
+        ));
+        assert!(!is_noise_display(
+            "/writing-plans docs/plans/2026-03-01-whole-repo-refactor-design.md"
+        ));
+        assert!(!is_noise_display("/baymax 帮我整理一下这份方案"));
+    }
+
+    #[test]
+    fn test_is_noise_display_for_real_topics() {
+        assert!(!is_noise_display("继续完成所有的任务"));
+        assert!(!is_noise_display("How do we handle auth token refresh?"));
+        assert!(!is_noise_display("/Users/g/Github/ccem/docs"));
+        assert!(!is_noise_display("I typed /clear but this is a sentence"));
+    }
 }

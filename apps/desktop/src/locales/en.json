@@ -347,9 +347,17 @@
     "expandPlan": "Expand All",
     "collapsePlan": "Collapse",
     "copyCode": "Copy",
+    "copyMessage": "Copy Message",
     "copied": "Copied",
     "resume": "Resume",
-    "resumed": "Resumed ✓"
+    "resumed": "Resumed ✓",
+    "export": "Export JSON",
+    "exported": "Conversation exported",
+    "exportFailed": "Export failed",
+    "sessionId": "Session ID",
+    "tokensTotal": "Total Tokens",
+    "tokensInput": "Input",
+    "tokensOutput": "Output"
   },
   "sideRail": {
     "dashboard": "Dashboard",
