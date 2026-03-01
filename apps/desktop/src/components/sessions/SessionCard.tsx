@@ -49,6 +49,8 @@ export function SessionCard({ session, onFocus, onMinimize, onClose, confirmingC
     return path.split('/').pop() || path;
   };
 
+  const clientLabel = session.client === 'codex' ? 'Codex' : 'Claude';
+
   return (
     <Card className="p-4 interactive-card card-stagger">
       <div className="flex items-start justify-between mb-3">
@@ -60,12 +62,17 @@ export function SessionCard({ session, onFocus, onMinimize, onClose, confirmingC
             </h3>
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span className="glass-subtle rounded-md px-2 py-0.5 text-[10px] uppercase tracking-wide font-medium">
+              {clientLabel}
+            </span>
             <span className="glass-subtle rounded-md px-2 py-0.5 text-xs font-medium">
               {session.envName}
             </span>
-            <span className="glass-subtle rounded-md px-2 py-0.5 text-xs font-medium">
-              {session.permMode}
-            </span>
+            {session.client === 'claude' && (
+              <span className="glass-subtle rounded-md px-2 py-0.5 text-xs font-medium">
+                {session.permMode}
+              </span>
+            )}
           </div>
         </div>
       </div>

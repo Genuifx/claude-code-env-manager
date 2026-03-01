@@ -1,8 +1,20 @@
-import { useState, useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import bash from 'react-syntax-highlighter/dist/esm/languages/prism/bash';
+import diff from 'react-syntax-highlighter/dist/esm/languages/prism/diff';
+import go from 'react-syntax-highlighter/dist/esm/languages/prism/go';
+import javascript from 'react-syntax-highlighter/dist/esm/languages/prism/javascript';
+import json from 'react-syntax-highlighter/dist/esm/languages/prism/json';
+import markdown from 'react-syntax-highlighter/dist/esm/languages/prism/markdown';
+import python from 'react-syntax-highlighter/dist/esm/languages/prism/python';
+import rust from 'react-syntax-highlighter/dist/esm/languages/prism/rust';
+import sql from 'react-syntax-highlighter/dist/esm/languages/prism/sql';
+import tsx from 'react-syntax-highlighter/dist/esm/languages/prism/tsx';
+import typescript from 'react-syntax-highlighter/dist/esm/languages/prism/typescript';
+import yaml from 'react-syntax-highlighter/dist/esm/languages/prism/yaml';
 import { Check, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
@@ -12,6 +24,32 @@ interface MarkdownRendererProps {
   className?: string;
   /** "user" adapts colors for the blue user bubble background */
   variant?: 'default' | 'user';
+}
+const REGISTERED_LANGUAGES: Array<[string, unknown]> = [
+  ['bash', bash],
+  ['sh', bash],
+  ['shell', bash],
+  ['diff', diff],
+  ['go', go],
+  ['javascript', javascript],
+  ['js', javascript],
+  ['json', json],
+  ['markdown', markdown],
+  ['md', markdown],
+  ['python', python],
+  ['py', python],
+  ['rust', rust],
+  ['rs', rust],
+  ['sql', sql],
+  ['typescript', typescript],
+  ['ts', typescript],
+  ['tsx', tsx],
+  ['yaml', yaml],
+  ['yml', yaml],
+];
+
+for (const [name, language] of REGISTERED_LANGUAGES) {
+  SyntaxHighlighter.registerLanguage(name, language as never);
 }
 
 function CopyButton({ text, dark = false }: { text: string; dark?: boolean }) {

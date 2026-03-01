@@ -1340,6 +1340,20 @@
   animation: msg-fade-in var(--duration-fast) var(--ease-default) both;
 }
 
+/* Virtualized-like paint skipping for long history timelines */
+.history-msg-virtualized,
+.history-item-virtualized {
+  content-visibility: auto;
+}
+
+.history-msg-virtualized {
+  contain-intrinsic-size: 280px;
+}
+
+.history-item-virtualized {
+  contain-intrinsic-size: 56px;
+}
+
 /* === Card Remove Animation === */
 @keyframes card-remove {
   0% { opacity: 1; transform: scale(1); }

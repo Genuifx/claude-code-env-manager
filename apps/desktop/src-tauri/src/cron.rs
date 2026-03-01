@@ -164,7 +164,11 @@ fn append_run(task_id: &str, run: CronTaskRun) -> Result<(), String> {
     write_runs(task_id, &runs)
 }
 
-fn update_run(task_id: &str, run_id: &str, updater: impl FnOnce(&mut CronTaskRun)) -> Result<(), String> {
+fn update_run(
+    task_id: &str,
+    run_id: &str,
+    updater: impl FnOnce(&mut CronTaskRun),
+) -> Result<(), String> {
     let mut runs = read_runs(task_id)?;
     if let Some(r) = runs.iter_mut().find(|r| r.id == run_id) {
         updater(r);
@@ -636,7 +640,10 @@ pub fn add_cron_task(
     // Validate cron expression (must be 5 fields)
     let fields: Vec<&str> = cron_expression.split_whitespace().collect();
     if fields.len() != 5 {
-        return Err("Invalid cron expression: must have exactly 5 fields (minute hour day month weekday)".to_string());
+        return Err(
+            "Invalid cron expression: must have exactly 5 fields (minute hour day month weekday)"
+                .to_string(),
+        );
     }
 
     let now = chrono::Utc::now().to_rfc3339();
@@ -778,7 +785,10 @@ pub fn list_cron_templates() -> Vec<CronTemplate> {
 }
 
 #[tauri::command]
-pub fn get_cron_next_runs(cron_expression: String, count: Option<usize>) -> Result<Vec<String>, String> {
+pub fn get_cron_next_runs(
+    cron_expression: String,
+    count: Option<usize>,
+) -> Result<Vec<String>, String> {
     let fields: Vec<&str> = cron_expression.split_whitespace().collect();
     if fields.len() != 5 {
         return Err("Invalid cron expression: must have exactly 5 fields".to_string());
@@ -798,9 +808,7 @@ fn get_user_path() -> String {
         .output();
 
     match output {
-        Ok(out) if out.status.success() => {
-            String::from_utf8_lossy(&out.stdout).trim().to_string()
-        }
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
         _ => std::env::var("PATH").unwrap_or_default(),
     }
 }
@@ -844,10 +852,18 @@ pub fn generate_cron_task_stream(app: AppHandle, query: String) {
             if let Some(env_name) = &cfg.current {
                 if let Some(env) = cfg.registries.get(env_name) {
                     let decrypted = config::get_env_with_decrypted_key(env);
-                    if let Some(url) = &decrypted.base_url { cmd.env("ANTHROPIC_BASE_URL", url); }
-                    if let Some(key) = &decrypted.api_key { cmd.env("ANTHROPIC_API_KEY", key); }
-                    if let Some(model) = &decrypted.model { cmd.env("ANTHROPIC_MODEL", model); }
-                    if let Some(small) = &decrypted.small_model { cmd.env("ANTHROPIC_SMALL_FAST_MODEL", small); }
+                    if let Some(url) = &decrypted.base_url {
+                        cmd.env("ANTHROPIC_BASE_URL", url);
+                    }
+                    if let Some(key) = &decrypted.api_key {
+                        cmd.env("ANTHROPIC_API_KEY", key);
+                    }
+                    if let Some(model) = &decrypted.model {
+                        cmd.env("ANTHROPIC_MODEL", model);
+                    }
+                    if let Some(small) = &decrypted.small_model {
+                        cmd.env("ANTHROPIC_SMALL_FAST_MODEL", small);
+                    }
                 }
             }
         }

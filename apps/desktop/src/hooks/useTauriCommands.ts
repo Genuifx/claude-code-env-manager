@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { useAppStore, type Environment, type Session, type ArrangeLayout, type InstalledSkill, type CronTask, type CronTaskRun, type CronTemplate } from '@/store';
+import { useAppStore, type Environment, type Session, type ArrangeLayout, type InstalledSkill, type CronTask, type CronTaskRun, type CronTemplate, type LaunchClient } from '@/store';
 import { useCallback } from 'react';
 import { toast } from 'sonner';
 
@@ -13,6 +13,7 @@ interface TauriEnvConfig {
 interface TauriSession {
   id: string;
   pid?: number;
+  client?: string;
   env_name: string;
   perm_mode: string;
   working_dir: string;
@@ -49,6 +50,10 @@ interface TauriAppConfig {
   recent: TauriRecentProject[];
   vscodeProjects: TauriVSCodeProject[];
   jetbrainsProjects: TauriJetBrainsProject[];
+}
+
+function normalizeLaunchClient(client?: string): LaunchClient {
+  return client?.toLowerCase() === 'codex' ? 'codex' : 'claude';
 }
 
 export function useTauriCommands() {
@@ -176,7 +181,11 @@ export function useTauriCommands() {
     }
   }, [loadEnvironments, setLoading, setError]);
 
-  const launchClaudeCode = useCallback(async (workingDir?: string, resumeSessionId?: string) => {
+  const launchClaudeCode = useCallback(async (
+    workingDir?: string,
+    resumeSessionId?: string,
+    client: LaunchClient = 'claude',
+  ) => {
     setLoading(true);
     try {
       const workDir = workingDir || selectedWorkingDir || null;
@@ -185,11 +194,13 @@ export function useTauriCommands() {
         permMode: permissionMode,
         workingDir: workDir,
         resumeSessionId: resumeSessionId || null,
+        client,
       });
 
       // Convert Tauri session to frontend session
       const session: Session = {
         id: tauriSession.id,
+        client: normalizeLaunchClient(tauriSession.client),
         envName: tauriSession.env_name,
         workingDir: tauriSession.working_dir,
         pid: tauriSession.pid,
@@ -211,7 +222,8 @@ export function useTauriCommands() {
 
       setError(null);
     } catch (err) {
-      setError(`Failed to launch Claude Code: ${err}`);
+      const clientLabel = client === 'codex' ? 'Codex' : 'Claude Code';
+      setError(`Failed to launch ${clientLabel}: ${err}`);
     } finally {
       setLoading(false);
     }
@@ -222,6 +234,7 @@ export function useTauriCommands() {
       const tauriSessions = await invoke<TauriSession[]>('list_sessions');
       const sessions: Session[] = tauriSessions.map((s) => ({
         id: s.id,
+        client: normalizeLaunchClient(s.client),
         envName: s.env_name,
         workingDir: s.working_dir,
         pid: s.pid,
@@ -378,6 +391,14 @@ export function useTauriCommands() {
     }
   }, []);
 
+  const checkCodexInstalled = useCallback(async (): Promise<boolean> => {
+    try {
+      return await invoke<boolean>('check_codex_installed');
+    } catch {
+      return false;
+    }
+  }, []);
+
   const loadInstalledSkills = useCallback(async () => {
     try {
       const skills = await invoke<InstalledSkill[]>('list_installed_skills');
@@ -501,6 +522,7 @@ export function useTauriCommands() {
     loadFromRemote,
     arrangeSessions,
     checkArrangeSupport,
+    checkCodexInstalled,
     loadInstalledSkills,
     loadCronTasks,
     addCronTask,

@@ -1,16 +1,14 @@
 // apps/desktop/src/pages/Analytics.tsx
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef, useTransition } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { TrendingUp, TrendingDown, BarChart3, DollarSign, Flame, RefreshCw } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { EmptyState, ErrorBanner } from '@/components/ui/EmptyState';
 import { cn } from '@/lib/utils';
-import {
-  TokenChart,
-  ModelDistribution,
-  HeatmapCalendar,
-} from '@/components/analytics';
-import { DailyTokenBar } from '@/components/analytics';
+import { TokenChart } from '@/components/analytics/TokenChart';
+import { ModelDistribution } from '@/components/analytics/ModelDistribution';
+import { HeatmapCalendar } from '@/components/analytics/HeatmapCalendar';
+import { DailyTokenBar } from '@/components/analytics/DailyTokenBar';
 import { useAppStore } from '@/store';
 import {
   generateMockUsageStats,
@@ -20,8 +18,10 @@ import { useLocale } from '../locales';
 import { AnalyticsSkeleton } from '@/components/ui/skeleton-states';
 import { useCountUp } from '@/hooks/useCountUp';
 import type { ChartDataPoint, DailyActivity, Milestone, TokenUsageWithCost, UsageStats } from '@/types/analytics';
+import { shallow } from 'zustand/shallow';
 
 type TimeGranularity = 'hour' | 'day' | 'week' | 'month';
+type UsageSourceFilter = 'all' | 'claude' | 'codex';
 
 /* ─── NextMilestone ──────────────────────────────────────────────── */
 
@@ -91,8 +91,26 @@ function NextMilestone({ milestones }: { milestones: Milestone[] }) {
 
 export function Analytics() {
   const { t, lang } = useLocale();
-  const { usageStats, milestones, continuousUsageDays, isLoadingStats, setUsageStats, setMilestones, setContinuousUsageDays } =
-    useAppStore();
+  const {
+    usageStats,
+    milestones,
+    continuousUsageDays,
+    isLoadingStats,
+    setUsageStats,
+    setMilestones,
+    setContinuousUsageDays,
+  } = useAppStore(
+    (state) => ({
+      usageStats: state.usageStats,
+      milestones: state.milestones,
+      continuousUsageDays: state.continuousUsageDays,
+      isLoadingStats: state.isLoadingStats,
+      setUsageStats: state.setUsageStats,
+      setMilestones: state.setMilestones,
+      setContinuousUsageDays: state.setContinuousUsageDays,
+    }),
+    shallow
+  );
 
   // Granularity state lives here and is passed down to TokenChart
   const [granularity, setGranularity] = useState<TimeGranularity>('day');
@@ -105,25 +123,33 @@ export function Analytics() {
 
   // Refreshing state for the manual refresh button
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [usageSource, setUsageSource] = useState<UsageSourceFilter>('all');
+  const requestSeqRef = useRef(0);
+  const [, startTransition] = useTransition();
 
   // Dynamic date locale based on current language
   const dateLocale = lang === 'zh' ? 'zh-CN' : 'en-US';
 
   // Load real data from Tauri backend, fall back to mock only if it fails
-  const loadRealData = async () => {
+  const loadRealData = useCallback(async () => {
+    const requestSeq = ++requestSeqRef.current;
     try {
-      const stats = await invoke<UsageStats>('get_usage_stats');
+      setLoadError(false);
+      const source = usageSource === 'all' ? null : usageSource;
+      const [stats, days] = await Promise.all([
+        invoke<UsageStats>('get_usage_stats', { source }),
+        invoke<number>('get_continuous_usage_days', { source }).catch(() => 0),
+      ]);
+
+      if (requestSeq !== requestSeqRef.current) {
+        return;
+      }
+
       setUsageStats(stats);
       setIsUsingMockData(false);
 
       // Load continuous usage days
-      let days = 0;
-      try {
-        days = await invoke<number>('get_continuous_usage_days');
-        setContinuousUsageDays(days);
-      } catch {
-        setContinuousUsageDays(0);
-      }
+      setContinuousUsageDays(days);
 
       // Generate milestones from real data
       const totalTokens = stats.total.inputTokens + stats.total.outputTokens + stats.total.cacheReadTokens + stats.total.cacheCreationTokens;
@@ -161,8 +187,12 @@ export function Analytics() {
         },
       ]);
     } catch (err) {
+      if (requestSeq !== requestSeqRef.current) {
+        return;
+      }
       console.error('Failed to load analytics data:', err);
-      if (import.meta.env.DEV && !usageStats) {
+      const hasExistingStats = useAppStore.getState().usageStats !== null;
+      if (import.meta.env.DEV && !hasExistingStats) {
         // Dev-only fallback to mock data
         setUsageStats(generateMockUsageStats());
         setMilestones(generateMockMilestones());
@@ -172,7 +202,13 @@ export function Analytics() {
         setLoadError(true);
       }
     }
-  };
+  }, [
+    setUsageStats,
+    setContinuousUsageDays,
+    setMilestones,
+    t,
+    usageSource,
+  ]);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -182,7 +218,7 @@ export function Analytics() {
 
   useEffect(() => {
     loadRealData();
-  }, []);
+  }, [loadRealData]);
 
   // FTUE: mark analytics as seen on first visit
   useEffect(() => {
@@ -403,6 +439,28 @@ export function Analytics() {
 
       {/* Hero Stats Card */}
       <div className="stat-card glass-noise px-5 py-4">
+        <div className="flex justify-start mb-3">
+          <div className="flex items-center gap-0.5 p-0.5 rounded-lg glass-subtle">
+            {(['all', 'claude', 'codex'] as UsageSourceFilter[]).map((source) => (
+              <button
+                key={source}
+                type="button"
+                onClick={() => startTransition(() => setUsageSource(source))}
+                className={cn(
+                  'px-3 h-7 text-xs rounded-md transition-all duration-150',
+                  usageSource === source
+                    ? 'seg-active text-foreground'
+                    : 'seg-hover text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {source === 'all' && t('analytics.sourceAll')}
+                {source === 'claude' && t('analytics.sourceClaude')}
+                {source === 'codex' && t('analytics.sourceCodex')}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Top: Hero number + trend (inline) */}
         <div className="flex items-baseline gap-3 mb-3">
           <div
@@ -475,12 +533,12 @@ export function Analytics() {
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-0.5 p-0.5 rounded-lg glass-subtle">
               {granularityOptions.map(({ key, label }) => (
-                <button
-                  key={key}
-                  onClick={() => setGranularity(key)}
-                  className={cn(
-                    'px-3 h-7 text-xs rounded-md transition-all duration-150',
-                    granularity === key
+                  <button
+                    key={key}
+                    onClick={() => startTransition(() => setGranularity(key))}
+                    className={cn(
+                      'px-3 h-7 text-xs rounded-md transition-all duration-150',
+                      granularity === key
                       ? 'seg-active text-foreground'
                       : 'text-muted-foreground seg-hover hover:text-foreground'
                   )}

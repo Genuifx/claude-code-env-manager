@@ -4,6 +4,7 @@ import { useAppStore } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useLocale } from '@/locales';
 import { cn } from '@/lib/utils';
+import { shallow } from 'zustand/shallow';
 
 interface LiveSessionsProps {
   onNavigate?: (tab: string) => void;
@@ -21,7 +22,10 @@ function getEnvDotColor(envName: string): string {
 
 export function LiveSessions({ onNavigate: _onNavigate }: LiveSessionsProps) {
   const { t } = useLocale();
-  const { sessions } = useAppStore();
+  const { sessions } = useAppStore(
+    (state) => ({ sessions: state.sessions }),
+    shallow
+  );
   const { focusSession, closeSession, arrangeSessions } = useTauriCommands();
 
   const runningSessions = sessions.filter(s => s.status === 'running');
@@ -79,7 +83,12 @@ export function LiveSessions({ onNavigate: _onNavigate }: LiveSessionsProps) {
                   <div className={cn('w-2 h-2 rounded-full flex-shrink-0 status-running', getEnvDotColor(session.envName))} />
                   <div className="min-w-0">
                     <div className="text-sm font-medium text-foreground truncate">
-                      {session.envName}
+                      <span className="flex items-center gap-1.5">
+                        <span>{session.envName}</span>
+                        <span className="inline-flex items-center text-[9px] uppercase tracking-wide text-muted-foreground/80 rounded-md bg-white/[0.04] px-1.5 py-0.5">
+                          {session.client === 'codex' ? 'Codex' : 'Claude'}
+                        </span>
+                      </span>
                     </div>
                     <div className="text-2xs text-muted-foreground/50 truncate flex items-center gap-1.5">
                       <span>{workingDirName}</span>

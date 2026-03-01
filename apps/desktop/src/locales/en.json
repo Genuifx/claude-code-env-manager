@@ -240,7 +240,10 @@
     "milestone100mTitle": "100M Tokens",
     "milestone100mDesc": "Accumulated 100M tokens",
     "dailyTokens": "Daily Tokens",
-    "allMilestonesAchieved": "All milestones achieved!"
+    "allMilestonesAchieved": "All milestones achieved!",
+    "sourceAll": "All",
+    "sourceClaude": "Claude",
+    "sourceCodex": "Codex"
   },
   "skills": {
     "subtitle": "Discover, install and manage Claude Code skill extensions",
@@ -349,8 +352,12 @@
     "copyCode": "Copy",
     "copyMessage": "Copy Message",
     "copied": "Copied",
+    "sourceAll": "All",
+    "sourceClaude": "Claude",
+    "sourceCodex": "Codex",
     "resume": "Resume",
     "resumed": "Resumed ✓",
+    "resumeUnsupportedCodex": "Codex resume is not supported yet",
     "export": "Export JSON",
     "exported": "Conversation exported",
     "exportFailed": "Export failed",

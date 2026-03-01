@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 import zh from './zh.json';
 import en from './en.json';
 
@@ -20,19 +20,21 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
     () => (localStorage.getItem('ccem-locale') as LocaleKey) || 'zh'
   );
 
-  const setLang = (newLang: LocaleKey) => {
+  const setLang = useCallback((newLang: LocaleKey) => {
     setLangState(newLang);
     localStorage.setItem('ccem-locale', newLang);
-  };
+  }, []);
 
-  const t = (key: string): string => {
+  const t = useCallback((key: string): string => {
     const [namespace, ...rest] = key.split('.');
     const msgKey = rest.join('.');
     return messages[lang]?.[namespace]?.[msgKey] || key;
-  };
+  }, [lang]);
+
+  const value = useMemo(() => ({ t, lang, setLang }), [t, lang, setLang]);
 
   return (
-    <LocaleContext.Provider value={{ t, lang, setLang }}>
+    <LocaleContext.Provider value={value}>
       {children}
     </LocaleContext.Provider>
   );

@@ -1,9 +1,9 @@
 use crate::crypto;
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
-use std::path::PathBuf;
-use fs2::FileExt;  // 文件锁支持
+use std::path::PathBuf; // 文件锁支持
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct EnvConfig {
@@ -74,7 +74,7 @@ pub struct VSCodeProject {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct JetBrainsProject {
     pub path: String,
-    pub ide: String,  // e.g., "WebStorm", "IntelliJ IDEA", "PyCharm"
+    pub ide: String, // e.g., "WebStorm", "IntelliJ IDEA", "PyCharm"
     #[serde(rename = "syncedAt")]
     pub synced_at: String,
 }
@@ -173,14 +173,15 @@ pub fn read_config() -> Result<CcemConfig, String> {
         .open(&config_path)
         .map_err(|e| format!("Failed to open config for locking: {}", e))?;
 
-    lock_file.lock_shared()
+    lock_file
+        .lock_shared()
         .map_err(|e| format!("Failed to acquire read lock: {}", e))?;
 
-    let content = fs::read_to_string(&config_path)
-        .map_err(|e| format!("Failed to read config: {}", e))?;
+    let content =
+        fs::read_to_string(&config_path).map_err(|e| format!("Failed to read config: {}", e))?;
 
-    let config = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse config: {}", e))?;
+    let config =
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))?;
 
     // 锁会在 lock_file drop 时自动释放
     Ok(config)
@@ -205,12 +206,12 @@ pub fn write_config(config: &CcemConfig) -> Result<(), String> {
         .map_err(|e| format!("Failed to open config for locking: {}", e))?;
 
     // 加排他锁
-    lock_file.lock_exclusive()
+    lock_file
+        .lock_exclusive()
         .map_err(|e| format!("Failed to acquire lock: {}", e))?;
 
     // 写入临时文件
-    fs::write(&temp_path, &content)
-        .map_err(|e| format!("Failed to write temp config: {}", e))?;
+    fs::write(&temp_path, &content).map_err(|e| format!("Failed to write temp config: {}", e))?;
 
     // 原子替换（rename 是原子操作）
     fs::rename(&temp_path, &config_path)
@@ -249,7 +250,10 @@ pub fn write_app_config(config: &AppConfig) -> Result<(), String> {
 pub fn get_env_with_decrypted_key(env: &EnvConfig) -> EnvConfig {
     EnvConfig {
         base_url: env.base_url.clone(),
-        api_key: env.api_key.as_ref().map(|k| crypto::decrypt(k).unwrap_or_else(|_| k.clone())),
+        api_key: env
+            .api_key
+            .as_ref()
+            .map(|k| crypto::decrypt(k).unwrap_or_else(|_| k.clone())),
         model: env.model.clone(),
         small_model: env.small_model.clone(),
     }
@@ -281,8 +285,12 @@ pub struct DesktopSettings {
     pub default_mode: Option<String>,
 }
 
-fn default_theme() -> String { "system".to_string() }
-fn default_close_to_tray() -> bool { true }
+fn default_theme() -> String {
+    "system".to_string()
+}
+fn default_close_to_tray() -> bool {
+    true
+}
 
 impl Default for DesktopSettings {
     fn default() -> Self {
@@ -305,8 +313,8 @@ pub fn read_settings() -> Result<DesktopSettings, String> {
     if !path.exists() {
         return Ok(DesktopSettings::default());
     }
-    let content = fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read settings: {}", e))?;
+    let content =
+        fs::read_to_string(&path).map_err(|e| format!("Failed to read settings: {}", e))?;
     serde_json::from_str(&content).map_err(|e| format!("Failed to parse settings: {}", e))
 }
 
@@ -314,8 +322,7 @@ pub fn write_settings(settings: &DesktopSettings) -> Result<(), String> {
     ensure_ccem_dir().map_err(|e| format!("Failed to create config dir: {}", e))?;
     let content = serde_json::to_string_pretty(settings)
         .map_err(|e| format!("Failed to serialize settings: {}", e))?;
-    fs::write(get_settings_path(), content)
-        .map_err(|e| format!("Failed to write settings: {}", e))
+    fs::write(get_settings_path(), content).map_err(|e| format!("Failed to write settings: {}", e))
 }
 
 /// Create environment config with encrypted API key
