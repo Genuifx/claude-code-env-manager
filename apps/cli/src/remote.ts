@@ -2,10 +2,11 @@ import crypto from 'crypto';
 import chalk from 'chalk';
 import Conf from 'conf';
 import type { EnvConfig } from '@ccem/core';
-import { encrypt } from '@ccem/core';
+import { encrypt, getCcemConfigDir } from '@ccem/core';
 
 const config = new Conf({
   projectName: 'claude-code-env-manager',
+  cwd: getCcemConfigDir(),  // 使用统一的配置目录
 });
 
 /**
@@ -55,14 +56,20 @@ interface LoadResult {
 
 /**
  * 从远程 URL 加载环境配置
+ * @returns 本次导入的环境列表
  */
-export const loadFromRemote = async (url: string, secret: string): Promise<void> => {
+export const loadFromRemote = async (url: string, secret: string): Promise<LoadResult[]> => {
   // 1. 发送请求
   console.log(chalk.gray('Fetching from remote...'));
 
   let response: Response;
   try {
-    response = await fetch(url);
+    // 使用 X-CCEM-Key header 传递密钥（更安全）
+    response = await fetch(url, {
+      headers: {
+        'X-CCEM-Key': secret,
+      },
+    });
   } catch (err) {
     console.error(chalk.red('Error: Failed to connect to server'));
     console.error(chalk.gray((err as Error).message));
@@ -151,4 +158,7 @@ export const loadFromRemote = async (url: string, secret: string): Promise<void>
     }
   }
   console.log(chalk.gray("\nRun 'ccem ls' to see all environments."));
+
+  // 7. 返回本次导入结果
+  return results;
 };

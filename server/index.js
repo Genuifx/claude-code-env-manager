@@ -100,11 +100,18 @@ app.set('trust proxy', 1);
 // ============ API 路由 ============
 app.get('/api/env', (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
-  const key = req.query.key;
+
+  // 优先从 header 读取密钥（安全），兼容 query 参数（过渡期）
+  const key = req.headers['x-ccem-key'] || req.query.key;
 
   if (!key) {
     log('FAIL', ip, 'Missing key parameter');
     return res.status(400).json({ error: 'Missing key parameter' });
+  }
+
+  // 如果使用了 query 参数，记录 deprecation 警告
+  if (req.query.key && !req.headers['x-ccem-key']) {
+    log('WARN', ip, 'Using deprecated query parameter for key (use X-CCEM-Key header instead)');
   }
 
   // 热加载配置文件

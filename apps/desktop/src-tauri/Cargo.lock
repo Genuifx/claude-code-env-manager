@@ -478,6 +478,7 @@ dependencies = [
  "cbc",
  "chrono",
  "dirs 5.0.1",
+ "fs2",
  "hex",
  "quick-xml 0.31.0",
  "rand 0.8.5",
@@ -1245,6 +1246,16 @@ checksum = "db9c27b72f19a99a895f8ca89e2d26e4ef31013376e56fdafef697627306c3e4"
 dependencies = [
  "nom",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "fs2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+dependencies = [
+ "libc",
+ "winapi",
 ]
 
 [[package]]
