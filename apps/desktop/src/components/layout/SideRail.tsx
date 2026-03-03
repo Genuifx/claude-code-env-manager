@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
-import { Home, Terminal, Globe, BarChart3, Sparkles, Settings, MessageSquare, Clock } from 'lucide-react';
+import { Home, Terminal, Globe, BarChart3, Sparkles, Settings, MessageSquare, Clock, Bug } from 'lucide-react';
 
 interface SideRailProps {
   activeTab: string;
@@ -40,12 +40,13 @@ const navGroupDefs: NavGroupDef[] = [
     titleKey: 'sideRail.groupInsights',
     items: [
       { id: 'analytics', labelKey: 'sideRail.analytics', icon: BarChart3, shortcut: '7' },
+      { id: 'proxy-debug', labelKey: 'sideRail.proxyDebug', icon: Bug, shortcut: '8' },
     ],
   },
 ];
 
 const bottomItemDefs: NavItemDef[] = [
-  { id: 'settings', labelKey: 'sideRail.settings', icon: Settings, shortcut: '8' },
+  { id: 'settings', labelKey: 'sideRail.settings', icon: Settings, shortcut: '9' },
 ];
 
 function NavButton({

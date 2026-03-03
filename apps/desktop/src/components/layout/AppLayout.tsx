@@ -13,7 +13,11 @@ export function AppLayout({ children, activeTab, onTabChange, pageActions }: App
   const { t } = useLocale();
   const scrollEndTimerRef = useRef<number | null>(null);
   const isDashboard = activeTab === 'dashboard';
-  const pageTitle = isDashboard ? undefined : (t(`sideRail.${activeTab}`) || t('sideRail.dashboard'));
+  const titleKeyMap: Record<string, string> = {
+    'proxy-debug': 'sideRail.proxyDebug',
+  };
+  const pageTitleKey = titleKeyMap[activeTab] || `sideRail.${activeTab}`;
+  const pageTitle = isDashboard ? undefined : (t(pageTitleKey) || t('sideRail.dashboard'));
 
   const subtitleKeyMap: Record<string, string> = {
     dashboard: 'dashboard.subtitle',
@@ -23,6 +27,7 @@ export function AppLayout({ children, activeTab, onTabChange, pageActions }: App
     history: 'history.subtitle',
     analytics: 'analytics.subtitle',
     cron: 'cron.subtitle',
+    'proxy-debug': 'proxyDebug.subtitle',
     settings: 'settings.subtitle',
   };
   const subtitle = subtitleKeyMap[activeTab] ? t(subtitleKeyMap[activeTab]) : undefined;

@@ -3,6 +3,7 @@ export { CronTasks } from './CronTasks';
 export { Dashboard } from './Dashboard';
 export { Environments } from './Environments';
 export { History } from './History';
+export { ProxyDebug } from './ProxyDebug';
 export { Sessions } from './Sessions';
 export { Settings } from './Settings';
 export { Skills } from './Skills';

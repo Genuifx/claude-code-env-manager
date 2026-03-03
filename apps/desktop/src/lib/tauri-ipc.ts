@@ -47,6 +47,16 @@ export interface TauriCommands {
   remove_favorite: [{ path: string }, void];
   add_recent: [{ path: string }, void];
   save_settings: [{ settings: DesktopSettings }, void];
+  get_proxy_debug_state: [void, ProxyDebugState];
+  set_proxy_debug_enabled: [{ enabled: boolean }, ProxyDebugState];
+  update_proxy_debug_config: [
+    { codexUpstreamBaseUrl: string; recordMode?: string | null },
+    ProxyDebugState
+  ];
+  list_proxy_traffic: [{ limit: number; cursor?: string | null }, ProxyTrafficPage];
+  get_proxy_traffic_detail: [{ id: string }, ProxyTrafficDetail];
+  clear_proxy_traffic: [void, void];
+  open_text_in_vscode: [{ content: string; suggestedName?: string | null }, string];
 
   // 会话管理
   launch_claude_code: [
@@ -176,6 +186,74 @@ export interface DesktopSettings {
   startMinimized: boolean;
   closeToTray: boolean;
   defaultMode?: string;
+  proxyDebugEnabled?: boolean;
+  proxyDebugCodexUpstreamBaseUrl?: string;
+  proxyDebugLogMaxBytes?: number;
+  proxyDebugRecordMode?: string;
+}
+
+export interface ProxyDebugState {
+  enabled: boolean;
+  running: boolean;
+  listenPort?: number;
+  baseUrl?: string;
+  codexUpstreamBaseUrl: string;
+  logMaxBytes: number;
+  recordMode: string;
+  routeCount: number;
+  metrics: ProxyMetrics;
+}
+
+export interface ProxyMetrics {
+  totalRequests: number;
+  successRequests: number;
+  failedRequests: number;
+  routeNotFoundRequests: number;
+  avgResponseMs: number;
+  activeConnections: number;
+}
+
+export interface ProxyTrafficPage {
+  items: ProxyTrafficItem[];
+  nextCursor?: string;
+}
+
+export interface ProxyTrafficItem {
+  id: string;
+  timestamp: number;
+  client: string;
+  sessionId: string;
+  envName: string;
+  method: string;
+  path: string;
+  query?: string;
+  status: number;
+  durationMs: number;
+  requestBodySize: number;
+  responseBodySize: number;
+  promptPreview?: string;
+  logDropped: boolean;
+  responseIncomplete: boolean;
+  logPartial: boolean;
+  logDroppedBytes: number;
+  reduced?: ReducedStreamLog;
+}
+
+export interface ProxyTrafficDetail {
+  item: ProxyTrafficItem;
+  requestHeaders: Record<string, string>;
+  responseHeaders: Record<string, string>;
+  requestBody?: string;
+  responseBody?: string;
+  reduced?: ReducedStreamLog;
+}
+
+export interface ReducedStreamLog {
+  finalText: string;
+  finishReason?: string;
+  streamStatus: string;
+  firstTokenMs?: number;
+  totalStreamMs?: number;
 }
 
 export interface UsageStats {
