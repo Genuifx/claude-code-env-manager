@@ -52,6 +52,66 @@ interface TauriAppConfig {
   jetbrainsProjects: TauriJetBrainsProject[];
 }
 
+interface ProxyDebugState {
+  enabled: boolean;
+  running: boolean;
+  listenPort?: number;
+  baseUrl?: string;
+  codexUpstreamBaseUrl: string;
+  logMaxBytes: number;
+  recordMode: string;
+  routeCount: number;
+  metrics: {
+    totalRequests: number;
+    successRequests: number;
+    failedRequests: number;
+    routeNotFoundRequests: number;
+    avgResponseMs: number;
+    activeConnections: number;
+  };
+}
+
+interface ProxyTrafficItem {
+  id: string;
+  timestamp: number;
+  client: string;
+  sessionId: string;
+  envName: string;
+  method: string;
+  path: string;
+  query?: string;
+  status: number;
+  durationMs: number;
+  requestBodySize: number;
+  responseBodySize: number;
+  promptPreview?: string;
+  logDropped: boolean;
+  responseIncomplete: boolean;
+  logPartial: boolean;
+  logDroppedBytes: number;
+  reduced?: {
+    finalText: string;
+    finishReason?: string;
+    streamStatus: string;
+    firstTokenMs?: number;
+    totalStreamMs?: number;
+  };
+}
+
+interface ProxyTrafficPage {
+  items: ProxyTrafficItem[];
+  nextCursor?: string;
+}
+
+interface ProxyTrafficDetail {
+  item: ProxyTrafficItem;
+  requestHeaders: Record<string, string>;
+  responseHeaders: Record<string, string>;
+  requestBody?: string;
+  responseBody?: string;
+  reduced?: ProxyTrafficItem['reduced'];
+}
+
 function normalizeLaunchClient(client?: string): LaunchClient {
   return client?.toLowerCase() === 'codex' ? 'codex' : 'claude';
 }
@@ -499,6 +559,52 @@ export function useTauriCommands() {
     }
   }, [setDefaultWorkingDir]);
 
+  const getProxyDebugState = useCallback(async (): Promise<ProxyDebugState> => {
+    return invoke<ProxyDebugState>('get_proxy_debug_state');
+  }, []);
+
+  const setProxyDebugEnabled = useCallback(async (enabled: boolean): Promise<ProxyDebugState> => {
+    return invoke<ProxyDebugState>('set_proxy_debug_enabled', { enabled });
+  }, []);
+
+  const updateProxyDebugConfig = useCallback(async (
+    codexUpstreamBaseUrl: string,
+    recordMode?: string,
+  ): Promise<ProxyDebugState> => {
+    return invoke<ProxyDebugState>('update_proxy_debug_config', {
+      codexUpstreamBaseUrl,
+      recordMode: recordMode ?? null,
+    });
+  }, []);
+
+  const listProxyTraffic = useCallback(async (
+    limit: number,
+    cursor?: string | null,
+  ): Promise<ProxyTrafficPage> => {
+    return invoke<ProxyTrafficPage>('list_proxy_traffic', {
+      limit,
+      cursor: cursor ?? null,
+    });
+  }, []);
+
+  const getProxyTrafficDetail = useCallback(async (id: string): Promise<ProxyTrafficDetail> => {
+    return invoke<ProxyTrafficDetail>('get_proxy_traffic_detail', { id });
+  }, []);
+
+  const clearProxyTraffic = useCallback(async (): Promise<void> => {
+    await invoke('clear_proxy_traffic');
+  }, []);
+
+  const openTextInVSCode = useCallback(async (
+    content: string,
+    suggestedName?: string,
+  ): Promise<string> => {
+    return invoke<string>('open_text_in_vscode', {
+      content,
+      suggestedName: suggestedName ?? null,
+    });
+  }, []);
+
   return {
     loadEnvironments,
     loadCurrentEnv,
@@ -535,5 +641,12 @@ export function useTauriCommands() {
     listCronTemplates,
     generateCronTaskStream,
     saveDefaultWorkingDir,
+    getProxyDebugState,
+    setProxyDebugEnabled,
+    updateProxyDebugConfig,
+    listProxyTraffic,
+    getProxyTrafficDetail,
+    clearProxyTraffic,
+    openTextInVSCode,
   };
 }

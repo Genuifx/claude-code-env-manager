@@ -29,6 +29,9 @@ const HistoryPage = lazy(async () =>
 const CronTasksPage = lazy(async () =>
   import('@/pages/CronTasks').then((m) => ({ default: m.CronTasks }))
 );
+const ProxyDebugPage = lazy(async () =>
+  import('@/pages/ProxyDebug').then((m) => ({ default: m.ProxyDebug }))
+);
 
 function App() {
   const FOCUS_SYNC_INTERVAL_MS = 5000;
@@ -223,7 +226,7 @@ function App() {
     }
   }, [launchClaudeCode, launchClient]);
 
-  // Global keyboard shortcuts (Cmd+1..8 for tabs, Cmd+Enter/N for launch, Cmd+, for settings)
+  // Global keyboard shortcuts (Cmd+1..9 for tabs, Cmd+Enter/N for launch, Cmd+, for settings)
   const globalShortcuts = useMemo(() => ({
     'meta+1': () => setActiveTab('dashboard'),
     'meta+2': () => setActiveTab('sessions'),
@@ -232,7 +235,8 @@ function App() {
     'meta+5': () => setActiveTab('history'),
     'meta+6': () => setActiveTab('cron'),
     'meta+7': () => setActiveTab('analytics'),
-    'meta+8': () => setActiveTab('settings'),
+    'meta+8': () => setActiveTab('proxy-debug'),
+    'meta+9': () => setActiveTab('settings'),
     'meta+enter': () => handleLaunch(),
     'meta+n': () => handleLaunch(),
     'meta+,': () => setActiveTab('settings'),
@@ -327,6 +331,8 @@ function App() {
         return <HistoryPage />;
       case 'cron':
         return <CronTasksPage />;
+      case 'proxy-debug':
+        return <ProxyDebugPage />;
       case 'settings':
         return <Settings />;
       default:

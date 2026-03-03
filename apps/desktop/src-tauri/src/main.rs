@@ -6,6 +6,7 @@ mod config;
 mod cron;
 mod crypto;
 mod history;
+mod proxy_debug;
 mod session;
 mod skills;
 mod terminal;
@@ -18,11 +19,15 @@ use config::{
 };
 use cron::{start_cron_scheduler, CronScheduler};
 use history::{get_conversation_history, get_conversation_messages, get_conversation_segments};
+use proxy_debug::{
+    ProxyDebugManager, ProxyDebugState, ProxyTrafficDetail, ProxyTrafficPage, RegisterRouteRequest,
+};
 use session::{
     cleanup_exit_file, cleanup_stale_exit_files_except, start_session_monitor, Session,
     SessionManager,
 };
 use std::collections::HashMap;
+use std::fs;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -251,8 +256,9 @@ fn set_preferred_terminal(terminal_type: TerminalType) -> Result<(), String> {
 // ============================================
 
 #[tauri::command]
-fn launch_claude_code(
-    state: State<Arc<SessionManager>>,
+async fn launch_claude_code(
+    state: State<'_, Arc<SessionManager>>,
+    proxy_state: State<'_, Arc<ProxyDebugManager>>,
     env_name: String,
     perm_mode: Option<String>,
     working_dir: Option<String>,
@@ -287,8 +293,12 @@ fn launch_claude_code(
         }
     }
 
+    // Generate session ID first (needed for launch tracking + proxy route binding)
+    let session_id = generate_session_id();
+
     // Build environment variables map
     let mut env_vars: HashMap<String, String> = HashMap::new();
+    let mut claude_upstream_base_url: Option<String> = None;
     if client_name == "claude" {
         // Read environment configuration only for Claude launches.
         let cfg = config::read_config()?;
@@ -302,6 +312,7 @@ fn launch_claude_code(
         let env = get_env_with_decrypted_key(env_config);
 
         if let Some(url) = env.base_url {
+            claude_upstream_base_url = Some(url.clone());
             env_vars.insert("ANTHROPIC_BASE_URL".to_string(), url);
         }
         if let Some(key) = env.api_key {
@@ -312,6 +323,31 @@ fn launch_claude_code(
         }
         if let Some(small_model) = env.small_model {
             env_vars.insert("ANTHROPIC_SMALL_FAST_MODEL".to_string(), small_model);
+        }
+    }
+
+    if proxy_state.is_enabled() {
+        let upstream_base_url = if client_name == "claude" {
+            claude_upstream_base_url
+                .clone()
+                .unwrap_or_else(|| "https://api.anthropic.com".to_string())
+        } else {
+            proxy_state.codex_upstream_base_url()
+        };
+
+        let proxy_route_base_url = proxy_state
+            .register_route(RegisterRouteRequest {
+                session_id: session_id.clone(),
+                client: client_name.clone(),
+                env_name: env_name.clone(),
+                upstream_base_url,
+            })
+            .await?;
+
+        if client_name == "claude" {
+            env_vars.insert("ANTHROPIC_BASE_URL".to_string(), proxy_route_base_url);
+        } else {
+            env_vars.insert("OPENAI_BASE_URL".to_string(), proxy_route_base_url);
         }
     }
 
@@ -326,9 +362,6 @@ fn launch_claude_code(
     } else {
         "n/a".to_string()
     };
-
-    // Generate session ID first (needed for exit status tracking)
-    let session_id = generate_session_id();
 
     println!("Session ID: {}", session_id);
     println!("Work dir: {}", work_dir);
@@ -359,6 +392,7 @@ fn launch_claude_code(
         }
         Err(e) => {
             println!("Terminal launch FAILED: {}", e);
+            proxy_state.remove_session_routes(&session_id);
             return Err(e.clone());
         }
     };
@@ -393,7 +427,11 @@ fn list_sessions(state: State<Arc<SessionManager>>) -> Vec<Session> {
 }
 
 #[tauri::command]
-fn stop_session(state: State<Arc<SessionManager>>, session_id: String) -> Result<(), String> {
+fn stop_session(
+    state: State<Arc<SessionManager>>,
+    proxy_state: State<Arc<ProxyDebugManager>>,
+    session_id: String,
+) -> Result<(), String> {
     let session = state
         .get_session(&session_id)
         .ok_or_else(|| format!("Session not found: {}", session_id))?;
@@ -418,14 +456,20 @@ fn stop_session(state: State<Arc<SessionManager>>, session_id: String) -> Result
     }
 
     state.update_session_status(&session_id, "stopped");
+    proxy_state.remove_session_routes(&session_id);
     Ok(())
 }
 
 #[tauri::command]
-fn remove_session(state: State<Arc<SessionManager>>, session_id: String) {
+fn remove_session(
+    state: State<Arc<SessionManager>>,
+    proxy_state: State<Arc<ProxyDebugManager>>,
+    session_id: String,
+) {
     // Clean up exit file when removing session
     cleanup_exit_file(&session_id);
     state.remove_session(&session_id);
+    proxy_state.remove_session_routes(&session_id);
 }
 
 #[tauri::command]
@@ -453,7 +497,11 @@ fn focus_session(state: State<Arc<SessionManager>>, session_id: String) -> Resul
 }
 
 #[tauri::command]
-fn close_session(state: State<Arc<SessionManager>>, session_id: String) -> Result<(), String> {
+fn close_session(
+    state: State<Arc<SessionManager>>,
+    proxy_state: State<Arc<ProxyDebugManager>>,
+    session_id: String,
+) -> Result<(), String> {
     let session = state
         .get_session(&session_id)
         .ok_or_else(|| format!("Session not found: {}", session_id))?;
@@ -478,6 +526,7 @@ fn close_session(state: State<Arc<SessionManager>>, session_id: String) -> Resul
     // Clean up and remove session after closing
     cleanup_exit_file(&session_id);
     state.remove_session(&session_id);
+    proxy_state.remove_session_routes(&session_id);
     Ok(())
 }
 
@@ -1037,13 +1086,137 @@ fn save_settings(app: tauri::AppHandle, settings: DesktopSettings) -> Result<(),
         }
     }
 
-    // Save desktop-specific settings to settings.json
-    config::write_settings(&settings)?;
+    // Save desktop-specific settings to settings.json.
+    // Merge fields that are not part of the Settings page payload to avoid resetting
+    // proxy-debug config when users change unrelated options.
+    let mut merged_settings = config::read_settings().unwrap_or_default();
+    merged_settings.theme = settings.theme;
+    merged_settings.auto_start = settings.auto_start;
+    merged_settings.start_minimized = settings.start_minimized;
+    merged_settings.close_to_tray = settings.close_to_tray;
+    merged_settings.default_mode = settings.default_mode;
+    config::write_settings(&merged_settings)?;
 
     if errors.is_empty() {
         Ok(())
     } else {
         Err(format!("Partial save failures: {}", errors.join("; ")))
+    }
+}
+
+#[tauri::command]
+fn get_proxy_debug_state(state: State<Arc<ProxyDebugManager>>) -> ProxyDebugState {
+    state.get_state()
+}
+
+#[tauri::command]
+async fn set_proxy_debug_enabled(
+    state: State<'_, Arc<ProxyDebugManager>>,
+    enabled: bool,
+) -> Result<ProxyDebugState, String> {
+    state.set_enabled(enabled).await
+}
+
+#[tauri::command]
+async fn update_proxy_debug_config(
+    state: State<'_, Arc<ProxyDebugManager>>,
+    codex_upstream_base_url: String,
+    record_mode: Option<String>,
+) -> Result<ProxyDebugState, String> {
+    state
+        .update_config(codex_upstream_base_url, record_mode)
+        .await
+}
+
+#[tauri::command]
+fn list_proxy_traffic(
+    state: State<Arc<ProxyDebugManager>>,
+    limit: u32,
+    cursor: Option<String>,
+) -> Result<ProxyTrafficPage, String> {
+    state.list_traffic(limit, cursor)
+}
+
+#[tauri::command]
+fn get_proxy_traffic_detail(
+    state: State<Arc<ProxyDebugManager>>,
+    id: String,
+) -> Result<ProxyTrafficDetail, String> {
+    state.get_traffic_detail(id)
+}
+
+#[tauri::command]
+fn clear_proxy_traffic(state: State<Arc<ProxyDebugManager>>) -> Result<(), String> {
+    state.clear_traffic()
+}
+
+#[tauri::command]
+fn open_text_in_vscode(content: String, suggested_name: Option<String>) -> Result<String, String> {
+    let sanitized = sanitize_filename(suggested_name.as_deref().unwrap_or("proxy-debug"));
+    let extension = if serde_json::from_str::<serde_json::Value>(&content).is_ok() {
+        "json"
+    } else {
+        "txt"
+    };
+
+    let timestamp = chrono::Utc::now().timestamp_millis();
+    let random_suffix = rand::random::<u32>();
+    let filename = format!(
+        "ccem-{}-{}-{:08x}.{}",
+        sanitized, timestamp, random_suffix, extension
+    );
+    let temp_path = std::env::temp_dir().join(filename);
+
+    fs::write(&temp_path, content)
+        .map_err(|e| format!("Failed to write temp file for VS Code: {}", e))?;
+
+    let code_result = Command::new("code")
+        .arg("-r")
+        .arg(&temp_path)
+        .spawn();
+
+    if code_result.is_ok() {
+        return Ok(temp_path.to_string_lossy().to_string());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let open_result = Command::new("open")
+            .arg("-a")
+            .arg("Visual Studio Code")
+            .arg(&temp_path)
+            .spawn();
+        if open_result.is_ok() {
+            return Ok(temp_path.to_string_lossy().to_string());
+        }
+    }
+
+    Err("Failed to open VS Code. Ensure 'code' CLI is installed and available in PATH.".to_string())
+}
+
+fn sanitize_filename(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let fallback = "proxy-debug".to_string();
+    if trimmed.is_empty() {
+        return fallback;
+    }
+
+    let sanitized: String = trimmed
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .take(40)
+        .collect();
+
+    if sanitized.is_empty() {
+        fallback
+    } else {
+        sanitized
     }
 }
 
@@ -1058,6 +1231,11 @@ fn quit_app(app: tauri::AppHandle) {
 fn main() {
     // Create SessionManager from persisted sessions (or empty if first run)
     let session_manager = Arc::new(SessionManager::load_from_disk());
+    let proxy_debug_manager = ProxyDebugManager::new(session_manager.clone())
+        .expect("failed to initialize proxy debug manager");
+    let session_manager_for_setup = session_manager.clone();
+    let proxy_manager_for_setup = proxy_debug_manager.clone();
+    let proxy_manager_for_run = proxy_debug_manager.clone();
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -1076,6 +1254,7 @@ fn main() {
 
     builder
         .manage(session_manager.clone())
+        .manage(proxy_debug_manager.clone())
         .invoke_handler(tauri::generate_handler![
             greet,
             get_environments,
@@ -1131,6 +1310,13 @@ fn main() {
             set_default_working_dir,
             get_settings,
             save_settings,
+            get_proxy_debug_state,
+            set_proxy_debug_enabled,
+            update_proxy_debug_config,
+            list_proxy_traffic,
+            get_proxy_traffic_detail,
+            clear_proxy_traffic,
+            open_text_in_vscode,
             quit_app
         ])
         .on_window_event(|window, event| {
@@ -1149,10 +1335,12 @@ fn main() {
         })
         .setup(move |app| {
             // Clean up stale exit files not belonging to any persisted session
-            cleanup_stale_exit_files_except(&session_manager);
+            cleanup_stale_exit_files_except(&session_manager_for_setup);
 
             // Validate persisted sessions against actual terminal state
-            session_manager.validate_and_reconcile();
+            session_manager_for_setup.validate_and_reconcile();
+
+            proxy_manager_for_setup.set_app_handle(app.handle().clone());
 
             // Auto-migrate configuration if needed
             if let Err(e) = config::migrate_if_needed() {
@@ -1200,7 +1388,13 @@ fn main() {
             let _ = create_tray(app.handle())?;
 
             // Start session monitor background task
-            start_session_monitor(app.handle().clone(), session_manager.clone());
+            start_session_monitor(app.handle().clone(), session_manager_for_setup.clone());
+
+            // Start proxy debug server if enabled in settings.
+            let proxy_for_boot = proxy_manager_for_setup.clone();
+            tauri::async_runtime::spawn(async move {
+                proxy_for_boot.maybe_start_on_boot().await;
+            });
 
             // Start cron scheduler background task
             let cron_scheduler = Arc::new(CronScheduler::default());
@@ -1212,13 +1406,18 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
+        .run(move |app_handle, event| {
             // macOS Dock icon click should reopen/show the main window.
             if let RunEvent::Reopen { .. } = event {
                 if let Some(window) = app_handle.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
+            } else if let RunEvent::Exit = event {
+                let proxy_for_shutdown = proxy_manager_for_run.clone();
+                tauri::async_runtime::block_on(async move {
+                    proxy_for_shutdown.shutdown().await;
+                });
             }
         });
 }

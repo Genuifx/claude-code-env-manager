@@ -283,6 +283,23 @@ pub struct DesktopSettings {
     pub close_to_tray: bool,
     #[serde(rename = "defaultMode", default)]
     pub default_mode: Option<String>,
+    #[serde(rename = "proxyDebugEnabled", default)]
+    pub proxy_debug_enabled: bool,
+    #[serde(
+        rename = "proxyDebugCodexUpstreamBaseUrl",
+        default = "default_proxy_debug_codex_upstream_base_url"
+    )]
+    pub proxy_debug_codex_upstream_base_url: String,
+    #[serde(
+        rename = "proxyDebugLogMaxBytes",
+        default = "default_proxy_debug_log_max_bytes"
+    )]
+    pub proxy_debug_log_max_bytes: u64,
+    #[serde(
+        rename = "proxyDebugRecordMode",
+        default = "default_proxy_debug_record_mode"
+    )]
+    pub proxy_debug_record_mode: String,
 }
 
 fn default_theme() -> String {
@@ -290,6 +307,15 @@ fn default_theme() -> String {
 }
 fn default_close_to_tray() -> bool {
     true
+}
+fn default_proxy_debug_codex_upstream_base_url() -> String {
+    "https://api.openai.com/v1".to_string()
+}
+fn default_proxy_debug_log_max_bytes() -> u64 {
+    500 * 1024 * 1024
+}
+fn default_proxy_debug_record_mode() -> String {
+    "full".to_string()
 }
 
 impl Default for DesktopSettings {
@@ -300,6 +326,10 @@ impl Default for DesktopSettings {
             start_minimized: false,
             close_to_tray: default_close_to_tray(),
             default_mode: None,
+            proxy_debug_enabled: false,
+            proxy_debug_codex_upstream_base_url: default_proxy_debug_codex_upstream_base_url(),
+            proxy_debug_log_max_bytes: default_proxy_debug_log_max_bytes(),
+            proxy_debug_record_mode: default_proxy_debug_record_mode(),
         }
     }
 }

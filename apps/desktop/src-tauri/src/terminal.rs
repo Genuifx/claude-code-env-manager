@@ -338,6 +338,7 @@ fn build_launch_command(
     session_id: &str,
     working_dir: &str,
     resume_session_id: Option<&str>,
+    proxy_base_url: Option<&str>,
 ) -> String {
     let ccem = resolve_ccem_path().unwrap_or_else(|| "ccem".to_string());
     let mut cmd = format!(
@@ -350,6 +351,10 @@ fn build_launch_command(
     if let Some(resume_id) = resume_session_id {
         let escaped_id = resume_id.replace("'", "'\\''");
         cmd.push_str(&format!(" --resume-session '{}'", escaped_id));
+    }
+    if let Some(proxy_url) = proxy_base_url {
+        let escaped_url = proxy_url.replace("'", "'\\''");
+        cmd.push_str(&format!(" --proxy-base-url '{}'", escaped_url));
     }
     // Escape single quotes in working_dir
     let escaped_dir = working_dir.replace("'", "'\\''");
@@ -400,13 +405,22 @@ fn build_shell_command(
 }
 
 /// Build the shell command to launch Codex and write exit code for session tracking.
-fn build_codex_shell_command(working_dir: &str, session_id: &str) -> String {
+fn build_codex_shell_command(
+    env_vars: &HashMap<String, String>,
+    working_dir: &str,
+    session_id: &str,
+) -> String {
     let mut parts = Vec::new();
     parts.push("mkdir -p ~/.ccem/sessions".to_string());
 
     let escaped_dir = working_dir.replace("\\", "\\\\").replace("\"", "\\\"");
     parts.push(format!("cd \"{}\"", escaped_dir));
     parts.push("unset CLAUDECODE".to_string());
+
+    for (key, value) in env_vars {
+        let escaped_value = value.replace("'", "'\\''");
+        parts.push(format!("export {}='{}'", key, escaped_value));
+    }
 
     let codex_path = resolve_codex_path().unwrap_or_else(|| "codex".to_string());
     let escaped_codex = codex_path.replace("'", "'\\''");
@@ -483,14 +497,22 @@ pub fn launch_in_terminal(
         if resume_session_id.is_some() {
             return Err("Codex resume is not supported yet".to_string());
         }
-        build_codex_shell_command(working_dir, session_id)
+        build_codex_shell_command(&env_vars, working_dir, session_id)
     } else if is_ccem_launch_supported() {
+        let proxy_base_url = env_vars.get("ANTHROPIC_BASE_URL").and_then(|url| {
+            if url.starts_with("http://127.0.0.1:") && url.contains("/proxy/claude/") {
+                Some(url.clone())
+            } else {
+                None
+            }
+        });
         build_launch_command(
             env_name,
             perm_mode,
             session_id,
             working_dir,
             resume_session_id,
+            proxy_base_url.as_deref(),
         )
     } else {
         build_shell_command(&env_vars, working_dir, session_id, resume_session_id)

@@ -788,6 +788,8 @@ program
   .option('--session-id <id>', '会话 ID')
   .option('--resume-session <id>', '恢复会话 ID')
   .option('--working-dir <path>', '工作目录')
+  .option('--proxy-base-url <url>', 'Desktop internal override for ANTHROPIC_BASE_URL')
+  .option('--anthropic-base-url <url>', 'Deprecated alias for --proxy-base-url')
   .action(async function(this: any) {
     const opts = this.opts();
     const envName = opts.env || (config.get('current') as string);
@@ -799,8 +801,13 @@ program
       process.exit(1);
     }
 
+    const proxyBaseUrl = (opts.proxyBaseUrl || opts.anthropicBaseUrl) as string | undefined;
+    const launchEnvConfig = proxyBaseUrl
+      ? { ...envConfig, ANTHROPIC_BASE_URL: proxyBaseUrl }
+      : envConfig;
+
     await launchClaude({
-      envConfig,
+      envConfig: launchEnvConfig,
       permMode: opts.perm as PermissionModeName | undefined,
       workingDir: opts.workingDir,
       sessionId: opts.sessionId,
