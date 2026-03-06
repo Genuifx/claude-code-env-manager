@@ -1712,6 +1712,11 @@ fn collect_chat_completion_text_fragments(value: &Value) -> Vec<String> {
             continue;
         }
 
+        if let Some(text) = choice.pointer("/delta/text").and_then(|v| v.as_str()) {
+            output.push(text.to_string());
+            continue;
+        }
+
         if let Some(text) = choice.get("text").and_then(|v| v.as_str()) {
             output.push(text.to_string());
         }
@@ -1891,7 +1896,7 @@ fn recompute_reduced_detail(record: &TrafficRecord) -> Result<Option<ReducedStre
         .get("content-type")
         .map(|value| value.contains("text/event-stream"))
         .unwrap_or(false);
-    if !is_sse {
+    if !is_sse || record.log_partial || record.log_dropped {
         return Ok(record.reduced.clone());
     }
 
@@ -2077,7 +2082,11 @@ fn generate_request_id() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_sse_reduced, compose_upstream_url, parse_proxy_path, validate_upstream_url};
+    use super::{
+        build_sse_reduced, compose_upstream_url, parse_proxy_path, recompute_reduced_detail,
+        validate_upstream_url, ReducedStreamLog, TrafficRecord,
+    };
+    use std::collections::HashMap;
 
     #[test]
     fn parse_proxy_path_extracts_components() {
@@ -2162,5 +2171,103 @@ mod tests {
 
         assert_eq!(reduced.final_text, "Hello");
         assert_eq!(reduced.finish_reason.as_deref(), Some("stop"));
+    }
+
+    #[test]
+    fn build_sse_reduced_collects_chat_completion_delta_text() {
+        let raw = concat!(
+            "data: {\"choices\":[{\"delta\":{\"text\":\"Hel\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"text\":\"lo\"},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+
+        let reduced = build_sse_reduced(raw.as_bytes(), false, false, false, None, 15);
+
+        assert_eq!(reduced.final_text, "Hello");
+        assert_eq!(reduced.finish_reason.as_deref(), Some("stop"));
+    }
+
+    #[test]
+    fn recompute_reduced_detail_keeps_original_when_log_file_is_partial() {
+        let reduced = ReducedStreamLog {
+            final_text: "stored".to_string(),
+            finish_reason: Some("stop".to_string()),
+            stream_status: "completed".to_string(),
+            first_token_ms: Some(12),
+            total_stream_ms: Some(34),
+        };
+        let record = TrafficRecord {
+            id: "req-1".to_string(),
+            timestamp: 0,
+            client: "codex".to_string(),
+            session_id: "session-1".to_string(),
+            env_name: "default".to_string(),
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            query: None,
+            status: 200,
+            duration_ms: 34,
+            request_headers: HashMap::new(),
+            response_headers: HashMap::from([(
+                "content-type".to_string(),
+                "text/event-stream".to_string(),
+            )]),
+            request_body_size: 0,
+            response_body_size: 0,
+            request_body_file: None,
+            response_body_file: Some("missing.bin".to_string()),
+            prompt_preview: None,
+            log_dropped: false,
+            response_incomplete: false,
+            log_partial: true,
+            log_dropped_bytes: 0,
+            reduced: Some(reduced.clone()),
+        };
+
+        let result = recompute_reduced_detail(&record).unwrap();
+
+        assert_eq!(result.unwrap().final_text, reduced.final_text);
+    }
+
+    #[test]
+    fn recompute_reduced_detail_keeps_original_when_log_file_is_dropped() {
+        let reduced = ReducedStreamLog {
+            final_text: "stored".to_string(),
+            finish_reason: Some("stop".to_string()),
+            stream_status: "completed".to_string(),
+            first_token_ms: Some(12),
+            total_stream_ms: Some(34),
+        };
+        let record = TrafficRecord {
+            id: "req-1".to_string(),
+            timestamp: 0,
+            client: "codex".to_string(),
+            session_id: "session-1".to_string(),
+            env_name: "default".to_string(),
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            query: None,
+            status: 200,
+            duration_ms: 34,
+            request_headers: HashMap::new(),
+            response_headers: HashMap::from([(
+                "content-type".to_string(),
+                "text/event-stream".to_string(),
+            )]),
+            request_body_size: 0,
+            response_body_size: 0,
+            request_body_file: None,
+            response_body_file: Some("missing.bin".to_string()),
+            prompt_preview: None,
+            log_dropped: true,
+            response_incomplete: false,
+            log_partial: false,
+            log_dropped_bytes: 16,
+            reduced: Some(reduced.clone()),
+        };
+
+        let result = recompute_reduced_detail(&record).unwrap();
+
+        assert_eq!(result.unwrap().final_text, reduced.final_text);
     }
 }
