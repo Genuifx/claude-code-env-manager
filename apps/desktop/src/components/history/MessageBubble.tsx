@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { startTransition, useMemo, useState } from 'react';
 import { ChevronRight, Brain, CheckCircle2, XCircle, Circle, Scissors, ChevronsUpDown, ClipboardList, ChevronDown, Terminal, Sparkles, Users, AlertCircle, Copy, Check } from 'lucide-react';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { cn } from '@/lib/utils';
@@ -264,19 +264,38 @@ function CollapsibleBlock({
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const [hasRenderedBody, setHasRenderedBody] = useState(defaultOpen);
+
+  const handleToggle = () => {
+    setOpen((current) => {
+      if (!current && !hasRenderedBody) {
+        startTransition(() => setHasRenderedBody(true));
+      }
+      return !current;
+    });
+  };
 
   return (
     <div className="rounded-lg border border-white/[0.06] overflow-hidden my-1">
       <button
-        onClick={() => setOpen(!open)}
+        onClick={handleToggle}
+        aria-expanded={open}
         className="w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-white/[0.03] transition-colors"
       >
         <ChevronRight className={cn('w-3.5 h-3.5 transition-transform', open && 'rotate-90')} />
         <Icon className={cn('w-3.5 h-3.5', iconClassName)} />
         <span className="truncate">{label}</span>
       </button>
-      {open && (
-        <div className="px-3 pb-3 text-xs">
+      {open && !hasRenderedBody && (
+        <div className="px-3 pb-3 pt-1">
+          <div className="h-5 animate-pulse rounded bg-white/[0.04]" />
+        </div>
+      )}
+      {hasRenderedBody && (
+        <div
+          aria-hidden={!open}
+          className={cn('px-3 pb-3 text-xs', !open && 'hidden')}
+        >
           {children}
         </div>
       )}
@@ -329,14 +348,33 @@ function extractToolSummary(name: string | undefined, input: unknown): string {
 
 function ToolCallBlock({ block, t }: { block: ContentBlock; t: (key: string) => string }) {
   const [open, setOpen] = useState(false);
+  const [hasRenderedBody, setHasRenderedBody] = useState(false);
   const summary = extractToolSummary(block.name, block.input);
   const hasResult = '_result' in block;
   const isError = block._resultError === true;
+  const inputText = useMemo(
+    () => (hasRenderedBody ? stringifyUnknown(block.input) : ''),
+    [block.input, hasRenderedBody]
+  );
+  const resultText = useMemo(
+    () => (hasRenderedBody && hasResult ? stringifyUnknown(block._result) : ''),
+    [block._result, hasRenderedBody, hasResult]
+  );
+
+  const handleToggle = () => {
+    setOpen((current) => {
+      if (!current && !hasRenderedBody) {
+        startTransition(() => setHasRenderedBody(true));
+      }
+      return !current;
+    });
+  };
 
   return (
     <div className="my-1">
       <button
-        onClick={() => setOpen(!open)}
+        onClick={handleToggle}
+        aria-expanded={open}
         className="w-full min-w-0 flex items-center gap-1.5 py-1 text-xs hover:bg-white/[0.03] rounded transition-colors group text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       >
         <Circle className={cn(
@@ -366,15 +404,22 @@ function ToolCallBlock({ block, t }: { block: ContentBlock; t: (key: string) => 
         </span>
       </button>
 
-      {open && (
-        <div className="ml-4 mt-1 mb-2 space-y-2">
+      {open && !hasRenderedBody && (
+        <div className="ml-4 mt-1 mb-2">
+          <div className="h-8 animate-pulse rounded-md bg-white/[0.04]" />
+        </div>
+      )}
+
+      {hasRenderedBody && (
+        <div
+          aria-hidden={!open}
+          className={cn('ml-4 mt-1 mb-2 space-y-2', !open && 'hidden')}
+        >
           {/* Input */}
           <div className="rounded-md p-2 bg-[hsl(var(--tool-input-bg))]">
             <p className="text-[10px] text-muted-foreground/60 uppercase tracking-wider mb-1">{t('history.toolInput')}</p>
             <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px] leading-relaxed max-h-[200px] overflow-y-auto">
-              {typeof block.input === 'string'
-                ? block.input
-                : JSON.stringify(block.input, null, 2)}
+              {inputText}
             </pre>
           </div>
           {/* Result */}
@@ -382,9 +427,7 @@ function ToolCallBlock({ block, t }: { block: ContentBlock; t: (key: string) => 
             <div className={cn('border-l-2 pl-3', isError ? 'border-destructive/30' : 'border-primary/20')}>
               <p className="text-[10px] text-muted-foreground/60 uppercase tracking-wider mb-1">{t('history.toolOutput')}</p>
               <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px] leading-relaxed max-h-[200px] overflow-y-auto">
-                {typeof block._result === 'string'
-                  ? block._result
-                  : JSON.stringify(block._result, null, 2)}
+                {resultText}
               </pre>
             </div>
           )}
@@ -525,6 +568,7 @@ const TEAMMATE_BORDER_COLORS: Record<string, string> = {
 /** Render a teammate message — either a full markdown deliverable or a status notification */
 function TeammateMessageBlock({ msg }: { msg: TeammateMessage }) {
   const [expanded, setExpanded] = useState(false);
+  const [hasRenderedBody, setHasRenderedBody] = useState(false);
   const isNotification = !!msg.notification;
   const isFailed = msg.notification?.idleReason === 'failed';
   const colorClass = TEAMMATE_COLORS[msg.color] || TEAMMATE_COLORS.blue;
@@ -572,7 +616,15 @@ function TeammateMessageBlock({ msg }: { msg: TeammateMessage }) {
     )}>
       {/* Header */}
       <button
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => {
+          setExpanded((current) => {
+            if (!current && !hasRenderedBody) {
+              startTransition(() => setHasRenderedBody(true));
+            }
+            return !current;
+          });
+        }}
+        aria-expanded={expanded}
         className="relative w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/[0.03] transition-colors"
       >
         <Users className="w-3.5 h-3.5 text-muted-foreground/60 shrink-0" />
@@ -593,8 +645,16 @@ function TeammateMessageBlock({ msg }: { msg: TeammateMessage }) {
         )} />
       </button>
       {/* Expandable content */}
-      {expanded && (
-        <div className="px-3 pb-3 border-t border-white/[0.06]">
+      {expanded && !hasRenderedBody && (
+        <div className="px-3 pb-3 pt-2 border-t border-white/[0.06]">
+          <div className="h-8 animate-pulse rounded bg-white/[0.04]" />
+        </div>
+      )}
+      {hasRenderedBody && (
+        <div
+          aria-hidden={!expanded}
+          className={cn('px-3 pb-3 border-t border-white/[0.06]', !expanded && 'hidden')}
+        >
           <div className="pt-2 max-h-[500px] overflow-y-auto">
             <MarkdownRenderer content={msg.content} />
           </div>

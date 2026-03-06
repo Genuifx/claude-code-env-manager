@@ -53,37 +53,68 @@ function formatHeaderDate(timestamp: number): string {
 }
 
 function mergeToolResults(msgs: ConversationMessageData[]): ConversationMessageData[] {
-  const cloned: ConversationMessageData[] = JSON.parse(JSON.stringify(msgs));
   const toolUseMap = new Map<string, ContentBlock>();
-
-  for (const msg of cloned) {
+  const prepared = msgs.map((msg) => {
     if ((msg.msgType === 'assistant' || msg.msgType === 'ai') && Array.isArray(msg.content)) {
-      for (const block of msg.content as ContentBlock[]) {
-        if (block.type === 'tool_use' && block.id) {
-          toolUseMap.set(block.id, block);
+      const blocks = msg.content as ContentBlock[];
+      let nextBlocks: ContentBlock[] | null = null;
+
+      blocks.forEach((block, index) => {
+        if (block.type !== 'tool_use' || !block.id) return;
+
+        if (!nextBlocks) {
+          nextBlocks = [...blocks];
         }
+
+        const clonedBlock = { ...block };
+        nextBlocks[index] = clonedBlock;
+        toolUseMap.set(block.id, clonedBlock);
+      });
+
+      if (nextBlocks) {
+        return {
+          ...msg,
+          content: nextBlocks as ConversationMessageData['content'],
+        };
       }
     }
-  }
+
+    return msg;
+  });
 
   const result: ConversationMessageData[] = [];
-  for (const msg of cloned) {
+  for (const msg of prepared) {
     if ((msg.msgType === 'user' || msg.msgType === 'human') && Array.isArray(msg.content)) {
       const blocks = msg.content as ContentBlock[];
-      const remaining = blocks.filter((block) => {
+      let remaining: ContentBlock[] | null = null;
+
+      for (let index = 0; index < blocks.length; index += 1) {
+        const block = blocks[index];
         if (block.type === 'tool_result' && block.tool_use_id) {
           const target = toolUseMap.get(block.tool_use_id);
           if (target) {
             target._result = block.content;
             target._resultError = block.is_error === true;
-            return false;
+            if (!remaining) {
+              remaining = blocks.slice(0, index);
+            }
+            continue;
           }
         }
-        return true;
-      });
 
-      if (remaining.length === 0) continue;
-      msg.content = remaining as ConversationMessageData['content'];
+        if (remaining) {
+          remaining.push(block);
+        }
+      }
+
+      if (remaining) {
+        if (remaining.length === 0) continue;
+        result.push({
+          ...msg,
+          content: remaining as ConversationMessageData['content'],
+        });
+        continue;
+      }
     }
     result.push(msg);
   }
