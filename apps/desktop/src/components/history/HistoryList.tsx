@@ -1,5 +1,5 @@
-import { useDeferredValue, useState, useMemo, useRef, useEffect } from 'react';
-import { Search, Clock, FolderOpen, MessageSquare, Scissors } from 'lucide-react';
+import { useDeferredValue, useState, useMemo, useRef, useEffect, type KeyboardEvent } from 'react';
+import { Search, MessageSquare } from 'lucide-react';
 import { Claude, Codex } from '@lobehub/icons';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
@@ -14,7 +14,6 @@ export interface HistorySessionItem {
   timestamp: number;
   project: string;
   projectName: string;
-  segmentCount: number;
 }
 
 interface HistoryListProps {
@@ -22,7 +21,8 @@ interface HistoryListProps {
   selectedKey: string | null;
   onSelect: (session: HistorySessionItem) => void;
   focusedKey?: string | null;
-  onFocusChange?: (id: string | null) => void;
+  sourceFilter: 'all' | HistorySource;
+  onVisibleSessionKeysChange?: (keys: string[]) => void;
 }
 
 function getSessionKey(session: HistorySessionItem): string {
@@ -90,12 +90,18 @@ function groupByTime(sessions: HistorySessionItem[]): TimeGroup[] {
   return result;
 }
 
-export function HistoryList({ sessions, selectedKey, onSelect, focusedKey }: HistoryListProps) {
+export function HistoryList({
+  sessions,
+  selectedKey,
+  onSelect,
+  focusedKey,
+  sourceFilter,
+  onVisibleSessionKeysChange,
+}: HistoryListProps) {
   const { t } = useLocale();
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
   const [projectFilter, setProjectFilter] = useState<string>('all');
-  const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   // Extract unique project names for filter
@@ -123,6 +129,10 @@ export function HistoryList({ sessions, selectedKey, onSelect, focusedKey }: His
   // Time-grouped sessions
   const timeGroups = useMemo(() => groupByTime(filtered), [filtered]);
 
+  useEffect(() => {
+    onVisibleSessionKeysChange?.(filtered.map(getSessionKey));
+  }, [filtered, onVisibleSessionKeysChange]);
+
   // Scroll focused item into view
   useEffect(() => {
     if (focusedKey && listRef.current) {
@@ -131,20 +141,26 @@ export function HistoryList({ sessions, selectedKey, onSelect, focusedKey }: His
     }
   }, [focusedKey]);
 
+  const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Escape') return;
+    setSearch('');
+    event.currentTarget.blur();
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* Search */}
-      <div className="p-3 space-y-2 border-b border-white/[0.06]">
+      <div className="space-y-2 border-b border-white/[0.06] px-4 pt-2 pb-2">
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <input
-            ref={searchRef}
             data-history-search
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
             placeholder={t('history.searchPlaceholder')}
-            className="w-full h-8 pl-8 pr-8 text-xs rounded-lg bg-white/[0.04] border border-white/[0.08] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/40 transition-colors"
+            className="w-full h-8 pl-8 pr-8 text-xs rounded-xl bg-white/[0.04] border border-white/[0.08] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/40 transition-colors"
           />
           <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground/40 bg-white/[0.04] px-1 rounded pointer-events-none">
     /
@@ -155,7 +171,6 @@ export function HistoryList({ sessions, selectedKey, onSelect, focusedKey }: His
         {projectNames.length > 1 && (
           <Select value={projectFilter} onValueChange={setProjectFilter}>
             <SelectTrigger className="w-full h-7 text-xs">
-              <FolderOpen className="w-3 h-3 text-muted-foreground shrink-0" />
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -179,7 +194,7 @@ export function HistoryList({ sessions, selectedKey, onSelect, focusedKey }: His
           <div className="py-1">
             {timeGroups.map(group => (
               <div key={group.key}>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground/50 px-3 pt-3 pb-1">
+                <div className="px-4 pt-5 pb-1.5 text-[10px] uppercase tracking-[0.24em] text-muted-foreground/35 font-medium">
                   {t(group.labelKey)}
                 </div>
                 {group.sessions.map(session => (
@@ -188,12 +203,12 @@ export function HistoryList({ sessions, selectedKey, onSelect, focusedKey }: His
                     data-session-id={getSessionKey(session)}
                     onClick={() => onSelect(session)}
                     className={cn(
-                      'w-full text-left px-3 py-1.5 transition-colors duration-[var(--duration-fast)] group history-item-virtualized',
+                      'w-full text-left px-4 py-2.5 transition-all duration-[var(--duration-fast)] group history-item-virtualized active:scale-[0.998]',
                       selectedKey === getSessionKey(session)
-                        ? 'bg-primary/10 border-l-2 border-l-primary'
+                        ? 'bg-primary/8 border-l-2 border-l-primary'
                         : focusedKey === getSessionKey(session)
                           ? 'ring-1 ring-primary/30 ring-inset border-l-2 border-l-transparent'
-                          : 'hover:bg-white/[0.04] border-l-2 border-l-transparent'
+                          : 'hover:bg-white/[0.03] border-l-2 border-l-transparent'
                     )}
                   >
                     <p className={cn(
@@ -202,28 +217,19 @@ export function HistoryList({ sessions, selectedKey, onSelect, focusedKey }: His
                     )}>
                       {session.display}
                     </p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span
-                        className="inline-flex items-center justify-center rounded-md bg-white/[0.04] px-1.5 py-1 shrink-0"
-                        title={session.source === 'codex' ? 'Codex (OpenAI)' : 'Claude'}
-                        aria-label={session.source === 'codex' ? 'Codex (OpenAI)' : 'Claude'}
-                      >
-                        <SourceIcon source={session.source} />
-                      </span>
-                      <span className="flex items-center gap-1 text-[11px] text-muted-foreground truncate">
-                        <FolderOpen className="w-3 h-3 shrink-0" />
-                        {session.projectName}
-                      </span>
-                      <span className="flex items-center gap-1 text-[11px] text-muted-foreground shrink-0 ml-auto">
-                        <Clock className="w-3 h-3" />
-                        {formatRelativeTime(session.timestamp)}
-                      </span>
-                      {session.segmentCount > 1 && (
-                        <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground/60 ml-1 shrink-0">
-                          <Scissors className="w-2.5 h-2.5" />
-                          {session.segmentCount}
+                    <div className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground/50">
+                      {sourceFilter === 'all' && (
+                        <span
+                          className="shrink-0"
+                          title={session.source === 'codex' ? 'Codex (OpenAI)' : 'Claude'}
+                          aria-label={session.source === 'codex' ? 'Codex (OpenAI)' : 'Claude'}
+                        >
+                          <SourceIcon source={session.source} />
                         </span>
                       )}
+                      <span className="truncate">{session.projectName}</span>
+                      <span className="shrink-0 text-muted-foreground/25">·</span>
+                      <span className="shrink-0">{formatRelativeTime(session.timestamp)}</span>
                     </div>
                   </button>
                 ))}
@@ -234,7 +240,7 @@ export function HistoryList({ sessions, selectedKey, onSelect, focusedKey }: His
       </div>
 
       {/* Footer count */}
-      <div className="px-3 py-2 border-t border-white/[0.06] text-[11px] text-muted-foreground/60">
+      <div className="border-t border-white/[0.06] px-4 py-2 text-[10px] tabular-nums text-muted-foreground/35">
         {t('history.totalSessions').replace('{count}', String(filtered.length))}
       </div>
     </div>

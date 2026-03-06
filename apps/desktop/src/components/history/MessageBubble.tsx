@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import { ChevronRight, Brain, CheckCircle2, XCircle, User, Circle, Scissors, ChevronsUpDown, ClipboardList, ChevronDown, Terminal, Sparkles, Users, AlertCircle, Copy, Check } from 'lucide-react';
+import { ChevronRight, Brain, CheckCircle2, XCircle, Circle, Scissors, ChevronsUpDown, ClipboardList, ChevronDown, Terminal, Sparkles, Users, AlertCircle, Copy, Check } from 'lucide-react';
 import { MarkdownRenderer } from './MarkdownRenderer';
-import { ModelIcon } from './ModelIcon';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 
@@ -784,7 +783,9 @@ export function MessageBubble({ message, prevRole }: MessageBubbleProps) {
 
   // Dynamic spacing: same role → tight, role switch → wider
   const sameRole = prevRole === currentRole;
-  const spacingClass = prevRole == null ? 'my-3' : sameRole ? 'my-1' : 'my-3';
+  const spacingClass = prevRole == null ? 'mt-0' : sameRole ? 'mt-1.5' : 'mt-5';
+  const showRoleLabel = prevRole !== null && prevRole !== currentRole;
+  const roleLabel = isUser ? t('history.you') : (message.model || t('history.assistant'));
 
   // Summary messages
   if (isSummary) {
@@ -861,9 +862,19 @@ export function MessageBubble({ message, prevRole }: MessageBubbleProps) {
   if (!hasMainContent && allTeammateMessages.length > 0) {
     return (
       <div className={spacingClass}>
-        {allTeammateMessages.map((msg, i) => (
-          <TeammateMessageBlock key={`tm-${msg.id}-${i}`} msg={msg} />
-        ))}
+        {showRoleLabel && (
+          <p className={cn(
+            'mb-1.5 text-[10px] font-medium uppercase tracking-wider',
+            isUser ? 'text-right text-primary/50' : 'text-muted-foreground/40'
+          )}>
+            {roleLabel}
+          </p>
+        )}
+        <div className={cn(!isUser && 'ml-4')}>
+          {allTeammateMessages.map((msg, i) => (
+            <TeammateMessageBlock key={`tm-${msg.id}-${i}`} msg={msg} />
+          ))}
+        </div>
       </div>
     );
   }
@@ -886,30 +897,27 @@ export function MessageBubble({ message, prevRole }: MessageBubbleProps) {
   };
 
   return (
-    <>
-      <div className={cn('flex gap-2.5', spacingClass, isUser ? 'flex-row-reverse' : 'flex-row')}>
-        {/* Avatar */}
-        <div className={cn(
-          'w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5',
-          isUser ? 'bg-primary/20' : 'glass-subtle'
+    <div className={spacingClass}>
+      {showRoleLabel && (
+        <p className={cn(
+          'mb-1.5 text-[10px] font-medium uppercase tracking-wider',
+          isUser ? 'text-right text-primary/50' : 'text-muted-foreground/40'
         )}>
-          {isUser
-            ? <User className="w-3.5 h-3.5 text-primary" />
-            : <ModelIcon model={message.model} size={14} className="text-muted-foreground" />
-          }
-        </div>
-
-        {/* Bubble */}
+          {roleLabel}
+        </p>
+      )}
+      <div className={cn('flex', isUser ? 'justify-end' : 'justify-start')}>
         <div className={cn(
-          'group/bubble rounded-2xl max-w-[85%] min-w-0 break-words [overflow-wrap:anywhere]',
+          'group/bubble min-w-0 break-words [overflow-wrap:anywhere]',
+          isUser ? 'max-w-[75%]' : 'max-w-full',
           isCommandOnly
             ? 'px-0 py-0'
-            : 'px-3.5 py-2.5',
+            : 'rounded-2xl px-3.5 py-2.5',
           isCommandOnly
             ? ''
             : isUser
-              ? 'glass-chat-user text-primary-foreground'
-              : 'glass-chat-assistant'
+              ? 'rounded-tr-md glass-chat-user text-primary-foreground'
+              : 'rounded-tl-md glass-chat-assistant'
         )}>
           {renderedContent}
           <div className={cn('mt-1.5 flex items-center gap-2', isUser && 'justify-end')}>
@@ -953,12 +961,12 @@ export function MessageBubble({ message, prevRole }: MessageBubbleProps) {
       </div>
       {/* Teammate messages rendered outside the bubble */}
       {allTeammateMessages.length > 0 && (
-        <div className="ml-[38px] mt-1">
+        <div className={cn('mt-1', !isUser && 'ml-4')}>
           {allTeammateMessages.map((msg, i) => (
             <TeammateMessageBlock key={`tm-${msg.id}-${i}`} msg={msg} />
           ))}
         </div>
       )}
-    </>
+    </div>
   );
 }
