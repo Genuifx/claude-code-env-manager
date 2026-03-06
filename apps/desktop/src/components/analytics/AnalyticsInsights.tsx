@@ -1,4 +1,5 @@
-import { memo, useMemo, useState, useTransition } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { memo, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { BarChart3, DollarSign, Flame, RefreshCw } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -7,15 +8,139 @@ import { useLocale } from '@/locales';
 import { TokenChart } from './TokenChart';
 import { ModelDistribution } from './ModelDistribution';
 import { DailyTokenBar } from './DailyTokenBar';
-import type { ChartDataPoint, Milestone, TokenUsageWithCost, UsageStats } from '@/types/analytics';
+import type {
+  ChartDataPoint,
+  Milestone,
+  ModelBreakdownHistory,
+  TokenUsageWithCost,
+  UsageStats,
+} from '@/types/analytics';
 
 type TimeGranularity = 'hour' | 'day' | 'week' | 'month';
+type AnalyticsUsageSource = 'all' | 'claude' | 'codex';
+const MODEL_BREAKDOWN_CACHE_TTL_MS = 60_000;
+
+interface ModelBreakdownCacheEntry {
+  data?: ModelBreakdownHistory;
+  statsLastUpdated?: string;
+  fetchedAt: number;
+  promise?: Promise<ModelBreakdownHistory>;
+}
+
+interface LoadedModelBreakdown {
+  data: ModelBreakdownHistory;
+  granularity: TimeGranularity;
+  source: AnalyticsUsageSource;
+  statsLastUpdated: string;
+}
+
+const modelBreakdownCache = new Map<string, ModelBreakdownCacheEntry>();
 
 interface AnalyticsInsightsProps {
   usageStats: UsageStats;
+  usageSource: AnalyticsUsageSource;
+  enableModelBreakdown: boolean;
   milestones: Milestone[];
   isRefreshing: boolean;
   onRefresh: () => void | Promise<void>;
+}
+
+function sumTokens(usage: TokenUsageWithCost): number {
+  return usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
+}
+
+function createEmptyUsage(): TokenUsageWithCost {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    cost: 0,
+  };
+}
+
+function addUsage(target: TokenUsageWithCost, usage: TokenUsageWithCost) {
+  target.inputTokens += usage.inputTokens;
+  target.outputTokens += usage.outputTokens;
+  target.cacheReadTokens += usage.cacheReadTokens;
+  target.cacheCreationTokens += usage.cacheCreationTokens;
+  target.cost += usage.cost;
+}
+
+function buildWeekBucketKey(dateStr: string): string {
+  const date = new Date(dateStr);
+  const jan1 = new Date(date.getFullYear(), 0, 1);
+  const weekNum = Math.ceil(((date.getTime() - jan1.getTime()) / 86400000 + jan1.getDay() + 1) / 7);
+  return `${date.getFullYear()}-W${String(weekNum).padStart(2, '0')}`;
+}
+
+function toBreakdown(modelUsage: Record<string, TokenUsageWithCost> | undefined): Record<string, number> {
+  if (!modelUsage) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(modelUsage)
+      .map(([model, usage]) => [model, sumTokens(usage)] as const)
+      .filter((entry): entry is readonly [string, number] => entry[1] > 0)
+      .sort(([, left], [, right]) => right - left),
+  );
+}
+
+function getModelBreakdownCacheKey(
+  source: AnalyticsUsageSource,
+  granularity: TimeGranularity,
+): string {
+  return `${source}:${granularity}`;
+}
+
+async function fetchModelBreakdown(
+  source: AnalyticsUsageSource,
+  granularity: TimeGranularity,
+  statsLastUpdated: string,
+): Promise<ModelBreakdownHistory> {
+  const cacheKey = getModelBreakdownCacheKey(source, granularity);
+  const cached = modelBreakdownCache.get(cacheKey);
+  const isFresh = cached?.statsLastUpdated === statsLastUpdated
+    && Date.now() - cached.fetchedAt < MODEL_BREAKDOWN_CACHE_TTL_MS;
+
+  if (cached?.data && isFresh) {
+    return cached.data;
+  }
+
+  if (cached?.promise && cached.statsLastUpdated === statsLastUpdated) {
+    return cached.promise;
+  }
+
+  const request = invoke<ModelBreakdownHistory>('get_usage_model_breakdown', {
+    granularity,
+    source: source === 'all' ? null : source,
+  })
+    .then((data) => {
+      modelBreakdownCache.set(cacheKey, {
+        data,
+        statsLastUpdated,
+        fetchedAt: Date.now(),
+      });
+      return data;
+    })
+    .catch((error) => {
+      if (cached) {
+        modelBreakdownCache.set(cacheKey, cached);
+      } else {
+        modelBreakdownCache.delete(cacheKey);
+      }
+      throw error;
+    });
+
+  modelBreakdownCache.set(cacheKey, {
+    data: cached?.statsLastUpdated === statsLastUpdated ? cached.data : undefined,
+    statsLastUpdated,
+    fetchedAt: cached?.fetchedAt ?? 0,
+    promise: request,
+  });
+
+  return request;
 }
 
 function NextMilestone({ milestones }: { milestones: Milestone[] }) {
@@ -93,6 +218,8 @@ function NextMilestone({ milestones }: { milestones: Milestone[] }) {
 
 export const AnalyticsInsights = memo(function AnalyticsInsights({
   usageStats,
+  usageSource,
+  enableModelBreakdown,
   milestones,
   isRefreshing,
   onRefresh,
@@ -100,102 +227,95 @@ export const AnalyticsInsights = memo(function AnalyticsInsights({
   const { t, lang } = useLocale();
   const [granularity, setGranularity] = useState<TimeGranularity>('day');
   const [animateTokenChart, setAnimateTokenChart] = useState(true);
+  const [loadedBreakdown, setLoadedBreakdown] = useState<LoadedModelBreakdown | null>(null);
+  const breakdownRequestSeqRef = useRef(0);
   const [, startTransition] = useTransition();
   const dateLocale = lang === 'zh' ? 'zh-CN' : 'en-US';
+
+  useEffect(() => {
+    if (!enableModelBreakdown) {
+      setLoadedBreakdown(null);
+      return;
+    }
+
+    const requestSeq = ++breakdownRequestSeqRef.current;
+
+    void fetchModelBreakdown(usageSource, granularity, usageStats.lastUpdated)
+      .then((data) => {
+        if (requestSeq !== breakdownRequestSeqRef.current) {
+          return;
+        }
+
+        setLoadedBreakdown({
+          data,
+          granularity,
+          source: usageSource,
+          statsLastUpdated: usageStats.lastUpdated,
+        });
+      })
+      .catch((error) => {
+        if (requestSeq !== breakdownRequestSeqRef.current) {
+          return;
+        }
+
+        console.debug('Model breakdown not available for analytics tooltip:', error);
+        setLoadedBreakdown(null);
+      });
+  }, [enableModelBreakdown, granularity, usageSource, usageStats.lastUpdated]);
+
+  const activeBreakdown = loadedBreakdown?.granularity === granularity
+    && loadedBreakdown.source === usageSource
+    && loadedBreakdown.statsLastUpdated === usageStats.lastUpdated
+    ? loadedBreakdown.data
+    : null;
 
   const chartData: ChartDataPoint[] = useMemo(() => {
     const allSortedEntries = Object.entries(usageStats.dailyHistory)
       .sort(([a], [b]) => a.localeCompare(b));
 
-    const sumTokens = (usage: TokenUsageWithCost) =>
-      usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
-
-    const toBreakdown = (modelUsage: Record<string, TokenUsageWithCost> | undefined): Record<string, number> => {
-      if (!modelUsage) {
-        return {};
-      }
-
-      return Object.fromEntries(
-        Object.entries(modelUsage)
-          .map(([model, usage]) => [model, sumTokens(usage)] as const)
-          .filter((entry): entry is readonly [string, number] => entry[1] > 0)
-          .sort(([, left], [, right]) => right - left),
-      );
-    };
-
     const toChartPoints = (
       entries: [string, TokenUsageWithCost][],
       dateFormat: Intl.DateTimeFormatOptions,
     ): ChartDataPoint[] =>
-      entries.map(([date, usage]) => ({
-        date: new Date(date).toLocaleDateString(dateLocale, dateFormat),
+      entries.map(([bucketKey, usage]) => ({
+        bucketKey,
+        date: new Date(bucketKey).toLocaleDateString(dateLocale, dateFormat),
         Tokens: sumTokens(usage),
-        breakdown: toBreakdown(usageStats.modelDailyHistory[date]),
+        breakdown: toBreakdown(activeBreakdown?.[bucketKey]),
       }));
 
     const aggregate = (
       entries: [string, TokenUsageWithCost][],
       keyFn: (dateStr: string) => string,
-    ): [string, { total: TokenUsageWithCost; breakdown: Record<string, TokenUsageWithCost> }][] => {
-      const grouped: Record<string, { total: TokenUsageWithCost; breakdown: Record<string, TokenUsageWithCost> }> = {};
+    ): [string, TokenUsageWithCost][] => {
+      const grouped: Record<string, TokenUsageWithCost> = {};
 
       entries.forEach(([date, usage]) => {
         const key = keyFn(date);
         if (!grouped[key]) {
-          grouped[key] = {
-            total: {
-              inputTokens: 0,
-              outputTokens: 0,
-              cacheReadTokens: 0,
-              cacheCreationTokens: 0,
-              cost: 0,
-            },
-            breakdown: {},
-          };
+          grouped[key] = createEmptyUsage();
         }
 
-        grouped[key].total.inputTokens += usage.inputTokens;
-        grouped[key].total.outputTokens += usage.outputTokens;
-        grouped[key].total.cacheReadTokens += usage.cacheReadTokens;
-        grouped[key].total.cacheCreationTokens += usage.cacheCreationTokens;
-        grouped[key].total.cost += usage.cost;
-
-        const modelBreakdown = usageStats.modelDailyHistory[date] ?? usageStats.modelHourlyHistory[date] ?? {};
-        Object.entries(modelBreakdown).forEach(([model, modelUsage]) => {
-          if (!grouped[key].breakdown[model]) {
-            grouped[key].breakdown[model] = {
-              inputTokens: 0,
-              outputTokens: 0,
-              cacheReadTokens: 0,
-              cacheCreationTokens: 0,
-              cost: 0,
-            };
-          }
-          grouped[key].breakdown[model].inputTokens += modelUsage.inputTokens;
-          grouped[key].breakdown[model].outputTokens += modelUsage.outputTokens;
-          grouped[key].breakdown[model].cacheReadTokens += modelUsage.cacheReadTokens;
-          grouped[key].breakdown[model].cacheCreationTokens += modelUsage.cacheCreationTokens;
-          grouped[key].breakdown[model].cost += modelUsage.cost;
-        });
+        addUsage(grouped[key], usage);
       });
 
       return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
     };
 
     const toAggregatedPoints = (
-      entries: [string, { total: TokenUsageWithCost; breakdown: Record<string, TokenUsageWithCost> }][],
+      entries: [string, TokenUsageWithCost][],
       labelFn: (key: string) => string,
     ): ChartDataPoint[] =>
-      entries.map(([key, usage]) => ({
-        date: labelFn(key),
-        Tokens: sumTokens(usage.total),
-        breakdown: toBreakdown(usage.breakdown),
+      entries.map(([bucketKey, usage]) => ({
+        bucketKey,
+        date: labelFn(bucketKey),
+        Tokens: sumTokens(usage),
+        breakdown: toBreakdown(activeBreakdown?.[bucketKey]),
       }));
 
     switch (granularity) {
       case 'hour': {
         const hourlyMap = usageStats.hourlyHistory ?? {};
-        const hourlyModelMap = usageStats.modelHourlyHistory ?? {};
         const now = new Date();
         const points: ChartDataPoint[] = [];
         let previousDate = '';
@@ -211,9 +331,10 @@ export const AnalyticsInsights = memo(function AnalyticsInsights({
           previousDate = datePart;
           const usage = hourlyMap[key];
           points.push({
+            bucketKey: key,
             date: label,
             Tokens: usage ? sumTokens(usage) : 0,
-            breakdown: toBreakdown(hourlyModelMap[key]),
+            breakdown: toBreakdown(activeBreakdown?.[key]),
           });
         }
 
@@ -227,12 +348,7 @@ export const AnalyticsInsights = memo(function AnalyticsInsights({
       case 'week': {
         const weekEntries = aggregate(
           allSortedEntries as [string, TokenUsageWithCost][],
-          (dateStr) => {
-            const date = new Date(dateStr);
-            const jan1 = new Date(date.getFullYear(), 0, 1);
-            const weekNum = Math.ceil(((date.getTime() - jan1.getTime()) / 86400000 + jan1.getDay() + 1) / 7);
-            return `${date.getFullYear()}-W${String(weekNum).padStart(2, '0')}`;
-          },
+          buildWeekBucketKey,
         );
         return toAggregatedPoints(weekEntries.slice(-4), (key) => key);
       }
@@ -249,7 +365,7 @@ export const AnalyticsInsights = memo(function AnalyticsInsights({
       default:
         return [];
     }
-  }, [dateLocale, granularity, usageStats.dailyHistory, usageStats.hourlyHistory]);
+  }, [activeBreakdown, dateLocale, granularity, usageStats.dailyHistory, usageStats.hourlyHistory]);
 
   const granularityOptions = useMemo<{ key: TimeGranularity; label: string }[]>(() => [
     { key: 'hour', label: t('analytics.hour') },

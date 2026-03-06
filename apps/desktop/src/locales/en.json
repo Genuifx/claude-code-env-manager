@@ -193,6 +193,7 @@
   "analytics": {
     "subtitle": "Token usage statistics and cost analysis",
     "tokenThisWeek": "Tokens (This Week)",
+    "costTotal": "Cost (Total)",
     "costThisWeek": "Cost (This Week)",
     "vsLastWeek": "vs last week",
     "streak": "Streak",

@@ -52,6 +52,10 @@ function TokenTooltipContent({ active, label, payload }: TokenTooltipContentProp
     return null;
   }
 
+  const totalUsage = breakdownRows.length > 0
+    ? breakdownRows.reduce((sum, [, value]) => sum + value, 0)
+    : seriesRows.reduce((sum, item) => sum + item.value, 0);
+
   const resolveSeriesLabel = (item: TokenTooltipPayloadItem) => {
     const rawLabel = typeof item.name === 'string' && item.name.length > 0
       ? item.name
@@ -64,8 +68,13 @@ function TokenTooltipContent({ active, label, payload }: TokenTooltipContentProp
 
   return (
     <div className="min-w-[196px] rounded-[24px] border border-white/45 bg-[hsl(var(--surface-overlay)/0.96)] px-4 py-3 shadow-[0_18px_50px_rgba(15,23,42,0.16)] backdrop-blur-2xl">
-      <div className="mb-3 text-[13px] font-medium tracking-[-0.01em] text-foreground">
-        {label}
+      <div className="mb-3 flex items-start justify-between gap-4">
+        <div className="text-[13px] font-medium tracking-[-0.01em] text-foreground">
+          {label}
+        </div>
+        <div className="text-right text-[18px] font-semibold tracking-[-0.02em] tabular-nums text-[hsl(38_92%_50%)]">
+          {formatTokens(totalUsage)}
+        </div>
       </div>
       <div className="grid grid-cols-[1fr_auto] gap-x-6 gap-y-2">
         <span className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground/65">
@@ -90,7 +99,7 @@ function TokenTooltipContent({ active, label, payload }: TokenTooltipContentProp
               />
               <span className="font-medium">{item.label}</span>
             </div>
-            <span className="text-right text-[15px] font-semibold tracking-[-0.01em] text-[hsl(38_92%_50%)]">
+            <span className="text-right text-[15px] font-semibold tracking-[-0.01em] tabular-nums text-[hsl(38_92%_50%)]">
               {formatTokens(item.value)}
             </span>
           </Fragment>

@@ -5,7 +5,7 @@
 use crate::config;
 use chrono::{Datelike, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -46,12 +46,12 @@ pub struct UsageStats {
     pub total: TokenUsageWithCost,
     pub daily_history: HashMap<String, TokenUsageWithCost>,
     pub hourly_history: HashMap<String, TokenUsageWithCost>,
-    pub model_daily_history: HashMap<String, HashMap<String, TokenUsageWithCost>>,
-    pub model_hourly_history: HashMap<String, HashMap<String, TokenUsageWithCost>>,
     pub by_model: HashMap<String, TokenUsageWithCost>,
     pub by_environment: HashMap<String, TokenUsageWithCost>,
     pub last_updated: String,
 }
+
+pub type ModelBreakdownHistory = HashMap<String, HashMap<String, TokenUsageWithCost>>;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -59,6 +59,29 @@ pub struct UsageHistory {
     pub daily: HashMap<String, TokenUsageWithCost>,
     pub by_model: HashMap<String, TokenUsageWithCost>,
     pub by_environment: HashMap<String, TokenUsageWithCost>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModelBreakdownGranularity {
+    Hour,
+    Day,
+    Week,
+    Month,
+}
+
+impl ModelBreakdownGranularity {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "hour" => Ok(Self::Hour),
+            "day" => Ok(Self::Day),
+            "week" => Ok(Self::Week),
+            "month" => Ok(Self::Month),
+            other => Err(format!(
+                "Unsupported granularity '{}'. Use hour, day, week, or month.",
+                other
+            )),
+        }
+    }
 }
 
 // ============================================================================
@@ -822,6 +845,68 @@ fn extract_hour(timestamp: &str) -> Option<String> {
     parse_to_local(timestamp).map(|dt| dt.format("%Y-%m-%dT%H").to_string())
 }
 
+fn format_week_bucket(date: NaiveDate) -> String {
+    let jan1 = NaiveDate::from_ymd_opt(date.year(), 1, 1).unwrap_or(date);
+    let days_since_jan1 = date.signed_duration_since(jan1).num_days();
+    let week_num = ((days_since_jan1 + jan1.weekday().num_days_from_sunday() as i64 + 7) / 7)
+        as u32;
+    format!("{}-W{:02}", date.year(), week_num)
+}
+
+fn extract_model_breakdown_bucket(
+    timestamp: &str,
+    granularity: ModelBreakdownGranularity,
+) -> Option<String> {
+    match granularity {
+        ModelBreakdownGranularity::Hour => extract_hour(timestamp),
+        ModelBreakdownGranularity::Day => extract_date(timestamp),
+        ModelBreakdownGranularity::Week => {
+            let date = NaiveDate::parse_from_str(&extract_date(timestamp)?, "%Y-%m-%d").ok()?;
+            Some(format_week_bucket(date))
+        }
+        ModelBreakdownGranularity::Month => {
+            let date = NaiveDate::parse_from_str(&extract_date(timestamp)?, "%Y-%m-%d").ok()?;
+            Some(date.format("%Y-%m").to_string())
+        }
+    }
+}
+
+fn retain_latest_keys(
+    breakdown: &mut ModelBreakdownHistory,
+    max_entries: usize,
+) {
+    if breakdown.len() <= max_entries {
+        return;
+    }
+
+    let mut keys: Vec<_> = breakdown.keys().cloned().collect();
+    keys.sort();
+    let keep: HashSet<_> = keys.into_iter().rev().take(max_entries).collect();
+    breakdown.retain(|key, _| keep.contains(key));
+}
+
+fn trim_model_breakdown_to_visible_window(
+    breakdown: &mut ModelBreakdownHistory,
+    granularity: ModelBreakdownGranularity,
+    now: chrono::DateTime<Local>,
+) {
+    match granularity {
+        ModelBreakdownGranularity::Hour => {
+            let keep: HashSet<_> = (0..24)
+                .map(|offset| {
+                    (now - chrono::Duration::hours(offset))
+                        .format("%Y-%m-%dT%H")
+                        .to_string()
+                })
+                .collect();
+            breakdown.retain(|key, _| keep.contains(key));
+        }
+        ModelBreakdownGranularity::Day => retain_latest_keys(breakdown, 7),
+        ModelBreakdownGranularity::Week => retain_latest_keys(breakdown, 4),
+        ModelBreakdownGranularity::Month => {}
+    }
+}
+
 // ============================================================================
 // Aggregation
 // ============================================================================
@@ -905,14 +990,6 @@ fn aggregate_cache(cache: &CacheFile, source_filter: Option<&'static str>) -> Us
                     .or_default()
                     .add(&token_usage);
 
-                stats
-                    .model_daily_history
-                    .entry(date_str.clone())
-                    .or_default()
-                    .entry(entry.model.clone())
-                    .or_default()
-                    .add(&token_usage);
-
                 if date_str == today_str {
                     stats.today.add(&token_usage);
                 }
@@ -933,19 +1010,54 @@ fn aggregate_cache(cache: &CacheFile, source_filter: Option<&'static str>) -> Us
                     .entry(hour_key.clone())
                     .or_default()
                     .add(&token_usage);
-
-                stats
-                    .model_hourly_history
-                    .entry(hour_key)
-                    .or_default()
-                    .entry(entry.model.clone())
-                    .or_default()
-                    .add(&token_usage);
             }
         }
     }
 
     stats
+}
+
+fn aggregate_model_breakdown(
+    cache: &CacheFile,
+    source_filter: Option<&'static str>,
+    granularity: ModelBreakdownGranularity,
+    now: chrono::DateTime<Local>,
+) -> ModelBreakdownHistory {
+    let mut breakdown: ModelBreakdownHistory = HashMap::new();
+
+    for (file_path, file_entry) in &cache.files {
+        if let Some(filter) = source_filter {
+            if detect_source_from_path(file_path) != Some(filter) {
+                continue;
+            }
+        }
+
+        for entry in &file_entry.stats.entries {
+            let Some(bucket_key) =
+                extract_model_breakdown_bucket(&entry.timestamp, granularity)
+            else {
+                continue;
+            };
+
+            let token_usage = TokenUsageWithCost {
+                input_tokens: entry.usage.input_tokens,
+                output_tokens: entry.usage.output_tokens,
+                cache_read_tokens: entry.usage.cache_read_tokens,
+                cache_creation_tokens: entry.usage.cache_creation_tokens,
+                cost: entry.usage.cost,
+            };
+
+            breakdown
+                .entry(bucket_key)
+                .or_default()
+                .entry(entry.model.clone())
+                .or_default()
+                .add(&token_usage);
+        }
+    }
+
+    trim_model_breakdown_to_visible_window(&mut breakdown, granularity, now);
+    breakdown
 }
 
 fn calculate_streak(daily_history: &HashMap<String, TokenUsageWithCost>) -> u32 {
@@ -997,6 +1109,22 @@ pub fn get_usage_history(
     })
 }
 
+#[tauri::command]
+pub fn get_usage_model_breakdown(
+    granularity: String,
+    source: Option<String>,
+) -> Result<ModelBreakdownHistory, String> {
+    let source_filter = normalize_usage_source(source.as_deref())?;
+    let granularity = ModelBreakdownGranularity::parse(&granularity)?;
+    let cache = refresh_usage_cache();
+    Ok(aggregate_model_breakdown(
+        &cache,
+        source_filter,
+        granularity,
+        Local::now(),
+    ))
+}
+
 /// Calculate continuous usage days (streak), optionally filtered by source.
 #[tauri::command]
 pub fn get_continuous_usage_days(source: Option<String>) -> Result<u32, String> {
@@ -1008,7 +1136,13 @@ pub fn get_continuous_usage_days(source: Option<String>) -> Result<u32, String> 
 
 #[cfg(test)]
 mod tests {
-    use super::{default_prices, normalize_usage_source, parse_codex_jsonl_reader, ModelPrice};
+    use super::{
+        aggregate_model_breakdown, default_prices, format_week_bucket,
+        normalize_usage_source, parse_codex_jsonl_reader, CacheEntry, CacheFile,
+        CacheFileEntry, CacheMeta, CacheStats, CacheUsage, ModelBreakdownGranularity,
+        ModelPrice, SOURCE_CLAUDE,
+    };
+    use chrono::{Local, TimeZone};
     use std::collections::HashMap;
     use std::io::BufReader;
 
@@ -1078,5 +1212,170 @@ mod tests {
             Some("codex")
         );
         assert!(normalize_usage_source(Some("other")).is_err());
+    }
+
+    fn usage_bucket(tokens: u64, cost: f64) -> CacheUsage {
+        CacheUsage {
+            input_tokens: tokens,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            cost,
+        }
+    }
+
+    fn fixed_now() -> chrono::DateTime<Local> {
+        Local
+            .with_ymd_and_hms(2026, 3, 6, 12, 0, 0)
+            .single()
+            .expect("fixed local time")
+    }
+
+    fn build_cache(
+        claude_entries: Vec<CacheEntry>,
+        codex_entries: Vec<CacheEntry>,
+    ) -> CacheFile {
+        let mut files = HashMap::new();
+        files.insert(
+            "/tmp/.claude/projects/session.jsonl".to_string(),
+            CacheFileEntry {
+                meta: CacheMeta::default(),
+                stats: CacheStats {
+                    entries: claude_entries,
+                },
+            },
+        );
+        files.insert(
+            "/tmp/.codex/sessions/session.jsonl".to_string(),
+            CacheFileEntry {
+                meta: CacheMeta::default(),
+                stats: CacheStats {
+                    entries: codex_entries,
+                },
+            },
+        );
+
+        CacheFile {
+            version: 1,
+            files,
+            last_updated: None,
+        }
+    }
+
+    #[test]
+    fn test_model_breakdown_hour_window_and_source_filtering() {
+        let cache = build_cache(
+            vec![
+                CacheEntry {
+                    timestamp: "2026-03-06T10:00:00+08:00".to_string(),
+                    model: "claude-sonnet-4-5".to_string(),
+                    usage: usage_bucket(120, 1.2),
+                },
+                CacheEntry {
+                    timestamp: "2026-03-05T09:00:00+08:00".to_string(),
+                    model: "claude-opus-4-5".to_string(),
+                    usage: usage_bucket(90, 0.9),
+                },
+            ],
+            vec![CacheEntry {
+                timestamp: "2026-03-06T11:00:00+08:00".to_string(),
+                model: "gpt-5.3-codex".to_string(),
+                usage: usage_bucket(75, 0.75),
+            }],
+        );
+
+        let result = aggregate_model_breakdown(
+            &cache,
+            Some(SOURCE_CLAUDE),
+            ModelBreakdownGranularity::Hour,
+            fixed_now(),
+        );
+
+        assert!(result.contains_key("2026-03-06T10"));
+        assert!(!result.contains_key("2026-03-05T09"));
+        assert_eq!(result["2026-03-06T10"]["claude-sonnet-4-5"].input_tokens, 120);
+        assert!(!result.values().any(|models| models.contains_key("gpt-5.3-codex")));
+    }
+
+    #[test]
+    fn test_model_breakdown_groups_and_trims_visible_buckets() {
+        let cache = build_cache(
+            vec![
+                CacheEntry {
+                    timestamp: "2026-02-27T10:00:00+08:00".to_string(),
+                    model: "claude-sonnet-4-5".to_string(),
+                    usage: usage_bucket(10, 0.1),
+                },
+                CacheEntry {
+                    timestamp: "2026-02-28T10:00:00+08:00".to_string(),
+                    model: "claude-sonnet-4-5".to_string(),
+                    usage: usage_bucket(20, 0.2),
+                },
+                CacheEntry {
+                    timestamp: "2026-03-01T10:00:00+08:00".to_string(),
+                    model: "claude-opus-4-5".to_string(),
+                    usage: usage_bucket(30, 0.3),
+                },
+                CacheEntry {
+                    timestamp: "2026-03-02T10:00:00+08:00".to_string(),
+                    model: "claude-opus-4-5".to_string(),
+                    usage: usage_bucket(40, 0.4),
+                },
+                CacheEntry {
+                    timestamp: "2026-03-03T10:00:00+08:00".to_string(),
+                    model: "claude-opus-4-5".to_string(),
+                    usage: usage_bucket(50, 0.5),
+                },
+                CacheEntry {
+                    timestamp: "2026-03-04T10:00:00+08:00".to_string(),
+                    model: "claude-opus-4-5".to_string(),
+                    usage: usage_bucket(60, 0.6),
+                },
+                CacheEntry {
+                    timestamp: "2026-03-05T10:00:00+08:00".to_string(),
+                    model: "claude-opus-4-5".to_string(),
+                    usage: usage_bucket(70, 0.7),
+                },
+                CacheEntry {
+                    timestamp: "2026-03-06T10:00:00+08:00".to_string(),
+                    model: "claude-opus-4-5".to_string(),
+                    usage: usage_bucket(80, 0.8),
+                },
+            ],
+            Vec::new(),
+        );
+
+        let day_result = aggregate_model_breakdown(
+            &cache,
+            None,
+            ModelBreakdownGranularity::Day,
+            fixed_now(),
+        );
+        assert_eq!(day_result.len(), 7);
+        assert!(!day_result.contains_key("2026-02-27"));
+        assert_eq!(day_result["2026-03-06"]["claude-opus-4-5"].input_tokens, 80);
+
+        let week_result = aggregate_model_breakdown(
+            &cache,
+            None,
+            ModelBreakdownGranularity::Week,
+            fixed_now(),
+        );
+        assert!(week_result.contains_key(&format_week_bucket(
+            chrono::NaiveDate::from_ymd_opt(2026, 3, 6).unwrap()
+        )));
+
+        let month_result = aggregate_model_breakdown(
+            &cache,
+            None,
+            ModelBreakdownGranularity::Month,
+            fixed_now(),
+        );
+        let march_total = &month_result["2026-03"]["claude-opus-4-5"];
+        assert_eq!(march_total.input_tokens, 330);
+        assert_eq!(march_total.output_tokens, 0);
+        assert_eq!(march_total.cache_read_tokens, 0);
+        assert_eq!(march_total.cache_creation_tokens, 0);
+        assert!((march_total.cost - 3.3).abs() < 1e-9);
     }
 }

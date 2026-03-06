@@ -193,6 +193,7 @@
   "analytics": {
     "subtitle": "Token 使用统计和成本分析",
     "tokenThisWeek": "Token (本周)",
+    "costTotal": "费用 (累计)",
     "costThisWeek": "费用 (本周)",
     "vsLastWeek": "较上周",
     "streak": "连续使用",

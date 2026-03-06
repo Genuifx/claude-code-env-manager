@@ -12,7 +12,10 @@ mod skills;
 mod terminal;
 mod tray;
 
-use analytics::{get_continuous_usage_days, get_usage_history, get_usage_stats};
+use analytics::{
+    get_continuous_usage_days, get_usage_history, get_usage_model_breakdown,
+    get_usage_stats,
+};
 use config::{
     create_env_with_encrypted_key, get_env_with_decrypted_key, AppConfig, DesktopSettings,
     EnvConfig, FavoriteProject, JetBrainsProject, RecentProject, VSCodeProject,
@@ -1170,10 +1173,7 @@ fn open_text_in_vscode(content: String, suggested_name: Option<String>) -> Resul
     fs::write(&temp_path, content)
         .map_err(|e| format!("Failed to write temp file for VS Code: {}", e))?;
 
-    let code_result = Command::new("code")
-        .arg("-r")
-        .arg(&temp_path)
-        .spawn();
+    let code_result = Command::new("code").arg("-r").arg(&temp_path).spawn();
 
     if code_result.is_ok() {
         return Ok(temp_path.to_string_lossy().to_string());
@@ -1282,6 +1282,7 @@ fn main() {
             sync_jetbrains_projects,
             get_usage_stats,
             get_usage_history,
+            get_usage_model_breakdown,
             get_continuous_usage_days,
             check_ccem_installed,
             check_codex_installed,

@@ -31,6 +31,10 @@ interface AnalyticsSourceCacheEntry {
 
 const analyticsSourceCache = new Map<UsageSourceFilter, AnalyticsSourceCacheEntry>();
 
+function isMockUsageStats(stats: UsageStats | null | undefined): boolean {
+  return typeof stats?.lastUpdated === 'string' && stats.lastUpdated.startsWith('mock:');
+}
+
 function calculateStreakDays(dailyHistory: UsageStats['dailyHistory']): number {
   const date = new Date();
   date.setHours(0, 0, 0, 0);
@@ -160,7 +164,7 @@ export function Analytics() {
     shallow
   );
 
-  const [isUsingMockData, setIsUsingMockData] = useState(false);
+  const [isUsingMockData, setIsUsingMockData] = useState(() => isMockUsageStats(useAppStore.getState().usageStats));
   const [loadError, setLoadError] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [usageSource, setUsageSource] = useState<UsageSourceFilter>('all');
@@ -258,7 +262,6 @@ export function Analytics() {
 
       if (import.meta.env.DEV && !hasExistingStats) {
         const mockStats = generateMockUsageStats();
-        primeAnalyticsSourceCache('all', mockStats);
         setUsageStats(mockStats);
         setMilestones(generateMockMilestones());
         setContinuousUsageDays(calculateStreakDays(mockStats.dailyHistory));
@@ -280,7 +283,11 @@ export function Analytics() {
   }, [loadRealData]);
 
   useEffect(() => {
-    if (usageSource === 'all' && usageStats && !analyticsSourceCache.has('all')) {
+    setIsUsingMockData(usageSource === 'all' && isMockUsageStats(usageStats));
+  }, [usageSource, usageStats]);
+
+  useEffect(() => {
+    if (usageSource === 'all' && usageStats && !isMockUsageStats(usageStats) && !analyticsSourceCache.has('all')) {
       primeAnalyticsSourceCache('all', usageStats);
     }
   }, [usageSource, usageStats]);
@@ -292,10 +299,16 @@ export function Analytics() {
   const totalTokensRaw = usageStats
     ? usageStats.total.inputTokens + usageStats.total.outputTokens + usageStats.total.cacheReadTokens + usageStats.total.cacheCreationTokens
     : 0;
+  const weeklyTokensRaw = usageStats
+    ? usageStats.week.inputTokens + usageStats.week.outputTokens + usageStats.week.cacheReadTokens + usageStats.week.cacheCreationTokens
+    : 0;
+  const totalCostRaw = usageStats?.total.cost ?? 0;
   const weeklyCostRaw = usageStats?.week.cost ?? 0;
   const streakDays = continuousUsageDays ?? 0;
 
   const animatedTotalTokens = useCountUp(totalTokensRaw);
+  const animatedWeeklyTokens = useCountUp(weeklyTokensRaw);
+  const animatedTotalCostCents = useCountUp(Math.round(totalCostRaw * 100));
   const animatedWeeklyCostCents = useCountUp(Math.round(weeklyCostRaw * 100));
   const animatedStreakDays = useCountUp(streakDays);
 
@@ -413,7 +426,7 @@ export function Analytics() {
 
         <div className="mb-3 flex items-baseline gap-3">
           <div
-            className="text-4xl font-bold"
+            className="text-4xl font-bold tabular-nums"
             style={{
               background: 'linear-gradient(135deg, hsl(var(--chart-1)), hsl(var(--chart-2)))',
               WebkitBackgroundClip: 'text',
@@ -424,7 +437,7 @@ export function Analytics() {
           </div>
           {tokenChange !== null ? (
             <div
-              className={`flex items-center gap-1 text-sm ${
+              className={`flex items-center gap-1 text-sm tabular-nums ${
                 tokenChange >= 0 ? 'text-chart-2' : 'text-destructive'
               }`}
             >
@@ -439,9 +452,18 @@ export function Analytics() {
         </div>
 
         <div className="flex items-end justify-between gap-4">
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
             <div className="flex flex-col">
-              <span className="text-lg font-semibold text-foreground">
+              <span className="text-lg font-semibold tabular-nums text-foreground">
+                ${(animatedTotalCostCents / 100).toFixed(2)}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {t('analytics.costTotal')}
+              </span>
+            </div>
+
+            <div className="flex flex-col">
+              <span className="text-lg font-semibold tabular-nums text-foreground">
                 ${(animatedWeeklyCostCents / 100).toFixed(2)}
               </span>
               <span className="text-xs text-muted-foreground">
@@ -449,9 +471,18 @@ export function Analytics() {
               </span>
             </div>
 
+            <div className="flex flex-col">
+              <span className="text-lg font-semibold tabular-nums text-foreground">
+                {animatedWeeklyTokens.toLocaleString()}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {t('analytics.tokenThisWeek')}
+              </span>
+            </div>
+
             <div className="flex flex-col items-center">
               <div className="flex items-center gap-1">
-                <span className="text-lg font-semibold text-foreground">
+                <span className="text-lg font-semibold tabular-nums text-foreground">
                   {animatedStreakDays}
                 </span>
                 <Flame className={`h-4 w-4 ${streakDays >= 7 ? 'text-orange-500' : 'text-muted-foreground'}`} />
@@ -471,6 +502,8 @@ export function Analytics() {
       <Suspense fallback={<AnalyticsInsightsFallback />}>
         <LazyAnalyticsInsights
           usageStats={usageStats}
+          usageSource={usageSource}
+          enableModelBreakdown={!isUsingMockData}
           milestones={milestones}
           isRefreshing={isRefreshing}
           onRefresh={handleRefresh}
