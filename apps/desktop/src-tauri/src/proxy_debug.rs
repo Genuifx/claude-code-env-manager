@@ -588,6 +588,7 @@ impl ProxyDebugManager {
         // Response body can be much larger (especially SSE), keep a safety cap.
         let request_body = read_body_preview(record.request_body_file.as_deref(), None)?;
         let response_body = read_body_preview(record.response_body_file.as_deref(), Some(200_000))?;
+        let reduced = recompute_reduced_detail(&record)?;
 
         Ok(ProxyTrafficDetail {
             item: record.to_item(),
@@ -595,7 +596,7 @@ impl ProxyDebugManager {
             response_headers: record.response_headers.clone(),
             request_body,
             response_body,
-            reduced: record.reduced.clone(),
+            reduced,
         })
     }
 
@@ -1649,54 +1650,93 @@ fn extract_finish_reason(value: &Value) -> Option<String> {
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
         })
+        .or_else(|| {
+            value
+                .pointer("/delta/stop_reason")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
+        .or_else(|| {
+            value
+                .get("choices")
+                .and_then(|v| v.as_array())
+                .and_then(|choices| {
+                    choices.iter().find_map(|choice| {
+                        choice
+                            .get("finish_reason")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
+                    })
+                })
+        })
 }
 
 fn collect_text_fragments(value: &Value) -> Vec<String> {
+    if let Some(event_type) = value.get("type").and_then(|v| v.as_str()) {
+        return collect_typed_text_fragments(event_type, value);
+    }
+
+    collect_chat_completion_text_fragments(value)
+}
+
+fn collect_typed_text_fragments(event_type: &str, value: &Value) -> Vec<String> {
+    match event_type {
+        "content_block_delta" | "response.output_text.delta" | "response.refusal.delta" => {
+            extract_delta_text(value)
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn extract_delta_text(value: &Value) -> Vec<String> {
+    match value.get("delta") {
+        Some(Value::String(text)) => vec![text.to_string()],
+        Some(Value::Object(obj)) => obj
+            .get("text")
+            .and_then(|v| v.as_str())
+            .map(|text| vec![text.to_string()])
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+fn collect_chat_completion_text_fragments(value: &Value) -> Vec<String> {
     let mut output = Vec::new();
-    collect_text_fragments_rec(value, &mut output);
+    let Some(choices) = value.get("choices").and_then(|v| v.as_array()) else {
+        return output;
+    };
+
+    for choice in choices {
+        if let Some(content) = choice.pointer("/delta/content") {
+            append_chat_completion_content(content, &mut output);
+            continue;
+        }
+
+        if let Some(text) = choice.get("text").and_then(|v| v.as_str()) {
+            output.push(text.to_string());
+        }
+    }
+
     output
 }
 
-fn collect_text_fragments_rec(value: &Value, output: &mut Vec<String>) {
+fn append_chat_completion_content(value: &Value, output: &mut Vec<String>) {
     match value {
+        Value::String(text) => output.push(text.to_string()),
+        Value::Array(parts) => {
+            for part in parts {
+                append_chat_completion_content(part, output);
+            }
+        }
         Value::Object(map) => {
             if let Some(text) = map.get("text").and_then(|v| v.as_str()) {
                 output.push(text.to_string());
-            }
-            if let Some(text) = map.get("output_text").and_then(|v| v.as_str()) {
+            } else if let Some(text) = map
+                .get("text")
+                .and_then(|v| v.get("value"))
+                .and_then(|v| v.as_str())
+            {
                 output.push(text.to_string());
-            }
-            if let Some(delta) = map.get("delta") {
-                match delta {
-                    Value::String(text) => output.push(text.to_string()),
-                    Value::Object(obj) => {
-                        if let Some(text) = obj.get("text").and_then(|v| v.as_str()) {
-                            output.push(text.to_string());
-                        }
-                    }
-                    _ => {}
-                }
-            }
-
-            for (key, child) in map {
-                if matches!(
-                    key.as_str(),
-                    "content"
-                        | "message"
-                        | "choices"
-                        | "output"
-                        | "data"
-                        | "delta"
-                        | "item"
-                        | "response"
-                ) {
-                    collect_text_fragments_rec(child, output);
-                }
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                collect_text_fragments_rec(item, output);
             }
         }
         _ => {}
@@ -1845,6 +1885,54 @@ fn read_body_preview(
     Ok(Some(text))
 }
 
+fn recompute_reduced_detail(record: &TrafficRecord) -> Result<Option<ReducedStreamLog>, String> {
+    let is_sse = record
+        .response_headers
+        .get("content-type")
+        .map(|value| value.contains("text/event-stream"))
+        .unwrap_or(false);
+    if !is_sse {
+        return Ok(record.reduced.clone());
+    }
+
+    let Some(raw_response) = read_body_preview(record.response_body_file.as_deref(), None)? else {
+        return Ok(record.reduced.clone());
+    };
+
+    let client_cancelled = matches!(
+        record
+            .reduced
+            .as_ref()
+            .map(|reduced| reduced.stream_status.as_str()),
+        Some("client_cancelled")
+    );
+    let upstream_error = matches!(
+        record
+            .reduced
+            .as_ref()
+            .map(|reduced| reduced.stream_status.as_str()),
+        Some("upstream_error")
+    );
+    let first_token_ms = record
+        .reduced
+        .as_ref()
+        .and_then(|reduced| reduced.first_token_ms);
+    let total_stream_ms = record
+        .reduced
+        .as_ref()
+        .and_then(|reduced| reduced.total_stream_ms)
+        .unwrap_or(record.duration_ms);
+
+    Ok(Some(build_sse_reduced(
+        raw_response.as_bytes(),
+        record.response_incomplete,
+        client_cancelled,
+        upstream_error,
+        first_token_ms,
+        total_stream_ms,
+    )))
+}
+
 fn enforce_log_retention(max_bytes: u64) -> Result<(), String> {
     ensure_proxy_debug_dirs()?;
 
@@ -1989,7 +2077,7 @@ fn generate_request_id() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{compose_upstream_url, parse_proxy_path, validate_upstream_url};
+    use super::{build_sse_reduced, compose_upstream_url, parse_proxy_path, validate_upstream_url};
 
     #[test]
     fn parse_proxy_path_extracts_components() {
@@ -2014,5 +2102,65 @@ mod tests {
     fn upstream_url_validation_rejects_non_http_scheme() {
         assert!(validate_upstream_url("ftp://example.com").is_err());
         assert!(validate_upstream_url("https://api.openai.com/v1").is_ok());
+    }
+
+    #[test]
+    fn build_sse_reduced_deduplicates_claude_content_deltas() {
+        let raw = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"content\":[]}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"我\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"可以帮你查询天气。\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"我需要知道你想查询哪个城市的天气？\"}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n"
+        );
+
+        let reduced = build_sse_reduced(raw.as_bytes(), false, false, false, Some(12), 34);
+
+        assert_eq!(
+            reduced.final_text,
+            "我可以帮你查询天气。我需要知道你想查询哪个城市的天气？"
+        );
+        assert_eq!(reduced.finish_reason.as_deref(), Some("end_turn"));
+        assert_eq!(reduced.stream_status, "completed");
+        assert_eq!(reduced.first_token_ms, Some(12));
+        assert_eq!(reduced.total_stream_ms, Some(34));
+    }
+
+    #[test]
+    fn build_sse_reduced_ignores_response_done_snapshots() {
+        let raw = concat!(
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"你\"}\n\n",
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"好\"}\n\n",
+            "data: {\"type\":\"response.output_text.done\",\"text\":\"你好\"}\n\n",
+            "data: {\"type\":\"response.completed\"}\n\n",
+            "data: [DONE]\n\n"
+        );
+
+        let reduced = build_sse_reduced(raw.as_bytes(), false, false, false, None, 20);
+
+        assert_eq!(reduced.final_text, "你好");
+    }
+
+    #[test]
+    fn build_sse_reduced_collects_chat_completion_deltas() {
+        let raw = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+
+        let reduced = build_sse_reduced(raw.as_bytes(), false, false, false, None, 15);
+
+        assert_eq!(reduced.final_text, "Hello");
+        assert_eq!(reduced.finish_reason.as_deref(), Some("stop"));
     }
 }
