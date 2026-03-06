@@ -11,7 +11,7 @@ export interface TokenUsageWithCost extends TokenUsage {
   cost: number;
 }
 
-export type ModelUsageHistory = Record<string, Record<string, TokenUsageWithCost>>;
+export type ModelBreakdownHistory = Record<string, Record<string, TokenUsageWithCost>>;
 
 export interface UsageStats {
   today: TokenUsageWithCost;
@@ -20,8 +20,6 @@ export interface UsageStats {
   total: TokenUsageWithCost;
   dailyHistory: Record<string, TokenUsageWithCost>; // key: YYYY-MM-DD
   hourlyHistory: Record<string, TokenUsageWithCost>; // key: YYYY-MM-DDTHH
-  modelDailyHistory: ModelUsageHistory; // key: YYYY-MM-DD -> model -> usage
-  modelHourlyHistory: ModelUsageHistory; // key: YYYY-MM-DDTHH -> model -> usage
   byModel: Record<string, TokenUsageWithCost>;
   byEnvironment: Record<string, TokenUsageWithCost>;
   lastUpdated: string;
@@ -46,6 +44,7 @@ export interface Milestone {
 }
 
 export interface ChartDataPoint {
+  bucketKey: string;
   date: string;
   breakdown?: Record<string, number>;
   [key: string]: number | string | Record<string, number> | undefined; // Dynamic keys for chart payloads
