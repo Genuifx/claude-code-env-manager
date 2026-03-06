@@ -1,6 +1,7 @@
 // apps/desktop/src/components/analytics/HeatmapCalendar.tsx
 import type { DailyActivity } from '@/types/analytics';
 import { useLocale } from '@/locales';
+import { formatTokens } from '@/lib/utils';
 
 interface HeatmapCalendarProps {
   activities: DailyActivity[];
@@ -16,12 +17,6 @@ const LEVEL_STYLES: Record<number, React.CSSProperties> = {
 };
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
-function formatTokens(tokens: number): string {
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
-  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}K`;
-  return tokens.toString();
-}
 
 export function HeatmapCalendar({ activities, compact = false }: HeatmapCalendarProps) {
   const { lang, t } = useLocale();

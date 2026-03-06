@@ -83,6 +83,7 @@ export function ModelDistribution({ byModel }: ModelDistributionProps) {
               onMouseEnter={onPieEnter}
               onMouseLeave={onPieLeave}
               strokeWidth={0}
+              isAnimationActive={false}
             >
               {pieData.map((_, index) => (
                 <Cell

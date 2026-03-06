@@ -6,11 +6,19 @@ interface AppLayoutProps {
   children: ReactNode;
   activeTab: string;
   onTabChange: (tab: string) => void;
+  onTabPrefetch?: (tab: string) => void;
   pageActions?: ReactNode;
   fullBleed?: boolean;
 }
 
-export function AppLayout({ children, activeTab, onTabChange, pageActions, fullBleed = false }: AppLayoutProps) {
+export function AppLayout({
+  children,
+  activeTab,
+  onTabChange,
+  onTabPrefetch,
+  pageActions,
+  fullBleed = false,
+}: AppLayoutProps) {
   const { t } = useLocale();
   const scrollEndTimerRef = useRef<number | null>(null);
   const isDashboard = activeTab === 'dashboard';
@@ -64,7 +72,7 @@ export function AppLayout({ children, activeTab, onTabChange, pageActions, fullB
 
       {/* Sidebar wrapper — adds inset padding around the floating panel */}
       <div className="p-2 pr-0 shrink-0 relative z-20">
-        <SideRail activeTab={activeTab} onTabChange={onTabChange} />
+        <SideRail activeTab={activeTab} onTabChange={onTabChange} onTabPrefetch={onTabPrefetch} />
       </div>
 
       {/* Main content area — semi-transparent so ambient orbs bleed through glass panels */}

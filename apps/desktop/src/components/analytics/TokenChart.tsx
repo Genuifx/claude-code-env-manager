@@ -1,5 +1,5 @@
 // apps/desktop/src/components/analytics/TokenChart.tsx
-import { memo } from 'react';
+import { Fragment, memo, useMemo } from 'react';
 import {
   AreaChart,
   Area,
@@ -10,36 +10,113 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import type { ChartDataPoint } from '@/types/analytics';
+import { useLocale } from '@/locales';
+import { formatTokenAxisValue, formatTokens, getYAxisWidth } from '@/lib/utils';
 
 interface TokenChartProps {
   data: ChartDataPoint[];
   seriesKeys: string[];
+  animate?: boolean;
 }
 
 const AMBER = 'hsl(38 92% 50%)';
 const AMBER_LIGHT = 'hsl(45 93% 58%)';
 
-const formatAxisValue = (value: number): string => {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(0)}K`;
-  return value.toString();
-};
+interface TokenTooltipPayloadItem {
+  color?: string;
+  payload?: ChartDataPoint;
+  dataKey?: string | number;
+  name?: string;
+  value?: number;
+}
 
-const tooltipStyle = {
-  backgroundColor: 'hsl(var(--surface-overlay))',
-  border: '1px solid hsl(var(--glass-border-light) / 0.3)',
-  borderRadius: '8px',
-  backdropFilter: 'blur(12px)',
-};
+interface TokenTooltipContentProps {
+  active?: boolean;
+  label?: string;
+  payload?: TokenTooltipPayloadItem[];
+}
 
-const tooltipFormatter = (value: number | undefined) => [formatAxisValue(value ?? 0), undefined];
+function TokenTooltipContent({ active, label, payload }: TokenTooltipContentProps) {
+  const { t } = useLocale();
+  const seriesRows = (payload ?? []).filter(
+    (item): item is TokenTooltipPayloadItem & { value: number } => typeof item.value === 'number',
+  );
+  const breakdown = seriesRows[0]?.payload?.breakdown;
+  const breakdownRows = breakdown
+    ? Object.entries(breakdown)
+        .filter(([, value]) => value > 0)
+        .sort(([, left], [, right]) => right - left)
+    : [];
 
-export const TokenChart = memo(function TokenChart({ data, seriesKeys }: TokenChartProps) {
+  if (!active || (seriesRows.length === 0 && breakdownRows.length === 0)) {
+    return null;
+  }
+
+  const resolveSeriesLabel = (item: TokenTooltipPayloadItem) => {
+    const rawLabel = typeof item.name === 'string' && item.name.length > 0
+      ? item.name
+      : typeof item.dataKey === 'string'
+        ? item.dataKey
+        : '';
+
+    return rawLabel === 'Tokens' ? t('analytics.totalTokens') : rawLabel;
+  };
+
+  return (
+    <div className="min-w-[196px] rounded-[24px] border border-white/45 bg-[hsl(var(--surface-overlay)/0.96)] px-4 py-3 shadow-[0_18px_50px_rgba(15,23,42,0.16)] backdrop-blur-2xl">
+      <div className="mb-3 text-[13px] font-medium tracking-[-0.01em] text-foreground">
+        {label}
+      </div>
+      <div className="grid grid-cols-[1fr_auto] gap-x-6 gap-y-2">
+        <span className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground/65">
+          {t('analytics.tooltipModel')}
+        </span>
+        <span className="text-right text-[11px] uppercase tracking-[0.18em] text-muted-foreground/65">
+          {t('analytics.tooltipUsage')}
+        </span>
+        {(breakdownRows.length > 0
+          ? breakdownRows.map(([model, value]) => ({ label: model, value, color: AMBER }))
+          : seriesRows.map((item) => ({
+              label: resolveSeriesLabel(item),
+              value: item.value,
+              color: item.color ?? AMBER,
+            }))
+        ).map((item) => (
+          <Fragment key={`${item.label}-${item.value}`}>
+            <div className="flex items-center gap-2 text-sm text-foreground">
+              <span
+                className="h-2.5 w-2.5 rounded-full"
+                style={{ backgroundColor: item.color }}
+              />
+              <span className="font-medium">{item.label}</span>
+            </div>
+            <span className="text-right text-[15px] font-semibold tracking-[-0.01em] text-[hsl(38_92%_50%)]">
+              {formatTokens(item.value)}
+            </span>
+          </Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export const TokenChart = memo(function TokenChart({
+  data,
+  seriesKeys,
+  animate = false,
+}: TokenChartProps) {
   const dataKey = seriesKeys[0] ?? 'Tokens';
+  const yAxisWidth = useMemo(() => {
+    const values = data
+      .map((point) => point[dataKey])
+      .filter((value): value is number => typeof value === 'number');
+
+    return getYAxisWidth(values, formatTokenAxisValue);
+  }, [data, dataKey]);
 
   return (
     <ResponsiveContainer width="100%" height={300}>
-      <AreaChart data={data}>
+      <AreaChart data={data} margin={{ left: 8, top: 8, right: 8 }}>
         <defs>
           <linearGradient id="amber-gradient" x1="0" y1="0" x2="0" y2="1">
             <stop offset="5%" stopColor={AMBER_LIGHT} stopOpacity={0.35} />
@@ -53,12 +130,13 @@ export const TokenChart = memo(function TokenChart({ data, seriesKeys }: TokenCh
         />
         <YAxis
           className="text-xs text-muted-foreground"
-          tickFormatter={formatAxisValue}
+          tickFormatter={formatTokenAxisValue}
           domain={[0, 'auto']}
+          width={yAxisWidth}
         />
         <Tooltip
-          contentStyle={tooltipStyle}
-          formatter={tooltipFormatter}
+          cursor={{ stroke: 'hsl(var(--border))', strokeDasharray: '4 4', strokeOpacity: 0.9 }}
+          content={<TokenTooltipContent />}
         />
         <Area
           type="monotone"
@@ -67,6 +145,7 @@ export const TokenChart = memo(function TokenChart({ data, seriesKeys }: TokenCh
           strokeWidth={2}
           fillOpacity={1}
           fill="url(#amber-gradient)"
+          isAnimationActive={animate}
         />
       </AreaChart>
     </ResponsiveContainer>

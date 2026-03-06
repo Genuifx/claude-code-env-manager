@@ -46,6 +46,8 @@ pub struct UsageStats {
     pub total: TokenUsageWithCost,
     pub daily_history: HashMap<String, TokenUsageWithCost>,
     pub hourly_history: HashMap<String, TokenUsageWithCost>,
+    pub model_daily_history: HashMap<String, HashMap<String, TokenUsageWithCost>>,
+    pub model_hourly_history: HashMap<String, HashMap<String, TokenUsageWithCost>>,
     pub by_model: HashMap<String, TokenUsageWithCost>,
     pub by_environment: HashMap<String, TokenUsageWithCost>,
     pub last_updated: String,
@@ -903,6 +905,14 @@ fn aggregate_cache(cache: &CacheFile, source_filter: Option<&'static str>) -> Us
                     .or_default()
                     .add(&token_usage);
 
+                stats
+                    .model_daily_history
+                    .entry(date_str.clone())
+                    .or_default()
+                    .entry(entry.model.clone())
+                    .or_default()
+                    .add(&token_usage);
+
                 if date_str == today_str {
                     stats.today.add(&token_usage);
                 }
@@ -920,7 +930,15 @@ fn aggregate_cache(cache: &CacheFile, source_filter: Option<&'static str>) -> Us
             if let Some(hour_key) = extract_hour(&entry.timestamp) {
                 stats
                     .hourly_history
+                    .entry(hour_key.clone())
+                    .or_default()
+                    .add(&token_usage);
+
+                stats
+                    .model_hourly_history
                     .entry(hour_key)
+                    .or_default()
+                    .entry(entry.model.clone())
                     .or_default()
                     .add(&token_usage);
             }

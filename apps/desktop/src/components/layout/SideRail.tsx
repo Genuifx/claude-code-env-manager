@@ -5,6 +5,7 @@ import { Home, Terminal, Globe, BarChart3, Sparkles, Settings, MessageSquare, Cl
 interface SideRailProps {
   activeTab: string;
   onTabChange: (tab: string) => void;
+  onTabPrefetch?: (tab: string) => void;
 }
 
 interface NavItemDef {
@@ -54,16 +55,20 @@ function NavButton({
   label,
   isActive,
   onClick,
+  onPrefetch,
 }: {
   item: NavItemDef;
   label: string;
   isActive: boolean;
   onClick: () => void;
+  onPrefetch?: () => void;
 }) {
   const Icon = item.icon;
   return (
     <button
       onClick={onClick}
+      onMouseEnter={onPrefetch}
+      onFocus={onPrefetch}
       title={`${label} (⌘${item.shortcut})`}
       className={cn(
         'sidebar-nav-item group relative w-full flex items-center gap-2.5 px-2.5 h-[30px] rounded-lg',
@@ -83,7 +88,7 @@ function NavButton({
   );
 }
 
-export function SideRail({ activeTab, onTabChange }: SideRailProps) {
+export function SideRail({ activeTab, onTabChange, onTabPrefetch }: SideRailProps) {
   const { t } = useLocale();
   return (
     <aside className="w-[200px] h-full shrink-0 flex flex-col glass-sidebar-panel glass-noise relative rounded-xl overflow-hidden">
@@ -107,6 +112,7 @@ export function SideRail({ activeTab, onTabChange }: SideRailProps) {
                   label={t(item.labelKey)}
                   isActive={activeTab === item.id}
                   onClick={() => onTabChange(item.id)}
+                  onPrefetch={() => onTabPrefetch?.(item.id)}
                 />
               ))}
             </div>
@@ -123,6 +129,7 @@ export function SideRail({ activeTab, onTabChange }: SideRailProps) {
             label={t(item.labelKey)}
             isActive={activeTab === item.id}
             onClick={() => onTabChange(item.id)}
+            onPrefetch={() => onTabPrefetch?.(item.id)}
           />
         ))}
       </div>

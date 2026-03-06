@@ -38,8 +38,37 @@ export function formatRelativeTime(dateStr: string): string {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+interface CompactTokenFormatOptions {
+  thousandDecimals?: number;
+}
+
+function formatCompactTokens(n: number, options: CompactTokenFormatOptions = {}): string {
+  if (!Number.isFinite(n)) return '0';
+
+  const { thousandDecimals = 1 } = options;
+  const sign = n < 0 ? '-' : '';
+  const value = Math.abs(n);
+
+  if (value >= 999_950_000_000) return `${sign}${(value / 1_000_000_000_000).toFixed(1)}T`;
+  if (value >= 999_950_000) return `${sign}${(value / 1_000_000_000).toFixed(1)}B`;
+  if (value >= 999_950) return `${sign}${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${sign}${(value / 1_000).toFixed(thousandDecimals)}K`;
+  return `${n}`;
+}
+
 export function formatTokens(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
-  return n.toString();
+  return formatCompactTokens(n);
+}
+
+export function formatTokenAxisValue(n: number): string {
+  return formatCompactTokens(n, { thousandDecimals: 0 });
+}
+
+export function getYAxisWidth(values: number[], formatter: (value: number) => string, minWidth = 56): number {
+  const maxLabelLength = values.reduce(
+    (widest, value) => Math.max(widest, formatter(value).length),
+    formatter(0).length,
+  );
+
+  return Math.max(minWidth, maxLabelLength * 8 + 16);
 }
