@@ -16,6 +16,7 @@ import { Toaster, toast } from 'sonner';
 import { LocaleProvider, useLocale } from '@/locales';
 import type { UsageStats } from '@/types/analytics';
 import { shallow } from 'zustand/shallow';
+import { TooltipProvider } from '@/components/ui/tooltip';
 
 const AnalyticsPage = lazy(async () =>
   import('@/pages/Analytics').then((m) => ({ default: m.Analytics }))
@@ -195,6 +196,38 @@ function App() {
     refreshData();
   }, [refreshData]);
 
+  useEffect(() => {
+    let cancelled = false;
+    let timeoutId: number | null = null;
+    let idleId: number | null = null;
+    const requestIdle = window.requestIdleCallback?.bind(window);
+    const cancelIdle = window.cancelIdleCallback?.bind(window);
+
+    const preloadHistory = () => {
+      void import('@/pages/History').then((module) => {
+        if (!cancelled) {
+          module.primeHistoryPage?.();
+        }
+      });
+    };
+
+    if (requestIdle) {
+      idleId = requestIdle(preloadHistory, { timeout: 1500 });
+    } else {
+      timeoutId = setTimeout(preloadHistory, 600);
+    }
+
+    return () => {
+      cancelled = true;
+      if (idleId !== null && cancelIdle) {
+        cancelIdle(idleId);
+      }
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, []);
+
   // Re-sync with CLI config when window regains focus
   // This ensures desktop stays in sync when user modifies env via `ccem add/del/use` in terminal
   // Skip environment reload when a dialog is open to avoid resetting in-progress edits
@@ -342,33 +375,35 @@ function App() {
 
   return (
     <LocaleProvider>
-      <AppLayout activeTab={activeTab} onTabChange={setActiveTab}>
-        <Suspense fallback={<PageFallback />}>
-          {renderPage()}
-        </Suspense>
-      </AppLayout>
+      <TooltipProvider delayDuration={120}>
+        <AppLayout activeTab={activeTab} onTabChange={setActiveTab} fullBleed={activeTab === 'history'}>
+          <Suspense fallback={<PageFallback />}>
+            {renderPage()}
+          </Suspense>
+        </AppLayout>
 
-      {/* Environment Dialog */}
-      <EnvironmentDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        mode={dialogMode}
-        environment={getEditingEnv()}
-        onSave={handleSaveEnv}
-        onServerSync={loadFromRemote}
-      />
-
-      {/* Delete Environment Confirmation Dialog */}
-      {pendingDeleteEnv && (
-        <DeleteEnvConfirmDialog
-          envName={pendingDeleteEnv}
-          onConfirm={confirmDeleteEnv}
-          onCancel={() => setPendingDeleteEnv(null)}
+        {/* Environment Dialog */}
+        <EnvironmentDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          mode={dialogMode}
+          environment={getEditingEnv()}
+          onSave={handleSaveEnv}
+          onServerSync={loadFromRemote}
         />
-      )}
 
-      {/* Toast notifications */}
-      <Toaster position="top-center" richColors />
+        {/* Delete Environment Confirmation Dialog */}
+        {pendingDeleteEnv && (
+          <DeleteEnvConfirmDialog
+            envName={pendingDeleteEnv}
+            onConfirm={confirmDeleteEnv}
+            onCancel={() => setPendingDeleteEnv(null)}
+          />
+        )}
+
+        {/* Toast notifications */}
+        <Toaster position="top-center" richColors />
+      </TooltipProvider>
     </LocaleProvider>
   );
 }

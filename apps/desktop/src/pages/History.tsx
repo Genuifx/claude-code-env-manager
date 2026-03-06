@@ -1,43 +1,30 @@
-import { useState, useEffect, useCallback, useRef, useMemo, useTransition } from 'react';
-import { MessageSquare, Play, Check, Download } from 'lucide-react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState, useTransition } from 'react';
+import { MessageSquare } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { HistoryList, type HistorySessionItem, type HistorySource } from '@/components/history/HistoryList';
-import { MessageBubble, type ConversationMessageData } from '@/components/history/MessageBubble';
+import type { ConversationMessageData } from '@/components/history/MessageBubble';
+import type { HistorySegment } from '@/components/history/HistoryDetail';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 
-interface ContentBlock {
-  type: string;
-  id?: string;
-  name?: string;
-  input?: unknown;
-  content?: unknown;
-  is_error?: boolean;
-  tool_use_id?: string;
-  _result?: unknown;
-  _resultError?: boolean;
-  [key: string]: unknown;
-}
-
-interface CompactSegment {
-  segmentIndex: number;
-  timestamp: number;
-  trigger?: string;
-  preTokens?: number;
-  messageCount: number;
-}
-
-interface SessionTokenUsage {
-  input: number;
-  output: number;
-  total: number;
-}
+const LazyHistoryDetail = lazy(async () =>
+  import('@/components/history/HistoryDetail').then((m) => ({ default: m.HistoryDetail }))
+);
 
 type HistorySourceFilter = 'all' | HistorySource;
+
+const HISTORY_CACHE_TTL_MS = 60_000;
+
+interface HistorySessionCacheEntry {
+  data: HistorySessionItem[];
+  fetchedAt: number;
+  promise?: Promise<HistorySessionItem[]>;
+}
+
+const historySessionCache = new Map<HistorySourceFilter, HistorySessionCacheEntry>();
 
 function toSessionKey(session: Pick<HistorySessionItem, 'id' | 'source'>): string {
   return `${session.source}:${session.id}`;
@@ -47,99 +34,150 @@ function normalizeHistorySource(value: unknown): HistorySource {
   return typeof value === 'string' && value.toLowerCase() === 'codex' ? 'codex' : 'claude';
 }
 
-/**
- * Pair tool_use blocks with their corresponding tool_result blocks.
- * Injects _result/_resultError into tool_use, removes paired tool_results.
- */
-function mergeToolResults(msgs: ConversationMessageData[]): ConversationMessageData[] {
-  // Deep clone to avoid mutating original data
-  const cloned: ConversationMessageData[] = JSON.parse(JSON.stringify(msgs));
+function normalizeHistorySessions(data: HistorySessionItem[]): HistorySessionItem[] {
+  return data.map((session) => ({
+    ...session,
+    source: normalizeHistorySource(session.source),
+  }));
+}
 
-  // Pass 1: index all tool_use blocks by id
-  const toolUseMap = new Map<string, ContentBlock>();
-  for (const msg of cloned) {
-    if ((msg.msgType === 'assistant' || msg.msgType === 'ai') && Array.isArray(msg.content)) {
-      for (const block of msg.content as ContentBlock[]) {
-        if (block.type === 'tool_use' && block.id) {
-          toolUseMap.set(block.id, block);
-        }
-      }
-    }
+function getCachedHistorySessions(sourceFilter: HistorySourceFilter): HistorySessionItem[] | null {
+  return historySessionCache.get(sourceFilter)?.data ?? null;
+}
+
+function isHistoryCacheFresh(sourceFilter: HistorySourceFilter): boolean {
+  const entry = historySessionCache.get(sourceFilter);
+  return !!entry && Date.now() - entry.fetchedAt < HISTORY_CACHE_TTL_MS;
+}
+
+async function fetchHistorySessions(sourceFilter: HistorySourceFilter, force = false): Promise<HistorySessionItem[]> {
+  const cached = historySessionCache.get(sourceFilter);
+
+  if (!force && cached?.data && isHistoryCacheFresh(sourceFilter)) {
+    return cached.data;
   }
 
-  // Pass 2: match tool_results and inject into tool_use blocks
-  const result: ConversationMessageData[] = [];
-  for (const msg of cloned) {
-    if ((msg.msgType === 'user' || msg.msgType === 'human') && Array.isArray(msg.content)) {
-      const blocks = msg.content as ContentBlock[];
-      const remaining = blocks.filter(block => {
-        if (block.type === 'tool_result' && block.tool_use_id) {
-          const target = toolUseMap.get(block.tool_use_id);
-          if (target) {
-            target._result = block.content;
-            target._resultError = block.is_error === true;
-            return false; // remove from user message
-          }
-        }
-        return true;
+  if (!force && cached?.promise) {
+    return cached.promise;
+  }
+
+  const request = invoke<HistorySessionItem[]>('get_conversation_history', {
+    source: sourceFilter === 'all' ? null : sourceFilter,
+  })
+    .then((data) => {
+      const normalized = normalizeHistorySessions(data);
+      historySessionCache.set(sourceFilter, {
+        data: normalized,
+        fetchedAt: Date.now(),
       });
+      return normalized;
+    })
+    .catch((err) => {
+      if (cached?.data) {
+        historySessionCache.set(sourceFilter, cached);
+      } else {
+        historySessionCache.delete(sourceFilter);
+      }
+      throw err;
+    });
 
-      // Skip user messages that only contained tool_results (now empty)
-      if (remaining.length === 0) continue;
-      msg.content = remaining as ConversationMessageData['content'];
-    }
-    result.push(msg);
-  }
+  historySessionCache.set(sourceFilter, {
+    data: cached?.data ?? [],
+    fetchedAt: cached?.fetchedAt ?? 0,
+    promise: request,
+  });
 
-  return result;
+  return request;
+}
+
+export function primeHistoryPage() {
+  void fetchHistorySessions('all').catch(() => {});
+}
+
+function HistoryDetailFallback() {
+  return (
+    <div className="flex-1 overflow-hidden">
+      <div className="glass-header glass-noise shrink-0 border-b border-white/[0.06] px-5 py-2.5">
+        <div className="h-4 w-48 animate-pulse rounded bg-white/[0.06]" />
+        <div className="mt-2 h-3 w-28 animate-pulse rounded bg-white/[0.04]" />
+      </div>
+      <div className="mx-auto max-w-3xl px-6 py-6">
+        <div className="space-y-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className={`flex ${i % 2 === 0 ? 'justify-end' : 'justify-start'}`}>
+              <div className={`h-16 animate-pulse rounded-xl ${i % 2 === 0 ? 'bg-primary/10 w-48' : 'bg-white/[0.04] w-64'}`} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function History() {
   const { t } = useLocale();
   const { launchClaudeCode } = useTauriCommands();
-  const [sessions, setSessions] = useState<HistorySessionItem[]>([]);
+  const [sessions, setSessions] = useState<HistorySessionItem[]>(() => getCachedHistorySessions('all') ?? []);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [messages, setMessages] = useState<ConversationMessageData[]>([]);
-  const [segments, setSegments] = useState<CompactSegment[]>([]);
+  const [segments, setSegments] = useState<HistorySegment[]>([]);
   const [activeSegment, setActiveSegment] = useState<number | null>(null);
-  const [isLoadingSessions, setIsLoadingSessions] = useState(true);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(() => getCachedHistorySessions('all') == null);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [focusedSessionKey, setFocusedSessionKey] = useState<string | null>(null);
+  const [visibleSessionKeys, setVisibleSessionKeys] = useState<string[] | null>(null);
   const [launched, setLaunched] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<HistorySourceFilter>('all');
   const [, startTransition] = useTransition();
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const formatTokens = (v: number) => v.toLocaleString();
 
-  const loadHistory = useCallback(async () => {
-    setIsLoadingSessions(true);
-    try {
-      const source = sourceFilter === 'all' ? null : sourceFilter;
-      const data = await invoke<HistorySessionItem[]>('get_conversation_history', { source });
-      const normalized = data.map((session) => ({
-        ...session,
-        source: normalizeHistorySource(session.source),
-      }));
-      setSessions(normalized);
-      setSelectedKey((prev) =>
-        prev && normalized.some((session) => toSessionKey(session) === prev) ? prev : null
-      );
-      setFocusedSessionKey((prev) =>
-        prev && normalized.some((session) => toSessionKey(session) === prev) ? prev : null
-      );
-    } catch (err) {
-      console.error('Failed to load conversation history:', err);
-    } finally {
-      setIsLoadingSessions(false);
-    }
-  }, [sourceFilter]);
+  const syncSessionState = useCallback((nextSessions: HistorySessionItem[]) => {
+    setSessions(nextSessions);
+    setSelectedKey((prev) => (
+      prev && nextSessions.some((session) => toSessionKey(session) === prev) ? prev : null
+    ));
+    setFocusedSessionKey((prev) => (
+      prev && nextSessions.some((session) => toSessionKey(session) === prev) ? prev : null
+    ));
+  }, []);
 
-  // Load conversation history on mount and when source filter changes.
   useEffect(() => {
-    loadHistory();
-  }, [loadHistory]);
+    setVisibleSessionKeys(null);
 
-  // Selected session info (needed by handleResume below)
+    const cached = getCachedHistorySessions(sourceFilter);
+    if (cached) {
+      syncSessionState(cached);
+      setIsLoadingSessions(false);
+    } else {
+      setSessions([]);
+      setIsLoadingSessions(true);
+    }
+
+    if (cached && isHistoryCacheFresh(sourceFilter)) {
+      return;
+    }
+
+    let cancelled = false;
+    fetchHistorySessions(sourceFilter)
+      .then((normalized) => {
+        if (cancelled) return;
+        syncSessionState(normalized);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error('Failed to load conversation history:', err);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingSessions(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sourceFilter, syncSessionState]);
+
   const selectedSession = sessions.find((session) => toSessionKey(session) === selectedKey);
   const selectedSource = selectedSession?.source ?? 'claude';
   const isCodexSessionSelected = selectedSource === 'codex';
@@ -159,23 +197,6 @@ export function History() {
     }
   }, [selectedSession, launchClaudeCode, t]);
 
-  // Merge tool_use + tool_result pairs, then filter by active segment
-  const mergedMessages = useMemo(() => mergeToolResults(messages), [messages]);
-  const sessionUsage = useMemo<SessionTokenUsage>(() => {
-    const usage = mergedMessages.reduce(
-      (acc, msg) => {
-        acc.input += msg.inputTokens ?? 0;
-        acc.output += msg.outputTokens ?? 0;
-        return acc;
-      },
-      { input: 0, output: 0 }
-    );
-    return {
-      ...usage,
-      total: usage.input + usage.output,
-    };
-  }, [mergedMessages]);
-
   const handleExport = useCallback(() => {
     if (!selectedSession) return;
 
@@ -185,7 +206,7 @@ export function History() {
         exportedAt: new Date().toISOString(),
         session: selectedSession,
         segments,
-        messages: mergedMessages,
+        messages,
       };
 
       const blob = new Blob([JSON.stringify(payload, null, 2)], {
@@ -211,9 +232,8 @@ export function History() {
       console.error('Failed to export conversation:', err);
       toast.error(t('history.exportFailed'));
     }
-  }, [selectedSession, segments, mergedMessages, t]);
+  }, [selectedSession, segments, messages, t]);
 
-  // Load messages + segments when a session is selected
   const handleSelect = useCallback(async (session: HistorySessionItem) => {
     const key = toSessionKey(session);
     setSelectedKey(key);
@@ -228,7 +248,7 @@ export function History() {
           sessionId: session.id,
           source: session.source,
         }),
-        invoke<CompactSegment[]>('get_conversation_segments', {
+        invoke<HistorySegment[]>('get_conversation_segments', {
           sessionId: session.id,
           source: session.source,
         }),
@@ -242,48 +262,41 @@ export function History() {
     }
   }, []);
 
-  // Scroll to top when session changes
   useEffect(() => {
-    if (messages.length > 0 && messagesContainerRef.current) {
-      messagesContainerRef.current.scrollTo({ top: 0 });
+    if (visibleSessionKeys === null) return;
+    if (visibleSessionKeys.length === 0) {
+      setFocusedSessionKey(null);
+      return;
     }
-  }, [selectedKey, messages.length]);
-
-  // Smooth scroll to top when segment changes
-  useEffect(() => {
-    if (activeSegment !== null && messagesContainerRef.current) {
-      messagesContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    if (focusedSessionKey && !visibleSessionKeys.includes(focusedSessionKey)) {
+      setFocusedSessionKey(
+        selectedKey && visibleSessionKeys.includes(selectedKey) ? selectedKey : null
+      );
     }
-  }, [activeSegment]);
+  }, [visibleSessionKeys, focusedSessionKey, selectedKey]);
 
-  const visibleMessages = useMemo(() => {
-    if (activeSegment === null) return mergedMessages;
-    return mergedMessages.filter(m => m.segmentIndex === activeSegment);
-  }, [mergedMessages, activeSegment]);
-
-  // Flat session ids for keyboard navigation
   const sessionKeys = useMemo(() => sessions.map((session) => toSessionKey(session)), [sessions]);
+  const navigableSessionKeys = visibleSessionKeys ?? sessionKeys;
 
-  // Keyboard navigation handler
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    // Don't intercept when typing in search
     if ((e.target as HTMLElement).tagName === 'INPUT') return;
+    if (navigableSessionKeys.length === 0 && e.key !== '/') return;
 
     switch (e.key) {
       case 'j':
       case 'ArrowDown': {
         e.preventDefault();
-        const currentIdx = focusedSessionKey ? sessionKeys.indexOf(focusedSessionKey) : -1;
-        const nextIdx = Math.min(currentIdx + 1, sessionKeys.length - 1);
-        setFocusedSessionKey(sessionKeys[nextIdx] || null);
+        const currentIdx = focusedSessionKey ? navigableSessionKeys.indexOf(focusedSessionKey) : -1;
+        const nextIdx = Math.min(currentIdx + 1, navigableSessionKeys.length - 1);
+        setFocusedSessionKey(navigableSessionKeys[nextIdx] || null);
         break;
       }
       case 'k':
       case 'ArrowUp': {
         e.preventDefault();
-        const currentIdx = focusedSessionKey ? sessionKeys.indexOf(focusedSessionKey) : sessionKeys.length;
+        const currentIdx = focusedSessionKey ? navigableSessionKeys.indexOf(focusedSessionKey) : navigableSessionKeys.length;
         const prevIdx = Math.max(currentIdx - 1, 0);
-        setFocusedSessionKey(sessionKeys[prevIdx] || null);
+        setFocusedSessionKey(navigableSessionKeys[prevIdx] || null);
         break;
       }
       case 'Enter': {
@@ -298,34 +311,32 @@ export function History() {
       }
       case '/': {
         e.preventDefault();
-        // Focus the search input inside HistoryList
         const searchInput = document.querySelector('[data-history-search]') as HTMLInputElement;
         searchInput?.focus();
         break;
       }
     }
-  }, [focusedSessionKey, sessionKeys, handleSelect, sessions]);
+  }, [focusedSessionKey, navigableSessionKeys, handleSelect, sessions]);
 
   return (
     <div
-      className="page-transition-enter flex h-[calc(100vh-48px-24px)] gap-0 -mx-6 -mb-6"
+      className="page-transition-enter flex h-full gap-0"
       onKeyDown={handleKeyDown}
       tabIndex={-1}
     >
-      {/* Left panel — session list */}
-      <div className="w-[280px] shrink-0 flex flex-col glass-subtle glass-noise border-r border-white/[0.06]">
-        <div className="p-3 border-b border-white/[0.06]">
-          <div className="flex items-center gap-0.5 p-0.5 rounded-lg glass-subtle">
+      <div className="w-[300px] shrink-0 flex flex-col glass-subtle glass-noise border-r border-white/[0.06]">
+        <div className="border-b border-white/[0.06] px-4 pt-3 pb-1">
+          <div className="flex items-center gap-4">
             {(['all', 'claude', 'codex'] as HistorySourceFilter[]).map((source) => (
               <button
                 key={source}
                 type="button"
                 onClick={() => startTransition(() => setSourceFilter(source))}
                 className={cn(
-                  'flex-1 h-7 rounded-md text-xs transition-all duration-150',
+                  'border-b-2 pb-1 text-xs transition-colors duration-150',
                   sourceFilter === source
-                    ? 'seg-active text-foreground'
-                    : 'seg-hover text-muted-foreground hover:text-foreground'
+                    ? 'border-primary font-medium text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
                 )}
               >
                 {source === 'all' && t('history.sourceAll')}
@@ -335,12 +346,12 @@ export function History() {
             ))}
           </div>
         </div>
-        {isLoadingSessions ? (
+        {isLoadingSessions && sessions.length === 0 ? (
           <div className="flex-1 flex flex-col gap-2 p-3">
             {Array.from({ length: 8 }).map((_, i) => (
               <div key={i} className="animate-pulse">
-                <div className="h-4 bg-white/[0.06] rounded w-3/4 mb-1.5" />
-                <div className="h-3 bg-white/[0.04] rounded w-1/2" />
+                <div className="mb-1.5 h-4 w-3/4 rounded bg-white/[0.06]" />
+                <div className="h-3 w-1/2 rounded bg-white/[0.04]" />
               </div>
             ))}
           </div>
@@ -350,13 +361,13 @@ export function History() {
             selectedKey={selectedKey}
             onSelect={handleSelect}
             focusedKey={focusedSessionKey}
-            onFocusChange={setFocusedSessionKey}
+            sourceFilter={sourceFilter}
+            onVisibleSessionKeysChange={setVisibleSessionKeys}
           />
         )}
       </div>
 
-      {/* Right panel — conversation detail */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 bg-[hsl(var(--background)/0.5)]">
         {!selectedKey ? (
           <div className="flex-1 flex items-center justify-center">
             <EmptyState
@@ -364,142 +375,25 @@ export function History() {
               message={t('history.selectConversation')}
             />
           </div>
+        ) : selectedSession ? (
+          <Suspense fallback={<HistoryDetailFallback />}>
+            <LazyHistoryDetail
+              selectedSession={selectedSession}
+              messages={messages}
+              segments={segments}
+              activeSegment={activeSegment}
+              onActiveSegmentChange={setActiveSegment}
+              isLoadingMessages={isLoadingMessages}
+              onExport={handleExport}
+              onResume={handleResume}
+              launched={launched}
+              isCodexSessionSelected={isCodexSessionSelected}
+            />
+          </Suspense>
         ) : (
-          <>
-            {/* Conversation header */}
-            {selectedSession && (
-              <div className="px-5 py-3 glass-header glass-noise shrink-0 flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <h3 className="text-sm font-medium text-foreground truncate">
-                    {selectedSession.display}
-                  </h3>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                    {selectedSession.projectName} · {new Date(selectedSession.timestamp).toLocaleString()}
-                  </p>
-                  <div className="mt-1">
-                    <span className="inline-flex items-center text-[10px] uppercase tracking-wide text-muted-foreground/80 rounded-md bg-white/[0.04] px-1.5 py-0.5">
-                      {selectedSession.source === 'codex' ? 'Codex' : 'Claude'}
-                    </span>
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground/75">
-                    <span className="inline-flex items-center gap-1 rounded-md bg-white/[0.03] px-1.5 py-0.5 max-w-[280px]">
-                      <span>{t('history.sessionId')}:</span>
-                      <span className="font-mono truncate" title={selectedSession.id}>{selectedSession.id}</span>
-                    </span>
-                    <span className="inline-flex items-center gap-1 rounded-md bg-white/[0.03] px-1.5 py-0.5">
-                      <span>{t('history.tokensTotal')}:</span>
-                      <span className="font-mono">{formatTokens(sessionUsage.total)}</span>
-                    </span>
-                    <span className="inline-flex items-center gap-1 rounded-md bg-white/[0.03] px-1.5 py-0.5">
-                      <span>{t('history.tokensInput')}:</span>
-                      <span className="font-mono">{formatTokens(sessionUsage.input)}</span>
-                    </span>
-                    <span className="inline-flex items-center gap-1 rounded-md bg-white/[0.03] px-1.5 py-0.5">
-                      <span>{t('history.tokensOutput')}:</span>
-                      <span className="font-mono">{formatTokens(sessionUsage.output)}</span>
-                    </span>
-                  </div>
-                </div>
-                <div className="shrink-0 flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="gap-1.5 text-xs"
-                    onClick={handleExport}
-                    disabled={isLoadingMessages}
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                    {t('history.export')}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant={launched ? 'ghost' : 'outline'}
-                    className="gap-1.5 text-xs"
-                    onClick={handleResume}
-                    disabled={launched || isCodexSessionSelected}
-                    title={isCodexSessionSelected ? t('history.resumeUnsupportedCodex') : undefined}
-                  >
-                    {launched ? <Check className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-                    {launched ? t('history.resumed') : t('history.resume')}
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {/* Segment navigation — only when multiple segments exist */}
-            {segments.length > 1 && (
-              <div className="px-5 py-2 border-b border-white/[0.06] flex items-center gap-1 overflow-x-auto shrink-0">
-                <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5">
-                  <button
-                    onClick={() => startTransition(() => setActiveSegment(null))}
-                    className={cn(
-                      'px-2.5 py-1 rounded-md text-[11px] transition-all shrink-0 seg-hover',
-                      activeSegment === null && 'seg-active'
-                    )}
-                  >
-                    {t('history.allSegments')}
-                  </button>
-                  {segments.map((seg) => (
-                    <button
-                      key={seg.segmentIndex}
-                      onClick={() => startTransition(() => setActiveSegment(seg.segmentIndex))}
-                      className={cn(
-                        'px-2.5 py-1 rounded-md text-[11px] transition-all shrink-0 seg-hover',
-                        activeSegment === seg.segmentIndex && 'seg-active'
-                      )}
-                    >
-                      {seg.segmentIndex === 0
-                        ? t('history.segmentInitial')
-                        : `${t('history.segmentLabel')} ${seg.segmentIndex}`
-                      }
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Messages */}
-            <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-5 py-4">
-              {isLoadingMessages ? (
-         <div className="space-y-4">
-                  {Array.from({ length: 4 }).map((_, i) => (
-                    <div key={i} className={`flex ${i % 2 === 0 ? 'justify-end' : 'justify-start'}`}>
-                      <div className="animate-pulse">
-                        <div className={`h-16 rounded-xl ${i % 2 === 0 ? 'bg-primary/10 w-48' : 'bg-white/[0.04] w-64'}`} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-           ) : visibleMessages.length === 0 ? (
-                <div className="flex items-center justify-center h-full">
-                  <p className="text-xs text-muted-foreground">{t('history.noMessages')}</p>
-                </div>
-              ) : (
-                <div key={activeSegment ?? 'all'}>
-                  {visibleMessages.map((msg, i) => {
-                    // Compute prevRole for dynamic spacing
-                    const prevMsg = i > 0 ? visibleMessages[i - 1] : null;
-                    const prevRole = prevMsg
-                      ? (prevMsg.msgType === 'user' || prevMsg.msgType === 'human' ? 'user' : 'assistant')
-                      : null;
-
-                    // Entrance animation: first 8 messages get staggered delay
-                    const animDelay = i < 8 ? `${i * 30}ms` : '0ms';
-
-                    return (
-                      <div
-                        key={msg.uuid || i}
-                        className="msg-enter history-msg-virtualized"
-                        style={{ animationDelay: animDelay }}
-                      >
-                        <MessageBubble message={msg} prevRole={prevRole} />
-                      </div>
-                    );
-               })}
-                </div>
-              )}
-            </div>
-          </>
+          <div className="flex-1 flex items-center justify-center">
+            <p className="text-xs text-muted-foreground">{t('history.noResults')}</p>
+          </div>
         )}
       </div>
     </div>

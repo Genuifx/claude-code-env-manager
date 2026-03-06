@@ -7,9 +7,10 @@ interface AppLayoutProps {
   activeTab: string;
   onTabChange: (tab: string) => void;
   pageActions?: ReactNode;
+  fullBleed?: boolean;
 }
 
-export function AppLayout({ children, activeTab, onTabChange, pageActions }: AppLayoutProps) {
+export function AppLayout({ children, activeTab, onTabChange, pageActions, fullBleed = false }: AppLayoutProps) {
   const { t } = useLocale();
   const scrollEndTimerRef = useRef<number | null>(null);
   const isDashboard = activeTab === 'dashboard';
@@ -91,11 +92,13 @@ export function AppLayout({ children, activeTab, onTabChange, pageActions }: App
           )}
         </div>
         <main
-          className="scroll-glass-root flex-1 overflow-y-auto px-8 py-4 relative z-10"
+          className={fullBleed
+            ? 'scroll-glass-root flex-1 overflow-hidden relative z-10'
+            : 'scroll-glass-root flex-1 overflow-y-auto px-8 py-4 relative z-10'}
           data-scrolling="false"
           onScrollCapture={handleScrollActivity}
         >
-          <div className="max-w-6xl">
+          <div className={fullBleed ? 'w-full h-full' : 'max-w-6xl'}>
             {children}
           </div>
         </main>

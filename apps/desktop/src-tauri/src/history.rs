@@ -25,7 +25,6 @@ pub struct HistorySession {
     pub timestamp: u64,
     pub project: String,
     pub project_name: String,
-    pub segment_count: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -222,7 +221,6 @@ fn load_claude_history() -> Result<Vec<HistorySession>, String> {
 
     let reader = BufReader::new(file);
     let mut session_map: HashMap<String, HistorySession> = HashMap::new();
-    let projects_dir = home.join(".claude").join("projects");
 
     for line_result in reader.lines() {
         let line = match line_result {
@@ -271,17 +269,8 @@ fn load_claude_history() -> Result<Vec<HistorySession>, String> {
                     timestamp,
                     project,
                     project_name,
-                    segment_count: 1,
                 },
             );
-        }
-    }
-
-    if projects_dir.exists() {
-        for session in session_map.values_mut() {
-            if let Some(path) = find_claude_session_file(&projects_dir, &session.id) {
-                session.segment_count = count_claude_segments(&path);
-            }
         }
     }
 
@@ -482,27 +471,6 @@ fn parse_claude_conversation_file(
     Ok((messages, segments))
 }
 
-fn count_claude_segments(path: &PathBuf) -> usize {
-    let file = match fs::File::open(path) {
-        Ok(f) => f,
-        Err(_) => return 1,
-    };
-    let reader = BufReader::new(file);
-    let mut count: usize = 1;
-
-    for line_result in reader.lines() {
-        let line = match line_result {
-            Ok(l) => l,
-            Err(_) => continue,
-        };
-        if line.contains("\"compact_boundary\"") && line.contains("\"parentUuid\":null") {
-            count += 1;
-        }
-    }
-
-    count
-}
-
 // ============================================================================
 // Codex history helpers
 // ============================================================================
@@ -541,8 +509,6 @@ fn load_codex_history() -> Result<Vec<HistorySession>, String> {
     }
 
     let mut meta_cache: HashMap<String, CodexSessionMeta> = HashMap::new();
-    let mut segment_cache: HashMap<String, usize> = HashMap::new();
-
     for session in session_map.values_mut() {
         if let Some(path) = codex_file_map.get(&session.id) {
             let path_key = path.to_string_lossy().to_string();
@@ -555,11 +521,6 @@ fn load_codex_history() -> Result<Vec<HistorySession>, String> {
                 session.project = cwd.clone();
                 session.project_name = cwd.split('/').next_back().unwrap_or("unknown").to_string();
             }
-
-            let segment_count = segment_cache
-                .entry(path_key)
-                .or_insert_with(|| count_codex_segments(path));
-            session.segment_count = *segment_count;
         }
     }
 
@@ -595,7 +556,6 @@ fn upsert_codex_history_session(
                 timestamp,
                 project: String::new(),
                 project_name: "unknown".to_string(),
-                segment_count: 1,
             },
         );
     }
@@ -706,46 +666,6 @@ fn read_codex_session_meta(path: &PathBuf) -> Option<CodexSessionMeta> {
     }
 
     None
-}
-
-fn count_codex_segments(path: &PathBuf) -> usize {
-    let file = match fs::File::open(path) {
-        Ok(file) => file,
-        Err(_) => return 1,
-    };
-    let reader = BufReader::new(file);
-    let mut count: usize = 1;
-
-    for line_result in reader.lines() {
-        let line = match line_result {
-            Ok(line) => line,
-            Err(_) => continue,
-        };
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        let parsed: CodexLine = match serde_json::from_str(&line) {
-            Ok(value) => value,
-            Err(_) => continue,
-        };
-
-        if parsed.line_type.as_deref() != Some("event_msg") {
-            continue;
-        }
-
-        let payload_type = parsed
-            .payload
-            .as_ref()
-            .and_then(|payload| payload.get("type"))
-            .and_then(|v| v.as_str());
-
-        if payload_type == Some("context_compacted") {
-            count += 1;
-        }
-    }
-
-    count
 }
 
 fn parse_codex_conversation_file(
