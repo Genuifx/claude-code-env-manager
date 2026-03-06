@@ -243,7 +243,9 @@
     "allMilestonesAchieved": "All milestones achieved!",
     "sourceAll": "All",
     "sourceClaude": "Claude",
-    "sourceCodex": "Codex"
+    "sourceCodex": "Codex",
+    "tooltipModel": "Model",
+    "tooltipUsage": "Usage"
   },
   "skills": {
     "subtitle": "Discover, install and manage Claude Code skill extensions",

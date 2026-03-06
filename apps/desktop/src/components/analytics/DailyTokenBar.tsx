@@ -9,16 +9,11 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { useLocale } from '@/locales';
+import { formatTokenAxisValue, getYAxisWidth } from '@/lib/utils';
 import type { TokenUsageWithCost } from '@/types/analytics';
 
 interface DailyTokenBarProps {
   dailyHistory: Record<string, TokenUsageWithCost>;
-}
-
-function formatAxisValue(value: number): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(0)}K`;
-  return value.toString();
 }
 
 export function DailyTokenBar({ dailyHistory }: DailyTokenBarProps) {
@@ -35,10 +30,14 @@ export function DailyTokenBar({ dailyHistory }: DailyTokenBarProps) {
       tokens: usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens,
     }));
   }, [dailyHistory, dateLocale]);
+  const yAxisWidth = useMemo(
+    () => getYAxisWidth(chartData.map((point) => point.tokens), formatTokenAxisValue),
+    [chartData],
+  );
 
   return (
     <ResponsiveContainer width="100%" height={200}>
-      <BarChart data={chartData}>
+      <BarChart data={chartData} margin={{ left: 8, top: 8, right: 8 }}>
         <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
         <XAxis
           dataKey="date"
@@ -47,9 +46,10 @@ export function DailyTokenBar({ dailyHistory }: DailyTokenBarProps) {
         />
         <YAxis
           className="text-xs text-muted-foreground"
-          tickFormatter={formatAxisValue}
+          tickFormatter={formatTokenAxisValue}
           tick={{ fontSize: 11 }}
           domain={[0, 'auto']}
+          width={yAxisWidth}
         />
         <Tooltip
           contentStyle={{
@@ -58,12 +58,13 @@ export function DailyTokenBar({ dailyHistory }: DailyTokenBarProps) {
             borderRadius: '8px',
             backdropFilter: 'blur(12px)',
           }}
-          formatter={(value: number | undefined) => [formatAxisValue(value ?? 0), 'Tokens']}
+          formatter={(value: number | undefined) => [formatTokenAxisValue(value ?? 0), 'Tokens']}
         />
         <Bar
           dataKey="tokens"
           fill="hsl(var(--chart-1))"
           radius={[4, 4, 0, 0]}
+          isAnimationActive={false}
         />
       </BarChart>
     </ResponsiveContainer>

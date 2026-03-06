@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { ENV_PRESETS } from '@ccem/core/browser';
@@ -42,6 +42,7 @@ function App() {
   const [editingEnvName, setEditingEnvName] = useState<string | undefined>();
   const [pendingDeleteEnv, setPendingDeleteEnv] = useState<string | null>(null);
   const lastFocusSyncAtRef = useRef(0);
+  const [, startTransition] = useTransition();
 
   const { setEnvironments, setCurrentEnv, setPermissionMode, setUsageStats, environments, launchClient, error, setError } = useAppStore(
     (state) => ({
@@ -70,6 +71,36 @@ function App() {
     loadInstalledSkills,
   } = useTauriCommands();
 
+  const preloadAnalyticsPage = useCallback(() => {
+    void import('@/pages/Analytics').then((module) => {
+      module.primeAnalyticsPage?.();
+    });
+  }, []);
+
+  const preloadHistoryPage = useCallback(() => {
+    void import('@/pages/History').then((module) => {
+      module.primeHistoryPage?.();
+    });
+  }, []);
+
+  const prefetchTab = useCallback((tab: string) => {
+    if (tab === 'analytics') {
+      preloadAnalyticsPage();
+      return;
+    }
+
+    if (tab === 'history') {
+      preloadHistoryPage();
+    }
+  }, [preloadAnalyticsPage, preloadHistoryPage]);
+
+  const navigateToTab = useCallback((tab: string) => {
+    prefetchTab(tab);
+    startTransition(() => {
+      setActiveTab(tab);
+    });
+  }, [prefetchTab, startTransition]);
+
   // Show global errors as toast notifications
   useEffect(() => {
     if (error) {
@@ -96,7 +127,7 @@ function App() {
         unlisteners.push(listener1);
 
         const listener2 = await listen('navigate-to-settings', () => {
-          setActiveTab('settings');
+          navigateToTab('settings');
         });
         if (cancelled) {
           listener2();
@@ -132,7 +163,7 @@ function App() {
       cancelled = true;
       unlisteners.forEach(fn => fn());
     };
-  }, []);
+  }, [navigateToTab, setCurrentEnv, setPermissionMode]);
 
   // Load all data from backend (reusable for both init and refresh)
   const refreshData = useCallback(async () => {
@@ -203,18 +234,19 @@ function App() {
     const requestIdle = window.requestIdleCallback?.bind(window);
     const cancelIdle = window.cancelIdleCallback?.bind(window);
 
-    const preloadHistory = () => {
-      void import('@/pages/History').then((module) => {
-        if (!cancelled) {
-          module.primeHistoryPage?.();
-        }
-      });
+    const preloadHeavyTabs = () => {
+      if (cancelled) {
+        return;
+      }
+
+      preloadAnalyticsPage();
+      preloadHistoryPage();
     };
 
     if (requestIdle) {
-      idleId = requestIdle(preloadHistory, { timeout: 1500 });
+      idleId = requestIdle(preloadHeavyTabs, { timeout: 1200 });
     } else {
-      timeoutId = setTimeout(preloadHistory, 600);
+      timeoutId = setTimeout(preloadHeavyTabs, 500);
     }
 
     return () => {
@@ -226,7 +258,7 @@ function App() {
         clearTimeout(timeoutId);
       }
     };
-  }, []);
+  }, [preloadAnalyticsPage, preloadHistoryPage]);
 
   // Re-sync with CLI config when window regains focus
   // This ensures desktop stays in sync when user modifies env via `ccem add/del/use` in terminal
@@ -261,20 +293,20 @@ function App() {
 
   // Global keyboard shortcuts (Cmd+1..9 for tabs, Cmd+Enter/N for launch, Cmd+, for settings)
   const globalShortcuts = useMemo(() => ({
-    'meta+1': () => setActiveTab('dashboard'),
-    'meta+2': () => setActiveTab('sessions'),
-    'meta+3': () => setActiveTab('environments'),
-    'meta+4': () => setActiveTab('skills'),
-    'meta+5': () => setActiveTab('history'),
-    'meta+6': () => setActiveTab('cron'),
-    'meta+7': () => setActiveTab('analytics'),
-    'meta+8': () => setActiveTab('proxy-debug'),
-    'meta+9': () => setActiveTab('settings'),
+    'meta+1': () => navigateToTab('dashboard'),
+    'meta+2': () => navigateToTab('sessions'),
+    'meta+3': () => navigateToTab('environments'),
+    'meta+4': () => navigateToTab('skills'),
+    'meta+5': () => navigateToTab('history'),
+    'meta+6': () => navigateToTab('cron'),
+    'meta+7': () => navigateToTab('analytics'),
+    'meta+8': () => navigateToTab('proxy-debug'),
+    'meta+9': () => navigateToTab('settings'),
     'meta+enter': () => handleLaunch(),
     'meta+n': () => handleLaunch(),
-    'meta+,': () => setActiveTab('settings'),
+    'meta+,': () => navigateToTab('settings'),
     'meta+q': () => invoke('quit_app'),
-  }), [handleLaunch]);
+  }), [handleLaunch, navigateToTab]);
 
   useKeyboardShortcuts(globalShortcuts);
 
@@ -340,8 +372,8 @@ function App() {
     switch (activeTab) {
       case 'dashboard':
         return (
-          <Dashboard
-            onNavigate={setActiveTab}
+            <Dashboard
+            onNavigate={navigateToTab}
             onLaunch={handleLaunch}
             onLaunchWithDir={handleLaunchWithDir}
           />
@@ -369,14 +401,19 @@ function App() {
       case 'settings':
         return <Settings />;
       default:
-        return <Dashboard onNavigate={setActiveTab} onLaunch={handleLaunch} onLaunchWithDir={handleLaunchWithDir} />;
+        return <Dashboard onNavigate={navigateToTab} onLaunch={handleLaunch} onLaunchWithDir={handleLaunchWithDir} />;
     }
   };
 
   return (
     <LocaleProvider>
       <TooltipProvider delayDuration={120}>
-        <AppLayout activeTab={activeTab} onTabChange={setActiveTab} fullBleed={activeTab === 'history'}>
+        <AppLayout
+          activeTab={activeTab}
+          onTabChange={navigateToTab}
+          onTabPrefetch={prefetchTab}
+          fullBleed={activeTab === 'history'}
+        >
           <Suspense fallback={<PageFallback />}>
             {renderPage()}
           </Suspense>

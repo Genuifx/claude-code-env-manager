@@ -243,7 +243,9 @@
     "allMilestonesAchieved": "所有里程碑已达成！",
     "sourceAll": "全部",
     "sourceClaude": "Claude",
-    "sourceCodex": "Codex"
+    "sourceCodex": "Codex",
+    "tooltipModel": "模型名",
+    "tooltipUsage": "用量"
   },
   "skills": {
     "subtitle": "发现、安装和管理 Claude Code 技能扩展",

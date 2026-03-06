@@ -2,6 +2,48 @@
 import type { UsageStats, Milestone, DailyActivity } from '@/types/analytics';
 
 export function generateMockUsageStats(): UsageStats {
+  type UsageBucket = UsageStats['today'];
+  const modelShares = [
+    ['claude-opus-4-5', 0.42],
+    ['claude-sonnet-4-5', 0.31],
+    ['glm-4-flash', 0.18],
+    ['deepseek-chat', 0.09],
+  ] as const;
+
+  const splitNumberByShares = (total: number, shares: readonly (readonly [string, number])[]) => {
+    const result: Record<string, number> = {};
+    let remaining = total;
+
+    shares.forEach(([model, share], index) => {
+      const isLast = index === shares.length - 1;
+      const value = isLast ? remaining : Math.max(0, Math.round(total * share));
+      result[model] = value;
+      remaining -= value;
+    });
+
+    return result;
+  };
+
+  const splitUsageByModel = (usage: UsageBucket) => {
+    const input = splitNumberByShares(usage.inputTokens, modelShares);
+    const output = splitNumberByShares(usage.outputTokens, modelShares);
+    const cacheRead = splitNumberByShares(usage.cacheReadTokens, modelShares);
+    const cacheCreation = splitNumberByShares(usage.cacheCreationTokens, modelShares);
+
+    return Object.fromEntries(
+      modelShares.map(([model, share]) => [
+        model,
+        {
+          inputTokens: input[model],
+          outputTokens: output[model],
+          cacheReadTokens: cacheRead[model],
+          cacheCreationTokens: cacheCreation[model],
+          cost: usage.cost * share,
+        },
+      ]),
+    );
+  };
+
   const today = {
     inputTokens: 32000,
     outputTokens: 16200,
@@ -36,6 +78,7 @@ export function generateMockUsageStats(): UsageStats {
 
   // Generate daily history for last 30 days
   const dailyHistory: Record<string, typeof today> = {};
+  const modelDailyHistory: UsageStats['modelDailyHistory'] = {};
   const now = new Date();
   for (let i = 0; i < 30; i++) {
     const date = new Date(now);
@@ -48,10 +91,12 @@ export function generateMockUsageStats(): UsageStats {
       cacheCreationTokens: Math.floor(Math.random() * 6000) + 1500,
       cost: Math.random() * 0.5 + 0.1,
     };
+    modelDailyHistory[dateStr] = splitUsageByModel(dailyHistory[dateStr]);
   }
 
   // Generate hourly history for last 24 hours
   const hourlyHistory: Record<string, typeof today> = {};
+  const modelHourlyHistory: UsageStats['modelHourlyHistory'] = {};
   for (let i = 0; i < 24; i++) {
     const date = new Date(now);
     date.setHours(date.getHours() - i);
@@ -63,6 +108,7 @@ export function generateMockUsageStats(): UsageStats {
       cacheCreationTokens: Math.floor(Math.random() * 1000) + 100,
       cost: Math.random() * 0.08 + 0.01,
     };
+    modelHourlyHistory[hourStr] = splitUsageByModel(hourlyHistory[hourStr]);
   }
 
   const byModel = {
@@ -127,6 +173,8 @@ export function generateMockUsageStats(): UsageStats {
     total,
     dailyHistory,
     hourlyHistory,
+    modelDailyHistory,
+    modelHourlyHistory,
     byModel,
     byEnvironment,
     lastUpdated: now.toISOString(),
