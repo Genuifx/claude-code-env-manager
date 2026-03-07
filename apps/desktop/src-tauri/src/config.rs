@@ -61,6 +61,13 @@ struct RawEnvConfig {
     subagent_model: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ResolvedClaudeEnv {
+    pub env_name: String,
+    pub env_vars: HashMap<String, String>,
+    pub upstream_base_url: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CcemConfig {
     #[serde(default)]
@@ -457,6 +464,27 @@ pub fn clear_managed_claude_env(command: &mut Command) {
     }
 }
 
+/// Resolve a named Claude environment into concrete process env vars.
+pub fn resolve_claude_env(env_name: &str) -> Result<ResolvedClaudeEnv, String> {
+    let cfg = read_config()?;
+    let env_config = cfg
+        .registries
+        .get(env_name)
+        .ok_or_else(|| format!("Environment '{}' does not exist", env_name))?;
+    let env = get_env_with_decrypted_key(env_config);
+    let (env_vars, upstream_base_url) = env_config_to_process_env(&env);
+
+    Ok(ResolvedClaudeEnv {
+        env_name: env_name.to_string(),
+        env_vars,
+        upstream_base_url,
+    })
+}
+
+fn env_config_to_process_env(env: &EnvConfig) -> (HashMap<String, String>, Option<String>) {
+    (build_claude_env_vars(env), env.base_url.clone())
+}
+
 /// Get default working directory from app config (validated)
 pub fn get_default_working_dir() -> Option<String> {
     read_app_config()
@@ -573,5 +601,56 @@ pub fn create_env_with_encrypted_key(
         default_haiku_model,
         model: runtime_model.or_else(|| Some("opus".to_string())),
         subagent_model,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{env_config_to_process_env, EnvConfig};
+
+    #[test]
+    fn process_env_includes_auth_token_when_present() {
+        let env = EnvConfig {
+            base_url: Some("https://example.com/anthropic".to_string()),
+            auth_token: Some("auth-token-123".to_string()),
+            default_opus_model: Some("claude-opus-test".to_string()),
+            default_sonnet_model: Some("claude-sonnet-test".to_string()),
+            default_haiku_model: Some("claude-haiku-test".to_string()),
+            model: Some("claude-sonnet-test".to_string()),
+            subagent_model: Some("claude-subagent-test".to_string()),
+        };
+
+        let (env_vars, upstream_base_url) = env_config_to_process_env(&env);
+
+        assert_eq!(
+            upstream_base_url.as_deref(),
+            Some("https://example.com/anthropic")
+        );
+        assert_eq!(
+            env_vars.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str),
+            Some("auth-token-123")
+        );
+        assert_eq!(
+            env_vars.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("claude-sonnet-test")
+        );
+        assert_eq!(
+            env_vars
+                .get("ANTHROPIC_DEFAULT_OPUS_MODEL")
+                .map(String::as_str),
+            Some("claude-opus-test")
+        );
+        assert_eq!(
+            env_vars
+                .get("ANTHROPIC_DEFAULT_HAIKU_MODEL")
+                .map(String::as_str),
+            Some("claude-haiku-test")
+        );
+        assert_eq!(
+            env_vars
+                .get("CLAUDE_CODE_SUBAGENT_MODEL")
+                .map(String::as_str),
+            Some("claude-subagent-test")
+        );
     }
 }

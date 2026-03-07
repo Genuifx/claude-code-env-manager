@@ -17,6 +17,7 @@ interface SessionCardProps {
 
 export function SessionCard({ session, onFocus, onMinimize, onClose, confirmingClose, onCancelClose, onConfirmClose }: SessionCardProps) {
   const { t } = useLocale();
+  const isEmbedded = session.terminalType === 'embedded';
 
   const getStatusDot = (status: Session['status']) => {
     switch (status) {
@@ -65,6 +66,11 @@ export function SessionCard({ session, onFocus, onMinimize, onClose, confirmingC
             <span className="glass-subtle rounded-md px-2 py-0.5 text-[10px] uppercase tracking-wide font-medium">
               {clientLabel}
             </span>
+            {isEmbedded && (
+              <span className="glass-subtle rounded-md px-2 py-0.5 text-[10px] uppercase tracking-wide font-medium">
+                embedded
+              </span>
+            )}
             <span className="glass-subtle rounded-md px-2 py-0.5 text-xs font-medium">
               {session.envName}
             </span>
@@ -106,14 +112,14 @@ export function SessionCard({ session, onFocus, onMinimize, onClose, confirmingC
           >
             {t('sessions.focus')}
           </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => onMinimize(session.id)}
-            disabled={session.status !== 'running'}
-            className="glass-btn-outline"
-          >
-            <Minus className="w-4 h-4" />
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => onMinimize(session.id)}
+              disabled={session.status !== 'running' || isEmbedded}
+              className="glass-btn-outline"
+            >
+              <Minus className="w-4 h-4" />
           </Button>
           <Button
             size="sm"

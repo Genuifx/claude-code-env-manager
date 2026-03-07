@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Moon, Sun, MonitorSmartphone, Lightbulb, Terminal, CheckCircle2, XCircle, Copy, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search, FolderOpen, X } from 'lucide-react';
+import { Moon, Sun, MonitorSmartphone, Lightbulb, Terminal, CheckCircle2, XCircle, Copy, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search, FolderOpen, X, Bot, Play, Square, MessageSquareWarning } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store';
@@ -10,6 +10,9 @@ import type { PermissionModeName } from '@ccem/core/browser';
 import { useLocale } from '../locales';
 import { SettingsSkeleton } from '@/components/ui/skeleton-states';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import type { TelegramBridgeStatus, TelegramSettings } from '@/lib/tauri-ipc';
+import { TelegramTopicBindingsEditor } from '@/components/settings/TelegramTopicBindingsEditor';
 
 const MODE_DISPLAY_NAMES: Record<PermissionModeName, string> = {
   yolo: 'YOLO',
@@ -39,13 +42,42 @@ interface InstallStatusState {
 }
 
 export function Settings() {
-  const { defaultMode, setDefaultMode, isLoadingSettings, defaultWorkingDir } = useAppStore();
+  const { defaultMode, setDefaultMode, isLoadingSettings, defaultWorkingDir, environments } = useAppStore();
   const { t, lang, setLang } = useLocale();
-  const { openDirectoryPicker, saveDefaultWorkingDir } = useTauriCommands();
+  const {
+    openDirectoryPicker,
+    saveDefaultWorkingDir,
+    getTelegramSettings,
+    saveTelegramSettings,
+    getTelegramBridgeStatus,
+    startTelegramBridge,
+    stopTelegramBridge,
+  } = useTauriCommands();
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('light');
   const [autoStart, setAutoStart] = useState(false);
   const [startMinimized, setStartMinimized] = useState(false);
   const [closeToTray, setCloseToTray] = useState(true);
+  const [telegramSettings, setTelegramSettings] = useState<TelegramSettings>({
+    enabled: false,
+    botToken: '',
+    allowedChatId: null,
+    notificationsThreadId: null,
+    defaultEnvName: null,
+    defaultPermMode: null,
+    defaultWorkingDir: null,
+    topicBindings: [],
+    preferences: {
+      showToolCalls: true,
+      showLowRiskTools: false,
+      flushIntervalMs: 3000,
+    },
+  });
+  const [telegramStatus, setTelegramStatus] = useState<TelegramBridgeStatus>({
+    configured: false,
+    running: false,
+  });
+  const [isSavingTelegram, setIsSavingTelegram] = useState(false);
+  const [isTogglingTelegram, setIsTogglingTelegram] = useState(false);
   const [installStatus, setInstallStatus] = useState<InstallStatusState>({
     ccem: null,
     claude: null,
@@ -122,6 +154,54 @@ export function Settings() {
     loadSettings();
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadTelegram = async () => {
+      try {
+        const [settings, status] = await Promise.all([
+          getTelegramSettings(),
+          getTelegramBridgeStatus(),
+        ]);
+        if (cancelled) return;
+        setTelegramSettings({
+          enabled: settings.enabled ?? false,
+          botToken: settings.botToken ?? '',
+          allowedChatId: settings.allowedChatId ?? null,
+          notificationsThreadId: settings.notificationsThreadId ?? null,
+          defaultEnvName: settings.defaultEnvName ?? null,
+          defaultPermMode: settings.defaultPermMode ?? null,
+          defaultWorkingDir: settings.defaultWorkingDir ?? null,
+          topicBindings: settings.topicBindings ?? [],
+          preferences: settings.preferences ?? {
+            showToolCalls: true,
+            showLowRiskTools: false,
+            flushIntervalMs: 3000,
+          },
+        });
+        setTelegramStatus(status);
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Failed to load telegram bridge state:', error);
+        }
+      }
+    };
+
+    void loadTelegram();
+    const intervalId = window.setInterval(() => {
+      void getTelegramBridgeStatus().then((status) => {
+        if (!cancelled) {
+          setTelegramStatus(status);
+        }
+      }).catch(() => {});
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [getTelegramBridgeStatus, getTelegramSettings]);
+
   // Apply theme to DOM
   useEffect(() => {
     const root = document.documentElement;
@@ -165,6 +245,59 @@ export function Settings() {
     { key: 'light', icon: Sun, label: t('settings.light') },
     { key: 'system', icon: MonitorSmartphone, label: t('settings.system') },
   ];
+
+  const handleSaveTelegram = async () => {
+    setIsSavingTelegram(true);
+    try {
+      await saveTelegramSettings({
+        enabled: telegramSettings.enabled,
+        botToken: telegramSettings.botToken?.trim() || null,
+        allowedChatId: telegramSettings.allowedChatId,
+        notificationsThreadId: telegramSettings.notificationsThreadId,
+        defaultEnvName: telegramSettings.defaultEnvName || null,
+        defaultPermMode: telegramSettings.defaultPermMode || null,
+        defaultWorkingDir: telegramSettings.defaultWorkingDir || null,
+        topicBindings: telegramSettings.topicBindings ?? [],
+        preferences: telegramSettings.preferences ?? {
+          showToolCalls: true,
+          showLowRiskTools: false,
+          flushIntervalMs: 3000,
+        },
+      });
+      setTelegramStatus(await getTelegramBridgeStatus());
+      toast.success(t('settings.telegramSaved'));
+    } catch (error) {
+      toast.error(t('settings.telegramSaveFailed').replace('{error}', String(error)));
+    } finally {
+      setIsSavingTelegram(false);
+    }
+  };
+
+  const handleStartTelegram = async () => {
+    setIsTogglingTelegram(true);
+    try {
+      const status = await startTelegramBridge();
+      setTelegramStatus(status);
+      toast.success(t('settings.telegramStarted'));
+    } catch (error) {
+      toast.error(t('settings.telegramStartFailed').replace('{error}', String(error)));
+    } finally {
+      setIsTogglingTelegram(false);
+    }
+  };
+
+  const handleStopTelegram = async () => {
+    setIsTogglingTelegram(true);
+    try {
+      const status = await stopTelegramBridge();
+      setTelegramStatus(status);
+      toast.success(t('settings.telegramStopSuccess'));
+    } catch (error) {
+      toast.error(t('settings.telegramStopFailed').replace('{error}', String(error)));
+    } finally {
+      setIsTogglingTelegram(false);
+    }
+  };
 
   return (
     <div className="page-transition-enter space-y-5">
@@ -350,6 +483,195 @@ export function Settings() {
         </div>
       </Card>
 
+      <Card className="p-5">
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <Bot className="w-4 h-4 text-primary" />
+              {t('settings.telegramTitle')}
+            </h3>
+            <p className="text-xs text-muted-foreground mt-1">
+              {t('settings.telegramDesc')}
+            </p>
+          </div>
+          <TelegramStatusBadge status={telegramStatus} />
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="space-y-4">
+            <ToggleSetting
+              checked={telegramSettings.enabled}
+              onChange={(value) => setTelegramSettings((current) => ({ ...current, enabled: value }))}
+              title={t('settings.telegramEnabled')}
+              description={t('settings.telegramEnabledDesc')}
+            />
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-muted-foreground">
+                {t('settings.telegramBotToken')}
+              </label>
+              <input
+                type="password"
+                className="w-full px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 transition-all"
+                value={telegramSettings.botToken ?? ''}
+                onChange={(event) => setTelegramSettings((current) => ({ ...current, botToken: event.target.value }))}
+                placeholder={t('settings.telegramBotTokenPlaceholder')}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-muted-foreground">
+                {t('settings.telegramAllowedChatId')}
+              </label>
+              <input
+                type="number"
+                className="w-full px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 transition-all"
+                value={telegramSettings.allowedChatId ?? ''}
+                onChange={(event) => setTelegramSettings((current) => ({
+                  ...current,
+                  allowedChatId: event.target.value ? Number(event.target.value) : null,
+                }))}
+                placeholder={t('settings.telegramAllowedChatIdPlaceholder')}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-muted-foreground">
+                {t('settings.telegramNotificationsThreadId')}
+              </label>
+              <input
+                type="number"
+                className="w-full px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 transition-all"
+                value={telegramSettings.notificationsThreadId ?? ''}
+                onChange={(event) => setTelegramSettings((current) => ({
+                  ...current,
+                  notificationsThreadId: event.target.value ? Number(event.target.value) : null,
+                }))}
+                placeholder={t('settings.telegramNotificationsThreadIdPlaceholder')}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                {t('settings.telegramNotificationsThreadIdDesc')}
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-muted-foreground">
+                {t('settings.telegramDefaultEnv')}
+              </label>
+              <Select
+                value={telegramSettings.defaultEnvName || '__current__'}
+                onValueChange={(value) => setTelegramSettings((current) => ({
+                  ...current,
+                  defaultEnvName: value === '__current__' ? null : value,
+                }))}
+              >
+                <SelectTrigger className="w-full h-auto px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm">
+                  <SelectValue placeholder={t('settings.telegramUseCurrentEnv')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__current__">{t('settings.telegramUseCurrentEnv')}</SelectItem>
+                  {environments.map((env) => (
+                    <SelectItem key={env.name} value={env.name}>{env.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-muted-foreground">
+                {t('settings.telegramDefaultPerm')}
+              </label>
+              <Select
+                value={telegramSettings.defaultPermMode || '__app_default__'}
+                onValueChange={(value) => setTelegramSettings((current) => ({
+                  ...current,
+                  defaultPermMode: value === '__app_default__' ? null : value,
+                }))}
+              >
+                <SelectTrigger className="w-full h-auto px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm">
+                  <SelectValue placeholder={t('settings.telegramUseDefaultPerm')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__app_default__">{t('settings.telegramUseDefaultPerm')}</SelectItem>
+                  {Object.keys(PERMISSION_PRESETS).map((key) => (
+                    <SelectItem key={key} value={key}>{MODE_DISPLAY_NAMES[key as PermissionModeName] || key}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-muted-foreground">
+                {t('settings.telegramWorkingDir')}
+              </label>
+              <div className="flex gap-2">
+                <input
+                  className="w-full px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 transition-all font-mono"
+                  value={telegramSettings.defaultWorkingDir ?? ''}
+                  onChange={(event) => setTelegramSettings((current) => ({ ...current, defaultWorkingDir: event.target.value || null }))}
+                  placeholder={defaultWorkingDir || t('settings.telegramWorkingDirPlaceholder')}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="glass-btn-outline shrink-0"
+                  onClick={async () => {
+                    const path = await openDirectoryPicker();
+                    if (path) {
+                      setTelegramSettings((current) => ({ ...current, defaultWorkingDir: path }));
+                    }
+                  }}
+                >
+                  <FolderOpen className="w-3.5 h-3.5 mr-1.5" />
+                  {t('settings.selectDir')}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t glass-divider pt-4">
+          <div className="text-xs text-muted-foreground space-y-1">
+            <p>{t('settings.telegramStatusLine').replace('{status}', telegramStatus.running ? t('settings.telegramRunning') : t('settings.telegramStopped'))}</p>
+            {telegramStatus.botUsername && (
+              <p>{t('settings.telegramBotUsername').replace('{username}', telegramStatus.botUsername)}</p>
+            )}
+            {telegramStatus.lastError && (
+              <p className="text-destructive flex items-center gap-1.5">
+                <MessageSquareWarning className="w-3.5 h-3.5" />
+                {telegramStatus.lastError}
+              </p>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" className="glass-btn-outline" onClick={handleSaveTelegram} disabled={isSavingTelegram}>
+              {isSavingTelegram ? t('common.loading') : t('settings.telegramSave')}
+            </Button>
+            {telegramStatus.running ? (
+              <Button variant="outline" className="glass-btn-outline" onClick={handleStopTelegram} disabled={isTogglingTelegram}>
+                <Square className="w-3.5 h-3.5 mr-1.5" />
+                {t('settings.telegramStop')}
+              </Button>
+            ) : (
+              <Button onClick={handleStartTelegram} disabled={isTogglingTelegram || !(telegramSettings.botToken || '').trim()}>
+                <Play className="w-3.5 h-3.5 mr-1.5" />
+                {t('settings.telegramStart')}
+              </Button>
+            )}
+          </div>
+        </div>
+
+        <TelegramTopicBindingsEditor
+          bindings={telegramSettings.topicBindings ?? []}
+          environmentNames={environments.map((env) => env.name)}
+          defaultWorkingDir={defaultWorkingDir || null}
+          onChange={(topicBindings) => setTelegramSettings((current) => ({ ...current, topicBindings }))}
+          onPickDirectory={openDirectoryPicker}
+        />
+      </Card>
+
       {/* Row 3: About */}
       <Card className="p-5">
         <h3 className="text-sm font-semibold text-foreground mb-4">
@@ -448,6 +770,35 @@ function InstallStatusBadge({ status }: { status: boolean | null }) {
     <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
       <XCircle className="w-3.5 h-3.5" />
       {t('settings.cliNotInstalled')}
+    </span>
+  );
+}
+
+function TelegramStatusBadge({ status }: { status: TelegramBridgeStatus }) {
+  const { t } = useLocale();
+
+  if (status.running) {
+    return (
+      <span className="flex items-center gap-1.5 text-sm font-medium text-success">
+        <CheckCircle2 className="w-3.5 h-3.5" />
+        {t('settings.telegramRunning')}
+      </span>
+    );
+  }
+
+  if (status.configured) {
+    return (
+      <span className="flex items-center gap-1.5 text-sm font-medium text-warning">
+        <MessageSquareWarning className="w-3.5 h-3.5" />
+        {t('settings.telegramConfigured')}
+      </span>
+    );
+  }
+
+  return (
+    <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+      <XCircle className="w-3.5 h-3.5" />
+      {t('settings.telegramNotConfigured')}
     </span>
   );
 }

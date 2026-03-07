@@ -5,10 +5,15 @@ mod analytics;
 mod config;
 mod cron;
 mod crypto;
+mod event_bus;
 mod history;
+mod interactive_runtime;
+mod permission;
 mod proxy_debug;
+mod runtime;
 mod session;
 mod skills;
+mod telegram;
 mod terminal;
 mod tray;
 
@@ -16,13 +21,23 @@ use analytics::{
     get_continuous_usage_days, get_usage_history, get_usage_model_breakdown, get_usage_stats,
 };
 use config::{
-    build_claude_env_vars, create_env_with_encrypted_key, get_env_with_decrypted_key, AppConfig,
-    DesktopSettings, EnvConfig, FavoriteProject, JetBrainsProject, RecentProject, VSCodeProject,
+    create_env_with_encrypted_key, resolve_claude_env, AppConfig, DesktopSettings, EnvConfig,
+    FavoriteProject, JetBrainsProject, RecentProject, VSCodeProject,
 };
 use cron::{start_cron_scheduler, CronScheduler};
 use history::{get_conversation_history, get_conversation_messages, get_conversation_segments};
+use interactive_runtime::{
+    InteractiveReplayBatch, InteractiveRuntimeManager, InteractiveSessionOptions,
+};
 use proxy_debug::{
     ProxyDebugManager, ProxyDebugState, ProxyTrafficDetail, ProxyTrafficPage, RegisterRouteRequest,
+};
+use runtime::{
+    cleanup_orphaned_runtime_processes, clear_runtime_recovery_candidates_by_claude_session_id,
+    dismiss_runtime_recovery_candidate as dismiss_runtime_recovery_candidate_entry,
+    list_runtime_recovery_candidates as list_runtime_recovery_candidates_entries,
+    HeadlessRuntimeManager, HeadlessSessionOptions, HeadlessSessionSource, HeadlessSessionSummary,
+    RuntimeRecoveryCandidate,
 };
 use session::{
     cleanup_exit_file, cleanup_stale_exit_files_except, start_session_monitor, Session,
@@ -33,6 +48,7 @@ use std::fs;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use telegram::{TelegramBridgeManager, TelegramBridgeStatus, TelegramSettings};
 
 /// Global flag: when true, CloseRequested should NOT be intercepted.
 static FORCE_QUIT: AtomicBool = AtomicBool::new(false);
@@ -274,7 +290,7 @@ fn set_preferred_terminal(terminal_type: TerminalType) -> Result<(), String> {
 }
 
 // ============================================
-// Claude Code Launch Commands
+// Interactive Runtime v0 Commands (external terminal-backed)
 // ============================================
 
 #[tauri::command]
@@ -322,21 +338,9 @@ async fn launch_claude_code(
     let mut env_vars: HashMap<String, String> = HashMap::new();
     let mut claude_upstream_base_url: Option<String> = None;
     if client_name == "claude" {
-        // Read environment configuration only for Claude launches.
-        let cfg = config::read_config()?;
-        println!("Config loaded, registries count: {}", cfg.registries.len());
-
-        // 校验环境是否存在
-        let env_config = cfg
-            .registries
-            .get(&env_name)
-            .ok_or_else(|| format!("Environment '{}' does not exist", env_name))?;
-        let env = get_env_with_decrypted_key(env_config);
-
-        if let Some(url) = env.base_url.clone() {
-            claude_upstream_base_url = Some(url);
-        }
-        env_vars.extend(build_claude_env_vars(&env));
+        let resolved = resolve_claude_env(&env_name)?;
+        claude_upstream_base_url = resolved.upstream_base_url;
+        env_vars = resolved.env_vars;
     }
 
     if proxy_state.is_enabled() {
@@ -434,6 +438,371 @@ async fn launch_claude_code(
     Ok(session)
 }
 
+fn resolve_headless_working_dir(working_dir: Option<String>) -> String {
+    working_dir
+        .filter(|dir| !dir.trim().is_empty())
+        .or_else(config::get_default_working_dir)
+        .or_else(|| dirs::home_dir().map(|path| path.to_string_lossy().to_string()))
+        .unwrap_or_else(|| ".".to_string())
+}
+
+// ============================================
+// Headless Runtime Commands (`claude -p` / stream-json)
+// ============================================
+
+#[tauri::command]
+async fn create_managed_session(
+    app: tauri::AppHandle,
+    runtime_state: State<'_, Arc<HeadlessRuntimeManager>>,
+    env_name: String,
+    perm_mode: Option<String>,
+    working_dir: Option<String>,
+    resume_session_id: Option<String>,
+    initial_prompt: Option<String>,
+) -> Result<HeadlessSessionSummary, String> {
+    let resolved = resolve_claude_env(&env_name)?;
+    let effective_working_dir = resolve_headless_working_dir(working_dir);
+    let resume_target = resume_session_id.clone();
+
+    let summary = runtime_state.create_session(
+        app,
+        HeadlessSessionOptions {
+            env_name: resolved.env_name,
+            perm_mode: perm_mode.unwrap_or_else(|| "dev".to_string()),
+            working_dir: effective_working_dir,
+            resume_session_id,
+            initial_prompt,
+            max_budget_usd: None,
+            allowed_tools: Vec::new(),
+            disallowed_tools: Vec::new(),
+            env_vars: resolved.env_vars,
+            source: HeadlessSessionSource::Desktop,
+        },
+    )?;
+
+    if let Some(session_id) = resume_target.as_deref() {
+        if let Err(error) = clear_runtime_recovery_candidates_by_claude_session_id(session_id) {
+            eprintln!(
+                "Failed to clear recovery candidate for resumed headless session {}: {}",
+                session_id, error
+            );
+        }
+    }
+
+    Ok(summary)
+}
+
+#[tauri::command]
+fn list_managed_sessions(
+    runtime_state: State<'_, Arc<HeadlessRuntimeManager>>,
+) -> Vec<HeadlessSessionSummary> {
+    runtime_state.list_sessions()
+}
+
+#[tauri::command]
+fn send_to_managed_session(
+    app: tauri::AppHandle,
+    runtime_state: State<'_, Arc<HeadlessRuntimeManager>>,
+    runtime_id: String,
+    text: String,
+) -> Result<(), String> {
+    runtime_state.send_user_message(&app, &runtime_id, &text)
+}
+
+#[tauri::command]
+fn get_managed_session_events(
+    runtime_state: State<'_, Arc<HeadlessRuntimeManager>>,
+    runtime_id: String,
+    since_seq: Option<u64>,
+) -> Result<event_bus::ReplayBatch, String> {
+    runtime_state.replay_events(&runtime_id, since_seq)
+}
+
+#[tauri::command]
+fn stop_managed_session(
+    app: tauri::AppHandle,
+    runtime_state: State<'_, Arc<HeadlessRuntimeManager>>,
+    runtime_id: String,
+) -> Result<(), String> {
+    runtime_state.stop_session(&app, &runtime_id)
+}
+
+#[tauri::command]
+fn remove_managed_session(
+    runtime_state: State<'_, Arc<HeadlessRuntimeManager>>,
+    runtime_id: String,
+) -> Result<(), String> {
+    runtime_state.remove_session(&runtime_id)
+}
+
+#[tauri::command]
+async fn create_headless_session(
+    app: tauri::AppHandle,
+    runtime_state: State<'_, Arc<HeadlessRuntimeManager>>,
+    env_name: String,
+    perm_mode: Option<String>,
+    working_dir: Option<String>,
+    resume_session_id: Option<String>,
+    initial_prompt: Option<String>,
+) -> Result<HeadlessSessionSummary, String> {
+    create_managed_session(
+        app,
+        runtime_state,
+        env_name,
+        perm_mode,
+        working_dir,
+        resume_session_id,
+        initial_prompt,
+    )
+    .await
+}
+
+#[tauri::command]
+fn list_headless_sessions(
+    runtime_state: State<'_, Arc<HeadlessRuntimeManager>>,
+) -> Vec<HeadlessSessionSummary> {
+    list_managed_sessions(runtime_state)
+}
+
+#[tauri::command]
+fn send_to_headless_session(
+    app: tauri::AppHandle,
+    runtime_state: State<'_, Arc<HeadlessRuntimeManager>>,
+    runtime_id: String,
+    text: String,
+) -> Result<(), String> {
+    send_to_managed_session(app, runtime_state, runtime_id, text)
+}
+
+#[tauri::command]
+fn get_headless_session_events(
+    runtime_state: State<'_, Arc<HeadlessRuntimeManager>>,
+    runtime_id: String,
+    since_seq: Option<u64>,
+) -> Result<event_bus::ReplayBatch, String> {
+    get_managed_session_events(runtime_state, runtime_id, since_seq)
+}
+
+#[tauri::command]
+fn stop_headless_session(
+    app: tauri::AppHandle,
+    runtime_state: State<'_, Arc<HeadlessRuntimeManager>>,
+    runtime_id: String,
+) -> Result<(), String> {
+    stop_managed_session(app, runtime_state, runtime_id)
+}
+
+#[tauri::command]
+fn remove_headless_session(
+    runtime_state: State<'_, Arc<HeadlessRuntimeManager>>,
+    runtime_id: String,
+) -> Result<(), String> {
+    remove_managed_session(runtime_state, runtime_id)
+}
+
+#[tauri::command]
+async fn create_interactive_session(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<SessionManager>>,
+    interactive_state: State<'_, Arc<InteractiveRuntimeManager>>,
+    proxy_state: State<'_, Arc<ProxyDebugManager>>,
+    env_name: String,
+    perm_mode: Option<String>,
+    working_dir: Option<String>,
+    resume_session_id: Option<String>,
+    client: Option<String>,
+) -> Result<Session, String> {
+    let client_name = client
+        .unwrap_or_else(|| "claude".to_string())
+        .to_lowercase();
+    if client_name != "claude" && client_name != "codex" {
+        return Err(format!("Unsupported client '{}'", client_name));
+    }
+
+    if client_name == "codex" {
+        return launch_claude_code(
+            state,
+            proxy_state,
+            env_name,
+            perm_mode,
+            working_dir,
+            resume_session_id,
+            Some(client_name),
+        )
+        .await;
+    }
+
+    let session_id = generate_session_id();
+    let resolved = resolve_claude_env(&env_name)?;
+    let effective_working_dir = resolve_headless_working_dir(working_dir);
+    let effective_perm_mode = perm_mode.unwrap_or_else(|| "dev".to_string());
+    let mut env_vars = resolved.env_vars;
+    let resume_target = resume_session_id.clone();
+
+    if proxy_state.is_enabled() {
+        let upstream_base_url = resolved
+            .upstream_base_url
+            .clone()
+            .unwrap_or_else(|| "https://api.anthropic.com".to_string());
+        let proxy_route_base_url = proxy_state
+            .register_route(RegisterRouteRequest {
+                session_id: session_id.clone(),
+                client: client_name.clone(),
+                env_name: resolved.env_name.clone(),
+                upstream_base_url,
+            })
+            .await?;
+        env_vars.insert("ANTHROPIC_BASE_URL".to_string(), proxy_route_base_url);
+    }
+
+    let session_manager = state.inner().clone();
+    let create_result = interactive_state.create_session(
+        app,
+        session_manager,
+        InteractiveSessionOptions {
+            session_id: session_id.clone(),
+            env_name: resolved.env_name,
+            perm_mode: effective_perm_mode,
+            working_dir: effective_working_dir,
+            resume_session_id,
+            env_vars,
+        },
+    );
+
+    if create_result.is_err() {
+        proxy_state.remove_session_routes(&session_id);
+    }
+
+    let session = create_result?;
+    if let Some(session_id) = resume_target.as_deref() {
+        if let Err(error) = clear_runtime_recovery_candidates_by_claude_session_id(session_id) {
+            eprintln!(
+                "Failed to clear recovery candidate for resumed interactive session {}: {}",
+                session_id, error
+            );
+        }
+    }
+
+    Ok(session)
+}
+
+#[tauri::command]
+fn list_runtime_recovery_candidates() -> Result<Vec<RuntimeRecoveryCandidate>, String> {
+    list_runtime_recovery_candidates_entries().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn dismiss_runtime_recovery_candidate(runtime_id: String) -> Result<(), String> {
+    dismiss_runtime_recovery_candidate_entry(&runtime_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_interactive_sessions(state: State<'_, Arc<SessionManager>>) -> Vec<Session> {
+    list_sessions(state)
+}
+
+#[tauri::command]
+fn stop_interactive_session(
+    state: State<'_, Arc<SessionManager>>,
+    interactive_state: State<'_, Arc<InteractiveRuntimeManager>>,
+    proxy_state: State<'_, Arc<ProxyDebugManager>>,
+    session_id: String,
+) -> Result<(), String> {
+    if state
+        .get_session(&session_id)
+        .is_some_and(|session| session.terminal_type.as_deref() == Some("embedded"))
+    {
+        interactive_state.stop_session(&session_id)?;
+        state.update_session_status(&session_id, "stopped");
+        proxy_state.remove_session_routes(&session_id);
+        return Ok(());
+    }
+
+    stop_session(state, proxy_state, session_id)
+}
+
+#[tauri::command]
+fn focus_interactive_session(
+    state: State<'_, Arc<SessionManager>>,
+    session_id: String,
+) -> Result<(), String> {
+    if state
+        .get_session(&session_id)
+        .is_some_and(|session| session.terminal_type.as_deref() == Some("embedded"))
+    {
+        return Ok(());
+    }
+
+    focus_session(state, session_id)
+}
+
+#[tauri::command]
+fn close_interactive_session(
+    state: State<'_, Arc<SessionManager>>,
+    interactive_state: State<'_, Arc<InteractiveRuntimeManager>>,
+    proxy_state: State<'_, Arc<ProxyDebugManager>>,
+    session_id: String,
+) -> Result<(), String> {
+    if state
+        .get_session(&session_id)
+        .is_some_and(|session| session.terminal_type.as_deref() == Some("embedded"))
+    {
+        let _ = interactive_state.stop_session(&session_id);
+        interactive_state.remove_session(&session_id);
+        state.remove_session(&session_id);
+        proxy_state.remove_session_routes(&session_id);
+        return Ok(());
+    }
+
+    close_session(state, proxy_state, session_id)
+}
+
+#[tauri::command]
+fn minimize_interactive_session(
+    state: State<'_, Arc<SessionManager>>,
+    session_id: String,
+) -> Result<(), String> {
+    if state
+        .get_session(&session_id)
+        .is_some_and(|session| session.terminal_type.as_deref() == Some("embedded"))
+    {
+        return Ok(());
+    }
+
+    minimize_session(state, session_id)
+}
+
+#[tauri::command]
+fn write_interactive_input(
+    interactive_state: State<'_, Arc<InteractiveRuntimeManager>>,
+    session_id: String,
+    data: String,
+) -> Result<(), String> {
+    interactive_state.write_input(&session_id, &data)
+}
+
+#[tauri::command]
+fn get_interactive_session_output(
+    interactive_state: State<'_, Arc<InteractiveRuntimeManager>>,
+    session_id: String,
+    since_seq: Option<u64>,
+) -> Result<InteractiveReplayBatch, String> {
+    interactive_state.replay_output(&session_id, since_seq)
+}
+
+#[tauri::command]
+fn resize_interactive_session(
+    state: State<'_, Arc<SessionManager>>,
+    session_id: String,
+    _cols: u16,
+    _rows: u16,
+) -> Result<(), String> {
+    let _ = state
+        .get_session(&session_id)
+        .ok_or_else(|| format!("Session not found: {}", session_id))?;
+    Ok(())
+}
+
 #[tauri::command]
 fn list_sessions(state: State<Arc<SessionManager>>) -> Vec<Session> {
     state.list_sessions()
@@ -476,9 +845,17 @@ fn stop_session(
 #[tauri::command]
 fn remove_session(
     state: State<Arc<SessionManager>>,
+    interactive_state: State<Arc<InteractiveRuntimeManager>>,
     proxy_state: State<Arc<ProxyDebugManager>>,
     session_id: String,
 ) {
+    if state
+        .get_session(&session_id)
+        .is_some_and(|session| session.terminal_type.as_deref() == Some("embedded"))
+    {
+        interactive_state.remove_session(&session_id);
+    }
+
     // Clean up exit file when removing session
     cleanup_exit_file(&session_id);
     state.remove_session(&session_id);
@@ -1167,6 +1544,47 @@ fn save_settings(app: tauri::AppHandle, settings: DesktopSettings) -> Result<(),
 }
 
 #[tauri::command]
+fn get_telegram_settings() -> Result<TelegramSettings, String> {
+    telegram::read_telegram_settings()
+}
+
+#[tauri::command]
+fn save_telegram_settings(
+    telegram_state: State<'_, Arc<TelegramBridgeManager>>,
+    settings: TelegramSettings,
+) -> Result<(), String> {
+    telegram::write_telegram_settings(&settings)?;
+    telegram_state.sync_settings(&settings);
+    Ok(())
+}
+
+#[tauri::command]
+fn get_telegram_bridge_status(
+    telegram_state: State<'_, Arc<TelegramBridgeManager>>,
+) -> TelegramBridgeStatus {
+    telegram_state.status()
+}
+
+#[tauri::command]
+fn start_telegram_bridge(
+    app: tauri::AppHandle,
+    telegram_state: State<'_, Arc<TelegramBridgeManager>>,
+    runtime_state: State<'_, Arc<HeadlessRuntimeManager>>,
+) -> Result<TelegramBridgeStatus, String> {
+    telegram_state
+        .inner()
+        .clone()
+        .start(app, runtime_state.inner().clone())
+}
+
+#[tauri::command]
+fn stop_telegram_bridge(
+    telegram_state: State<'_, Arc<TelegramBridgeManager>>,
+) -> TelegramBridgeStatus {
+    telegram_state.stop()
+}
+
+#[tauri::command]
 fn get_proxy_debug_state(state: State<Arc<ProxyDebugManager>>) -> ProxyDebugState {
     state.get_state()
 }
@@ -1290,11 +1708,18 @@ fn quit_app(app: tauri::AppHandle) {
 fn main() {
     // Create SessionManager from persisted sessions (or empty if first run)
     let session_manager = Arc::new(SessionManager::load_from_disk());
+    let interactive_runtime_manager = Arc::new(InteractiveRuntimeManager::default());
+    let headless_runtime_manager = Arc::new(HeadlessRuntimeManager::default());
     let proxy_debug_manager = ProxyDebugManager::new(session_manager.clone())
         .expect("failed to initialize proxy debug manager");
+    let telegram_bridge_manager = Arc::new(TelegramBridgeManager::default());
     let session_manager_for_setup = session_manager.clone();
     let proxy_manager_for_setup = proxy_debug_manager.clone();
     let proxy_manager_for_run = proxy_debug_manager.clone();
+    let interactive_manager_for_run = interactive_runtime_manager.clone();
+    let headless_manager_for_run = headless_runtime_manager.clone();
+    let telegram_manager_for_setup = telegram_bridge_manager.clone();
+    let telegram_manager_for_run = telegram_bridge_manager.clone();
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -1313,6 +1738,9 @@ fn main() {
 
     builder
         .manage(session_manager.clone())
+        .manage(interactive_runtime_manager.clone())
+        .manage(headless_runtime_manager.clone())
+        .manage(telegram_bridge_manager.clone())
         .manage(proxy_debug_manager.clone())
         .invoke_handler(tauri::generate_handler![
             greet,
@@ -1330,6 +1758,29 @@ fn main() {
             get_preferred_terminal,
             set_preferred_terminal,
             launch_claude_code,
+            create_interactive_session,
+            list_runtime_recovery_candidates,
+            dismiss_runtime_recovery_candidate,
+            list_interactive_sessions,
+            stop_interactive_session,
+            focus_interactive_session,
+            close_interactive_session,
+            minimize_interactive_session,
+            write_interactive_input,
+            get_interactive_session_output,
+            resize_interactive_session,
+            create_managed_session,
+            list_managed_sessions,
+            send_to_managed_session,
+            get_managed_session_events,
+            stop_managed_session,
+            remove_managed_session,
+            create_headless_session,
+            list_headless_sessions,
+            send_to_headless_session,
+            get_headless_session_events,
+            stop_headless_session,
+            remove_headless_session,
             list_sessions,
             stop_session,
             remove_session,
@@ -1371,6 +1822,11 @@ fn main() {
             set_default_working_dir,
             get_settings,
             save_settings,
+            get_telegram_settings,
+            save_telegram_settings,
+            get_telegram_bridge_status,
+            start_telegram_bridge,
+            stop_telegram_bridge,
             get_proxy_debug_state,
             set_proxy_debug_enabled,
             update_proxy_debug_config,
@@ -1395,6 +1851,10 @@ fn main() {
             }
         })
         .setup(move |app| {
+            if let Err(error) = cleanup_orphaned_runtime_processes() {
+                eprintln!("Runtime orphan cleanup warning: {}", error);
+            }
+
             // Clean up stale exit files not belonging to any persisted session
             cleanup_stale_exit_files_except(&session_manager_for_setup);
 
@@ -1461,7 +1921,24 @@ fn main() {
             let cron_scheduler = Arc::new(CronScheduler::default());
             app.manage(cron_scheduler.clone());
             let cron_app = app.handle().clone();
-            start_cron_scheduler(cron_app, cron_scheduler);
+            start_cron_scheduler(cron_app, cron_scheduler, headless_runtime_manager.clone());
+
+            if let Ok(settings) = telegram::read_telegram_settings() {
+                telegram_manager_for_setup.sync_settings(&settings);
+                if settings.enabled
+                    && settings
+                        .bot_token
+                        .as_ref()
+                        .is_some_and(|value| !value.trim().is_empty())
+                {
+                    if let Err(error) = telegram_manager_for_setup
+                        .clone()
+                        .start(app.handle().clone(), headless_runtime_manager.clone())
+                    {
+                        eprintln!("Telegram bridge auto-start warning: {}", error);
+                    }
+                }
+            }
 
             Ok(())
         })
@@ -1475,6 +1952,9 @@ fn main() {
                     let _ = window.set_focus();
                 }
             } else if let RunEvent::Exit = event {
+                telegram_manager_for_run.stop();
+                interactive_manager_for_run.shutdown_all();
+                headless_manager_for_run.shutdown_all();
                 let proxy_for_shutdown = proxy_manager_for_run.clone();
                 tauri::async_runtime::block_on(async move {
                     proxy_for_shutdown.shutdown().await;

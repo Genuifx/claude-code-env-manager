@@ -52,6 +52,7 @@ export function SessionList({ sessions, onFocus, onMinimize, onClose, confirming
     <div className="space-y-1.5">
       {sessions.map((session) => {
         const dot = getStatusDot(session.status);
+        const isEmbedded = session.terminalType === 'embedded';
         return (
           <div
             key={session.id}
@@ -67,6 +68,11 @@ export function SessionList({ sessions, onFocus, onMinimize, onClose, confirming
                 <span className="text-xs px-1.5 py-0.5 glass-subtle rounded-md font-medium">
                   {session.envName}
                 </span>
+                {isEmbedded && (
+                  <span className="text-xs px-1.5 py-0.5 glass-subtle rounded-md font-medium uppercase tracking-wide">
+                    embedded
+                  </span>
+                )}
                 <span className="text-xs px-1.5 py-0.5 glass-subtle rounded-md font-medium">
                   {session.permMode}
                 </span>
@@ -106,7 +112,7 @@ export function SessionList({ sessions, onFocus, onMinimize, onClose, confirming
                   size="sm"
                   variant="ghost"
                   onClick={() => onMinimize(session.id)}
-                  disabled={session.status !== 'running'}
+                  disabled={session.status !== 'running' || isEmbedded}
                   className="glass-btn-outline"
                 >
                   <Minus className="w-4 h-4" />

@@ -238,6 +238,14 @@ impl SessionManager {
 
             // Validate each remaining running session
             for session in sessions.iter_mut() {
+                if session.terminal_type.as_deref() == Some("embedded") {
+                    let is_alive = session.pid.is_some_and(is_process_alive);
+                    if !is_alive {
+                        session.status = "stopped".to_string();
+                    }
+                    continue;
+                }
+
                 match (&session.terminal_type, &session.window_id) {
                     (Some(term_type), Some(wid)) => {
                         let is_alive = match term_type.as_str() {

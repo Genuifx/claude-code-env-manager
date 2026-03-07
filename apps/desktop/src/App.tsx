@@ -292,10 +292,13 @@ function App() {
   const handleLaunch = useCallback(async () => {
     try {
       await launchClaudeCode(undefined, undefined, launchClient);
+      if (launchClient === 'claude') {
+        navigateToTab('sessions');
+      }
     } catch (err) {
       console.error('Launch failed:', err);
     }
-  }, [launchClaudeCode, launchClient]);
+  }, [launchClaudeCode, launchClient, navigateToTab]);
 
   // Global keyboard shortcuts (Cmd+1..9 for tabs, Cmd+Enter/N for launch, Cmd+, for settings)
   const globalShortcuts = useMemo(() => ({
@@ -320,6 +323,9 @@ function App() {
   const handleLaunchWithDir = async (workingDir: string) => {
     try {
       await launchClaudeCode(workingDir, undefined, launchClient);
+      if (launchClient === 'claude') {
+        navigateToTab('sessions');
+      }
     } catch (err) {
       console.error('Launch failed:', err);
     }
