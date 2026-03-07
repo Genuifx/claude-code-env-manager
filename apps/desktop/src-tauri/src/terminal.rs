@@ -187,6 +187,8 @@ pub fn set_preferred_terminal(terminal: TerminalType) -> Result<(), String> {
 
 /// Cached result of ccem launch support check
 static CCEM_LAUNCH_SUPPORTED: OnceLock<bool> = OnceLock::new();
+static CCEM_INSTALLED: OnceLock<bool> = OnceLock::new();
+static CLAUDE_INSTALLED: OnceLock<bool> = OnceLock::new();
 
 /// Compare a parsed semver tuple against a minimum requirement.
 fn version_gte(
@@ -310,6 +312,20 @@ pub fn resolve_ccem_path() -> Option<String> {
     resolve_binary_path("ccem", &candidates)
 }
 
+/// Resolve the full path to the `claude` binary.
+pub fn resolve_claude_path() -> Option<String> {
+    let home = dirs::home_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let candidates = vec![
+        format!("{}/.local/bin/claude", home),
+        format!("{}/.npm-global/bin/claude", home),
+        "/usr/local/bin/claude".to_string(),
+        "/opt/homebrew/bin/claude".to_string(),
+    ];
+    resolve_binary_path("claude", &candidates)
+}
+
 /// Resolve the full path to the `codex` binary.
 pub fn resolve_codex_path() -> Option<String> {
     let home = dirs::home_dir()
@@ -323,6 +339,27 @@ pub fn resolve_codex_path() -> Option<String> {
         "/opt/homebrew/bin/codex".to_string(),
     ];
     resolve_binary_path("codex", &candidates)
+}
+
+/// Returns whether ccem is installed.
+pub fn is_ccem_installed() -> bool {
+    *CCEM_INSTALLED.get_or_init(|| resolve_ccem_path().is_some())
+}
+
+/// Returns whether Claude Code is installed.
+pub fn is_claude_installed() -> bool {
+    *CLAUDE_INSTALLED.get_or_init(|| resolve_claude_path().is_some())
+}
+
+/// Cached result of Codex install detection.
+static CODEX_INSTALLED: OnceLock<bool> = OnceLock::new();
+
+/// Returns whether Codex is installed.
+///
+/// This is used by the Dashboard launch picker, so cache it for the lifetime
+/// of the app to avoid repeatedly spawning a login shell on every tab visit.
+pub fn is_codex_installed() -> bool {
+    *CODEX_INSTALLED.get_or_init(|| resolve_codex_path().is_some())
 }
 
 /// Returns whether the installed ccem supports the `launch` command.

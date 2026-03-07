@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search } from 'lucide-react';
+import { Plus, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search, LayoutGrid, List } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ErrorBanner } from '@/components/ui/EmptyState';
 import { EnvList } from '@/components/environments';
@@ -21,10 +21,20 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
   const { t } = useLocale();
   const { loadEnvironments } = useTauriCommands();
 
+  // View mode state with localStorage persistence
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(
+    () => (localStorage.getItem('ccem-env-view-mode') as 'grid' | 'list') || 'list'
+  );
+
   // FTUE: read flag synchronously at mount
   const [hasAddedEnvs, setHasAddedEnvs] = useState(
     () => localStorage.getItem('ccem-ftue-envs-added') === 'true'
   );
+
+  // Persist view mode to localStorage
+  useEffect(() => {
+    localStorage.setItem('ccem-env-view-mode', viewMode);
+  }, [viewMode]);
 
   // FTUE: set flag when environments.length > 1
   useEffect(() => {
@@ -59,16 +69,45 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
           <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
             {t('environments.configuredEnvs')}
           </h3>
-          <Button
-            size="sm"
-            className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/25 border border-[hsl(var(--glass-border-light)/0.15)]"
-            onClick={onAddEnv}
-          >
-            <Plus className="w-3.5 h-3.5 mr-1" />
-            {t('environments.addEnv')}
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* View Mode Toggle */}
+            <div className="flex items-center gap-0.5 p-0.5 rounded-lg glass-subtle">
+              <button
+                type="button"
+                onClick={() => setViewMode('grid')}
+                className={`h-7 w-7 rounded-md flex items-center justify-center transition-all duration-150 ${
+                  viewMode === 'grid'
+                    ? 'seg-active text-foreground'
+                    : 'text-muted-foreground seg-hover hover:text-foreground'
+                }`}
+                title={t('environments.viewGrid')}
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('list')}
+                className={`h-7 w-7 rounded-md flex items-center justify-center transition-all duration-150 ${
+                  viewMode === 'list'
+                    ? 'seg-active text-foreground'
+                    : 'text-muted-foreground seg-hover hover:text-foreground'
+                }`}
+                title={t('environments.viewList')}
+              >
+                <List className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <Button
+              size="sm"
+              className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/25 border border-[hsl(var(--glass-border-light)/0.15)]"
+              onClick={onAddEnv}
+            >
+              <Plus className="w-3.5 h-3.5 mr-1" />
+              {t('environments.addEnv')}
+            </Button>
+          </div>
         </div>
-        <EnvList onEdit={onEditEnv} onDelete={onDeleteEnv} />
+        <EnvList onEdit={onEditEnv} onDelete={onDeleteEnv} viewMode={viewMode} />
 
         {/* FTUE: Ghost card for adding first environment */}
         {showGhostCard && (

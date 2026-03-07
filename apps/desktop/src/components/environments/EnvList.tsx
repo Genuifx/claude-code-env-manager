@@ -1,4 +1,4 @@
-import { Globe, Check, Circle } from 'lucide-react';
+import { Globe, Check, Circle, Edit2, Trash2 } from 'lucide-react';
 import { useAppStore, type Environment } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { Button } from '@/components/ui/button';
@@ -13,12 +13,22 @@ function maskApiKey(key?: string, notSet?: string): string {
   return key.slice(0, 4) + '***' + key.slice(-3);
 }
 
+function extractDomain(url: string): string {
+  if (!url) return 'api.anthropic.com';
+  try {
+    return new URL(url.startsWith('http') ? url : `https://${url}`).hostname;
+  } catch {
+    return url;
+  }
+}
+
 interface EnvListProps {
   onEdit?: (name: string) => void;
   onDelete?: (name: string) => void;
+  viewMode?: 'grid' | 'list';
 }
 
-export function EnvList({ onEdit, onDelete }: EnvListProps) {
+export function EnvList({ onEdit, onDelete, viewMode = 'list' }: EnvListProps) {
   const { environments, currentEnv } = useAppStore();
   const { switchEnvironment } = useTauriCommands();
   const { t } = useLocale();
@@ -31,6 +41,24 @@ export function EnvList({ onEdit, onDelete }: EnvListProps) {
         </div>
         <h3 className="text-lg font-medium text-foreground mb-1">{t('environments.noEnvTitle')}</h3>
         <p className="text-sm text-muted-foreground">{t('environments.noEnvHint')}</p>
+      </div>
+    );
+  }
+
+  if (viewMode === 'grid') {
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+        {environments.map((env) => (
+          <EnvCompactCard
+            key={env.name}
+            name={env.name}
+            env={env}
+            isActive={env.name === currentEnv}
+            onSelect={() => switchEnvironment(env.name)}
+            onEdit={() => onEdit?.(env.name)}
+            onDelete={() => onDelete?.(env.name)}
+          />
+        ))}
       </div>
     );
   }
@@ -166,6 +194,77 @@ function EnvCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardPro
             </Button>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function EnvCompactCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardProps) {
+
+  return (
+    <div
+      className={cn(
+        'group relative p-4 rounded-xl cursor-pointer glass-noise glass-card hover:-translate-y-0.5 transition-all',
+        isActive && 'active ring-2 ring-primary/50'
+      )}
+      onClick={onSelect}
+      style={isActive ? {
+        boxShadow: '0 0 24px hsl(var(--primary) / 0.2), 0 0 8px hsl(var(--primary) / 0.3)',
+      } : undefined}
+    >
+      {/* 顶部:图标 + 名称 + 徽章 */}
+      <div className="flex items-center gap-2 mb-3">
+        <div className={cn(
+          'w-8 h-8 rounded-md flex items-center justify-center shrink-0',
+          isActive
+            ? 'bg-primary/15 text-primary'
+            : 'glass-icon-container text-muted-foreground'
+        )}>
+          {isActive ? <Check className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
+        </div>
+        <h4 className="font-semibold text-sm truncate flex-1">{name}</h4>
+        {isActive && (
+          <span className="relative flex h-2 w-2 shrink-0">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/75 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+          </span>
+        )}
+      </div>
+
+      {/* 中部:模型 */}
+      <p className="text-xs text-muted-foreground truncate mb-2">
+        {env.model || 'claude-sonnet-4-5'}
+      </p>
+
+      {/* 底部:域名 */}
+      <p className="text-xs text-muted-foreground/70 truncate">
+        {extractDomain(env.baseUrl)}
+      </p>
+
+      {/* 悬停操作层 */}
+      <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+        <button
+          type="button"
+          className="w-7 h-7 rounded-md flex items-center justify-center glass-subtle hover:bg-surface-raised text-muted-foreground hover:text-foreground transition-colors"
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit();
+          }}
+        >
+          <Edit2 className="w-3.5 h-3.5" />
+        </button>
+        {name !== 'official' && (
+          <button
+            type="button"
+            className="w-7 h-7 rounded-md flex items-center justify-center glass-subtle hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
     </div>
   );

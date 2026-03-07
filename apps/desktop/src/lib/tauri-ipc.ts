@@ -81,6 +81,9 @@ export interface TauriCommands {
   get_usage_stats: [void, UsageStats];
   get_usage_history: [{ days: number }, UsageHistoryEntry[]];
   get_continuous_usage_days: [void, number];
+  check_ccem_installed: [void, boolean];
+  check_claude_installed: [void, boolean];
+  check_codex_installed: [void, boolean];
 
   // 历史记录
   get_conversation_history: [void, ConversationHistoryEntry[]];
@@ -143,7 +146,6 @@ export interface TauriCommands {
   ];
 
   // 其他
-  check_ccem_installed: [void, boolean];
   get_default_working_dir: [void, string | null];
 }
 
