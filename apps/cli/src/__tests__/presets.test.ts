@@ -13,8 +13,10 @@ describe('presets', () => {
     it('should have GLM preset with correct structure', () => {
       expect(ENV_PRESETS.GLM).toBeDefined();
       expect(ENV_PRESETS.GLM.ANTHROPIC_BASE_URL).toContain('bigmodel.cn');
+      expect(ENV_PRESETS.GLM.ANTHROPIC_DEFAULT_OPUS_MODEL).toBeDefined();
+      expect(ENV_PRESETS.GLM.ANTHROPIC_DEFAULT_SONNET_MODEL).toBeDefined();
+      expect(ENV_PRESETS.GLM.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBeDefined();
       expect(ENV_PRESETS.GLM.ANTHROPIC_MODEL).toBeDefined();
-      expect(ENV_PRESETS.GLM.ANTHROPIC_SMALL_FAST_MODEL).toBeDefined();
     });
 
     it('should have KIMI preset with correct structure', () => {
@@ -32,9 +34,10 @@ describe('presets', () => {
       expect(ENV_PRESETS.DeepSeek.ANTHROPIC_BASE_URL).toContain('deepseek.com');
     });
 
-    it('should not include API keys in presets', () => {
-      for (const [name, preset] of Object.entries(ENV_PRESETS)) {
-        expect((preset as any).ANTHROPIC_API_KEY).toBeUndefined();
+    it('should not include auth tokens in presets', () => {
+      for (const preset of Object.values(ENV_PRESETS)) {
+        expect((preset as any).ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+        expect((preset as any).CLAUDE_CODE_SUBAGENT_MODEL).toBeUndefined();
       }
     });
   });

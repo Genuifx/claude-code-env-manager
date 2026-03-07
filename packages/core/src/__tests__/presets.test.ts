@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   ENV_PRESETS,
+  ENV_PRESET_METADATA,
   PERMISSION_PRESETS,
   getPermissionModeNames,
   getModeIcon,
@@ -13,8 +14,10 @@ describe('presets', () => {
     it('should have GLM preset with correct structure', () => {
       expect(ENV_PRESETS.GLM).toBeDefined();
       expect(ENV_PRESETS.GLM.ANTHROPIC_BASE_URL).toContain('bigmodel.cn');
+      expect(ENV_PRESETS.GLM.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe('glm-5');
+      expect(ENV_PRESETS.GLM.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('glm-5');
+      expect(ENV_PRESETS.GLM.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('glm-4.5-air');
       expect(ENV_PRESETS.GLM.ANTHROPIC_MODEL).toBeDefined();
-      expect(ENV_PRESETS.GLM.ANTHROPIC_SMALL_FAST_MODEL).toBeDefined();
     });
 
     it('should have KIMI preset with correct structure', () => {
@@ -32,9 +35,28 @@ describe('presets', () => {
       expect(ENV_PRESETS.DeepSeek.ANTHROPIC_BASE_URL).toContain('deepseek.com');
     });
 
-    it('should not include API keys in presets', () => {
-      for (const [name, preset] of Object.entries(ENV_PRESETS)) {
-        expect((preset as any).ANTHROPIC_API_KEY).toBeUndefined();
+    it('should include new preset providers', () => {
+      expect(ENV_PRESETS.Bailian).toBeDefined();
+      expect(ENV_PRESETS.BailianCodePlan).toBeDefined();
+      expect(ENV_PRESETS.OpenRouter).toBeDefined();
+    });
+
+    it('should not include auth tokens in presets', () => {
+      for (const preset of Object.values(ENV_PRESETS)) {
+        expect((preset as any).ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+        expect((preset as any).CLAUDE_CODE_SUBAGENT_MODEL).toBeUndefined();
+      }
+    });
+
+    it('should define metadata for every preset', () => {
+      expect(Object.keys(ENV_PRESET_METADATA)).toEqual(Object.keys(ENV_PRESETS));
+      for (const [name, meta] of Object.entries(ENV_PRESET_METADATA)) {
+        expect(meta.displayName.zh).toBeTruthy();
+        expect(meta.displayName.en).toBeTruthy();
+        expect(meta.description.zh).toBeTruthy();
+        expect(meta.description.en).toBeTruthy();
+        expect(meta.credentialUrl).toBeTruthy();
+        expect(ENV_PRESETS[name]).toBeDefined();
       }
     });
   });

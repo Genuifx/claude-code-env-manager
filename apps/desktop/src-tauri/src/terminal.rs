@@ -417,6 +417,19 @@ fn build_shell_command(
 
     // Unset CLAUDECODE to prevent "nested session" detection error
     parts.push("unset CLAUDECODE".to_string());
+    for key in [
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "ANTHROPIC_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_SMALL_FAST_MODEL",
+    ] {
+        parts.push(format!("unset {}", key));
+    }
 
     // Export environment variables
     for (key, value) in env_vars {

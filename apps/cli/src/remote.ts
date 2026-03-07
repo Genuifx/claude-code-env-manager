@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import chalk from 'chalk';
 import Conf from 'conf';
 import type { EnvConfig } from '@ccem/core';
-import { encrypt, getCcemConfigDir } from '@ccem/core';
+import { encrypt, getCcemConfigDir, normalizeEnvConfig } from '@ccem/core';
 
 const config = new Conf({
   projectName: 'claude-code-env-manager',
@@ -130,10 +130,10 @@ export const loadFromRemote = async (url: string, secret: string): Promise<LoadR
     const uniqueName = getUniqueName(name, existingNames);
     const renamed = uniqueName !== name;
 
-    // 加密 API key
-    const configToSave: EnvConfig = { ...envConfig };
-    if (configToSave.ANTHROPIC_API_KEY) {
-      configToSave.ANTHROPIC_API_KEY = encrypt(configToSave.ANTHROPIC_API_KEY);
+    const normalizedConfig = normalizeEnvConfig(envConfig);
+    const configToSave: EnvConfig = { ...normalizedConfig };
+    if (configToSave.ANTHROPIC_AUTH_TOKEN) {
+      configToSave.ANTHROPIC_AUTH_TOKEN = encrypt(configToSave.ANTHROPIC_AUTH_TOKEN);
     }
 
     registries[uniqueName] = configToSave;

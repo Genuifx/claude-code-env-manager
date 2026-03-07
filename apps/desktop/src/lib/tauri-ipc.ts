@@ -22,9 +22,12 @@ export interface TauriCommands {
     {
       name: string;
       baseUrl: string;
-      apiKey?: string;
-      model: string;
-      smallModel?: string;
+      authToken?: string;
+      defaultOpusModel: string;
+      defaultSonnetModel?: string;
+      defaultHaikuModel?: string;
+      runtimeModel?: string;
+      subagentModel?: string;
     },
     void
   ];
@@ -33,9 +36,12 @@ export interface TauriCommands {
       oldName: string;
       name: string;
       baseUrl: string;
-      apiKey?: string;
-      model: string;
-      smallModel?: string;
+      authToken?: string;
+      defaultOpusModel: string;
+      defaultSonnetModel?: string;
+      defaultHaikuModel?: string;
+      runtimeModel?: string;
+      subagentModel?: string;
     },
     void
   ];

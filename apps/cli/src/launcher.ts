@@ -17,15 +17,30 @@ export interface LaunchOptions {
   silent?: boolean;
 }
 
+const MANAGED_CLAUDE_ENV_KEYS = [
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+  'ANTHROPIC_MODEL',
+  'CLAUDE_CODE_SUBAGENT_MODEL',
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_SMALL_FAST_MODEL',
+] as const;
+
 /**
- * Build environment variables from an EnvConfig, decrypting the API key.
+ * Build environment variables from an EnvConfig, decrypting the auth token.
  */
 function buildEnvVars(envConfig: EnvConfig): Record<string, string> {
   const vars: Record<string, string> = {};
   if (envConfig.ANTHROPIC_BASE_URL) vars.ANTHROPIC_BASE_URL = envConfig.ANTHROPIC_BASE_URL;
-  if (envConfig.ANTHROPIC_API_KEY) vars.ANTHROPIC_API_KEY = decrypt(envConfig.ANTHROPIC_API_KEY);
+  if (envConfig.ANTHROPIC_AUTH_TOKEN) vars.ANTHROPIC_AUTH_TOKEN = decrypt(envConfig.ANTHROPIC_AUTH_TOKEN);
+  if (envConfig.ANTHROPIC_DEFAULT_OPUS_MODEL) vars.ANTHROPIC_DEFAULT_OPUS_MODEL = envConfig.ANTHROPIC_DEFAULT_OPUS_MODEL;
+  if (envConfig.ANTHROPIC_DEFAULT_SONNET_MODEL) vars.ANTHROPIC_DEFAULT_SONNET_MODEL = envConfig.ANTHROPIC_DEFAULT_SONNET_MODEL;
+  if (envConfig.ANTHROPIC_DEFAULT_HAIKU_MODEL) vars.ANTHROPIC_DEFAULT_HAIKU_MODEL = envConfig.ANTHROPIC_DEFAULT_HAIKU_MODEL;
   if (envConfig.ANTHROPIC_MODEL) vars.ANTHROPIC_MODEL = envConfig.ANTHROPIC_MODEL;
-  if (envConfig.ANTHROPIC_SMALL_FAST_MODEL) vars.ANTHROPIC_SMALL_FAST_MODEL = envConfig.ANTHROPIC_SMALL_FAST_MODEL;
+  if (envConfig.CLAUDE_CODE_SUBAGENT_MODEL) vars.CLAUDE_CODE_SUBAGENT_MODEL = envConfig.CLAUDE_CODE_SUBAGENT_MODEL;
   return vars;
 }
 
@@ -75,6 +90,9 @@ export async function launchClaude(options: LaunchOptions): Promise<void> {
 
   // Build env
   const env = { ...process.env };
+  for (const key of MANAGED_CLAUDE_ENV_KEYS) {
+    delete env[key];
+  }
   if (envConfig) {
     Object.assign(env, buildEnvVars(envConfig));
   }

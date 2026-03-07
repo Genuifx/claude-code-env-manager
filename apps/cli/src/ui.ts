@@ -71,9 +71,12 @@ export const renderLogoWithEnvPanel = (
   envName: string,
   env: {
     ANTHROPIC_BASE_URL?: string;
-    ANTHROPIC_API_KEY?: string;
+    ANTHROPIC_AUTH_TOKEN?: string;
+    ANTHROPIC_DEFAULT_OPUS_MODEL?: string;
+    ANTHROPIC_DEFAULT_SONNET_MODEL?: string;
+    ANTHROPIC_DEFAULT_HAIKU_MODEL?: string;
     ANTHROPIC_MODEL?: string;
-    ANTHROPIC_SMALL_FAST_MODEL?: string;
+    CLAUDE_CODE_SUBAGENT_MODEL?: string;
   },
   defaultMode?: PermissionModeName | null
 ): string => {
@@ -92,9 +95,10 @@ export const renderLogoWithEnvPanel = (
 
   // 构建环境变量显示
   const baseUrl = env.ANTHROPIC_BASE_URL || '-';
-  const model = env.ANTHROPIC_MODEL || '-';
-  const fastModel = env.ANTHROPIC_SMALL_FAST_MODEL || '-';
-  const apiKey = env.ANTHROPIC_API_KEY ? env.ANTHROPIC_API_KEY.slice(0, 2) + '••••' + env.ANTHROPIC_API_KEY.slice(-4) : '-';
+  const runtimeModel = env.ANTHROPIC_MODEL || '-';
+  const opusModel = env.ANTHROPIC_DEFAULT_OPUS_MODEL || '-';
+  const haikuModel = env.ANTHROPIC_DEFAULT_HAIKU_MODEL || '-';
+  const authToken = env.ANTHROPIC_AUTH_TOKEN ? env.ANTHROPIC_AUTH_TOKEN.slice(0, 2) + '••••' + env.ANTHROPIC_AUTH_TOKEN.slice(-4) : '-';
 
   // 截断过长的值
   const truncate = (s: string, max: number) => s.length > max ? s.slice(0, max - 3) + '...' : s;
@@ -127,15 +131,15 @@ export const renderLogoWithEnvPanel = (
   if (isNarrow) {
     envLines = [
       envLabel,
-      theme.muted('Model:'.padEnd(labelWidth)) + theme.dim(truncate(model, 25)),
-      theme.muted('Key:'.padEnd(labelWidth)) + theme.dim(apiKey),
+      theme.muted('Opus:'.padEnd(labelWidth)) + theme.dim(truncate(opusModel, 25)),
+      theme.muted('Token:'.padEnd(labelWidth)) + theme.dim(authToken),
     ];
   } else {
     envLines = [
       envLabel + (defaultMode && PERMISSION_PRESETS[defaultMode] ? '  ' + theme.accent(`[${PERMISSION_PRESETS[defaultMode].name}]`) : ''),
       theme.muted('URL:'.padEnd(labelWidth)) + theme.dim(maskUrl(baseUrl, 40)),
-      theme.muted('Model:'.padEnd(labelWidth)) + theme.dim(truncate(model, 15)) + '  ' + theme.muted('Fast:'.padEnd(labelWidth)) + theme.dim(truncate(fastModel, 15)),
-      theme.muted('Key:'.padEnd(labelWidth)) + theme.dim(apiKey),
+      theme.muted('Run:'.padEnd(labelWidth)) + theme.dim(truncate(runtimeModel, 12)) + '  ' + theme.muted('Opus:'.padEnd(labelWidth)) + theme.dim(truncate(opusModel, 15)),
+      theme.muted('Haiku:'.padEnd(labelWidth)) + theme.dim(truncate(haikuModel, 15)) + '  ' + theme.muted('Token:'.padEnd(labelWidth)) + theme.dim(authToken),
     ];
   }
 
@@ -252,9 +256,12 @@ export const renderEnvPanel = (
   envName: string,
   env: {
     ANTHROPIC_BASE_URL?: string;
-    ANTHROPIC_API_KEY?: string;
+    ANTHROPIC_AUTH_TOKEN?: string;
+    ANTHROPIC_DEFAULT_OPUS_MODEL?: string;
+    ANTHROPIC_DEFAULT_SONNET_MODEL?: string;
+    ANTHROPIC_DEFAULT_HAIKU_MODEL?: string;
     ANTHROPIC_MODEL?: string;
-    ANTHROPIC_SMALL_FAST_MODEL?: string;
+    CLAUDE_CODE_SUBAGENT_MODEL?: string;
   },
   defaultMode?: PermissionModeName | null
 ): string => {
@@ -265,9 +272,11 @@ export const renderEnvPanel = (
 
   const vars = [
     { key: 'Base URL', value: env.ANTHROPIC_BASE_URL || '-' },
-    { key: 'Model', value: env.ANTHROPIC_MODEL || '-' },
-    { key: 'Fast Model', value: env.ANTHROPIC_SMALL_FAST_MODEL || '-' },
-    { key: 'API Key', value: env.ANTHROPIC_API_KEY ? env.ANTHROPIC_API_KEY.slice(0, 2) + '••••' + env.ANTHROPIC_API_KEY.slice(-4) : '-' },
+    { key: 'Runtime', value: env.ANTHROPIC_MODEL || '-' },
+    { key: 'Opus', value: env.ANTHROPIC_DEFAULT_OPUS_MODEL || '-' },
+    { key: 'Sonnet', value: env.ANTHROPIC_DEFAULT_SONNET_MODEL || '-' },
+    { key: 'Haiku', value: env.ANTHROPIC_DEFAULT_HAIKU_MODEL || '-' },
+    { key: 'Token', value: env.ANTHROPIC_AUTH_TOKEN ? env.ANTHROPIC_AUTH_TOKEN.slice(0, 2) + '••••' + env.ANTHROPIC_AUTH_TOKEN.slice(-4) : '-' },
   ];
 
   vars.forEach(({ key, value }) => {

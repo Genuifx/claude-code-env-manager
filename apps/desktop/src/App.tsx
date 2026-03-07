@@ -172,12 +172,18 @@ function App() {
       const envList: Environment[] = Object.entries(ENV_PRESETS).map(([name, config]) => ({
         name,
         baseUrl: config.ANTHROPIC_BASE_URL || '',
-        model: config.ANTHROPIC_MODEL || '',
+        defaultOpusModel: config.ANTHROPIC_DEFAULT_OPUS_MODEL || '',
+        defaultSonnetModel: config.ANTHROPIC_DEFAULT_SONNET_MODEL,
+        defaultHaikuModel: config.ANTHROPIC_DEFAULT_HAIKU_MODEL,
+        runtimeModel: config.ANTHROPIC_MODEL || 'opus',
       }));
       envList.unshift({
         name: 'official',
         baseUrl: 'https://api.anthropic.com',
-        model: 'claude-sonnet-4-5-20250929',
+        defaultOpusModel: 'claude-opus-4-1-20250805',
+        defaultSonnetModel: 'claude-opus-4-1-20250805',
+        defaultHaikuModel: 'claude-3-5-haiku-20241022',
+        runtimeModel: 'opus',
       });
       setEnvironments(envList);
     });

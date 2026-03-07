@@ -18,7 +18,17 @@ const pkgPath = path.resolve(__dirname, '..', 'package.json');
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
 
 import type { EnvConfig, PermissionModeName } from '@ccem/core';
-import { encrypt, decrypt, ENV_PRESETS, PERMISSION_PRESETS, getCcemConfigDir, ensureCcemDir, getCcemConfigPath, getLegacyConfigPath } from '@ccem/core';
+import {
+  decrypt,
+  encrypt,
+  ENV_PRESETS,
+  normalizeEnvConfig,
+  PERMISSION_PRESETS,
+  getCcemConfigDir,
+  ensureCcemDir,
+  getCcemConfigPath,
+  getLegacyConfigPath,
+} from '@ccem/core';
 import {
   renderCompactHeader,
   renderEnvPanel,
@@ -57,6 +67,61 @@ import { CCEM_CRON_SKILL_CONTENT } from './cron-skill.js';
 
 const program = new Command();
 
+type StoredEnvConfig = EnvConfig & {
+  ANTHROPIC_API_KEY?: string;
+  ANTHROPIC_SMALL_FAST_MODEL?: string;
+};
+
+const DEFAULT_OFFICIAL_ENV: EnvConfig = {
+  ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
+  ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-4-1-20250805',
+  ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-opus-4-1-20250805',
+  ANTHROPIC_DEFAULT_HAIKU_MODEL: 'claude-3-5-haiku-20241022',
+  ANTHROPIC_MODEL: 'opus',
+};
+
+const MANAGED_CLAUDE_ENV_KEYS = [
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+  'ANTHROPIC_MODEL',
+  'CLAUDE_CODE_SUBAGENT_MODEL',
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_SMALL_FAST_MODEL',
+] as const;
+
+const shellQuote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`;
+
+const clearManagedClaudeEnv = (env: NodeJS.ProcessEnv): void => {
+  for (const key of MANAGED_CLAUDE_ENV_KEYS) {
+    delete env[key];
+  }
+};
+
+const buildResolvedEnvVars = (env: EnvConfig): Record<string, string> => {
+  const resolved: Record<string, string> = {};
+  if (env.ANTHROPIC_BASE_URL) resolved.ANTHROPIC_BASE_URL = env.ANTHROPIC_BASE_URL;
+  if (env.ANTHROPIC_AUTH_TOKEN) resolved.ANTHROPIC_AUTH_TOKEN = decrypt(env.ANTHROPIC_AUTH_TOKEN);
+  if (env.ANTHROPIC_DEFAULT_OPUS_MODEL) resolved.ANTHROPIC_DEFAULT_OPUS_MODEL = env.ANTHROPIC_DEFAULT_OPUS_MODEL;
+  if (env.ANTHROPIC_DEFAULT_SONNET_MODEL) resolved.ANTHROPIC_DEFAULT_SONNET_MODEL = env.ANTHROPIC_DEFAULT_SONNET_MODEL;
+  if (env.ANTHROPIC_DEFAULT_HAIKU_MODEL) resolved.ANTHROPIC_DEFAULT_HAIKU_MODEL = env.ANTHROPIC_DEFAULT_HAIKU_MODEL;
+  if (env.ANTHROPIC_MODEL) resolved.ANTHROPIC_MODEL = env.ANTHROPIC_MODEL;
+  if (env.CLAUDE_CODE_SUBAGENT_MODEL) resolved.CLAUDE_CODE_SUBAGENT_MODEL = env.CLAUDE_CODE_SUBAGENT_MODEL;
+  return resolved;
+};
+
+const buildShellEnvCommands = (env: EnvConfig): string[] => {
+  const resolved = buildResolvedEnvVars(env);
+
+  return MANAGED_CLAUDE_ENV_KEYS.map((key) =>
+    resolved[key]
+      ? `export ${key}=${shellQuote(resolved[key])}`
+      : `unset ${key}`
+  );
+};
+
 // 确保配置目录存在
 ensureCcemDir();
 
@@ -65,16 +130,135 @@ const config = new Conf({
   cwd: getCcemConfigDir(),  // 使用新路径
   defaults: {
     registries: {
-      'official': {
-        ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
-        ANTHROPIC_MODEL: 'claude-sonnet-4-5-20250929',
-        ANTHROPIC_SMALL_FAST_MODEL: 'claude-haiku-4-5-20251001'
-      }
+      official: DEFAULT_OFFICIAL_ENV,
     },
     current: 'official',
     defaultMode: null as string | null
   }
 });
+
+const getRegistries = (): Record<string, EnvConfig> => {
+  const rawRegistries = (config.get('registries') as Record<string, StoredEnvConfig> | undefined) ?? {};
+  const normalizedEntries = Object.entries(rawRegistries).map(([name, envConfig]) => [
+    name,
+    normalizeEnvConfig(envConfig ?? {}),
+  ]);
+  const normalizedRegistries = Object.fromEntries(normalizedEntries) as Record<string, EnvConfig>;
+  if (!normalizedRegistries.official) {
+    normalizedRegistries.official = { ...DEFAULT_OFFICIAL_ENV };
+  }
+
+  const changed =
+    Object.keys(rawRegistries).length !== Object.keys(normalizedRegistries).length ||
+    JSON.stringify(rawRegistries) !== JSON.stringify(normalizedRegistries);
+
+  if (changed) {
+    config.set('registries', normalizedRegistries);
+  }
+
+  return normalizedRegistries;
+};
+
+const setRegistries = (registries: Record<string, EnvConfig>): void => {
+  config.set('registries', registries);
+};
+
+const getDecryptedAuthToken = (envConfig: EnvConfig): string | undefined => {
+  return envConfig.ANTHROPIC_AUTH_TOKEN
+    ? decrypt(envConfig.ANTHROPIC_AUTH_TOKEN)
+    : undefined;
+};
+
+const applyPromptAnswers = (
+  current: EnvConfig,
+  answers: Record<string, string | undefined>,
+  keepCurrentSecret: boolean
+): EnvConfig => {
+  const next: EnvConfig = {
+    ...current,
+    ANTHROPIC_BASE_URL: answers.ANTHROPIC_BASE_URL?.trim() || current.ANTHROPIC_BASE_URL,
+    ANTHROPIC_DEFAULT_OPUS_MODEL:
+      answers.ANTHROPIC_DEFAULT_OPUS_MODEL?.trim() || current.ANTHROPIC_DEFAULT_OPUS_MODEL,
+    ANTHROPIC_DEFAULT_HAIKU_MODEL:
+      answers.ANTHROPIC_DEFAULT_HAIKU_MODEL?.trim() || current.ANTHROPIC_DEFAULT_HAIKU_MODEL,
+    ANTHROPIC_DEFAULT_SONNET_MODEL:
+      answers.ANTHROPIC_DEFAULT_SONNET_MODEL?.trim() ||
+      answers.ANTHROPIC_DEFAULT_OPUS_MODEL?.trim() ||
+      current.ANTHROPIC_DEFAULT_SONNET_MODEL ||
+      current.ANTHROPIC_DEFAULT_OPUS_MODEL,
+    ANTHROPIC_MODEL: answers.ANTHROPIC_MODEL?.trim() || current.ANTHROPIC_MODEL || 'opus',
+    CLAUDE_CODE_SUBAGENT_MODEL:
+      answers.CLAUDE_CODE_SUBAGENT_MODEL?.trim() || current.CLAUDE_CODE_SUBAGENT_MODEL,
+  };
+
+  if (!keepCurrentSecret) {
+    next.ANTHROPIC_AUTH_TOKEN = answers.ANTHROPIC_AUTH_TOKEN
+      ? encrypt(answers.ANTHROPIC_AUTH_TOKEN)
+      : undefined;
+  } else if (answers.ANTHROPIC_AUTH_TOKEN) {
+    next.ANTHROPIC_AUTH_TOKEN = encrypt(answers.ANTHROPIC_AUTH_TOKEN);
+  }
+
+  return normalizeEnvConfig(next);
+};
+
+const promptForEnvironmentConfig = async (
+  current: Partial<EnvConfig> = {},
+  keepCurrentSecret: boolean = false
+): Promise<Record<string, string | undefined>> => {
+  return inquirer.prompt([
+    {
+      type: 'input',
+      name: 'ANTHROPIC_BASE_URL',
+      message: 'ANTHROPIC_BASE_URL:',
+      default: current.ANTHROPIC_BASE_URL || DEFAULT_OFFICIAL_ENV.ANTHROPIC_BASE_URL,
+    },
+    {
+      type: 'password',
+      name: 'ANTHROPIC_AUTH_TOKEN',
+      message: keepCurrentSecret
+        ? 'ANTHROPIC_AUTH_TOKEN (leave empty to keep current):'
+        : 'ANTHROPIC_AUTH_TOKEN:',
+    },
+    {
+      type: 'input',
+      name: 'ANTHROPIC_DEFAULT_OPUS_MODEL',
+      message: 'ANTHROPIC_DEFAULT_OPUS_MODEL:',
+      default:
+        current.ANTHROPIC_DEFAULT_OPUS_MODEL ||
+        DEFAULT_OFFICIAL_ENV.ANTHROPIC_DEFAULT_OPUS_MODEL,
+    },
+    {
+      type: 'input',
+      name: 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+      message: 'ANTHROPIC_DEFAULT_HAIKU_MODEL:',
+      default:
+        current.ANTHROPIC_DEFAULT_HAIKU_MODEL ||
+        DEFAULT_OFFICIAL_ENV.ANTHROPIC_DEFAULT_HAIKU_MODEL,
+    },
+    {
+      type: 'input',
+      name: 'ANTHROPIC_DEFAULT_SONNET_MODEL',
+      message: 'ANTHROPIC_DEFAULT_SONNET_MODEL (blank = same as opus):',
+      default:
+        current.ANTHROPIC_DEFAULT_SONNET_MODEL ||
+        current.ANTHROPIC_DEFAULT_OPUS_MODEL ||
+        '',
+    },
+    {
+      type: 'input',
+      name: 'ANTHROPIC_MODEL',
+      message: 'ANTHROPIC_MODEL (e.g. opus, opusplan, sonnet):',
+      default: current.ANTHROPIC_MODEL || 'opus',
+    },
+    {
+      type: 'input',
+      name: 'CLAUDE_CODE_SUBAGENT_MODEL',
+      message: 'CLAUDE_CODE_SUBAGENT_MODEL (optional):',
+      default: current.CLAUDE_CODE_SUBAGENT_MODEL || '',
+    },
+  ]);
+};
 
 // 权限模式列表
 const PERMISSION_MODES: PermissionModeName[] = ['yolo', 'dev', 'readonly', 'safe', 'ci', 'audit'];
@@ -144,7 +328,7 @@ PERMISSION_MODES.forEach(mode => {
     .command(mode)
     .description(`临时应用 ${preset.name}，退出后还原`)
     .action(async () => {
-      const registries = config.get('registries') as Record<string, EnvConfig>;
+      const registries = getRegistries();
       const current = config.get('current') as string;
       const envConfig = registries[current];
       await runWithTempPermissions(mode, envConfig);
@@ -155,7 +339,7 @@ const showCurrentEnv = (usageStats: UsageStats | null, usageLoading: boolean) =>
   if (!process.stdout.isTTY) return;
 
   const current = config.get('current') as string;
-  const registries = config.get('registries') as Record<string, EnvConfig>;
+  const registries = getRegistries();
   const env = registries[current];
   const defaultMode = config.get('defaultMode') as PermissionModeName | null;
 
@@ -164,9 +348,12 @@ const showCurrentEnv = (usageStats: UsageStats | null, usageLoading: boolean) =>
   // 显示 Logo + 环境信息（横向布局）
   console.log(renderLogoWithEnvPanel(current, {
     ANTHROPIC_BASE_URL: env.ANTHROPIC_BASE_URL,
-    ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY ? decrypt(env.ANTHROPIC_API_KEY) : undefined,
+    ANTHROPIC_AUTH_TOKEN: getDecryptedAuthToken(env),
+    ANTHROPIC_DEFAULT_OPUS_MODEL: env.ANTHROPIC_DEFAULT_OPUS_MODEL,
+    ANTHROPIC_DEFAULT_SONNET_MODEL: env.ANTHROPIC_DEFAULT_SONNET_MODEL,
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: env.ANTHROPIC_DEFAULT_HAIKU_MODEL,
     ANTHROPIC_MODEL: env.ANTHROPIC_MODEL,
-    ANTHROPIC_SMALL_FAST_MODEL: env.ANTHROPIC_SMALL_FAST_MODEL,
+    CLAUDE_CODE_SUBAGENT_MODEL: env.CLAUDE_CODE_SUBAGENT_MODEL,
   }, defaultMode));
 
   // 分隔线
@@ -179,7 +366,7 @@ const showCurrentEnv = (usageStats: UsageStats | null, usageLoading: boolean) =>
 };
 
 const switchEnvironment = async (name: string) => {
-  const registries = config.get('registries') as Record<string, EnvConfig>;
+  const registries = getRegistries();
   if (!registries[name]) {
     console.error(chalk.red(`Environment '${name}' not found.`));
     return;
@@ -195,11 +382,7 @@ const switchEnvironment = async (name: string) => {
   showCurrentEnv(null, false);
 
   const env = registries[name];
-  const exportCmds: string[] = [];
-  if (env.ANTHROPIC_BASE_URL) exportCmds.push(`export ANTHROPIC_BASE_URL="${env.ANTHROPIC_BASE_URL}"`);
-  if (env.ANTHROPIC_API_KEY) exportCmds.push(`export ANTHROPIC_API_KEY="${decrypt(env.ANTHROPIC_API_KEY)}"`);
-  if (env.ANTHROPIC_MODEL) exportCmds.push(`export ANTHROPIC_MODEL="${env.ANTHROPIC_MODEL}"`);
-  if (env.ANTHROPIC_SMALL_FAST_MODEL) exportCmds.push(`export ANTHROPIC_SMALL_FAST_MODEL="${env.ANTHROPIC_SMALL_FAST_MODEL}"`);
+  const exportCmds = buildShellEnvCommands(env);
 
   if (process.stdout.isTTY) {
     console.log(chalk.yellow('\nTo apply to current shell immediately, run:'));
@@ -217,11 +400,11 @@ program
   .command('ls')
   .description('List all configured environments')
   .action(() => {
-    const registries = config.get('registries') as Record<string, EnvConfig>;
+    const registries = getRegistries();
     const current = config.get('current') as string;
 
     const table = new Table({
-      head: ['Name', 'Base URL', 'Model'],
+      head: ['Name', 'Base URL', 'Opus'],
       style: { head: ['cyan'] }
     });
 
@@ -231,7 +414,7 @@ program
       table.push([
         prefix + name,
         reg.ANTHROPIC_BASE_URL || '-',
-        reg.ANTHROPIC_MODEL || '-'
+        reg.ANTHROPIC_DEFAULT_OPUS_MODEL || '-'
       ]);
     });
 
@@ -249,7 +432,7 @@ program
   .command('add <name>')
   .description('Add a new environment configuration')
   .action(async (name) => {
-    const registries = config.get('registries') as Record<string, EnvConfig>;
+    const registries = getRegistries();
     if (registries[name]) {
       console.log(chalk.red(`Environment '${name}' already exists.`));
       return;
@@ -278,38 +461,9 @@ program
       presetConfig = ENV_PRESETS[presetName];
     }
 
-    const answers = await inquirer.prompt([
-      {
-        type: 'input',
-        name: 'ANTHROPIC_BASE_URL',
-        message: 'Enter ANTHROPIC_BASE_URL:',
-        default: presetConfig.ANTHROPIC_BASE_URL || 'https://api.anthropic.com'
-      },
-      {
-        type: 'password',
-        name: 'ANTHROPIC_API_KEY',
-        message: 'Enter ANTHROPIC_API_KEY:',
-      },
-      {
-        type: 'input',
-        name: 'ANTHROPIC_MODEL',
-        message: 'Enter ANTHROPIC_MODEL:',
-        default: presetConfig.ANTHROPIC_MODEL || 'claude-sonnet-4-5-20250929'
-      },
-      {
-        type: 'input',
-        name: 'ANTHROPIC_SMALL_FAST_MODEL',
-        message: 'Enter ANTHROPIC_SMALL_FAST_MODEL:',
-        default: presetConfig.ANTHROPIC_SMALL_FAST_MODEL || 'claude-haiku-4-5-20251001'
-      }
-    ]);
-
-    if (answers.ANTHROPIC_API_KEY) {
-      answers.ANTHROPIC_API_KEY = encrypt(answers.ANTHROPIC_API_KEY);
-    }
-
-    registries[name] = answers;
-    config.set('registries', registries);
+    const answers = await promptForEnvironmentConfig(presetConfig);
+    registries[name] = applyPromptAnswers(normalizeEnvConfig(presetConfig), answers, false);
+    setRegistries(registries);
     console.log(chalk.green(`Environment '${name}' added successfully.`));
   });
 
@@ -317,7 +471,7 @@ program
   .command('del <name>')
   .description('Delete an environment configuration')
   .action((name) => {
-    const registries = config.get('registries') as Record<string, EnvConfig>;
+    const registries = getRegistries();
     if (!registries[name]) {
       console.log(chalk.red(`Environment '${name}' not found.`));
       return;
@@ -329,7 +483,7 @@ program
     }
 
     delete registries[name];
-    config.set('registries', registries);
+    setRegistries(registries);
 
     const current = config.get('current');
     if (current === name) {
@@ -344,7 +498,7 @@ program
   .command('rename <old> <new>')
   .description('Rename an environment configuration')
   .action((oldName, newName) => {
-    const registries = config.get('registries') as Record<string, EnvConfig>;
+    const registries = getRegistries();
 
     if (!registries[oldName]) {
       console.log(chalk.red(`Environment '${oldName}' not found.`));
@@ -363,7 +517,7 @@ program
 
     registries[newName] = registries[oldName];
     delete registries[oldName];
-    config.set('registries', registries);
+    setRegistries(registries);
 
     const current = config.get('current');
     if (current === oldName) {
@@ -377,7 +531,7 @@ program
   .command('cp <source> <target>')
   .description('Copy an environment configuration')
   .action(async (source, target) => {
-    const registries = config.get('registries') as Record<string, EnvConfig>;
+    const registries = getRegistries();
 
     if (!registries[source]) {
       console.log(chalk.red(`Environment '${source}' not found.`));
@@ -390,7 +544,7 @@ program
     }
 
     registries[target] = { ...registries[source] };
-    config.set('registries', registries);
+    setRegistries(registries);
     console.log(chalk.green(`Environment '${source}' copied to '${target}'.`));
 
     const { modify } = await inquirer.prompt([
@@ -404,39 +558,9 @@ program
 
     if (modify) {
       const current = registries[target];
-      const answers = await inquirer.prompt([
-        {
-          type: 'input',
-          name: 'ANTHROPIC_BASE_URL',
-          message: 'ANTHROPIC_BASE_URL:',
-          default: current.ANTHROPIC_BASE_URL
-        },
-        {
-          type: 'password',
-          name: 'ANTHROPIC_API_KEY',
-          message: 'ANTHROPIC_API_KEY (leave empty to keep current):',
-        },
-        {
-          type: 'input',
-          name: 'ANTHROPIC_MODEL',
-          message: 'ANTHROPIC_MODEL:',
-          default: current.ANTHROPIC_MODEL
-        },
-        {
-          type: 'input',
-          name: 'ANTHROPIC_SMALL_FAST_MODEL',
-          message: 'ANTHROPIC_SMALL_FAST_MODEL:',
-          default: current.ANTHROPIC_SMALL_FAST_MODEL
-        }
-      ]);
-
-      if (answers.ANTHROPIC_BASE_URL) current.ANTHROPIC_BASE_URL = answers.ANTHROPIC_BASE_URL;
-      if (answers.ANTHROPIC_API_KEY) current.ANTHROPIC_API_KEY = encrypt(answers.ANTHROPIC_API_KEY);
-      if (answers.ANTHROPIC_MODEL) current.ANTHROPIC_MODEL = answers.ANTHROPIC_MODEL;
-      if (answers.ANTHROPIC_SMALL_FAST_MODEL) current.ANTHROPIC_SMALL_FAST_MODEL = answers.ANTHROPIC_SMALL_FAST_MODEL;
-
-      registries[target] = current;
-      config.set('registries', registries);
+      const answers = await promptForEnvironmentConfig(current, true);
+      registries[target] = applyPromptAnswers(current, answers, true);
+      setRegistries(registries);
       console.log(chalk.green(`Environment '${target}' updated.`));
     }
   });
@@ -454,24 +578,21 @@ program
   .description('Output environment variables for shell eval')
   .option('--json', 'Output as JSON')
   .action((options) => {
-    const registries = config.get('registries') as Record<string, EnvConfig>;
+    const registries = getRegistries();
     const current = config.get('current') as string;
     const env = registries[current];
 
     if (!env) return;
 
     const outputEnv = { ...env };
-    if (outputEnv.ANTHROPIC_API_KEY) {
-        outputEnv.ANTHROPIC_API_KEY = decrypt(outputEnv.ANTHROPIC_API_KEY);
+    if (outputEnv.ANTHROPIC_AUTH_TOKEN) {
+        outputEnv.ANTHROPIC_AUTH_TOKEN = decrypt(outputEnv.ANTHROPIC_AUTH_TOKEN);
     }
 
     if (options.json) {
         console.log(JSON.stringify(outputEnv, null, 2));
     } else {
-        if (outputEnv.ANTHROPIC_BASE_URL) console.log(`export ANTHROPIC_BASE_URL="${outputEnv.ANTHROPIC_BASE_URL}"`);
-        if (outputEnv.ANTHROPIC_API_KEY) console.log(`export ANTHROPIC_API_KEY="${outputEnv.ANTHROPIC_API_KEY}"`);
-        if (outputEnv.ANTHROPIC_MODEL) console.log(`export ANTHROPIC_MODEL="${outputEnv.ANTHROPIC_MODEL}"`);
-        if (outputEnv.ANTHROPIC_SMALL_FAST_MODEL) console.log(`export ANTHROPIC_SMALL_FAST_MODEL="${outputEnv.ANTHROPIC_SMALL_FAST_MODEL}"`);
+        buildShellEnvCommands(env).forEach(cmd => console.log(cmd));
     }
   });
 
@@ -479,7 +600,7 @@ program
   .command('run <command...>')
   .description('Run a command with the current environment variables')
   .action((command) => {
-    const registries = config.get('registries') as Record<string, EnvConfig>;
+    const registries = getRegistries();
     const current = config.get('current') as string;
     const envConfig = registries[current];
 
@@ -489,10 +610,8 @@ program
     }
 
     const env = { ...process.env };
-    if (envConfig.ANTHROPIC_BASE_URL) env.ANTHROPIC_BASE_URL = envConfig.ANTHROPIC_BASE_URL;
-    if (envConfig.ANTHROPIC_API_KEY) env.ANTHROPIC_API_KEY = decrypt(envConfig.ANTHROPIC_API_KEY || '');
-    if (envConfig.ANTHROPIC_MODEL) env.ANTHROPIC_MODEL = envConfig.ANTHROPIC_MODEL;
-    if (envConfig.ANTHROPIC_SMALL_FAST_MODEL) env.ANTHROPIC_SMALL_FAST_MODEL = envConfig.ANTHROPIC_SMALL_FAST_MODEL;
+    clearManagedClaudeEnv(env);
+    Object.assign(env, buildResolvedEnvVars(envConfig));
 
     const [cmd, ...args] = command;
     const child = spawn(cmd, args, {
@@ -793,7 +912,7 @@ program
   .action(async function(this: any) {
     const opts = this.opts();
     const envName = opts.env || (config.get('current') as string);
-    const registries = config.get('registries') as Record<string, EnvConfig>;
+    const registries = getRegistries();
     const envConfig = registries[envName];
 
     if (!envConfig) {
@@ -864,7 +983,7 @@ program
 
       // 获取默认模式
       const defaultMode = config.get('defaultMode') as PermissionModeName | null;
-      const registries = config.get('registries') as Record<string, EnvConfig>;
+      const registries = getRegistries();
       const current = config.get('current') as string;
       const envConfig = registries[current];
 
@@ -920,39 +1039,9 @@ program
           const envToEdit = registries[result.name];
           console.log(chalk.yellow(`\nEditing environment '${result.name}'`));
 
-          const answers = await inquirer.prompt([
-            {
-              type: 'input',
-              name: 'ANTHROPIC_BASE_URL',
-              message: 'ANTHROPIC_BASE_URL:',
-              default: envToEdit.ANTHROPIC_BASE_URL
-            },
-            {
-              type: 'password',
-              name: 'ANTHROPIC_API_KEY',
-              message: 'ANTHROPIC_API_KEY (leave empty to keep current):',
-            },
-            {
-              type: 'input',
-              name: 'ANTHROPIC_MODEL',
-              message: 'ANTHROPIC_MODEL:',
-              default: envToEdit.ANTHROPIC_MODEL
-            },
-            {
-              type: 'input',
-              name: 'ANTHROPIC_SMALL_FAST_MODEL',
-              message: 'ANTHROPIC_SMALL_FAST_MODEL:',
-              default: envToEdit.ANTHROPIC_SMALL_FAST_MODEL
-            }
-          ]);
-
-          if (answers.ANTHROPIC_BASE_URL) envToEdit.ANTHROPIC_BASE_URL = answers.ANTHROPIC_BASE_URL;
-          if (answers.ANTHROPIC_API_KEY) envToEdit.ANTHROPIC_API_KEY = encrypt(answers.ANTHROPIC_API_KEY);
-          if (answers.ANTHROPIC_MODEL) envToEdit.ANTHROPIC_MODEL = answers.ANTHROPIC_MODEL;
-          if (answers.ANTHROPIC_SMALL_FAST_MODEL) envToEdit.ANTHROPIC_SMALL_FAST_MODEL = answers.ANTHROPIC_SMALL_FAST_MODEL;
-
-          registries[result.name] = envToEdit;
-          config.set('registries', registries);
+          const answers = await promptForEnvironmentConfig(envToEdit, true);
+          registries[result.name] = applyPromptAnswers(envToEdit, answers, true);
+          setRegistries(registries);
           msg.success(`Environment '${result.name}' updated.`);
           await new Promise(resolve => setTimeout(resolve, 800));
         } else if (result.action === 'rename') {
@@ -976,7 +1065,7 @@ program
 
             registries[newName] = registries[result.name];
             delete registries[result.name];
-            config.set('registries', registries);
+            setRegistries(registries);
 
             if (current === result.name) {
               config.set('current', newName);
@@ -1000,7 +1089,7 @@ program
           ]);
 
           registries[targetName] = { ...registries[result.name] };
-          config.set('registries', registries);
+          setRegistries(registries);
           msg.success(`Environment '${result.name}' copied to '${targetName}'.`);
 
           const { modify } = await inquirer.prompt([
@@ -1014,39 +1103,9 @@ program
 
           if (modify) {
             const envToEdit = registries[targetName];
-            const editAnswers = await inquirer.prompt([
-              {
-                type: 'input',
-                name: 'ANTHROPIC_BASE_URL',
-                message: 'ANTHROPIC_BASE_URL:',
-                default: envToEdit.ANTHROPIC_BASE_URL
-              },
-              {
-                type: 'password',
-                name: 'ANTHROPIC_API_KEY',
-                message: 'ANTHROPIC_API_KEY (leave empty to keep current):',
-              },
-              {
-                type: 'input',
-                name: 'ANTHROPIC_MODEL',
-                message: 'ANTHROPIC_MODEL:',
-                default: envToEdit.ANTHROPIC_MODEL
-              },
-              {
-                type: 'input',
-                name: 'ANTHROPIC_SMALL_FAST_MODEL',
-                message: 'ANTHROPIC_SMALL_FAST_MODEL:',
-                default: envToEdit.ANTHROPIC_SMALL_FAST_MODEL
-              }
-            ]);
-
-            if (editAnswers.ANTHROPIC_BASE_URL) envToEdit.ANTHROPIC_BASE_URL = editAnswers.ANTHROPIC_BASE_URL;
-            if (editAnswers.ANTHROPIC_API_KEY) envToEdit.ANTHROPIC_API_KEY = encrypt(editAnswers.ANTHROPIC_API_KEY);
-            if (editAnswers.ANTHROPIC_MODEL) envToEdit.ANTHROPIC_MODEL = editAnswers.ANTHROPIC_MODEL;
-            if (editAnswers.ANTHROPIC_SMALL_FAST_MODEL) envToEdit.ANTHROPIC_SMALL_FAST_MODEL = editAnswers.ANTHROPIC_SMALL_FAST_MODEL;
-
-            registries[targetName] = envToEdit;
-            config.set('registries', registries);
+            const editAnswers = await promptForEnvironmentConfig(envToEdit, true);
+            registries[targetName] = applyPromptAnswers(envToEdit, editAnswers, true);
+            setRegistries(registries);
             msg.success(`Environment '${targetName}' updated.`);
           }
           await new Promise(resolve => setTimeout(resolve, 800));
@@ -1067,7 +1126,7 @@ program
 
             if (confirm) {
               delete registries[result.name];
-              config.set('registries', registries);
+              setRegistries(registries);
 
               if (current === result.name) {
                 config.set('current', 'official');

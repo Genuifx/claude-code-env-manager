@@ -5,9 +5,12 @@ import type { UsageStats, Milestone } from '@/types/analytics';
 export interface Environment {
   name: string;
   baseUrl: string;
-  apiKey?: string;
-  model: string;
-  smallModel?: string;
+  authToken?: string;
+  defaultOpusModel: string;
+  defaultSonnetModel?: string;
+  defaultHaikuModel?: string;
+  runtimeModel?: string;
+  subagentModel?: string;
 }
 
 export type ArrangeLayout = 'horizontal2' | 'vertical2' | 'grid4' | 'left_main3';

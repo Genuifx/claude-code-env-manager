@@ -308,18 +308,7 @@ fn build_env_vars(env_name: &Option<String>) -> HashMap<String, String> {
         if let Some(name) = resolved_name {
             if let Some(env) = cfg.registries.get(name) {
                 let decrypted = config::get_env_with_decrypted_key(env);
-                if let Some(url) = decrypted.base_url {
-                    env_vars.insert("ANTHROPIC_BASE_URL".to_string(), url);
-                }
-                if let Some(key) = decrypted.api_key {
-                    env_vars.insert("ANTHROPIC_API_KEY".to_string(), key);
-                }
-                if let Some(model) = decrypted.model {
-                    env_vars.insert("ANTHROPIC_MODEL".to_string(), model);
-                }
-                if let Some(small) = decrypted.small_model {
-                    env_vars.insert("ANTHROPIC_SMALL_FAST_MODEL".to_string(), small);
-                }
+                env_vars.extend(config::build_claude_env_vars(&decrypted));
             }
         }
     }
@@ -394,6 +383,7 @@ fn execute_task(app: AppHandle, task: CronTask) {
     let mut cmd = Command::new("claude");
     cmd.arg("-p").arg(&task.prompt);
     cmd.current_dir(&working_dir);
+    config::clear_managed_claude_env(&mut cmd);
     cmd.envs(&env_vars);
     cmd.env("PATH", &expanded_path);
     // Remove CLAUDECODE env var to avoid "nested session" detection
@@ -852,17 +842,9 @@ pub fn generate_cron_task_stream(app: AppHandle, query: String) {
             if let Some(env_name) = &cfg.current {
                 if let Some(env) = cfg.registries.get(env_name) {
                     let decrypted = config::get_env_with_decrypted_key(env);
-                    if let Some(url) = &decrypted.base_url {
-                        cmd.env("ANTHROPIC_BASE_URL", url);
-                    }
-                    if let Some(key) = &decrypted.api_key {
-                        cmd.env("ANTHROPIC_API_KEY", key);
-                    }
-                    if let Some(model) = &decrypted.model {
-                        cmd.env("ANTHROPIC_MODEL", model);
-                    }
-                    if let Some(small) = &decrypted.small_model {
-                        cmd.env("ANTHROPIC_SMALL_FAST_MODEL", small);
+                    config::clear_managed_claude_env(&mut cmd);
+                    for (key, value) in config::build_claude_env_vars(&decrypted) {
+                        cmd.env(key, value);
                     }
                 }
             }
