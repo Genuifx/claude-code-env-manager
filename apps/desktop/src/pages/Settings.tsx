@@ -32,6 +32,12 @@ function getModeIcon(mode: PermissionModeName): typeof Shield {
   return iconMap[mode] || Shield;
 }
 
+interface InstallStatusState {
+  ccem: boolean | null;
+  claude: boolean | null;
+  codex: boolean | null;
+}
+
 export function Settings() {
   const { defaultMode, setDefaultMode, isLoadingSettings, defaultWorkingDir } = useAppStore();
   const { t, lang, setLang } = useLocale();
@@ -40,15 +46,41 @@ export function Settings() {
   const [autoStart, setAutoStart] = useState(false);
   const [startMinimized, setStartMinimized] = useState(false);
   const [closeToTray, setCloseToTray] = useState(true);
-  const [ccemInstalled, setCcemInstalled] = useState<boolean | null>(null);
+  const [installStatus, setInstallStatus] = useState<InstallStatusState>({
+    ccem: null,
+    claude: null,
+    codex: null,
+  });
   const [webkitVersion, setWebkitVersion] = useState<string | null>(null);
   const loaded = useRef(false);
 
-  // Check if ccem CLI is installed
+  // Load CLI install status in parallel so the About card updates once.
   useEffect(() => {
-    invoke<boolean>('check_ccem_installed')
-      .then(setCcemInstalled)
-      .catch(() => setCcemInstalled(false));
+    let cancelled = false;
+
+    const loadInstallStatus = async () => {
+      const [ccem, claude, codex] = await Promise.allSettled([
+        invoke<boolean>('check_ccem_installed'),
+        invoke<boolean>('check_claude_installed'),
+        invoke<boolean>('check_codex_installed'),
+      ]);
+
+      if (cancelled) {
+        return;
+      }
+
+      setInstallStatus({
+        ccem: ccem.status === 'fulfilled' ? ccem.value : false,
+        claude: claude.status === 'fulfilled' ? claude.value : false,
+        codex: codex.status === 'fulfilled' ? codex.value : false,
+      });
+    };
+
+    void loadInstallStatus();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Surface runtime WebKit version for desktop debugging.
@@ -345,33 +377,35 @@ export function Settings() {
               <Terminal className="w-3.5 h-3.5" />
               {t('settings.cliStatus')}
             </span>
-            {ccemInstalled === null ? (
-              <span className="text-xs text-muted-foreground">...</span>
-            ) : ccemInstalled ? (
-              <span className="flex items-center gap-1.5 text-sm font-medium text-success">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                {t('settings.cliInstalled')}
-              </span>
-            ) : (
-              <div className="flex items-center gap-2">
-                <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
-                  <XCircle className="w-3.5 h-3.5" />
-                  {t('settings.cliNotInstalled')}
-                </span>
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(t('settings.cliInstallCmd'));
-                    toast.success(t('settings.cliInstallCmd'));
-                  }}
-                  className="inline-flex items-center gap-1 text-[11px] font-mono text-primary hover:text-primary/80 glass-btn-outline px-2 py-0.5 rounded-md"
-                >
-                  <Copy className="w-3 h-3" />
-                  {t('settings.cliInstallCmd')}
-                </button>
-              </div>
-            )}
+            <InstallStatusBadge status={installStatus.ccem} />
           </div>
-          {ccemInstalled === false && (
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">
+              {t('settings.claudeCodeStatus')}
+            </span>
+            <InstallStatusBadge status={installStatus.claude} />
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">
+              {t('settings.codexStatus')}
+            </span>
+            <InstallStatusBadge status={installStatus.codex} />
+          </div>
+          {installStatus.ccem === false && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(t('settings.cliInstallCmd'));
+                  toast.success(t('settings.cliInstallCmd'));
+                }}
+                className="inline-flex items-center gap-1 text-[11px] font-mono text-primary hover:text-primary/80 glass-btn-outline px-2 py-0.5 rounded-md"
+              >
+                <Copy className="w-3 h-3" />
+                {t('settings.cliInstallCmd')}
+              </button>
+            </div>
+          )}
+          {installStatus.ccem === false && (
             <p className="text-xs text-muted-foreground/80 flex items-center gap-1">
               <Lightbulb className="w-3 h-3 text-primary shrink-0" />
               {t('settings.cliInstallHint')}
@@ -391,6 +425,30 @@ export function Settings() {
         </div>
       </Card>
     </div>
+  );
+}
+
+function InstallStatusBadge({ status }: { status: boolean | null }) {
+  const { t } = useLocale();
+
+  if (status === null) {
+    return <span className="text-xs text-muted-foreground">...</span>;
+  }
+
+  if (status) {
+    return (
+      <span className="flex items-center gap-1.5 text-sm font-medium text-success">
+        <CheckCircle2 className="w-3.5 h-3.5" />
+        {t('settings.cliInstalled')}
+      </span>
+    );
+  }
+
+  return (
+    <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+      <XCircle className="w-3.5 h-3.5" />
+      {t('settings.cliNotInstalled')}
+    </span>
   );
 }
 

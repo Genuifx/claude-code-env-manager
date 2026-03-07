@@ -905,12 +905,17 @@ fn extract_jetbrains_projects(
 
 #[tauri::command]
 fn check_ccem_installed() -> bool {
-    terminal::resolve_ccem_path().is_some()
+    terminal::is_ccem_installed()
+}
+
+#[tauri::command]
+fn check_claude_installed() -> bool {
+    terminal::is_claude_installed()
 }
 
 #[tauri::command]
 fn check_codex_installed() -> bool {
-    terminal::resolve_codex_path().is_some()
+    terminal::is_codex_installed()
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -1285,6 +1290,7 @@ fn main() {
             get_usage_model_breakdown,
             get_continuous_usage_days,
             check_ccem_installed,
+            check_claude_installed,
             check_codex_installed,
             load_from_remote,
             arrange_sessions,
