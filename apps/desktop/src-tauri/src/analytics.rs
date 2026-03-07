@@ -848,8 +848,8 @@ fn extract_hour(timestamp: &str) -> Option<String> {
 fn format_week_bucket(date: NaiveDate) -> String {
     let jan1 = NaiveDate::from_ymd_opt(date.year(), 1, 1).unwrap_or(date);
     let days_since_jan1 = date.signed_duration_since(jan1).num_days();
-    let week_num = ((days_since_jan1 + jan1.weekday().num_days_from_sunday() as i64 + 7) / 7)
-        as u32;
+    let week_num =
+        ((days_since_jan1 + jan1.weekday().num_days_from_sunday() as i64 + 7) / 7) as u32;
     format!("{}-W{:02}", date.year(), week_num)
 }
 
@@ -871,10 +871,7 @@ fn extract_model_breakdown_bucket(
     }
 }
 
-fn retain_latest_keys(
-    breakdown: &mut ModelBreakdownHistory,
-    max_entries: usize,
-) {
+fn retain_latest_keys(breakdown: &mut ModelBreakdownHistory, max_entries: usize) {
     if breakdown.len() <= max_entries {
         return;
     }
@@ -1033,8 +1030,7 @@ fn aggregate_model_breakdown(
         }
 
         for entry in &file_entry.stats.entries {
-            let Some(bucket_key) =
-                extract_model_breakdown_bucket(&entry.timestamp, granularity)
+            let Some(bucket_key) = extract_model_breakdown_bucket(&entry.timestamp, granularity)
             else {
                 continue;
             };
@@ -1137,10 +1133,9 @@ pub fn get_continuous_usage_days(source: Option<String>) -> Result<u32, String> 
 #[cfg(test)]
 mod tests {
     use super::{
-        aggregate_model_breakdown, default_prices, format_week_bucket,
-        normalize_usage_source, parse_codex_jsonl_reader, CacheEntry, CacheFile,
-        CacheFileEntry, CacheMeta, CacheStats, CacheUsage, ModelBreakdownGranularity,
-        ModelPrice, SOURCE_CLAUDE,
+        aggregate_model_breakdown, default_prices, format_week_bucket, normalize_usage_source,
+        parse_codex_jsonl_reader, CacheEntry, CacheFile, CacheFileEntry, CacheMeta, CacheStats,
+        CacheUsage, ModelBreakdownGranularity, ModelPrice, SOURCE_CLAUDE,
     };
     use chrono::{Local, TimeZone};
     use std::collections::HashMap;
@@ -1231,10 +1226,7 @@ mod tests {
             .expect("fixed local time")
     }
 
-    fn build_cache(
-        claude_entries: Vec<CacheEntry>,
-        codex_entries: Vec<CacheEntry>,
-    ) -> CacheFile {
+    fn build_cache(claude_entries: Vec<CacheEntry>, codex_entries: Vec<CacheEntry>) -> CacheFile {
         let mut files = HashMap::new();
         files.insert(
             "/tmp/.claude/projects/session.jsonl".to_string(),
@@ -1293,8 +1285,13 @@ mod tests {
 
         assert!(result.contains_key("2026-03-06T10"));
         assert!(!result.contains_key("2026-03-05T09"));
-        assert_eq!(result["2026-03-06T10"]["claude-sonnet-4-5"].input_tokens, 120);
-        assert!(!result.values().any(|models| models.contains_key("gpt-5.3-codex")));
+        assert_eq!(
+            result["2026-03-06T10"]["claude-sonnet-4-5"].input_tokens,
+            120
+        );
+        assert!(!result
+            .values()
+            .any(|models| models.contains_key("gpt-5.3-codex")));
     }
 
     #[test]
@@ -1345,32 +1342,20 @@ mod tests {
             Vec::new(),
         );
 
-        let day_result = aggregate_model_breakdown(
-            &cache,
-            None,
-            ModelBreakdownGranularity::Day,
-            fixed_now(),
-        );
+        let day_result =
+            aggregate_model_breakdown(&cache, None, ModelBreakdownGranularity::Day, fixed_now());
         assert_eq!(day_result.len(), 7);
         assert!(!day_result.contains_key("2026-02-27"));
         assert_eq!(day_result["2026-03-06"]["claude-opus-4-5"].input_tokens, 80);
 
-        let week_result = aggregate_model_breakdown(
-            &cache,
-            None,
-            ModelBreakdownGranularity::Week,
-            fixed_now(),
-        );
+        let week_result =
+            aggregate_model_breakdown(&cache, None, ModelBreakdownGranularity::Week, fixed_now());
         assert!(week_result.contains_key(&format_week_bucket(
             chrono::NaiveDate::from_ymd_opt(2026, 3, 6).unwrap()
         )));
 
-        let month_result = aggregate_model_breakdown(
-            &cache,
-            None,
-            ModelBreakdownGranularity::Month,
-            fixed_now(),
-        );
+        let month_result =
+            aggregate_model_breakdown(&cache, None, ModelBreakdownGranularity::Month, fixed_now());
         let march_total = &month_result["2026-03"]["claude-opus-4-5"];
         assert_eq!(march_total.input_tokens, 330);
         assert_eq!(march_total.output_tokens, 0);
