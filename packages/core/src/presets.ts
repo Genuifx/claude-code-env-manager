@@ -1,27 +1,102 @@
-import type { EnvConfig, PermissionPreset, PermissionModeName } from './types.js';
+import type {
+  EnvConfig,
+  EnvPresetMetadata,
+  PermissionPreset,
+  PermissionModeName,
+} from './types.js';
 
 // 环境预设（API 提供商）
-export const ENV_PRESETS: Record<string, Omit<EnvConfig, 'ANTHROPIC_API_KEY'>> = {
+export const ENV_PRESETS: Record<
+  string,
+  Omit<EnvConfig, 'ANTHROPIC_AUTH_TOKEN' | 'CLAUDE_CODE_SUBAGENT_MODEL'>
+> = {
   'GLM': {
     ANTHROPIC_BASE_URL: 'https://open.bigmodel.cn/api/anthropic',
-    ANTHROPIC_MODEL: 'glm-4.6',
-    ANTHROPIC_SMALL_FAST_MODEL: 'glm-4.5-air'
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-5',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-4.5-air',
+    ANTHROPIC_MODEL: 'opus'
   },
   'KIMI': {
     ANTHROPIC_BASE_URL: 'https://api.moonshot.cn/anthropic',
-    ANTHROPIC_MODEL: 'kimi-k2-thinking-turbo',
-    ANTHROPIC_SMALL_FAST_MODEL: 'kimi-k2-turbo-preview'
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'kimi-k2-thinking-turbo',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'kimi-k2-thinking-turbo',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'kimi-k2-turbo-preview',
+    ANTHROPIC_MODEL: 'opus'
   },
   'MiniMax': {
     ANTHROPIC_BASE_URL: 'https://api.minimaxi.com/anthropic',
-    ANTHROPIC_MODEL: 'MiniMax-M2',
-    ANTHROPIC_SMALL_FAST_MODEL: 'MiniMax-M2'
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'MiniMax-M2.5',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'MiniMax-M2.5',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'MiniMax-M2.5-highspeed',
+    ANTHROPIC_MODEL: 'opus'
   },
   'DeepSeek': {
     ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
-    ANTHROPIC_MODEL: 'deepseek-chat',
-    ANTHROPIC_SMALL_FAST_MODEL: 'deepseek-chat'
-  }
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-chat',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-chat',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-chat',
+    ANTHROPIC_MODEL: 'opus'
+  },
+  'Bailian': {
+    ANTHROPIC_BASE_URL: 'https://dashscope.aliyuncs.com/api/v2/apps/claude-code-proxy',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'qwen3-coder-plus',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'qwen3-coder-plus',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'qwen3-coder-flash',
+    ANTHROPIC_MODEL: 'opus'
+  },
+  'BailianCodePlan': {
+    ANTHROPIC_BASE_URL: 'https://coding.dashscope.aliyuncs.com/api/v2/apps/claude-code-proxy',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'qwen3-coder-plus',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'qwen3-coder-plus',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'qwen3-coder-plus',
+    ANTHROPIC_MODEL: 'opus'
+  },
+  'OpenRouter': {
+    ANTHROPIC_BASE_URL: 'https://openrouter.ai/api/v1',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'anthropic/claude-opus-4-1',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'anthropic/claude-opus-4-1',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'anthropic/claude-3.5-haiku',
+    ANTHROPIC_MODEL: 'opus'
+  },
+};
+
+export const ENV_PRESET_METADATA: Record<string, EnvPresetMetadata> = {
+  'GLM': {
+    displayName: { zh: 'GLM', en: 'GLM' },
+    description: { zh: '智谱 AI GLM 系列模型', en: 'Zhipu AI GLM Series' },
+    credentialUrl: 'https://bigmodel.cn/usercenter/proj-mgmt/apikeys',
+  },
+  'KIMI': {
+    displayName: { zh: 'KIMI', en: 'KIMI' },
+    description: { zh: '月之暗面 Kimi 对话模型', en: 'Moonshot Kimi' },
+    credentialUrl: 'https://platform.moonshot.cn/console/api-keys',
+  },
+  'MiniMax': {
+    displayName: { zh: 'MiniMax', en: 'MiniMax' },
+    description: { zh: 'MiniMax 大模型服务', en: 'MiniMax LLM Service' },
+    credentialUrl: 'https://www.minimaxi.com/user-center/basic-information/interface-key',
+  },
+  'DeepSeek': {
+    displayName: { zh: 'DeepSeek', en: 'DeepSeek' },
+    description: { zh: 'DeepSeek AI 深度求索', en: 'DeepSeek AI' },
+    credentialUrl: 'https://platform.deepseek.com/api_keys',
+  },
+  'Bailian': {
+    displayName: { zh: '百炼', en: 'Bailian' },
+    description: { zh: '阿里云百炼按量 Claude Code 接入', en: 'Alibaba Cloud Bailian Claude Code' },
+    credentialUrl: 'https://bailian.console.aliyun.com/?tab=model#/api-key',
+  },
+  'BailianCodePlan': {
+    displayName: { zh: '百炼 Coding Plan', en: 'Bailian Coding Plan' },
+    description: { zh: '阿里云百炼 Coding Plan 套餐入口', en: 'Alibaba Cloud Bailian Coding Plan' },
+    credentialUrl: 'https://bailian.console.aliyun.com/?tab=model#/api-key',
+  },
+  'OpenRouter': {
+    displayName: { zh: 'OpenRouter', en: 'OpenRouter' },
+    description: { zh: 'OpenRouter Anthropic 兼容入口', en: 'OpenRouter Anthropic-compatible routing' },
+    credentialUrl: 'https://openrouter.ai/settings/keys',
+  },
 };
 
 // 权限预设

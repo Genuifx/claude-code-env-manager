@@ -1,9 +1,24 @@
 // 环境配置类型
 export interface EnvConfig {
   ANTHROPIC_BASE_URL?: string;
-  ANTHROPIC_API_KEY?: string;
+  ANTHROPIC_AUTH_TOKEN?: string;
+  ANTHROPIC_DEFAULT_OPUS_MODEL?: string;
+  ANTHROPIC_DEFAULT_SONNET_MODEL?: string;
+  ANTHROPIC_DEFAULT_HAIKU_MODEL?: string;
   ANTHROPIC_MODEL?: string;
-  ANTHROPIC_SMALL_FAST_MODEL?: string;
+  CLAUDE_CODE_SUBAGENT_MODEL?: string;
+}
+
+export interface EnvPresetMetadata {
+  displayName: {
+    zh: string;
+    en: string;
+  };
+  description: {
+    zh: string;
+    en: string;
+  };
+  credentialUrl?: string;
 }
 
 // Claude Code 权限配置类型

@@ -388,13 +388,19 @@ ccem load https://your-server.com/api/env?key=YOUR_KEY --secret YOUR_SECRET
 {
   "kimi": {
     "ANTHROPIC_BASE_URL": "https://api.moonshot.cn/anthropic",
-    "ANTHROPIC_API_KEY": "sk-xxx",
-    "ANTHROPIC_MODEL": "kimi-k2-thinking-turbo"
+    "ANTHROPIC_AUTH_TOKEN": "sk-xxx",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "kimi-k2-thinking-turbo",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "kimi-k2-thinking-turbo",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "kimi-k2-turbo-preview",
+    "ANTHROPIC_MODEL": "opus"
   },
   "glm": {
     "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic",
-    "ANTHROPIC_API_KEY": "xxx.xxx",
-    "ANTHROPIC_MODEL": "glm-4.6"
+    "ANTHROPIC_AUTH_TOKEN": "xxx.xxx",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-4.5-air",
+    "ANTHROPIC_MODEL": "opus"
   }
 }
 ```
@@ -411,7 +417,7 @@ node index.js
 
 #### 3. 安全特性
 
-- **AES-256-CBC 加密**：API Key 在传输中加密
+- **AES-256-CBC 加密**：Auth Token 在传输中加密
 - **Rate Limiting**：每分钟最多 10 次请求
 - **指数退避**：连续失败后冷却时间递增（最长 30 分钟）
 - **Helmet**：安全响应头
@@ -511,7 +517,7 @@ ccem setup init
 
 | 路径 | 内容 |
 |------|------|
-| `~/.config/claude-code-env-manager/` | 环境配置（加密存储 API Key） |
+| `~/.ccem/config.json` | 环境配置（加密存储 Auth Token） |
 | `~/.ccem/usage-cache.json` | 用量缓存（增量解析结果） |
 | `~/.ccem/model-prices.json` | 价格缓存（从 LiteLLM 拉取） |
 | `.claude/settings.json` | 项目权限配置 |

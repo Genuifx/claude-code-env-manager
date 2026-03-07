@@ -5,12 +5,11 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 
-function maskApiKey(key?: string, notSet?: string): string {
-  if (!key) return notSet || 'Not set';
-  // Encrypted keys start with "enc:" — show a generic mask
-  if (key.startsWith('enc:')) return '••••••••';
-  if (key.length <= 7) return '****';
-  return key.slice(0, 4) + '***' + key.slice(-3);
+function maskAuthToken(token?: string, notSet?: string): string {
+  if (!token) return notSet || 'Not set';
+  if (token.startsWith('enc:')) return '••••••••';
+  if (token.length <= 7) return '****';
+  return token.slice(0, 4) + '***' + token.slice(-3);
 }
 
 function extractDomain(url: string): string {
@@ -91,6 +90,9 @@ interface EnvCardProps {
 
 function EnvCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardProps) {
   const { t } = useLocale();
+  const runtimeModel = env.runtimeModel || 'opus';
+  const defaultOpusModel = env.defaultOpusModel || 'claude-opus-4-1-20250805';
+  const defaultHaikuModel = env.defaultHaikuModel || t('environments.notSet');
 
   return (
     <div
@@ -127,16 +129,34 @@ function EnvCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardPro
           </div>
           <div className="space-y-1">
             <p className="text-sm text-muted-foreground truncate">
-              <span className="text-muted-foreground/80">Base URL:</span>{' '}
+              <span className="text-muted-foreground/80">
+                {t('environmentDialog.baseUrl')}:
+              </span>{' '}
               {env.baseUrl || 'api.anthropic.com'}
             </p>
             <p className="text-sm text-muted-foreground">
-              <span className="text-muted-foreground/80">Model:</span>{' '}
-              {env.model || 'claude-sonnet-4-5'}
+              <span className="text-muted-foreground/80">
+                {t('environmentDialog.runtimeModel')}:
+              </span>{' '}
+              {runtimeModel}
             </p>
             <p className="text-sm text-muted-foreground">
-              <span className="text-muted-foreground/80">API Key:</span>{' '}
-              {maskApiKey(env.apiKey, t('environments.notSet'))}
+              <span className="text-muted-foreground/80">
+                {t('environmentDialog.defaultOpusModel')}:
+              </span>{' '}
+              {defaultOpusModel}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              <span className="text-muted-foreground/80">
+                {t('environmentDialog.defaultHaikuModel')}:
+              </span>{' '}
+              {defaultHaikuModel}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              <span className="text-muted-foreground/80">
+                {t('environmentDialog.authToken')}:
+              </span>{' '}
+              {maskAuthToken(env.authToken, t('environments.notSet'))}
             </p>
           </div>
         </div>
@@ -200,6 +220,8 @@ function EnvCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardPro
 }
 
 function EnvCompactCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardProps) {
+  const runtimeModel = env.runtimeModel || 'opus';
+  const defaultOpusModel = env.defaultOpusModel || 'claude-opus-4-1-20250805';
 
   return (
     <div
@@ -232,8 +254,11 @@ function EnvCompactCard({ name, env, isActive, onSelect, onEdit, onDelete }: Env
       </div>
 
       {/* 中部:模型 */}
-      <p className="text-xs text-muted-foreground truncate mb-2">
-        {env.model || 'claude-sonnet-4-5'}
+      <p className="text-xs text-muted-foreground truncate">
+        {defaultOpusModel}
+      </p>
+      <p className="text-[11px] text-muted-foreground/70 truncate mb-2">
+        runtime: {runtimeModel}
       </p>
 
       {/* 底部:域名 */}

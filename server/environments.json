@@ -1,17 +1,26 @@
 {
   "glm": {
-    "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/paas/v4",
-    "ANTHROPIC_API_KEY": "your-glm-api-key",
-    "ANTHROPIC_MODEL": "glm-4-plus"
+    "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "your-glm-token",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-4.5-air",
+    "ANTHROPIC_MODEL": "opus"
   },
   "kimi": {
-    "ANTHROPIC_BASE_URL": "https://api.moonshot.cn/v1",
-    "ANTHROPIC_API_KEY": "your-kimi-api-key",
-    "ANTHROPIC_MODEL": "moonshot-v1-8k"
+    "ANTHROPIC_BASE_URL": "https://api.moonshot.cn/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "your-kimi-token",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "kimi-k2-thinking-turbo",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "kimi-k2-thinking-turbo",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "kimi-k2-turbo-preview",
+    "ANTHROPIC_MODEL": "opus"
   },
   "deepseek": {
-    "ANTHROPIC_BASE_URL": "https://api.deepseek.com",
-    "ANTHROPIC_API_KEY": "your-deepseek-api-key",
-    "ANTHROPIC_MODEL": "deepseek-chat"
+    "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "your-deepseek-token",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-chat",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-chat",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-chat",
+    "ANTHROPIC_MODEL": "opus"
   }
 }

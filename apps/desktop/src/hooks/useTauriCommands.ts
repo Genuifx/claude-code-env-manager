@@ -5,9 +5,12 @@ import { toast } from 'sonner';
 
 interface TauriEnvConfig {
   ANTHROPIC_BASE_URL?: string;
-  ANTHROPIC_API_KEY?: string;
+  ANTHROPIC_AUTH_TOKEN?: string;
+  ANTHROPIC_DEFAULT_OPUS_MODEL?: string;
+  ANTHROPIC_DEFAULT_SONNET_MODEL?: string;
+  ANTHROPIC_DEFAULT_HAIKU_MODEL?: string;
   ANTHROPIC_MODEL?: string;
-  ANTHROPIC_SMALL_FAST_MODEL?: string;
+  CLAUDE_CODE_SUBAGENT_MODEL?: string;
 }
 
 interface TauriSession {
@@ -150,9 +153,12 @@ export function useTauriCommands() {
       const envList: Environment[] = Object.entries(envs).map(([name, config]) => ({
         name,
         baseUrl: config.ANTHROPIC_BASE_URL || '',
-        apiKey: config.ANTHROPIC_API_KEY,
-        model: config.ANTHROPIC_MODEL || '',
-        smallModel: config.ANTHROPIC_SMALL_FAST_MODEL,
+        authToken: config.ANTHROPIC_AUTH_TOKEN,
+        defaultOpusModel: config.ANTHROPIC_DEFAULT_OPUS_MODEL || '',
+        defaultSonnetModel: config.ANTHROPIC_DEFAULT_SONNET_MODEL,
+        defaultHaikuModel: config.ANTHROPIC_DEFAULT_HAIKU_MODEL,
+        runtimeModel: config.ANTHROPIC_MODEL || 'opus',
+        subagentModel: config.CLAUDE_CODE_SUBAGENT_MODEL,
       }));
       envList.sort((a, b) => a.name.localeCompare(b.name));
       setEnvironments(envList);
@@ -194,9 +200,12 @@ export function useTauriCommands() {
       await invoke('add_environment', {
         name: env.name,
         baseUrl: env.baseUrl,
-        apiKey: env.apiKey,
-        model: env.model,
-        smallModel: env.smallModel,
+        authToken: env.authToken,
+        defaultOpusModel: env.defaultOpusModel,
+        defaultSonnetModel: env.defaultSonnetModel,
+        defaultHaikuModel: env.defaultHaikuModel,
+        runtimeModel: env.runtimeModel,
+        subagentModel: env.subagentModel,
       });
       await loadEnvironments();
       setError(null);
@@ -214,9 +223,12 @@ export function useTauriCommands() {
         oldName: oldName ?? env.name,
         name: env.name,
         baseUrl: env.baseUrl,
-        apiKey: env.apiKey,
-        model: env.model,
-        smallModel: env.smallModel,
+        authToken: env.authToken,
+        defaultOpusModel: env.defaultOpusModel,
+        defaultSonnetModel: env.defaultSonnetModel,
+        defaultHaikuModel: env.defaultHaikuModel,
+        runtimeModel: env.runtimeModel,
+        subagentModel: env.subagentModel,
       });
       await loadEnvironments();
       await loadCurrentEnv();

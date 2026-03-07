@@ -176,17 +176,9 @@ pub fn search_skills_stream(app: AppHandle, query: String) {
             if let Some(env_name) = &cfg.current {
                 if let Some(env) = cfg.registries.get(env_name) {
                     let decrypted = config::get_env_with_decrypted_key(env);
-                    if let Some(url) = &decrypted.base_url {
-                        cmd.env("ANTHROPIC_BASE_URL", url);
-                    }
-                    if let Some(key) = &decrypted.api_key {
-                        cmd.env("ANTHROPIC_API_KEY", key);
-                    }
-                    if let Some(model) = &decrypted.model {
-                        cmd.env("ANTHROPIC_MODEL", model);
-                    }
-                    if let Some(small) = &decrypted.small_model {
-                        cmd.env("ANTHROPIC_SMALL_FAST_MODEL", small);
+                    config::clear_managed_claude_env(&mut cmd);
+                    for (key, value) in config::build_claude_env_vars(&decrypted) {
+                        cmd.env(key, value);
                     }
                 }
             }

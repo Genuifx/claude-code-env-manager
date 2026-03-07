@@ -2,19 +2,63 @@ use crate::crypto;
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::path::PathBuf; // 文件锁支持
+use std::process::Command;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct EnvConfig {
     #[serde(rename = "ANTHROPIC_BASE_URL")]
     pub base_url: Option<String>,
-    #[serde(rename = "ANTHROPIC_API_KEY")]
-    pub api_key: Option<String>,
+    #[serde(
+        rename = "ANTHROPIC_AUTH_TOKEN",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub auth_token: Option<String>,
+    #[serde(
+        rename = "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub default_opus_model: Option<String>,
+    #[serde(
+        rename = "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub default_sonnet_model: Option<String>,
+    #[serde(
+        rename = "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub default_haiku_model: Option<String>,
     #[serde(rename = "ANTHROPIC_MODEL")]
     pub model: Option<String>,
-    #[serde(rename = "ANTHROPIC_SMALL_FAST_MODEL")]
-    pub small_model: Option<String>,
+    #[serde(
+        rename = "CLAUDE_CODE_SUBAGENT_MODEL",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub subagent_model: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+struct RawEnvConfig {
+    #[serde(rename = "ANTHROPIC_BASE_URL", default)]
+    base_url: Option<String>,
+    #[serde(rename = "ANTHROPIC_AUTH_TOKEN", default)]
+    auth_token: Option<String>,
+    #[serde(rename = "ANTHROPIC_API_KEY", default)]
+    api_key: Option<String>,
+    #[serde(rename = "ANTHROPIC_DEFAULT_OPUS_MODEL", default)]
+    default_opus_model: Option<String>,
+    #[serde(rename = "ANTHROPIC_DEFAULT_SONNET_MODEL", default)]
+    default_sonnet_model: Option<String>,
+    #[serde(rename = "ANTHROPIC_DEFAULT_HAIKU_MODEL", default)]
+    default_haiku_model: Option<String>,
+    #[serde(rename = "ANTHROPIC_MODEL", default)]
+    model: Option<String>,
+    #[serde(rename = "ANTHROPIC_SMALL_FAST_MODEL", default)]
+    small_fast_model: Option<String>,
+    #[serde(rename = "CLAUDE_CODE_SUBAGENT_MODEL", default)]
+    subagent_model: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -27,18 +71,124 @@ pub struct CcemConfig {
     pub default_mode: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Default)]
+struct RawCcemConfig {
+    #[serde(default)]
+    registries: HashMap<String, RawEnvConfig>,
+    #[serde(default)]
+    current: Option<String>,
+    #[serde(rename = "defaultMode", default)]
+    default_mode: Option<String>,
+}
+
+fn default_official_env() -> EnvConfig {
+    EnvConfig {
+        base_url: Some("https://api.anthropic.com".to_string()),
+        auth_token: None,
+        default_opus_model: Some("claude-opus-4-1-20250805".to_string()),
+        default_sonnet_model: Some("claude-opus-4-1-20250805".to_string()),
+        default_haiku_model: Some("claude-3-5-haiku-20241022".to_string()),
+        model: Some("opus".to_string()),
+        subagent_model: None,
+    }
+}
+
+fn normalize_env_config(raw: RawEnvConfig) -> EnvConfig {
+    let has_tier_defaults = raw.default_opus_model.is_some()
+        || raw.default_sonnet_model.is_some()
+        || raw.default_haiku_model.is_some();
+
+    let default_opus_model = raw.default_opus_model.or_else(|| {
+        if has_tier_defaults {
+            None
+        } else {
+            raw.model.clone()
+        }
+    });
+    let default_sonnet_model = raw
+        .default_sonnet_model
+        .or_else(|| default_opus_model.clone())
+        .or_else(|| {
+            if has_tier_defaults {
+                None
+            } else {
+                raw.model.clone()
+            }
+        });
+    let default_haiku_model = raw.default_haiku_model.or(raw.small_fast_model);
+
+    EnvConfig {
+        base_url: raw.base_url,
+        auth_token: raw.auth_token.or(raw.api_key),
+        default_opus_model,
+        default_sonnet_model,
+        default_haiku_model,
+        model: Some(if has_tier_defaults {
+            raw.model.unwrap_or_else(|| "opus".to_string())
+        } else {
+            "opus".to_string()
+        }),
+        subagent_model: raw.subagent_model,
+    }
+}
+
+fn normalize_config(raw: RawCcemConfig) -> CcemConfig {
+    CcemConfig {
+        registries: raw
+            .registries
+            .into_iter()
+            .map(|(name, env)| (name, normalize_env_config(env)))
+            .collect(),
+        current: raw.current,
+        default_mode: raw.default_mode,
+    }
+}
+
+const MANAGED_CLAUDE_ENV_KEYS: &[&str] = &[
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_MODEL",
+    "CLAUDE_CODE_SUBAGENT_MODEL",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_SMALL_FAST_MODEL",
+];
+
+fn read_raw_config_file(
+    config_path: &PathBuf,
+) -> Result<(serde_json::Value, RawCcemConfig), String> {
+    let content =
+        fs::read_to_string(config_path).map_err(|e| format!("Failed to read config: {}", e))?;
+    let original_value: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))?;
+    let raw: RawCcemConfig = serde_json::from_value(original_value.clone())
+        .map_err(|e| format!("Failed to parse config: {}", e))?;
+
+    Ok((original_value, raw))
+}
+
+fn write_config_locked(
+    config_path: &PathBuf,
+    _lock_file: &File,
+    config: &CcemConfig,
+) -> Result<(), String> {
+    let temp_path = config_path.with_extension("tmp");
+    let content = serde_json::to_string_pretty(config)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+
+    fs::write(&temp_path, &content).map_err(|e| format!("Failed to write temp config: {}", e))?;
+    fs::rename(&temp_path, config_path)
+        .map_err(|e| format!("Failed to rename temp config: {}", e))?;
+
+    Ok(())
+}
+
 impl Default for CcemConfig {
     fn default() -> Self {
         let mut registries = HashMap::new();
-        registries.insert(
-            "official".to_string(),
-            EnvConfig {
-                base_url: Some("https://api.anthropic.com".to_string()),
-                api_key: None,
-                model: Some("claude-sonnet-4-5-20250929".to_string()),
-                small_model: Some("claude-haiku-4-5-20251001".to_string()),
-            },
-        );
+        registries.insert("official".to_string(), default_official_env());
         Self {
             registries,
             current: Some("official".to_string()),
@@ -165,25 +315,49 @@ pub fn read_config() -> Result<CcemConfig, String> {
         return Ok(CcemConfig::default());
     }
 
-    // 获取共享锁（允许多个读者）
-    let lock_file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .open(&config_path)
-        .map_err(|e| format!("Failed to open config for locking: {}", e))?;
+    let (original_value, config) = {
+        let lock_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&config_path)
+            .map_err(|e| format!("Failed to open config for locking: {}", e))?;
 
-    lock_file
-        .lock_shared()
-        .map_err(|e| format!("Failed to acquire read lock: {}", e))?;
+        lock_file
+            .lock_shared()
+            .map_err(|e| format!("Failed to acquire read lock: {}", e))?;
 
-    let content =
-        fs::read_to_string(&config_path).map_err(|e| format!("Failed to read config: {}", e))?;
+        let (original_value, raw) = read_raw_config_file(&config_path)?;
 
-    let config =
-        serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))?;
+        (original_value, normalize_config(raw))
+    };
 
-    // 锁会在 lock_file drop 时自动释放
+    let normalized_value =
+        serde_json::to_value(&config).map_err(|e| format!("Failed to serialize config: {}", e))?;
+    if normalized_value != original_value {
+        let lock_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&config_path)
+            .map_err(|e| format!("Failed to open config for locking: {}", e))?;
+
+        lock_file
+            .lock_exclusive()
+            .map_err(|e| format!("Failed to acquire lock: {}", e))?;
+
+        let (latest_value, latest_raw) = read_raw_config_file(&config_path)?;
+        let latest_config = normalize_config(latest_raw);
+        let latest_normalized_value = serde_json::to_value(&latest_config)
+            .map_err(|e| format!("Failed to serialize config: {}", e))?;
+
+        if latest_normalized_value != latest_value {
+            write_config_locked(&config_path, &lock_file, &latest_config)?;
+        }
+
+        return Ok(latest_config);
+    }
+
     Ok(config)
 }
 
@@ -192,11 +366,6 @@ pub fn write_config(config: &CcemConfig) -> Result<(), String> {
     ensure_ccem_dir().map_err(|e| format!("Failed to create config dir: {}", e))?;
 
     let config_path = get_config_path();
-    let temp_path = config_path.with_extension("tmp");
-
-    // 序列化配置
-    let content = serde_json::to_string_pretty(config)
-        .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
     // 获取文件锁（如果文件不存在会创建）
     let lock_file = OpenOptions::new()
@@ -210,15 +379,7 @@ pub fn write_config(config: &CcemConfig) -> Result<(), String> {
         .lock_exclusive()
         .map_err(|e| format!("Failed to acquire lock: {}", e))?;
 
-    // 写入临时文件
-    fs::write(&temp_path, &content).map_err(|e| format!("Failed to write temp config: {}", e))?;
-
-    // 原子替换（rename 是原子操作）
-    fs::rename(&temp_path, &config_path)
-        .map_err(|e| format!("Failed to rename temp config: {}", e))?;
-
-    // 锁会在 lock_file drop 时自动释放
-    Ok(())
+    write_config_locked(&config_path, &lock_file, config)
 }
 
 /// Read app config from ~/.ccem/app.json
@@ -246,16 +407,53 @@ pub fn write_app_config(config: &AppConfig) -> Result<(), String> {
         .map_err(|e| format!("Failed to write app config: {}", e))
 }
 
-/// Get environment config with decrypted API key
+/// Get environment config with decrypted auth token
 pub fn get_env_with_decrypted_key(env: &EnvConfig) -> EnvConfig {
     EnvConfig {
         base_url: env.base_url.clone(),
-        api_key: env
-            .api_key
+        auth_token: env
+            .auth_token
             .as_ref()
             .map(|k| crypto::decrypt(k).unwrap_or_else(|_| k.clone())),
+        default_opus_model: env.default_opus_model.clone(),
+        default_sonnet_model: env.default_sonnet_model.clone(),
+        default_haiku_model: env.default_haiku_model.clone(),
         model: env.model.clone(),
-        small_model: env.small_model.clone(),
+        subagent_model: env.subagent_model.clone(),
+    }
+}
+
+pub fn build_claude_env_vars(env: &EnvConfig) -> HashMap<String, String> {
+    let mut env_vars = HashMap::new();
+
+    if let Some(url) = &env.base_url {
+        env_vars.insert("ANTHROPIC_BASE_URL".to_string(), url.clone());
+    }
+    if let Some(token) = &env.auth_token {
+        env_vars.insert("ANTHROPIC_AUTH_TOKEN".to_string(), token.clone());
+    }
+    if let Some(model) = &env.default_opus_model {
+        env_vars.insert("ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(), model.clone());
+    }
+    if let Some(model) = &env.default_sonnet_model {
+        env_vars.insert("ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(), model.clone());
+    }
+    if let Some(model) = &env.default_haiku_model {
+        env_vars.insert("ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(), model.clone());
+    }
+    if let Some(model) = &env.model {
+        env_vars.insert("ANTHROPIC_MODEL".to_string(), model.clone());
+    }
+    if let Some(model) = &env.subagent_model {
+        env_vars.insert("CLAUDE_CODE_SUBAGENT_MODEL".to_string(), model.clone());
+    }
+
+    env_vars
+}
+
+pub fn clear_managed_claude_env(command: &mut Command) {
+    for key in MANAGED_CLAUDE_ENV_KEYS {
+        command.env_remove(key);
     }
 }
 
@@ -355,17 +553,25 @@ pub fn write_settings(settings: &DesktopSettings) -> Result<(), String> {
     fs::write(get_settings_path(), content).map_err(|e| format!("Failed to write settings: {}", e))
 }
 
-/// Create environment config with encrypted API key
+/// Create environment config with encrypted auth token
 pub fn create_env_with_encrypted_key(
     base_url: Option<String>,
-    api_key: Option<String>,
-    model: Option<String>,
-    small_model: Option<String>,
+    auth_token: Option<String>,
+    default_opus_model: Option<String>,
+    default_sonnet_model: Option<String>,
+    default_haiku_model: Option<String>,
+    runtime_model: Option<String>,
+    subagent_model: Option<String>,
 ) -> EnvConfig {
+    let default_sonnet_model = default_sonnet_model.or_else(|| default_opus_model.clone());
+
     EnvConfig {
         base_url,
-        api_key: api_key.map(|k| crypto::encrypt(&k)),
-        model,
-        small_model,
+        auth_token: auth_token.map(|k| crypto::encrypt(&k)),
+        default_opus_model,
+        default_sonnet_model,
+        default_haiku_model,
+        model: runtime_model.or_else(|| Some("opus".to_string())),
+        subagent_model,
     }
 }

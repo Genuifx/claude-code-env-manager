@@ -13,12 +13,11 @@ mod terminal;
 mod tray;
 
 use analytics::{
-    get_continuous_usage_days, get_usage_history, get_usage_model_breakdown,
-    get_usage_stats,
+    get_continuous_usage_days, get_usage_history, get_usage_model_breakdown, get_usage_stats,
 };
 use config::{
-    create_env_with_encrypted_key, get_env_with_decrypted_key, AppConfig, DesktopSettings,
-    EnvConfig, FavoriteProject, JetBrainsProject, RecentProject, VSCodeProject,
+    build_claude_env_vars, create_env_with_encrypted_key, get_env_with_decrypted_key, AppConfig,
+    DesktopSettings, EnvConfig, FavoriteProject, JetBrainsProject, RecentProject, VSCodeProject,
 };
 use cron::{start_cron_scheduler, CronScheduler};
 use history::{get_conversation_history, get_conversation_messages, get_conversation_segments};
@@ -116,9 +115,12 @@ fn set_current_env(name: String) -> Result<(), String> {
 fn add_environment(
     name: String,
     base_url: String,
-    api_key: Option<String>,
-    model: String,
-    small_model: Option<String>,
+    auth_token: Option<String>,
+    default_opus_model: String,
+    default_sonnet_model: Option<String>,
+    default_haiku_model: Option<String>,
+    runtime_model: Option<String>,
+    subagent_model: Option<String>,
 ) -> Result<(), String> {
     let mut cfg = config::read_config()?;
 
@@ -126,8 +128,15 @@ fn add_environment(
         return Err(format!("Environment '{}' already exists", name));
     }
 
-    let env_config =
-        create_env_with_encrypted_key(Some(base_url), api_key, Some(model), small_model);
+    let env_config = create_env_with_encrypted_key(
+        Some(base_url),
+        auth_token,
+        Some(default_opus_model),
+        default_sonnet_model,
+        default_haiku_model,
+        runtime_model,
+        subagent_model,
+    );
 
     cfg.registries.insert(name, env_config);
     config::write_config(&cfg)
@@ -138,9 +147,12 @@ fn update_environment(
     old_name: String,
     name: String,
     base_url: String,
-    api_key: Option<String>,
-    model: String,
-    small_model: Option<String>,
+    auth_token: Option<String>,
+    default_opus_model: String,
+    default_sonnet_model: Option<String>,
+    default_haiku_model: Option<String>,
+    runtime_model: Option<String>,
+    subagent_model: Option<String>,
 ) -> Result<(), String> {
     let mut cfg = config::read_config()?;
 
@@ -153,8 +165,15 @@ fn update_environment(
         return Err(format!("Environment '{}' already exists", name));
     }
 
-    let env_config =
-        create_env_with_encrypted_key(Some(base_url), api_key, Some(model), small_model);
+    let env_config = create_env_with_encrypted_key(
+        Some(base_url),
+        auth_token,
+        Some(default_opus_model),
+        default_sonnet_model,
+        default_haiku_model,
+        runtime_model,
+        subagent_model,
+    );
 
     // Remove old key if renamed
     if old_name != name {
@@ -314,19 +333,10 @@ async fn launch_claude_code(
             .ok_or_else(|| format!("Environment '{}' does not exist", env_name))?;
         let env = get_env_with_decrypted_key(env_config);
 
-        if let Some(url) = env.base_url {
-            claude_upstream_base_url = Some(url.clone());
-            env_vars.insert("ANTHROPIC_BASE_URL".to_string(), url);
+        if let Some(url) = env.base_url.clone() {
+            claude_upstream_base_url = Some(url);
         }
-        if let Some(key) = env.api_key {
-            env_vars.insert("ANTHROPIC_API_KEY".to_string(), key);
-        }
-        if let Some(model) = env.model {
-            env_vars.insert("ANTHROPIC_MODEL".to_string(), model);
-        }
-        if let Some(small_model) = env.small_model {
-            env_vars.insert("ANTHROPIC_SMALL_FAST_MODEL".to_string(), small_model);
-        }
+        env_vars.extend(build_claude_env_vars(&env));
     }
 
     if proxy_state.is_enabled() {
@@ -927,12 +937,22 @@ struct RemoteResponse {
 struct RemoteEnvConfig {
     #[serde(rename = "ANTHROPIC_BASE_URL")]
     base_url: Option<String>,
+    #[serde(rename = "ANTHROPIC_AUTH_TOKEN")]
+    auth_token: Option<String>,
     #[serde(rename = "ANTHROPIC_API_KEY")]
     api_key: Option<String>,
+    #[serde(rename = "ANTHROPIC_DEFAULT_OPUS_MODEL")]
+    default_opus_model: Option<String>,
+    #[serde(rename = "ANTHROPIC_DEFAULT_SONNET_MODEL")]
+    default_sonnet_model: Option<String>,
+    #[serde(rename = "ANTHROPIC_DEFAULT_HAIKU_MODEL")]
+    default_haiku_model: Option<String>,
     #[serde(rename = "ANTHROPIC_MODEL")]
     model: Option<String>,
     #[serde(rename = "ANTHROPIC_SMALL_FAST_MODEL")]
-    small_model: Option<String>,
+    small_fast_model: Option<String>,
+    #[serde(rename = "CLAUDE_CODE_SUBAGENT_MODEL")]
+    subagent_model: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -1012,8 +1032,42 @@ fn load_from_remote(url: String, secret: String) -> Result<LoadResult, String> {
 
         let renamed = final_name != orig_name;
 
-        let env_config =
-            create_env_with_encrypted_key(env.base_url, env.api_key, env.model, env.small_model);
+        let has_tier_defaults = env.default_opus_model.is_some()
+            || env.default_sonnet_model.is_some()
+            || env.default_haiku_model.is_some();
+        let default_opus_model = env.default_opus_model.or_else(|| {
+            if has_tier_defaults {
+                None
+            } else {
+                env.model.clone()
+            }
+        });
+        let default_sonnet_model = env
+            .default_sonnet_model
+            .or_else(|| default_opus_model.clone())
+            .or_else(|| {
+                if has_tier_defaults {
+                    None
+                } else {
+                    env.model.clone()
+                }
+            });
+        let default_haiku_model = env.default_haiku_model.or(env.small_fast_model);
+        let runtime_model = Some(if has_tier_defaults {
+            env.model.unwrap_or_else(|| "opus".to_string())
+        } else {
+            "opus".to_string()
+        });
+
+        let env_config = create_env_with_encrypted_key(
+            env.base_url,
+            env.auth_token.or(env.api_key),
+            default_opus_model,
+            default_sonnet_model,
+            default_haiku_model,
+            runtime_model,
+            env.subagent_model,
+        );
 
         cfg.registries.insert(final_name.clone(), env_config);
         loaded.push(LoadedEnv {
