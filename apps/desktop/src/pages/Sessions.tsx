@@ -1,9 +1,16 @@
-import { useState, useCallback, useRef } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { LayoutGrid, List, Minimize2, Plus, Terminal, X, FolderOpen, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { SessionCard, SessionList, ArrangeBanner, SessionLauncherPopover } from '@/components/sessions';
+import {
+  SessionCard,
+  SessionList,
+  ArrangeBanner,
+  SessionLauncherPopover,
+  HeadlessSessionsPanel,
+  RecoveryCandidatesPanel,
+} from '@/components/sessions';
 import { useAppStore, type ArrangeLayout } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useLocale } from '../locales';
@@ -11,6 +18,10 @@ import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { SessionsSkeleton } from '@/components/ui/skeleton-states';
 import { toast } from 'sonner';
 import { shallow } from 'zustand/shallow';
+
+const EmbeddedTerminalPanel = lazy(async () =>
+  import('@/components/sessions/EmbeddedTerminalPanel').then((m) => ({ default: m.EmbeddedTerminalPanel }))
+);
 
 interface SessionsProps {
   onLaunch: () => void;
@@ -27,6 +38,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   const [launcherOpen, setLauncherOpen] = useState(false);
   const [isMultiLaunching, setIsMultiLaunching] = useState(false);
   const [launched, setLaunched] = useState(false);
+  const [selectedEmbeddedSessionId, setSelectedEmbeddedSessionId] = useState<string | null>(null);
   const launchedTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const {
     sessions,
@@ -49,7 +61,24 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   const { focusSession, minimizeSession, closeSession, arrangeSessions, launchClaudeCode, openDirectoryPicker } = useTauriCommands();
 
   const runningSessions = sessions.filter(s => s.status === 'running');
+  const embeddedSessions = sessions.filter((session) => session.terminalType === 'embedded');
+  const externalRunningSessions = runningSessions.filter((session) => session.terminalType !== 'embedded');
   const runningCount = runningSessions.length;
+  const externalRunningCount = externalRunningSessions.length;
+
+  useEffect(() => {
+    if (embeddedSessions.length === 0) {
+      setSelectedEmbeddedSessionId(null);
+      return;
+    }
+
+    setSelectedEmbeddedSessionId((current) => {
+      if (current && embeddedSessions.some((session) => session.id === current)) {
+        return current;
+      }
+      return embeddedSessions[0]?.id ?? null;
+    });
+  }, [embeddedSessions]);
 
   // Truncate directory path for display (same logic as Dashboard)
   const launchDirDisplay = selectedWorkingDir
@@ -59,22 +88,22 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   // Smart layout: pick best layout based on session count, or use remembered layout
   const getSmartLayout = useCallback((): ArrangeLayout => {
     if (arrangeLayout) return arrangeLayout;
-    if (runningCount <= 2) return 'horizontal2';
-    if (runningCount === 3) return 'left_main3';
+    if (externalRunningCount <= 2) return 'horizontal2';
+    if (externalRunningCount === 3) return 'left_main3';
     return 'grid4';
-  }, [arrangeLayout, runningCount]);
+  }, [arrangeLayout, externalRunningCount]);
 
   const selectedLayout = arrangeLayout || getSmartLayout();
 
   const handleArrange = useCallback(async (layout?: ArrangeLayout) => {
-    if (runningCount < 2 || isArranging) return;
+    if (externalRunningCount < 2 || isArranging) return;
 
     const targetLayout = layout || getSmartLayout();
     setIsArranging(true);
     setArrangeStatus('loading');
 
     try {
-      const sessionIds = runningSessions.map(s => s.id);
+      const sessionIds = externalRunningSessions.map(s => s.id);
       await arrangeSessions(sessionIds, targetLayout);
 
       setArrangeStatus('success');
@@ -86,7 +115,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
       };
       toast.success(
         t('sessions.arrangeSuccess')
-          .replace('{count}', String(runningCount))
+          .replace('{count}', String(externalRunningCount))
           .replace('{layout}', layoutNames[targetLayout])
       );
 
@@ -98,7 +127,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
     } finally {
       setIsArranging(false);
     }
-  }, [runningCount, isArranging, getSmartLayout, runningSessions, arrangeSessions, t]);
+  }, [externalRunningCount, isArranging, getSmartLayout, externalRunningSessions, arrangeSessions, t]);
 
   // Multi-session launch: serially launch N sessions, then auto-arrange
   const handleMultiLaunch = useCallback(async (dirs: string[], layout: ArrangeLayout) => {
@@ -121,8 +150,13 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
       await new Promise(resolve => setTimeout(resolve, 800));
 
       try {
-        const allRunning = useAppStore.getState().sessions.filter(s => s.status === 'running');
-        await arrangeSessions(allRunning.map(s => s.id), layout);
+        const allRunning = useAppStore
+          .getState()
+          .sessions
+          .filter((session) => session.status === 'running' && session.terminalType !== 'embedded');
+        if (allRunning.length >= 2) {
+          await arrangeSessions(allRunning.map(s => s.id), layout);
+        }
         toast.success(
           t('sessions.multiLaunchSuccess').replace('{count}', String(successCount))
         );
@@ -174,7 +208,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   // Register keyboard shortcuts
   useKeyboardShortcuts({
     'meta+shift+l': () => {
-      if (runningCount >= 2) handleArrange();
+      if (externalRunningCount >= 2) handleArrange();
     },
     'meta+shift+n': () => {
       setLauncherOpen(true);
@@ -182,6 +216,10 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   });
 
   const handleFocus = async (id: string) => {
+    const target = sessions.find((session) => session.id === id);
+    if (target?.terminalType === 'embedded') {
+      setSelectedEmbeddedSessionId(id);
+    }
     try {
       await focusSession(id);
     } catch (err) {
@@ -190,6 +228,10 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   };
 
   const handleMinimize = async (id: string) => {
+    const target = sessions.find((session) => session.id === id);
+    if (target?.terminalType === 'embedded') {
+      return;
+    }
     try {
       await minimizeSession(id);
     } catch (err) {
@@ -216,7 +258,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   };
 
   const handleMinimizeAll = async () => {
-    for (const session of runningSessions) {
+    for (const session of externalRunningSessions) {
       await minimizeSession(session.id);
     }
   };
@@ -323,10 +365,10 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
       </div>
 
       {/* Arrange Banner — shown when running >= 2 */}
-      {runningCount >= 2 && (
+      {externalRunningCount >= 2 && (
         <div>
           <ArrangeBanner
-            runningCount={runningCount}
+            runningCount={externalRunningCount}
             onArrange={handleArrange}
             isArranging={isArranging}
             arrangeStatus={arrangeStatus}
@@ -339,70 +381,89 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
       )}
 
       {/* Sessions Display */}
-      {sessions.length === 0 ? (
-        <Card className="p-4">
-          <div className="py-8">
-            <EmptyState
-              icon={Terminal}
-              message={t('sessions.noActiveSessions')}
-              action={t('sessions.launchClaudeCode')}
-              onAction={onLaunch}
-            />
-            <p className="text-xs text-muted-foreground text-center -mt-8">
-              {t('sessions.detectionNote')}
-            </p>
-          </div>
-        </Card>
-      ) : (
-        <Card className="p-4">
-          <h3 className="text-sm font-medium text-muted-foreground mb-4">
-            {t('sessions.activeSessions')} ({sessions.length})
-          </h3>
+      <div className="space-y-4">
+        <RecoveryCandidatesPanel />
+        {sessions.length === 0 ? (
+          <Card className="p-4">
+            <div className="py-8">
+              <EmptyState
+                icon={Terminal}
+                message={t('sessions.noActiveSessions')}
+                action={t('sessions.launchClaudeCode')}
+                onAction={onLaunch}
+              />
+              <p className="text-xs text-muted-foreground text-center -mt-8">
+                {t('sessions.detectionNote')}
+              </p>
+            </div>
+          </Card>
+        ) : (
+          <>
+            <Card className="p-4">
+              <h3 className="text-sm font-medium text-muted-foreground mb-4">
+                {t('sessions.activeSessions')} ({sessions.length})
+              </h3>
 
-          {viewMode === 'card' ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {sessions.map((session) => (
-                <SessionCard
-                  key={session.id}
-                  session={session}
+              {viewMode === 'card' ? (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {sessions.map((session) => (
+                    <SessionCard
+                      key={session.id}
+                      session={session}
+                      onFocus={handleFocus}
+                      onMinimize={handleMinimize}
+                      onClose={handleRequestClose}
+                      confirmingClose={confirmingId === session.id}
+                      onCancelClose={handleCancelClose}
+                      onConfirmClose={handleConfirmClose}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <SessionList
+                  sessions={sessions}
                   onFocus={handleFocus}
                   onMinimize={handleMinimize}
                   onClose={handleRequestClose}
-                  confirmingClose={confirmingId === session.id}
+                  confirmingId={confirmingId}
                   onCancelClose={handleCancelClose}
                   onConfirmClose={handleConfirmClose}
                 />
-              ))}
-            </div>
-          ) : (
-            <SessionList
-              sessions={sessions}
-              onFocus={handleFocus}
-              onMinimize={handleMinimize}
-              onClose={handleRequestClose}
-              confirmingId={confirmingId}
-              onCancelClose={handleCancelClose}
-              onConfirmClose={handleConfirmClose}
-            />
-          )}
+              )}
 
-          {/* Card footer: Minimize All / Close All (when ArrangeBanner is not shown) */}
-          {runningCount > 0 && runningCount < 2 && (
-            <>
-              <div className="mt-4 pt-3 flex items-center gap-2 glass-divider-top">
-                <Button size="sm" variant="ghost" onClick={handleMinimizeAll} className="glass-ghost-hover">
-                  <Minimize2 className="w-3.5 h-3.5 mr-1" />
-                  {t('sessions.minimizeAll')}
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setShowCloseAllDialog(true)} className="glass-ghost-hover">
-                  <X className="w-3.5 h-3.5 mr-1" />
-                  {t('sessions.closeAll')}
-                </Button>
-              </div>
-            </>
-          )}
-        </Card>
-      )}
+              {/* Card footer: Minimize All / Close All (when ArrangeBanner is not shown) */}
+              {externalRunningCount > 0 && externalRunningCount < 2 && (
+                <div className="mt-4 pt-3 flex items-center gap-2 glass-divider-top">
+                  <Button size="sm" variant="ghost" onClick={handleMinimizeAll} className="glass-ghost-hover">
+                    <Minimize2 className="mr-1 h-3.5 w-3.5" />
+                    {t('sessions.minimizeAll')}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setShowCloseAllDialog(true)} className="glass-ghost-hover">
+                    <X className="mr-1 h-3.5 w-3.5" />
+                    {t('sessions.closeAll')}
+                  </Button>
+                </div>
+              )}
+            </Card>
+            {embeddedSessions.length > 0 && (
+              <Suspense
+                fallback={(
+                  <Card className="p-4">
+                    <div className="h-[520px] animate-pulse rounded-xl bg-black/[0.04] dark:bg-white/[0.06]" />
+                  </Card>
+                )}
+              >
+                <EmbeddedTerminalPanel
+                  sessions={embeddedSessions}
+                  activeSessionId={selectedEmbeddedSessionId}
+                  onSelect={setSelectedEmbeddedSessionId}
+                />
+              </Suspense>
+            )}
+          </>
+        )}
+        <HeadlessSessionsPanel />
+      </div>
 
       {/* Close All Dialog */}
       {showCloseAllDialog && (

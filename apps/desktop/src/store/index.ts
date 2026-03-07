@@ -65,6 +65,7 @@ export interface CronTask {
   prompt: string;
   workingDir: string;
   envName: string | null;
+  executionProfile: 'conservative' | 'standard' | 'autonomous';
   enabled: boolean;
   timeoutSecs: number;
   templateId: string | null;
@@ -84,6 +85,8 @@ export interface CronTaskRun {
   stderr: string;
   durationMs: number | null;
   status: string; // "running" | "success" | "failed" | "timeout"
+  runtimeId?: string | null;
+  runtimeKind?: string | null;
 }
 
 export interface CronTemplate {

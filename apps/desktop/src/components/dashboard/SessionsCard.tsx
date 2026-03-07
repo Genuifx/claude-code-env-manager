@@ -160,6 +160,7 @@ function SessionItem({ session, onFocus, onMinimize, onClose, onRemove }: Sessio
   };
 
   const status = statusConfig[session.status] || statusConfig.stopped;
+  const isEmbedded = session.terminalType === 'embedded';
 
   // Get short working dir name
   const workingDirName = session.workingDir.split('/').pop() || session.workingDir;
@@ -175,6 +176,11 @@ function SessionItem({ session, onFocus, onMinimize, onClose, onRemove }: Sessio
         <div className="min-w-0 flex-1">
           <div className="font-medium text-sm text-foreground truncate">
             {session.envName}
+            {isEmbedded && (
+              <span className="ml-2 inline-flex items-center rounded-md bg-cyan-500/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-cyan-500">
+                embedded
+              </span>
+            )}
           </div>
           <div className="text-xs text-muted-foreground truncate">
             {startTime} · {workingDirName}
@@ -198,6 +204,7 @@ function SessionItem({ session, onFocus, onMinimize, onClose, onRemove }: Sessio
               size="sm"
               className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted"
               onClick={onMinimize}
+              disabled={isEmbedded}
               title="Minimize"
             >
               Min

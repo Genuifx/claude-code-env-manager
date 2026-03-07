@@ -1,4 +1,7 @@
 use crate::config;
+use crate::event_bus::{ReplayBatch, SessionEventPayload};
+use crate::runtime::{HeadlessRuntimeManager, HeadlessSessionOptions, HeadlessSessionSource};
+use crate::telegram;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -24,6 +27,8 @@ pub struct CronTask {
     pub working_dir: String,
     #[serde(rename = "envName")]
     pub env_name: Option<String>,
+    #[serde(rename = "executionProfile", default = "default_execution_profile")]
+    pub execution_profile: String,
     pub enabled: bool,
     #[serde(rename = "timeoutSecs")]
     pub timeout_secs: u64,
@@ -43,6 +48,10 @@ fn default_trigger_type() -> String {
     "schedule".to_string()
 }
 
+fn default_execution_profile() -> String {
+    "conservative".to_string()
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CronTaskRun {
     pub id: String,
@@ -59,6 +68,10 @@ pub struct CronTaskRun {
     #[serde(rename = "durationMs")]
     pub duration_ms: Option<u64>,
     pub status: String, // "running" | "success" | "failed" | "timeout"
+    #[serde(rename = "runtimeId", default)]
+    pub runtime_id: Option<String>,
+    #[serde(rename = "runtimeKind", default)]
+    pub runtime_kind: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -301,21 +314,175 @@ fn next_runs(expression: &str, count: usize) -> Vec<String> {
 // ============================================================================
 
 fn build_env_vars(env_name: &Option<String>) -> HashMap<String, String> {
-    let mut env_vars: HashMap<String, String> = HashMap::new();
-    if let Ok(cfg) = config::read_config() {
-        // Use the task's explicit env, or fall back to the current active environment
-        let resolved_name = env_name.as_ref().or(cfg.current.as_ref());
-        if let Some(name) = resolved_name {
-            if let Some(env) = cfg.registries.get(name) {
-                let decrypted = config::get_env_with_decrypted_key(env);
-                env_vars.extend(config::build_claude_env_vars(&decrypted));
-            }
-        }
-    }
-    env_vars
+    let resolved_name = match config::read_config() {
+        Ok(cfg) => env_name.clone().or(cfg.current),
+        Err(_) => env_name.clone(),
+    };
+
+    resolved_name
+        .as_deref()
+        .and_then(|name| config::resolve_claude_env(name).ok())
+        .map(|resolved| resolved.env_vars)
+        .unwrap_or_default()
 }
 
-fn execute_task(app: AppHandle, task: CronTask) {
+fn collect_runtime_output(replay: &ReplayBatch) -> (String, String) {
+    let mut stdout_lines = Vec::new();
+    let mut stderr_lines = Vec::new();
+
+    for event in &replay.events {
+        match &event.payload {
+            SessionEventPayload::ClaudeJson {
+                message_type,
+                raw_json,
+            } => {
+                let parsed = serde_json::from_str::<serde_json::Value>(raw_json).ok();
+                match message_type.as_deref() {
+                    Some("result") => {
+                        let result = parsed
+                            .as_ref()
+                            .and_then(|value| value.get("result"))
+                            .and_then(serde_json::Value::as_str)
+                            .map(ToString::to_string)
+                            .unwrap_or_else(|| raw_json.clone());
+                        stdout_lines.push(result);
+                    }
+                    Some("error") => {
+                        let message = parsed
+                            .as_ref()
+                            .and_then(|value| value.get("message"))
+                            .and_then(serde_json::Value::as_str)
+                            .map(ToString::to_string)
+                            .unwrap_or_else(|| raw_json.clone());
+                        stderr_lines.push(message);
+                    }
+                    _ => stdout_lines.push(raw_json.clone()),
+                }
+            }
+            SessionEventPayload::StdErrLine { line } => stderr_lines.push(line.clone()),
+            SessionEventPayload::Lifecycle { stage, detail } => {
+                if matches!(
+                    stage.as_str(),
+                    "stderr_error" | "stdout_error" | "process_failure"
+                ) {
+                    stderr_lines.push(format!("[{stage}] {detail}"));
+                }
+            }
+            SessionEventPayload::SessionCompleted { reason } => {
+                if reason != "completed" && reason != "stopped" {
+                    stderr_lines.push(reason.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    (stdout_lines.join("\n"), stderr_lines.join("\n"))
+}
+
+fn format_cron_notification(task: &CronTask, run: &CronTaskRun) -> String {
+    let execution_profile = resolve_execution_profile(&task.execution_profile);
+    let mut lines = vec![format!(
+        "{} Cron: {}",
+        match run.status.as_str() {
+            "success" => "✅",
+            "running" => "⏳",
+            "timeout" => "⏱",
+            _ => "❌",
+        },
+        task.name
+    )];
+    lines.push(format!("Status: {}", run.status));
+
+    if let Some(runtime_id) = &run.runtime_id {
+        lines.push(format!("Runtime: {}", runtime_id));
+    }
+    lines.push(format!("Schedule: {}", task.cron_expression));
+    lines.push(format!("Profile: {}", execution_profile.key));
+    lines.push(format!("Working dir: {}", task.working_dir));
+
+    if let Some(duration_ms) = run.duration_ms {
+        lines.push(format!("Duration: {:.1}s", duration_ms as f64 / 1000.0));
+    }
+
+    if !run.stdout.trim().is_empty() {
+        lines.push(String::new());
+        lines.push("Output:".to_string());
+        lines.push(run.stdout.chars().take(1200).collect());
+    }
+
+    if !run.stderr.trim().is_empty() {
+        lines.push(String::new());
+        lines.push("Errors:".to_string());
+        lines.push(run.stderr.chars().take(1200).collect());
+    }
+
+    lines.join("\n")
+}
+
+#[derive(Debug, Clone)]
+struct ExecutionProfilePreset {
+    key: &'static str,
+    permission_mode: &'static str,
+    max_budget_usd: f64,
+    allowed_tools: Vec<String>,
+}
+
+fn normalize_execution_profile(value: &str) -> &'static str {
+    match value {
+        "standard" => "standard",
+        "autonomous" => "autonomous",
+        _ => "conservative",
+    }
+}
+
+fn resolve_execution_profile(value: &str) -> ExecutionProfilePreset {
+    match normalize_execution_profile(value) {
+        "standard" => ExecutionProfilePreset {
+            key: "standard",
+            permission_mode: "default",
+            max_budget_usd: 2.0,
+            allowed_tools: vec![
+                "Task".to_string(),
+                "TaskOutput".to_string(),
+                "Read".to_string(),
+                "Glob".to_string(),
+                "Grep".to_string(),
+                "Edit".to_string(),
+                "Write".to_string(),
+                "TodoWrite".to_string(),
+                "Skill".to_string(),
+                "Bash".to_string(),
+                "WebFetch".to_string(),
+                "WebSearch".to_string(),
+            ],
+        },
+        "autonomous" => ExecutionProfilePreset {
+            key: "autonomous",
+            permission_mode: "bypassPermissions",
+            max_budget_usd: 5.0,
+            allowed_tools: Vec::new(),
+        },
+        _ => ExecutionProfilePreset {
+            key: "conservative",
+            permission_mode: "default",
+            max_budget_usd: 0.5,
+            allowed_tools: vec![
+                "Task".to_string(),
+                "TaskOutput".to_string(),
+                "Read".to_string(),
+                "Glob".to_string(),
+                "Grep".to_string(),
+                "Edit".to_string(),
+                "Write".to_string(),
+                "TodoWrite".to_string(),
+                "Skill".to_string(),
+            ],
+        },
+    }
+}
+
+fn execute_task(app: AppHandle, runtime_manager: Arc<HeadlessRuntimeManager>, task: CronTask) {
     let run_id = generate_id("run");
     let started_at = chrono::Utc::now().to_rfc3339();
 
@@ -329,13 +496,28 @@ fn execute_task(app: AppHandle, task: CronTask) {
         stderr: String::new(),
         duration_ms: None,
         status: "running".to_string(),
+        runtime_id: None,
+        runtime_kind: Some("headless".to_string()),
     };
 
     let _ = append_run(&task.id, run.clone());
     let _ = app.emit("cron-task-started", &run);
 
+    let effective_env_name = match config::read_config() {
+        Ok(cfg) => task
+            .env_name
+            .clone()
+            .or(cfg.current)
+            .unwrap_or_else(|| "official".to_string()),
+        Err(_) => task
+            .env_name
+            .clone()
+            .unwrap_or_else(|| "official".to_string()),
+    };
     let env_vars = build_env_vars(&task.env_name);
+    let execution_profile = resolve_execution_profile(&task.execution_profile);
     let start = std::time::Instant::now();
+    let mut runtime_id_for_run: Option<String> = None;
 
     // Expand PATH to include common Node.js/nvm/fnm/volta install locations
     // since Tauri processes don't inherit the user's shell PATH
@@ -380,87 +562,111 @@ fn execute_task(app: AppHandle, task: CronTask) {
         task.working_dir.clone()
     };
 
-    let mut cmd = Command::new("claude");
-    cmd.arg("-p").arg(&task.prompt);
-    cmd.current_dir(&working_dir);
-    config::clear_managed_claude_env(&mut cmd);
-    cmd.envs(&env_vars);
-    cmd.env("PATH", &expanded_path);
-    // Remove CLAUDECODE env var to avoid "nested session" detection
-    cmd.env_remove("CLAUDECODE");
+    let create_result = runtime_manager.create_session(
+        app.clone(),
+        HeadlessSessionOptions {
+            env_name: effective_env_name,
+            perm_mode: execution_profile.permission_mode.to_string(),
+            working_dir,
+            resume_session_id: None,
+            initial_prompt: Some(task.prompt.clone()),
+            max_budget_usd: Some(execution_profile.max_budget_usd),
+            allowed_tools: execution_profile.allowed_tools.clone(),
+            disallowed_tools: Vec::new(),
+            env_vars: {
+                let mut vars = env_vars;
+                vars.insert("PATH".to_string(), expanded_path);
+                vars
+            },
+            source: HeadlessSessionSource::Cron {
+                task_id: task.id.clone(),
+            },
+        },
+    );
 
-    // Capture stdout and stderr separately
-    cmd.stdout(std::process::Stdio::piped());
-    cmd.stderr(std::process::Stdio::piped());
-
-    let child_result = cmd.spawn();
-
-    let (status_str, exit_code, stdout, stderr) = match child_result {
-        Ok(mut child) => {
+    let (status_str, exit_code, stdout, stderr) = match create_result {
+        Ok(summary) => {
+            runtime_id_for_run = Some(summary.runtime_id.clone());
+            let _ = update_run(&task.id, &run_id, |r| {
+                r.runtime_id = Some(summary.runtime_id.clone());
+                r.runtime_kind = Some("headless".to_string());
+            });
             let timeout = Duration::from_secs(task.timeout_secs);
             let poll_interval = Duration::from_millis(500);
-            let mut elapsed = Duration::ZERO;
 
-            // Poll for completion with timeout
             loop {
-                match child.try_wait() {
-                    Ok(Some(exit_status)) => {
-                        // Process finished
-                        let code = exit_status.code();
-                        let out = child
-                            .stdout
-                            .take()
-                            .map(|mut s| {
-                                let mut buf = String::new();
-                                use std::io::Read;
-                                let _ = s.read_to_string(&mut buf);
-                                buf
-                            })
-                            .unwrap_or_default();
-                        let err = child
-                            .stderr
-                            .take()
-                            .map(|mut s| {
-                                let mut buf = String::new();
-                                use std::io::Read;
-                                let _ = s.read_to_string(&mut buf);
-                                buf
-                            })
-                            .unwrap_or_default();
-                        let st = if code == Some(0) { "success" } else { "failed" };
-                        break (st.to_string(), code, out, err);
+                if start.elapsed() >= timeout {
+                    let _ = runtime_manager.stop_session(&app, &summary.runtime_id);
+                    let replay = runtime_manager
+                        .replay_events(&summary.runtime_id, None)
+                        .unwrap_or(ReplayBatch {
+                            gap_detected: false,
+                            oldest_available_seq: None,
+                            newest_available_seq: None,
+                            events: Vec::new(),
+                        });
+                    let (stdout, mut stderr) = collect_runtime_output(&replay);
+                    if !stderr.is_empty() {
+                        stderr.push('\n');
                     }
-                    Ok(None) => {
-                        // Still running
-                        if elapsed >= timeout {
-                            let _ = child.kill();
-                            let _ = child.wait(); // reap
-                            break (
-                                "timeout".to_string(),
-                                None,
-                                String::new(),
-                                format!("Task timed out after {} seconds", task.timeout_secs),
-                            );
-                        }
+                    stderr.push_str(&format!(
+                        "Task timed out after {} seconds",
+                        task.timeout_secs
+                    ));
+                    break ("timeout".to_string(), None, stdout, stderr);
+                }
+
+                match runtime_manager.summary(&summary.runtime_id) {
+                    Some(next_summary)
+                        if !next_summary.is_active
+                            || matches!(
+                                next_summary.status.as_str(),
+                                "completed" | "stopped" | "error"
+                            ) =>
+                    {
+                        let replay = runtime_manager
+                            .replay_events(&summary.runtime_id, None)
+                            .unwrap_or(ReplayBatch {
+                                gap_detected: false,
+                                oldest_available_seq: None,
+                                newest_available_seq: None,
+                                events: Vec::new(),
+                            });
+                        let (stdout, stderr) = collect_runtime_output(&replay);
+                        let exit_code = if next_summary.status == "completed" {
+                            Some(0)
+                        } else {
+                            Some(1)
+                        };
+                        let status = if next_summary.status == "completed" {
+                            "success".to_string()
+                        } else {
+                            "failed".to_string()
+                        };
+                        break (status, exit_code, stdout, stderr);
+                    }
+                    Some(_) => {
                         thread::sleep(poll_interval);
-                        elapsed += poll_interval;
                     }
-                    Err(e) => {
+                    None => {
                         break (
                             "failed".to_string(),
                             None,
                             String::new(),
-                            format!("Error waiting for process: {}", e),
+                            format!(
+                                "Headless runtime session disappeared before completion: {}",
+                                summary.runtime_id
+                            ),
                         );
                     }
                 }
             }
         }
-        Err(e) => (
+        Err(error) => (
             "failed".to_string(),
             None,
             String::new(),
-            format!("Failed to spawn claude: {}", e),
+            format!("Failed to start headless runtime: {}", error),
         ),
     };
 
@@ -474,6 +680,9 @@ fn execute_task(app: AppHandle, task: CronTask) {
         r.stderr = stderr.clone();
         r.duration_ms = Some(duration_ms);
         r.finished_at = Some(finished_at.clone());
+        if r.runtime_kind.is_none() {
+            r.runtime_kind = Some("headless".to_string());
+        }
     });
 
     let finished_run = CronTaskRun {
@@ -486,6 +695,8 @@ fn execute_task(app: AppHandle, task: CronTask) {
         stderr,
         duration_ms: Some(duration_ms),
         status: status_str,
+        runtime_id: runtime_id_for_run,
+        runtime_kind: Some("headless".to_string()),
     };
 
     let event_name = if finished_run.status == "success" {
@@ -494,6 +705,7 @@ fn execute_task(app: AppHandle, task: CronTask) {
         "cron-task-failed"
     };
     let _ = app.emit(event_name, &finished_run);
+    let _ = telegram::send_configured_message(&format_cron_notification(&task, &finished_run));
 }
 
 // ============================================================================
@@ -512,7 +724,11 @@ impl Default for CronScheduler {
     }
 }
 
-pub fn start_cron_scheduler(app: AppHandle, scheduler: Arc<CronScheduler>) {
+pub fn start_cron_scheduler(
+    app: AppHandle,
+    scheduler: Arc<CronScheduler>,
+    runtime_manager: Arc<HeadlessRuntimeManager>,
+) {
     thread::spawn(move || {
         loop {
             thread::sleep(Duration::from_secs(30));
@@ -551,12 +767,34 @@ pub fn start_cron_scheduler(app: AppHandle, scheduler: Arc<CronScheduler>) {
                 // Execute in a separate thread
                 let app_clone = app.clone();
                 let task_clone = task.clone();
+                let runtime_manager_clone = runtime_manager.clone();
                 thread::spawn(move || {
-                    execute_task(app_clone, task_clone);
+                    execute_task(app_clone, runtime_manager_clone, task_clone);
                 });
             }
         }
     });
+}
+
+pub fn run_cron_task_now(
+    app: AppHandle,
+    runtime_manager: Arc<HeadlessRuntimeManager>,
+    id: &str,
+) -> Result<CronTask, String> {
+    let tasks = read_tasks()?;
+    let task = tasks
+        .iter()
+        .find(|task| task.id == id)
+        .ok_or_else(|| format!("Task not found: {}", id))?
+        .clone();
+
+    let app_clone = app.clone();
+    let task_clone = task.clone();
+    thread::spawn(move || {
+        execute_task(app_clone, runtime_manager, task_clone);
+    });
+
+    Ok(task)
 }
 
 // ============================================================================
@@ -624,6 +862,7 @@ pub fn add_cron_task(
     prompt: String,
     working_dir: String,
     env_name: Option<String>,
+    execution_profile: Option<String>,
     timeout_secs: Option<u64>,
     template_id: Option<String>,
 ) -> Result<CronTask, String> {
@@ -644,6 +883,10 @@ pub fn add_cron_task(
         prompt,
         working_dir,
         env_name,
+        execution_profile: normalize_execution_profile(
+            execution_profile.as_deref().unwrap_or("conservative"),
+        )
+        .to_string(),
         enabled: true,
         timeout_secs: timeout_secs.unwrap_or(300),
         template_id,
@@ -668,6 +911,7 @@ pub fn update_cron_task(
     prompt: Option<String>,
     working_dir: Option<String>,
     env_name: Option<String>,
+    execution_profile: Option<String>,
     timeout_secs: Option<u64>,
 ) -> Result<CronTask, String> {
     let mut tasks = read_tasks()?;
@@ -694,6 +938,9 @@ pub fn update_cron_task(
     }
     // env_name: always update (allows clearing by passing null from frontend)
     task.env_name = env_name;
+    if let Some(v) = execution_profile {
+        task.execution_profile = normalize_execution_profile(&v).to_string();
+    }
     if let Some(v) = timeout_secs {
         task.timeout_secs = v;
     }
@@ -745,19 +992,12 @@ pub fn get_cron_task_runs(task_id: String) -> Result<Vec<CronTaskRun>, String> {
 }
 
 #[tauri::command]
-pub fn retry_cron_task(id: String, app: AppHandle) -> Result<(), String> {
-    let tasks = read_tasks()?;
-    let task = tasks
-        .iter()
-        .find(|t| t.id == id)
-        .ok_or_else(|| format!("Task not found: {}", id))?
-        .clone();
-
-    let app_clone = app.clone();
-    thread::spawn(move || {
-        execute_task(app_clone, task);
-    });
-
+pub fn retry_cron_task(
+    id: String,
+    app: AppHandle,
+    runtime_manager: tauri::State<'_, Arc<HeadlessRuntimeManager>>,
+) -> Result<(), String> {
+    run_cron_task_now(app, runtime_manager.inner().clone(), &id)?;
     Ok(())
 }
 
@@ -876,4 +1116,36 @@ pub fn generate_cron_task_stream(app: AppHandle, query: String) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_execution_profile, resolve_execution_profile};
+
+    #[test]
+    fn normalize_execution_profile_defaults_unknown_values() {
+        assert_eq!(normalize_execution_profile("standard"), "standard");
+        assert_eq!(normalize_execution_profile("autonomous"), "autonomous");
+        assert_eq!(normalize_execution_profile("unknown"), "conservative");
+    }
+
+    #[test]
+    fn resolve_execution_profile_maps_budget_and_tools() {
+        let conservative = resolve_execution_profile("conservative");
+        assert_eq!(conservative.permission_mode, "default");
+        assert_eq!(conservative.max_budget_usd, 0.5);
+        assert!(conservative.allowed_tools.contains(&"Read".to_string()));
+        assert!(!conservative.allowed_tools.contains(&"Bash".to_string()));
+
+        let standard = resolve_execution_profile("standard");
+        assert_eq!(standard.permission_mode, "default");
+        assert_eq!(standard.max_budget_usd, 2.0);
+        assert!(standard.allowed_tools.contains(&"Bash".to_string()));
+        assert!(standard.allowed_tools.contains(&"WebSearch".to_string()));
+
+        let autonomous = resolve_execution_profile("autonomous");
+        assert_eq!(autonomous.permission_mode, "bypassPermissions");
+        assert_eq!(autonomous.max_budget_usd, 5.0);
+        assert!(autonomous.allowed_tools.is_empty());
+    }
 }
