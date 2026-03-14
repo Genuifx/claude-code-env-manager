@@ -58,6 +58,17 @@ export interface TauriCommands {
   get_telegram_bridge_status: [void, TelegramBridgeStatus];
   start_telegram_bridge: [void, TelegramBridgeStatus];
   stop_telegram_bridge: [void, TelegramBridgeStatus];
+  get_telegram_forum_topics: [void, TelegramForumTopic[]];
+  bind_telegram_topic: [
+    {
+      projectDir: string;
+      envName?: string | null;
+      permMode?: string | null;
+      threadId?: number | null;
+      createNewTopic: boolean;
+    },
+    TelegramTopicBinding
+  ];
   get_proxy_debug_state: [void, ProxyDebugState];
   set_proxy_debug_enabled: [{ enabled: boolean }, ProxyDebugState];
   update_proxy_debug_config: [
@@ -95,12 +106,17 @@ export interface TauriCommands {
   dismiss_runtime_recovery_candidate: [{ runtimeId: string }, void];
   stop_interactive_session: [{ sessionId: string }, void];
   focus_interactive_session: [{ sessionId: string }, void];
+  open_interactive_session_in_terminal: [{ sessionId: string }, void];
   close_interactive_session: [{ sessionId: string }, void];
   minimize_interactive_session: [{ sessionId: string }, void];
   write_interactive_input: [{ sessionId: string; data: string }, void];
   get_interactive_session_output: [
     { sessionId: string; sinceSeq?: number | null },
     InteractiveReplayBatch
+  ];
+  get_interactive_session_events: [
+    { sessionId: string; sinceSeq?: number | null },
+    ReplayBatch
   ];
   resize_interactive_session: [{ sessionId: string; cols: number; rows: number }, void];
   create_managed_session: [
@@ -171,6 +187,14 @@ export interface TauriCommands {
     },
     void
   ];
+  respond_headless_permission: [
+    {
+      requestId: string;
+      approved: boolean;
+      responder?: string | null;
+    },
+    void
+  ];
   remove_headless_session: [
     {
       runtimeId: string;
@@ -193,6 +217,7 @@ export interface TauriCommands {
   check_ccem_installed: [void, boolean];
   check_claude_installed: [void, boolean];
   check_codex_installed: [void, boolean];
+  check_tmux_installed: [void, boolean];
 
   // 历史记录
   get_conversation_history: [void, ConversationHistoryEntry[]];
@@ -218,6 +243,9 @@ export interface TauriCommands {
       workingDir: string;
       envName?: string | null;
       executionProfile?: 'conservative' | 'standard' | 'autonomous' | null;
+      maxBudgetUsd?: number | null;
+      allowedTools?: string[] | null;
+      disallowedTools?: string[] | null;
       timeoutSecs?: number;
       templateId?: string | null;
     },
@@ -232,6 +260,9 @@ export interface TauriCommands {
       workingDir?: string;
       envName?: string | null;
       executionProfile?: 'conservative' | 'standard' | 'autonomous' | null;
+      maxBudgetUsd?: number | null;
+      allowedTools?: string[] | null;
+      disallowedTools?: string[] | null;
       timeoutSecs?: number;
     },
     CronTask
@@ -313,6 +344,7 @@ export interface DesktopSettings {
 export interface TelegramSettings {
   enabled: boolean;
   botToken?: string | null;
+  allowedUserIds?: number[];
   allowedChatId?: number | null;
   notificationsThreadId?: number | null;
   defaultEnvName?: string | null;
@@ -344,6 +376,14 @@ export interface TelegramBridgeStatus {
   botUsername?: string | null;
   lastError?: string | null;
   allowedChatId?: number | null;
+}
+
+export interface TelegramForumTopic {
+  threadId: number;
+  name: string;
+  iconColor?: number | null;
+  isBound: boolean;
+  boundProject?: string | null;
 }
 
 export interface ProxyDebugState {
@@ -427,14 +467,66 @@ export interface SessionEventRecord {
   payload: SessionEventPayload;
 }
 
+export type UserInputKind = 'question' | 'plan_entry' | 'plan_exit';
+
+export type ToolCategory =
+  | { category: 'user_input'; kind: UserInputKind; raw_name: string }
+  | { category: 'file_op'; raw_name: string }
+  | { category: 'execution'; raw_name: string }
+  | { category: 'search'; raw_name: string }
+  | { category: 'task_mgmt'; raw_name: string }
+  | { category: 'unknown'; raw_name: string };
+
+export interface ToolQuestionOption {
+  label: string;
+  description?: string | null;
+  preview?: string | null;
+}
+
+export interface ToolQuestionPrompt {
+  question: string;
+  header?: string | null;
+  multiSelect: boolean;
+  options: ToolQuestionOption[];
+}
+
+export type InteractiveToolPrompt =
+  | { prompt_type: 'ask_user_question'; questions: ToolQuestionPrompt[] }
+  | { prompt_type: 'plan_entry' }
+  | {
+      prompt_type: 'plan_exit';
+      allowed_prompts?: string[];
+      plan_summary?: string | null;
+    };
+
+export type TerminalPromptKind = 'permission';
+
 export type SessionEventPayload =
   | { type: 'system_message'; message: string }
   | { type: 'lifecycle'; stage: string; detail: string }
   | { type: 'claude_json'; message_type?: string | null; raw_json: string }
   | { type: 'stderr_line'; line: string }
   | { type: 'assistant_chunk'; text: string }
+  | {
+      type: 'tool_use_started';
+      tool_use_id: string;
+      category: ToolCategory;
+      raw_name: string;
+      input_summary: string;
+      needs_response: boolean;
+      prompt?: InteractiveToolPrompt | null;
+    }
+  | {
+      type: 'tool_use_completed';
+      tool_use_id: string;
+      raw_name: string;
+      result_summary: string;
+      success: boolean;
+    }
   | { type: 'permission_required'; request_id: string; tool_name: string }
   | { type: 'permission_responded'; request_id: string; approved: boolean; responder: string }
+  | { type: 'terminal_prompt_required'; prompt_kind: TerminalPromptKind; prompt_text: string }
+  | { type: 'terminal_prompt_resolved'; prompt_kind: TerminalPromptKind; approved: boolean }
   | { type: 'session_completed'; reason: string }
   | { type: 'gap_notification'; last_seen_seq: number; oldest_available_seq: number };
 
@@ -530,6 +622,9 @@ export interface CronTask {
   workingDir: string;
   envName?: string | null;
   executionProfile: 'conservative' | 'standard' | 'autonomous';
+  maxBudgetUsd?: number | null;
+  allowedTools?: string[];
+  disallowedTools?: string[];
   enabled: boolean;
   timeoutSecs: number;
   templateId?: string | null;

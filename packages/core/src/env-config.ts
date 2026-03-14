@@ -5,6 +5,8 @@ export interface LegacyEnvConfig extends EnvConfig {
   ANTHROPIC_SMALL_FAST_MODEL?: string;
 }
 
+const TIER_MODEL_ALIASES = new Set(['opus', 'sonnet', 'haiku']);
+
 export function hasLegacyEnvFields(envConfig: Partial<LegacyEnvConfig>): boolean {
   return Boolean(
     envConfig.ANTHROPIC_API_KEY ||
@@ -59,5 +61,41 @@ export function normalizeEnvConfig(
     ...(envConfig.CLAUDE_CODE_SUBAGENT_MODEL && {
       CLAUDE_CODE_SUBAGENT_MODEL: envConfig.CLAUDE_CODE_SUBAGENT_MODEL,
     }),
+  };
+}
+
+function shouldRecoverTierModel(model?: string): boolean {
+  return !model || TIER_MODEL_ALIASES.has(model);
+}
+
+export function recoverEnvConfigFromLegacy(
+  currentEnvConfig: Partial<LegacyEnvConfig>,
+  legacyEnvConfig: Partial<LegacyEnvConfig>
+): EnvConfig {
+  const current = normalizeEnvConfig(currentEnvConfig);
+  const legacy = normalizeEnvConfig(legacyEnvConfig);
+
+  return {
+    ...current,
+    ...(!current.ANTHROPIC_AUTH_TOKEN &&
+      legacy.ANTHROPIC_AUTH_TOKEN && {
+        ANTHROPIC_AUTH_TOKEN: legacy.ANTHROPIC_AUTH_TOKEN,
+      }),
+    ...(shouldRecoverTierModel(current.ANTHROPIC_DEFAULT_OPUS_MODEL) &&
+      legacy.ANTHROPIC_DEFAULT_OPUS_MODEL && {
+        ANTHROPIC_DEFAULT_OPUS_MODEL: legacy.ANTHROPIC_DEFAULT_OPUS_MODEL,
+      }),
+    ...(shouldRecoverTierModel(current.ANTHROPIC_DEFAULT_SONNET_MODEL) &&
+      legacy.ANTHROPIC_DEFAULT_SONNET_MODEL && {
+        ANTHROPIC_DEFAULT_SONNET_MODEL: legacy.ANTHROPIC_DEFAULT_SONNET_MODEL,
+      }),
+    ...(shouldRecoverTierModel(current.ANTHROPIC_DEFAULT_HAIKU_MODEL) &&
+      legacy.ANTHROPIC_DEFAULT_HAIKU_MODEL && {
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: legacy.ANTHROPIC_DEFAULT_HAIKU_MODEL,
+      }),
+    ...(!current.CLAUDE_CODE_SUBAGENT_MODEL &&
+      legacy.CLAUDE_CODE_SUBAGENT_MODEL && {
+        CLAUDE_CODE_SUBAGENT_MODEL: legacy.CLAUDE_CODE_SUBAGENT_MODEL,
+      }),
   };
 }

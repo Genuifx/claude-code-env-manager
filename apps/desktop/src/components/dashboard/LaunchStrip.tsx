@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FolderOpen, ChevronDown, Globe, Shield, Check, Clock, Rocket, TerminalSquare } from 'lucide-react';
+import { FolderOpen, ChevronDown, Globe, Shield, Check, Clock, Copy, Rocket, TerminalSquare } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -24,12 +24,14 @@ interface LaunchStripProps {
   selectedWorkingDir: string | null;
   recentDirs: string[];
   launched: boolean;
+  bindCopied: boolean;
   onSetLaunchClient: (client: LaunchClient) => void;
   onSwitchEnv: (name: string) => void;
   onSetPermMode: (mode: PermissionModeName) => void;
   onSelectDir: () => void;
   onPickRecentDir: (dir: string) => void;
   onLaunch: () => void;
+  onCopyBind: () => void;
 }
 
 function getEnvColorVar(envName: string): string {
@@ -51,12 +53,14 @@ export function LaunchStrip({
   selectedWorkingDir,
   recentDirs,
   launched,
+  bindCopied,
   onSetLaunchClient,
   onSwitchEnv,
   onSetPermMode,
   onSelectDir,
   onPickRecentDir,
   onLaunch,
+  onCopyBind,
 }: LaunchStripProps) {
   const { t } = useLocale();
   const [dirOpen, setDirOpen] = useState(false);
@@ -238,6 +242,23 @@ export function LaunchStrip({
               </Popover.Content>
             </Popover.Portal>
           </Popover.Root>
+
+          <span className="text-muted-foreground/20 text-xs select-none">·</span>
+
+          <button
+            className={cn(
+              'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-colors',
+              selectedWorkingDir
+                ? 'bg-white/[0.06] text-muted-foreground hover:bg-white/[0.10] hover:text-foreground'
+                : 'bg-white/[0.04] text-muted-foreground/40 cursor-not-allowed'
+            )}
+            title={t('telegram.copyBindCommand')}
+            disabled={!selectedWorkingDir}
+            onClick={onCopyBind}
+          >
+            <Copy className="w-3.5 h-3.5" />
+            <span>{bindCopied ? t('telegram.bindCopiedShort') : t('telegram.copyBindShort')}</span>
+          </button>
         </div>
       </div>
     </div>

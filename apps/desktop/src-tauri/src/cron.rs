@@ -29,6 +29,12 @@ pub struct CronTask {
     pub env_name: Option<String>,
     #[serde(rename = "executionProfile", default = "default_execution_profile")]
     pub execution_profile: String,
+    #[serde(rename = "maxBudgetUsd", default)]
+    pub max_budget_usd: Option<f64>,
+    #[serde(rename = "allowedTools", default)]
+    pub allowed_tools: Vec<String>,
+    #[serde(rename = "disallowedTools", default)]
+    pub disallowed_tools: Vec<String>,
     pub enabled: bool,
     #[serde(rename = "timeoutSecs")]
     pub timeout_secs: u64,
@@ -428,6 +434,14 @@ struct ExecutionProfilePreset {
     allowed_tools: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+struct ResolvedToolPolicy {
+    permission_mode: String,
+    max_budget_usd: f64,
+    allowed_tools: Vec<String>,
+    disallowed_tools: Vec<String>,
+}
+
 fn normalize_execution_profile(value: &str) -> &'static str {
     match value {
         "standard" => "standard",
@@ -482,6 +496,20 @@ fn resolve_execution_profile(value: &str) -> ExecutionProfilePreset {
     }
 }
 
+fn resolve_task_tool_policy(task: &CronTask) -> ResolvedToolPolicy {
+    let preset = resolve_execution_profile(&task.execution_profile);
+    ResolvedToolPolicy {
+        permission_mode: preset.permission_mode.to_string(),
+        max_budget_usd: task.max_budget_usd.unwrap_or(preset.max_budget_usd),
+        allowed_tools: if task.allowed_tools.is_empty() {
+            preset.allowed_tools
+        } else {
+            task.allowed_tools.clone()
+        },
+        disallowed_tools: task.disallowed_tools.clone(),
+    }
+}
+
 fn execute_task(app: AppHandle, runtime_manager: Arc<HeadlessRuntimeManager>, task: CronTask) {
     let run_id = generate_id("run");
     let started_at = chrono::Utc::now().to_rfc3339();
@@ -515,7 +543,7 @@ fn execute_task(app: AppHandle, runtime_manager: Arc<HeadlessRuntimeManager>, ta
             .unwrap_or_else(|| "official".to_string()),
     };
     let env_vars = build_env_vars(&task.env_name);
-    let execution_profile = resolve_execution_profile(&task.execution_profile);
+    let tool_policy = resolve_task_tool_policy(&task);
     let start = std::time::Instant::now();
     let mut runtime_id_for_run: Option<String> = None;
 
@@ -566,13 +594,13 @@ fn execute_task(app: AppHandle, runtime_manager: Arc<HeadlessRuntimeManager>, ta
         app.clone(),
         HeadlessSessionOptions {
             env_name: effective_env_name,
-            perm_mode: execution_profile.permission_mode.to_string(),
+            perm_mode: tool_policy.permission_mode.clone(),
             working_dir,
             resume_session_id: None,
             initial_prompt: Some(task.prompt.clone()),
-            max_budget_usd: Some(execution_profile.max_budget_usd),
-            allowed_tools: execution_profile.allowed_tools.clone(),
-            disallowed_tools: Vec::new(),
+            max_budget_usd: Some(tool_policy.max_budget_usd),
+            allowed_tools: tool_policy.allowed_tools.clone(),
+            disallowed_tools: tool_policy.disallowed_tools.clone(),
             env_vars: {
                 let mut vars = env_vars;
                 vars.insert("PATH".to_string(), expanded_path);
@@ -863,6 +891,9 @@ pub fn add_cron_task(
     working_dir: String,
     env_name: Option<String>,
     execution_profile: Option<String>,
+    max_budget_usd: Option<f64>,
+    allowed_tools: Option<Vec<String>>,
+    disallowed_tools: Option<Vec<String>>,
     timeout_secs: Option<u64>,
     template_id: Option<String>,
 ) -> Result<CronTask, String> {
@@ -887,6 +918,9 @@ pub fn add_cron_task(
             execution_profile.as_deref().unwrap_or("conservative"),
         )
         .to_string(),
+        max_budget_usd,
+        allowed_tools: allowed_tools.unwrap_or_default(),
+        disallowed_tools: disallowed_tools.unwrap_or_default(),
         enabled: true,
         timeout_secs: timeout_secs.unwrap_or(300),
         template_id,
@@ -912,6 +946,9 @@ pub fn update_cron_task(
     working_dir: Option<String>,
     env_name: Option<String>,
     execution_profile: Option<String>,
+    max_budget_usd: Option<f64>,
+    allowed_tools: Option<Vec<String>>,
+    disallowed_tools: Option<Vec<String>>,
     timeout_secs: Option<u64>,
 ) -> Result<CronTask, String> {
     let mut tasks = read_tasks()?;
@@ -941,6 +978,9 @@ pub fn update_cron_task(
     if let Some(v) = execution_profile {
         task.execution_profile = normalize_execution_profile(&v).to_string();
     }
+    task.max_budget_usd = max_budget_usd;
+    task.allowed_tools = allowed_tools.unwrap_or_default();
+    task.disallowed_tools = disallowed_tools.unwrap_or_default();
     if let Some(v) = timeout_secs {
         task.timeout_secs = v;
     }
@@ -1120,7 +1160,9 @@ pub fn generate_cron_task_stream(app: AppHandle, query: String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_execution_profile, resolve_execution_profile};
+    use super::{
+        normalize_execution_profile, resolve_execution_profile, resolve_task_tool_policy, CronTask,
+    };
 
     #[test]
     fn normalize_execution_profile_defaults_unknown_values() {
@@ -1147,5 +1189,37 @@ mod tests {
         assert_eq!(autonomous.permission_mode, "bypassPermissions");
         assert_eq!(autonomous.max_budget_usd, 5.0);
         assert!(autonomous.allowed_tools.is_empty());
+    }
+
+    #[test]
+    fn resolve_task_tool_policy_prefers_task_overrides() {
+        let task = CronTask {
+            id: "cron-1".to_string(),
+            name: "Example".to_string(),
+            cron_expression: "0 9 * * 1-5".to_string(),
+            prompt: "Do work".to_string(),
+            working_dir: "/tmp".to_string(),
+            env_name: Some("glm".to_string()),
+            execution_profile: "standard".to_string(),
+            max_budget_usd: Some(9.5),
+            allowed_tools: vec!["Read".to_string(), "Bash".to_string()],
+            disallowed_tools: vec!["WebSearch".to_string()],
+            enabled: true,
+            timeout_secs: 300,
+            template_id: None,
+            trigger_type: "schedule".to_string(),
+            parent_task_id: None,
+            created_at: "2026-03-08T00:00:00Z".to_string(),
+            updated_at: "2026-03-08T00:00:00Z".to_string(),
+        };
+
+        let resolved = resolve_task_tool_policy(&task);
+        assert_eq!(resolved.permission_mode, "default");
+        assert_eq!(resolved.max_budget_usd, 9.5);
+        assert_eq!(
+            resolved.allowed_tools,
+            vec!["Read".to_string(), "Bash".to_string()]
+        );
+        assert_eq!(resolved.disallowed_tools, vec!["WebSearch".to_string()]);
     }
 }

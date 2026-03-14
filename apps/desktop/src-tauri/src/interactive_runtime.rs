@@ -1,23 +1,25 @@
+use crate::event_bus::{ReplayBatch, SessionEventPayload, SessionStore, TerminalPromptKind};
+use crate::jsonl_watcher::{JsonlPollResult, JsonlWatcher};
 use crate::runtime::{
     replace_runtime_entries_for_kind, runtime_state_file_path, RuntimeKind, RuntimeStateEntry,
 };
 use crate::session::{Session, SessionManager};
-use crate::terminal::resolve_claude_path;
+use crate::tmux::{ClaudeTerminalState, TmuxManager, TmuxWindowInfo};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
 use std::io;
-use std::io::{Read, Write};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
+const CAPTURE_HISTORY_LINES: u32 = 1200;
+const CAPTURE_POLL_INTERVAL: Duration = Duration::from_millis(700);
 const MAX_TRANSCRIPT_CHUNKS: usize = 1200;
 const INTERACTIVE_OUTPUT_EVENT: &str = "interactive-session-output";
-static USER_PATH: OnceLock<String> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct InteractiveSessionOptions {
@@ -95,20 +97,38 @@ impl InteractiveTranscript {
 
 struct InteractiveSessionHandle {
     session: Mutex<Session>,
-    claude_session_id: Option<String>,
-    stdin: Mutex<Option<ChildStdin>>,
+    claude_session_id: Mutex<Option<String>>,
+    tmux_window: TmuxWindowInfo,
     transcript: Mutex<InteractiveTranscript>,
+    events: Mutex<SessionStore>,
+    jsonl_watcher: Mutex<JsonlWatcher>,
+    last_persisted_jsonl_path: Mutex<Option<String>>,
+    last_snapshot: Mutex<String>,
+    last_terminal_state: Mutex<ClaudeTerminalState>,
     alive: AtomicBool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InteractiveSessionSummary {
+    pub session_id: String,
+    pub claude_session_id: Option<String>,
+    pub project_dir: String,
+    pub env_name: String,
+    pub perm_mode: String,
+    pub status: String,
+    pub is_active: bool,
 }
 
 pub struct InteractiveRuntimeManager {
     sessions: Mutex<HashMap<String, Arc<InteractiveSessionHandle>>>,
+    tmux: TmuxManager,
 }
 
 impl Default for InteractiveRuntimeManager {
     fn default() -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
+            tmux: TmuxManager::default(),
         }
     }
 }
@@ -120,28 +140,16 @@ impl InteractiveRuntimeManager {
         session_manager: Arc<SessionManager>,
         options: InteractiveSessionOptions,
     ) -> Result<Session, String> {
-        let mut command = build_interactive_command(&options)?;
-        let mut child = command
-            .spawn()
-            .map_err(|error| format!("Failed to spawn interactive Claude session: {}", error))?;
-
-        let pid = child.id();
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| "Failed to capture interactive stdin".to_string())?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| "Failed to capture interactive stdout".to_string())?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| "Failed to capture interactive stderr".to_string())?;
+        let window = self.tmux.create_session(
+            &options.session_id,
+            &build_claude_args(&options.perm_mode, options.resume_session_id.as_deref()),
+            &options.env_vars,
+            Path::new(&options.working_dir),
+        )?;
 
         let session = Session {
             id: options.session_id.clone(),
-            pid: Some(pid),
+            pid: window.pane_pid,
             client: "claude".to_string(),
             env_name: options.env_name.clone(),
             perm_mode: options.perm_mode.clone(),
@@ -149,15 +157,24 @@ impl InteractiveRuntimeManager {
             start_time: Utc::now().to_rfc3339(),
             status: "running".to_string(),
             terminal_type: Some("embedded".to_string()),
-            window_id: None,
+            window_id: Some(window.target.clone()),
             iterm_session_id: None,
         };
 
         let handle = Arc::new(InteractiveSessionHandle {
             session: Mutex::new(session.clone()),
-            claude_session_id: options.resume_session_id.clone(),
-            stdin: Mutex::new(Some(stdin)),
+            claude_session_id: Mutex::new(options.resume_session_id.clone()),
+            tmux_window: window.clone(),
             transcript: Mutex::new(InteractiveTranscript::default()),
+            events: Mutex::new(SessionStore::new(session.id.clone())),
+            jsonl_watcher: Mutex::new(JsonlWatcher::new(
+                options.working_dir.clone(),
+                Utc::now(),
+                options.resume_session_id.clone(),
+            )),
+            last_persisted_jsonl_path: Mutex::new(None),
+            last_snapshot: Mutex::new(String::new()),
+            last_terminal_state: Mutex::new(ClaudeTerminalState::Unknown),
             alive: AtomicBool::new(true),
         });
 
@@ -169,16 +186,83 @@ impl InteractiveRuntimeManager {
             &app,
             &session.id,
             format!(
-                "\r\n[ccem] interactive session attached (pid {}, cwd {})\r\n",
-                pid, options.working_dir
+                "\r\n[ccem] tmux session attached ({}, cwd {})\r\n",
+                window.target, options.working_dir
             ),
         );
 
-        self.spawn_output_reader(app.clone(), session.id.clone(), stdout);
-        self.spawn_output_reader(app.clone(), session.id.clone(), stderr);
-        self.spawn_waiter(app, session_manager, session.id.clone(), child);
+        self.sample_jsonl_events(&session.id).ok();
+        self.sample_tmux_output(&app, &session.id).ok();
+        self.spawn_capture_poller(app, session_manager, session.id.clone());
 
         Ok(session)
+    }
+
+    pub fn rehydrate_existing(
+        self: &Arc<Self>,
+        app: AppHandle,
+        session_manager: Arc<SessionManager>,
+    ) -> Result<(), String> {
+        for session in session_manager.get_running_sessions() {
+            if session.terminal_type.as_deref() != Some("embedded") {
+                continue;
+            }
+
+            if self
+                .sessions
+                .lock()
+                .map_err(|_| "Failed to lock interactive session map".to_string())?
+                .contains_key(&session.id)
+            {
+                continue;
+            }
+
+            let window = match self.tmux.get_window_info(&session.id) {
+                Ok(window) => window,
+                Err(error) => {
+                    eprintln!(
+                        "Interactive rehydrate skipped for {}: {}",
+                        session.id, error
+                    );
+                    continue;
+                }
+            };
+
+            if let Some(pid) = window.pane_pid {
+                session_manager.update_session_pid(&session.id, Some(pid));
+            }
+
+            let mut hydrated = session.clone();
+            hydrated.pid = window.pane_pid;
+            hydrated.window_id = Some(window.target.clone());
+
+            let handle = Arc::new(InteractiveSessionHandle {
+                session: Mutex::new(hydrated.clone()),
+                claude_session_id: Mutex::new(None),
+                tmux_window: window,
+                transcript: Mutex::new(InteractiveTranscript::default()),
+                events: Mutex::new(SessionStore::new(hydrated.id.clone())),
+                jsonl_watcher: Mutex::new(JsonlWatcher::new(
+                    hydrated.working_dir.clone(),
+                    DateTime::parse_from_rfc3339(&hydrated.start_time)
+                        .map(|value| value.with_timezone(&Utc))
+                        .unwrap_or_else(|_| Utc::now()),
+                    None,
+                )),
+                last_persisted_jsonl_path: Mutex::new(None),
+                last_snapshot: Mutex::new(String::new()),
+                last_terminal_state: Mutex::new(ClaudeTerminalState::Unknown),
+                alive: AtomicBool::new(true),
+            });
+
+            self.insert_handle(hydrated.id.clone(), handle)?;
+            self.sample_jsonl_events(&hydrated.id).ok();
+            self.sample_tmux_output(&app, &hydrated.id).ok();
+            self.spawn_capture_poller(app.clone(), session_manager.clone(), hydrated.id.clone());
+        }
+
+        self.persist_state_best_effort();
+        Ok(())
     }
 
     pub fn write_input(&self, session_id: &str, data: &str) -> Result<(), String> {
@@ -190,75 +274,38 @@ impl InteractiveRuntimeManager {
             ));
         }
 
-        let mut stdin_guard = handle
-            .stdin
-            .lock()
-            .map_err(|_| "Failed to lock interactive stdin".to_string())?;
-        let stdin = stdin_guard
-            .as_mut()
-            .ok_or_else(|| format!("Interactive session {} stdin is closed", session_id))?;
+        self.tmux
+            .send_terminal_input_to_target(&handle.tmux_window.target, data)
+    }
 
-        stdin
-            .write_all(data.as_bytes())
-            .and_then(|_| stdin.flush())
-            .map_err(|error| format!("Failed to write to interactive stdin: {}", error))
+    pub fn send_message(&self, session_id: &str, message: &str) -> Result<(), String> {
+        let _ = self.get_handle(session_id)?;
+        self.tmux.send_message(session_id, message)
+    }
+
+    pub fn send_approval(&self, session_id: &str, approved: bool) -> Result<(), String> {
+        let _ = self.get_handle(session_id)?;
+        self.tmux.send_approval(session_id, approved)
+    }
+
+    pub fn get_state(&self, session_id: &str) -> Result<ClaudeTerminalState, String> {
+        let _ = self.get_handle(session_id)?;
+        self.tmux.detect_state(session_id)
     }
 
     pub fn stop_session(&self, session_id: &str) -> Result<(), String> {
         let handle = self.get_handle(session_id)?;
-        let pid = handle
-            .session
-            .lock()
-            .map_err(|_| "Failed to lock interactive session".to_string())?
-            .pid
-            .ok_or_else(|| format!("Interactive session {} has no active pid", session_id))?;
-
-        {
-            let mut stdin_guard = handle
-                .stdin
-                .lock()
-                .map_err(|_| "Failed to lock interactive stdin".to_string())?;
-            *stdin_guard = None;
-        }
-
-        kill_process(pid)?;
-        Ok(())
+        handle.alive.store(false, Ordering::SeqCst);
+        self.tmux.stop_session(session_id)
     }
 
     pub fn shutdown_all(&self) {
-        let handles = self
-            .sessions
-            .lock()
-            .map(|sessions| sessions.values().cloned().collect::<Vec<_>>())
-            .unwrap_or_default();
-
-        for handle in handles {
-            let pid = {
-                let mut stdin_guard = match handle.stdin.lock() {
-                    Ok(guard) => guard,
-                    Err(_) => continue,
-                };
-                *stdin_guard = None;
-
-                let session = match handle.session.lock() {
-                    Ok(session) => session,
-                    Err(_) => continue,
-                };
-                session.pid
-            };
-
-            handle.alive.store(false, Ordering::SeqCst);
-
-            if let Some(pid) = pid {
-                let _ = terminate_process(pid);
+        self.persist_state_best_effort();
+        if let Ok(sessions) = self.sessions.lock() {
+            for handle in sessions.values() {
+                handle.alive.store(false, Ordering::SeqCst);
             }
         }
-
-        let _ = replace_runtime_entries_for_kind(
-            &runtime_state_file_path(),
-            RuntimeKind::Interactive,
-            Vec::new(),
-        );
     }
 
     pub fn active_state_entries(&self) -> Vec<RuntimeStateEntry> {
@@ -270,10 +317,17 @@ impl InteractiveRuntimeManager {
                     .filter(|handle| handle.alive.load(Ordering::SeqCst))
                     .filter_map(|handle| {
                         let session = handle.session.lock().ok()?.clone();
+                        let claude_session_id = handle.claude_session_id.lock().ok()?.clone();
+                        let jsonl_path = handle
+                            .jsonl_watcher
+                            .lock()
+                            .ok()?
+                            .jsonl_path()
+                            .map(|path| path.to_string_lossy().to_string());
                         Some(RuntimeStateEntry {
                             runtime_id: session.id,
                             runtime_kind: RuntimeKind::Interactive,
-                            claude_session_id: handle.claude_session_id.clone(),
+                            claude_session_id,
                             pid: session.pid,
                             project_dir: session.working_dir,
                             env_name: session.env_name,
@@ -281,6 +335,10 @@ impl InteractiveRuntimeManager {
                             source: crate::runtime::ManagedSessionSource::Desktop,
                             saved_at: Utc::now(),
                             summary: None,
+                            tmux_session: Some(handle.tmux_window.session_name.clone()),
+                            tmux_window: Some(handle.tmux_window.window_name.clone()),
+                            tmux_window_index: Some(handle.tmux_window.window_index),
+                            jsonl_path,
                         })
                     })
                     .collect()
@@ -308,6 +366,73 @@ impl InteractiveRuntimeManager {
             .lock()
             .map_err(|_| "Failed to lock interactive transcript".to_string())?;
         Ok(transcript.replay_since(since_seq))
+    }
+
+    pub fn replay_events(
+        &self,
+        session_id: &str,
+        since_seq: Option<u64>,
+    ) -> Result<ReplayBatch, String> {
+        let handle = self.get_handle(session_id)?;
+        let events = handle
+            .events
+            .lock()
+            .map_err(|_| "Failed to lock interactive event store".to_string())?;
+        Ok(events.events_since(since_seq))
+    }
+
+    pub fn summary(&self, session_id: &str) -> Option<InteractiveSessionSummary> {
+        let handle = self.get_handle(session_id).ok()?;
+        let session = handle.session.lock().ok()?.clone();
+        let claude_session_id = handle.claude_session_id.lock().ok()?.clone();
+        Some(InteractiveSessionSummary {
+            session_id: session.id,
+            claude_session_id,
+            project_dir: session.working_dir,
+            env_name: session.env_name,
+            perm_mode: session.perm_mode,
+            status: session.status,
+            is_active: handle.alive.load(Ordering::SeqCst),
+        })
+    }
+
+    pub fn current_claude_session_id(&self, session_id: &str) -> Option<String> {
+        let handle = self.get_handle(session_id).ok()?;
+        let current = handle.claude_session_id.lock().ok()?.clone();
+        Some(current).flatten()
+    }
+
+    pub fn find_active_by_scope(
+        &self,
+        project_dir: &str,
+        env_name: &str,
+        perm_mode: &str,
+    ) -> Option<InteractiveSessionSummary> {
+        let sessions = self.sessions.lock().ok()?;
+        sessions.values().find_map(|handle| {
+            if !handle.alive.load(Ordering::SeqCst) {
+                return None;
+            }
+
+            let session = handle.session.lock().ok()?.clone();
+            if !project_dirs_match(&session.working_dir, project_dir)
+                || session.env_name != env_name
+                || session.perm_mode != perm_mode
+            {
+                return None;
+            }
+
+            let claude_session_id = handle.claude_session_id.lock().ok()?.clone();
+            Some(InteractiveSessionSummary {
+                session_id: session.id,
+                claude_session_id,
+                project_dir: session.working_dir,
+                env_name: session.env_name,
+                perm_mode: session.perm_mode,
+                status: session.status,
+                is_active: true,
+            })
+        })
     }
 
     pub fn remove_session(&self, session_id: &str) {
@@ -350,91 +475,169 @@ impl InteractiveRuntimeManager {
         }
     }
 
-    fn spawn_output_reader<T>(self: &Arc<Self>, app: AppHandle, session_id: String, output: T)
-    where
-        T: Read + Send + 'static,
-    {
-        let manager = Arc::clone(self);
-        thread::spawn(move || {
-            let mut reader = output;
-            let mut buffer = [0_u8; 4096];
+    fn sample_jsonl_events(&self, session_id: &str) -> Result<(), String> {
+        let handle = self.get_handle(session_id)?;
+        let poll_result = {
+            let mut watcher = handle
+                .jsonl_watcher
+                .lock()
+                .map_err(|_| "Failed to lock JSONL watcher".to_string())?;
+            watcher.poll()?
+        };
 
-            loop {
-                match reader.read(&mut buffer) {
-                    Ok(0) => break,
-                    Ok(read) => {
-                        let chunk = String::from_utf8_lossy(&buffer[..read]).to_string();
-                        manager.append_output(&app, &session_id, chunk);
-                    }
-                    Err(error) => {
-                        manager.append_output(
-                            &app,
-                            &session_id,
-                            format!("\r\n[ccem] interactive output error: {}\r\n", error),
-                        );
-                        break;
-                    }
-                }
-            }
-        });
+        self.apply_jsonl_poll_result(session_id, &handle, poll_result)?;
+        Ok(())
     }
 
-    fn spawn_waiter(
+    fn apply_jsonl_poll_result(
+        &self,
+        _session_id: &str,
+        handle: &Arc<InteractiveSessionHandle>,
+        poll_result: JsonlPollResult,
+    ) -> Result<(), String> {
+        let mut should_persist = false;
+
+        if let Some(claude_session_id) = poll_result.claude_session_id {
+            {
+                let mut current = handle
+                    .claude_session_id
+                    .lock()
+                    .map_err(|_| "Failed to lock interactive Claude session id".to_string())?;
+                if current.as_deref() != Some(claude_session_id.as_str()) {
+                    *current = Some(claude_session_id);
+                    should_persist = true;
+                }
+            }
+        }
+
+        if let Some(jsonl_path) = poll_result.jsonl_path {
+            let jsonl_path = jsonl_path.to_string_lossy().to_string();
+            {
+                let mut persisted = handle
+                    .last_persisted_jsonl_path
+                    .lock()
+                    .map_err(|_| "Failed to lock interactive JSONL path state".to_string())?;
+                if persisted.as_deref() != Some(jsonl_path.as_str()) {
+                    *persisted = Some(jsonl_path);
+                    should_persist = true;
+                }
+            }
+        }
+
+        if should_persist {
+            self.persist_state_best_effort();
+        }
+
+        if poll_result.events.is_empty() {
+            return Ok(());
+        }
+
+        let mut store = handle
+            .events
+            .lock()
+            .map_err(|_| "Failed to lock interactive event store".to_string())?;
+        for payload in poll_result.events {
+            let _ = store.append(payload);
+        }
+
+        Ok(())
+    }
+
+    fn sample_tmux_output(&self, app: &AppHandle, session_id: &str) -> Result<(), String> {
+        let handle = self.get_handle(session_id)?;
+        let snapshot = self
+            .tmux
+            .capture_pane_target(&handle.tmux_window.target, CAPTURE_HISTORY_LINES)?;
+        let state = crate::tmux::detect_state_from_capture(&snapshot);
+        self.track_terminal_prompt_events(&handle, state)?;
+
+        let mut previous = handle
+            .last_snapshot
+            .lock()
+            .map_err(|_| "Failed to lock interactive snapshot".to_string())?;
+        if snapshot == *previous {
+            return Ok(());
+        }
+
+        let delta = diff_capture_snapshot(previous.as_str(), snapshot.as_str());
+        *previous = snapshot;
+        if !delta.is_empty() {
+            self.append_output(app, session_id, delta);
+        }
+
+        Ok(())
+    }
+
+    fn track_terminal_prompt_events(
+        &self,
+        handle: &Arc<InteractiveSessionHandle>,
+        state: ClaudeTerminalState,
+    ) -> Result<(), String> {
+        let mut last_state = handle
+            .last_terminal_state
+            .lock()
+            .map_err(|_| "Failed to lock interactive terminal state".to_string())?;
+
+        if *last_state == state {
+            return Ok(());
+        }
+
+        let mut store = handle
+            .events
+            .lock()
+            .map_err(|_| "Failed to lock interactive event store".to_string())?;
+
+        if state == ClaudeTerminalState::WaitingApproval {
+            let _ = store.append(SessionEventPayload::TerminalPromptRequired {
+                prompt_kind: TerminalPromptKind::Permission,
+                prompt_text: "Claude is waiting for approval.".to_string(),
+            });
+        } else if *last_state == ClaudeTerminalState::WaitingApproval {
+            let _ = store.append(SessionEventPayload::TerminalPromptResolved {
+                prompt_kind: TerminalPromptKind::Permission,
+                approved: true,
+            });
+        }
+
+        *last_state = state;
+        Ok(())
+    }
+
+    fn spawn_capture_poller(
         self: &Arc<Self>,
         app: AppHandle,
         session_manager: Arc<SessionManager>,
         session_id: String,
-        mut child: Child,
     ) {
         let manager = Arc::clone(self);
-        thread::spawn(move || match child.wait() {
-            Ok(status) => {
-                if let Ok(handle) = manager.get_handle(&session_id) {
-                    handle.alive.store(false, Ordering::SeqCst);
-                    if let Ok(mut stdin_guard) = handle.stdin.lock() {
-                        *stdin_guard = None;
-                    }
-                    if let Ok(mut session) = handle.session.lock() {
-                        session.status = if status.success() {
-                            "stopped".to_string()
-                        } else {
-                            "error".to_string()
-                        };
-                    }
-                }
+        thread::spawn(move || loop {
+            let Ok(handle) = manager.get_handle(&session_id) else {
+                break;
+            };
+            if !handle.alive.load(Ordering::SeqCst) {
+                break;
+            }
 
-                session_manager.update_session_status(
-                    &session_id,
-                    if status.success() { "stopped" } else { "error" },
+            if let Err(error) = manager.sample_jsonl_events(&session_id) {
+                eprintln!(
+                    "Interactive JSONL poll warning for {}: {}",
+                    session_id, error
                 );
+            }
 
-                let exit_detail = status
-                    .code()
-                    .map(|code| code.to_string())
-                    .unwrap_or_else(|| "unknown".to_string());
+            if let Err(error) = manager.sample_tmux_output(&app, &session_id) {
+                handle.alive.store(false, Ordering::SeqCst);
+                session_manager.update_session_status(&session_id, "stopped");
                 manager.append_output(
                     &app,
                     &session_id,
-                    format!(
-                        "\r\n[ccem] interactive session exited (code {})\r\n",
-                        exit_detail
-                    ),
+                    format!("\r\n[ccem] tmux session ended: {}\r\n", error),
                 );
+                manager.persist_state_best_effort();
+                break;
+            }
 
-                if let Some(session) = session_manager.get_session(&session_id) {
-                    let _ = app.emit("session-updated", &session);
-                }
-                manager.persist_state_best_effort();
-            }
-            Err(error) => {
-                session_manager.update_session_status(&session_id, "error");
-                manager.append_output(
-                    &app,
-                    &session_id,
-                    format!("\r\n[ccem] interactive wait error: {}\r\n", error),
-                );
-                manager.persist_state_best_effort();
-            }
+            thread::sleep(CAPTURE_POLL_INTERVAL);
         });
     }
 
@@ -445,34 +648,7 @@ impl InteractiveRuntimeManager {
     }
 }
 
-fn build_interactive_command(options: &InteractiveSessionOptions) -> Result<Command, String> {
-    let claude_binary = resolve_claude_path().unwrap_or_else(|| "claude".to_string());
-    let mut command = Command::new("/usr/bin/script");
-
-    command.args(["-q", "/dev/null", &claude_binary]);
-    command.args(build_permission_args(&options.perm_mode));
-
-    if let Some(resume_session_id) = options.resume_session_id.as_ref() {
-        command.args(["--resume", resume_session_id]);
-    }
-
-    command
-        .env("PATH", get_user_path())
-        .env("TERM", "xterm-256color")
-        .env_remove("CLAUDECODE")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .current_dir(&options.working_dir);
-
-    for (key, value) in &options.env_vars {
-        command.env(key, value);
-    }
-
-    Ok(command)
-}
-
-fn build_permission_args(mode_name: &str) -> Vec<String> {
+fn build_claude_args(mode_name: &str, resume_session_id: Option<&str>) -> Vec<String> {
     let official_mode = match mode_name {
         "yolo" => "bypassPermissions",
         "dev" => "acceptEdits",
@@ -482,79 +658,69 @@ fn build_permission_args(mode_name: &str) -> Vec<String> {
         _ => "acceptEdits",
     };
 
-    vec!["--permission-mode".to_string(), official_mode.to_string()]
+    let mut args = vec!["--permission-mode".to_string(), official_mode.to_string()];
+
+    if let Some(resume_session_id) = resume_session_id {
+        args.push("--resume".to_string());
+        args.push(resume_session_id.to_string());
+    }
+
+    args
 }
 
-fn get_user_path() -> &'static str {
-    USER_PATH.get_or_init(|| {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-        match Command::new(&shell)
-            .args(["-li", "-c", "echo $PATH"])
-            .output()
-        {
-            Ok(output) if output.status.success() => {
-                String::from_utf8_lossy(&output.stdout).trim().to_string()
-            }
-            _ => std::env::var("PATH").unwrap_or_default(),
-        }
-    })
+fn project_dirs_match(left: &str, right: &str) -> bool {
+    normalize_project_dir(left) == normalize_project_dir(right)
 }
 
-fn kill_process(pid: u32) -> Result<(), String> {
-    let status = Command::new("kill")
-        .args(["-TERM", &pid.to_string()])
-        .status()
-        .map_err(|error| format!("Failed to invoke kill for pid {}: {}", pid, error))?;
+fn normalize_project_dir(value: &str) -> String {
+    std::fs::canonicalize(value)
+        .unwrap_or_else(|_| PathBuf::from(value))
+        .to_string_lossy()
+        .to_string()
+}
 
-    if status.success() {
-        Ok(())
+fn diff_capture_snapshot(previous: &str, current: &str) -> String {
+    if previous.is_empty() {
+        return current.to_string();
+    }
+
+    if let Some(delta) = current.strip_prefix(previous) {
+        return delta.to_string();
+    }
+
+    let previous_lines = previous.lines().collect::<Vec<_>>();
+    let current_lines = current.lines().collect::<Vec<_>>();
+    let mut start = 0;
+    while start < previous_lines.len()
+        && start < current_lines.len()
+        && previous_lines[start] == current_lines[start]
+    {
+        start += 1;
+    }
+
+    if start >= current_lines.len() {
+        return String::new();
+    }
+
+    let new_lines = current_lines[start..].join("\n");
+    if new_lines.is_empty() {
+        String::new()
+    } else if start == 0 {
+        format!(
+            "\r\n[ccem] tmux screen resynced\r\n{}\r\n",
+            current.trim_end_matches('\n')
+        )
     } else {
-        Err(format!("kill -TERM {} exited with status {}", pid, status))
+        format!("{}\n", new_lines)
     }
-}
-
-fn terminate_process(pid: u32) -> Result<(), String> {
-    kill_process(pid)?;
-
-    for _ in 0..50 {
-        if !process_exists(pid) {
-            return Ok(());
-        }
-        thread::sleep(std::time::Duration::from_millis(100));
-    }
-
-    let status = Command::new("kill")
-        .args(["-KILL", &pid.to_string()])
-        .status()
-        .map_err(|error| format!("Failed to invoke kill -KILL for pid {}: {}", pid, error))?;
-
-    if status.success() || !process_exists(pid) {
-        Ok(())
-    } else {
-        Err(format!("kill -KILL {} exited with status {}", pid, status))
-    }
-}
-
-fn process_exists(pid: u32) -> bool {
-    Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
-#[allow(dead_code)]
-fn generate_interactive_runtime_id() -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    format!("interactive-{}", nanos)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::InteractiveTranscript;
+    use super::{
+        diff_capture_snapshot, normalize_project_dir, project_dirs_match, InteractiveTranscript,
+    };
+    use std::path::PathBuf;
 
     #[test]
     fn replay_flags_gap_after_eviction() {
@@ -567,5 +733,26 @@ mod tests {
         assert!(replay.gap_detected);
         assert!(replay.oldest_available_seq.unwrap_or(0) > 0);
         assert_eq!(replay.chunks.len(), 1200);
+    }
+
+    #[test]
+    fn diff_capture_snapshot_returns_suffix_when_history_grows() {
+        let previous = "line-1\nline-2\n";
+        let current = "line-1\nline-2\nline-3\n";
+        assert_eq!(diff_capture_snapshot(previous, current), "line-3\n");
+    }
+
+    #[test]
+    fn project_dirs_match_normalizes_private_tmp_alias() {
+        let tmp = std::env::temp_dir();
+        let private_tmp = PathBuf::from("/private").join(tmp.strip_prefix("/").unwrap_or(&tmp));
+        assert_eq!(
+            normalize_project_dir("/tmp"),
+            normalize_project_dir("/private/tmp")
+        );
+        assert!(project_dirs_match(
+            tmp.to_string_lossy().as_ref(),
+            private_tmp.to_string_lossy().as_ref()
+        ));
     }
 }

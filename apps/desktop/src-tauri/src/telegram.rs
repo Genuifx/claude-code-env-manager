@@ -1,20 +1,40 @@
 use crate::config;
 use crate::cron;
 use crate::crypto;
-use crate::event_bus::{ReplayBatch, SessionEventPayload};
-use crate::runtime::{HeadlessRuntimeManager, HeadlessSessionOptions, HeadlessSessionSource};
+use crate::event_bus::{
+    InteractiveToolPrompt, SessionEventPayload, ToolCategory, ToolQuestionOption,
+    ToolQuestionPrompt,
+};
+use crate::interactive_runtime::{InteractiveRuntimeManager, InteractiveSessionOptions};
+use crate::runtime::{
+    clear_runtime_recovery_candidates_by_claude_session_id, HeadlessRuntimeManager,
+    HeadlessSessionOptions, HeadlessSessionSource,
+};
+use crate::session::SessionManager;
+use crate::tmux::ClaudeTerminalState;
 use chrono::{DateTime, Utc};
+use reqwest::blocking::Response;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 const TELEGRAM_API_BASE: &str = "https://api.telegram.org";
+const TELEGRAM_GENERAL_TOPIC_THREAD_ID: i64 = 1;
+const TELEGRAM_DEFAULT_TOPIC_ICON_COLOR: u32 = 0x6FB9F0;
+const INTERACTIVE_TOOL_SEEN_TTL: Duration = Duration::from_secs(60 * 10);
+const TELEGRAM_LONG_POLL_TIMEOUT_SECS: u64 = 5;
+const TELEGRAM_HTTP_TIMEOUT_SECS: u64 = 12;
+const TELEGRAM_STOP_GRACE_TIMEOUT_SECS: u64 = 7;
+const TELEGRAM_STOP_POLL_INTERVAL_MS: u64 = 100;
+const TELEGRAM_BIND_PROJECT_LIMIT: usize = 8;
+const TELEGRAM_BIND_PERM_MODES: &[&str] = &["yolo", "dev", "readonly", "safe", "ci", "audit"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TelegramTopicBinding {
@@ -88,6 +108,8 @@ pub struct TelegramSettings {
     pub enabled: bool,
     #[serde(rename = "botToken", default)]
     pub bot_token: Option<String>,
+    #[serde(rename = "allowedUserIds", alias = "allowed_user_ids", default)]
+    pub allowed_user_ids: Vec<i64>,
     #[serde(rename = "allowedChatId", default)]
     pub allowed_chat_id: Option<i64>,
     #[serde(rename = "notificationsThreadId", default)]
@@ -116,7 +138,72 @@ pub struct TelegramBridgeStatus {
     pub allowed_chat_id: Option<i64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TelegramForumTopic {
+    pub thread_id: i64,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_color: Option<u32>,
+    pub is_bound: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bound_project: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+enum PendingInteractiveAction {
+    #[default]
+    Empty,
+    FreeText(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InteractiveChoiceSubmitMode {
+    AskUserQuestion,
+    PlanExit,
+}
+
+#[derive(Debug, Clone)]
+struct ActiveInteractiveChoicePrompt {
+    runtime_id: String,
+    tool_use_id: String,
+    questions: Vec<ToolQuestionPrompt>,
+    current_question_index: usize,
+    submit_mode: InteractiveChoiceSubmitMode,
+    selected_options: BTreeSet<usize>,
+    awaiting_text_entry: Option<usize>,
+    message_id: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+enum ActiveInteractivePrompt {
+    Choice(ActiveInteractiveChoicePrompt),
+}
+
 #[derive(Debug, Clone, Default)]
+struct KnownForumTopicState {
+    name: Option<String>,
+    icon_color: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BindStep {
+    SelectProject,
+    EnterCustomProject,
+    SelectEnv,
+    SelectPerm,
+}
+
+#[derive(Debug, Clone)]
+struct PendingBindSession {
+    message_id: i64,
+    step: BindStep,
+    project_candidates: Vec<String>,
+    selected_project: Option<String>,
+    selected_env: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 struct TelegramBridgeState {
     configured: bool,
     running: bool,
@@ -125,11 +212,38 @@ struct TelegramBridgeState {
     allowed_chat_id: Option<i64>,
     next_update_id: Option<i64>,
     active_runtime_by_scope: HashMap<String, String>,
+    interactive_monitor_by_scope: HashMap<String, String>,
+    pending_interactive_actions: HashMap<String, VecDeque<PendingInteractiveAction>>,
+    active_interactive_prompts: HashMap<String, ActiveInteractivePrompt>,
+    seen_interactive_tool_events: HashMap<String, Instant>,
+    pending_bind_sessions: HashMap<String, PendingBindSession>,
+    known_forum_topics: HashMap<i64, KnownForumTopicState>,
+}
+
+impl Default for TelegramBridgeState {
+    fn default() -> Self {
+        Self {
+            configured: false,
+            running: false,
+            bot_username: None,
+            last_error: None,
+            allowed_chat_id: None,
+            next_update_id: None,
+            active_runtime_by_scope: HashMap::new(),
+            interactive_monitor_by_scope: HashMap::new(),
+            pending_interactive_actions: HashMap::new(),
+            active_interactive_prompts: HashMap::new(),
+            seen_interactive_tool_events: HashMap::new(),
+            pending_bind_sessions: HashMap::new(),
+            known_forum_topics: HashMap::new(),
+        }
+    }
 }
 
 pub struct TelegramBridgeManager {
     state: Mutex<TelegramBridgeState>,
     stop_flag: AtomicBool,
+    worker: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
 impl Default for TelegramBridgeManager {
@@ -137,6 +251,7 @@ impl Default for TelegramBridgeManager {
         Self {
             state: Mutex::new(TelegramBridgeState::default()),
             stop_flag: AtomicBool::new(false),
+            worker: Mutex::new(None),
         }
     }
 }
@@ -161,7 +276,43 @@ impl TelegramBridgeManager {
         self: &Arc<Self>,
         app: AppHandle,
         runtime_manager: Arc<HeadlessRuntimeManager>,
+        interactive_runtime_manager: Arc<InteractiveRuntimeManager>,
     ) -> Result<TelegramBridgeStatus, String> {
+        self.cleanup_finished_worker();
+
+        {
+            let state = self
+                .state
+                .lock()
+                .map_err(|_| "Failed to lock Telegram bridge state".to_string())?;
+            if state.running {
+                return Ok(TelegramBridgeStatus {
+                    configured: true,
+                    running: true,
+                    bot_username: state.bot_username.clone(),
+                    last_error: state.last_error.clone(),
+                    allowed_chat_id: state.allowed_chat_id,
+                });
+            }
+        }
+
+        if self
+            .worker
+            .lock()
+            .map_err(|_| "Failed to lock Telegram bridge worker".to_string())?
+            .as_ref()
+            .is_some_and(|handle| !handle.is_finished())
+        {
+            self.stop_flag.store(true, Ordering::SeqCst);
+            if !self.wait_for_worker_shutdown(Duration::from_secs(TELEGRAM_STOP_GRACE_TIMEOUT_SECS))
+            {
+                return Err(
+                    "Telegram bridge is still stopping. CCEM is waiting for the previous long-poll request to finish."
+                        .to_string(),
+                );
+            }
+        }
+
         let settings = read_telegram_settings()?;
         let token = settings
             .bot_token
@@ -175,16 +326,6 @@ impl TelegramBridgeManager {
                 .state
                 .lock()
                 .map_err(|_| "Failed to lock Telegram bridge state".to_string())?;
-            if state.running {
-                return Ok(TelegramBridgeStatus {
-                    configured: true,
-                    running: true,
-                    bot_username: state.bot_username.clone(),
-                    last_error: state.last_error.clone(),
-                    allowed_chat_id: settings.allowed_chat_id,
-                });
-            }
-
             self.stop_flag.store(false, Ordering::SeqCst);
             state.configured = true;
             state.running = true;
@@ -194,9 +335,20 @@ impl TelegramBridgeManager {
         }
 
         let manager = Arc::clone(self);
-        thread::spawn(move || {
-            run_bridge_loop(manager, app, runtime_manager, token, settings, me.username);
+        let handle = thread::spawn(move || {
+            run_bridge_loop(
+                manager,
+                app,
+                runtime_manager,
+                interactive_runtime_manager,
+                token,
+                settings,
+                me.username,
+            );
         });
+        if let Ok(mut worker) = self.worker.lock() {
+            *worker = Some(handle);
+        }
 
         Ok(self.status())
     }
@@ -206,6 +358,12 @@ impl TelegramBridgeManager {
         if let Ok(mut state) = self.state.lock() {
             state.running = false;
             state.active_runtime_by_scope.clear();
+            state.interactive_monitor_by_scope.clear();
+            state.pending_interactive_actions.clear();
+            state.active_interactive_prompts.clear();
+            state.seen_interactive_tool_events.clear();
+            state.pending_bind_sessions.clear();
+            state.known_forum_topics.clear();
         }
         self.status()
     }
@@ -237,6 +395,25 @@ impl TelegramBridgeManager {
         }
     }
 
+    fn remember_forum_topic(&self, thread_id: i64, name: Option<String>, icon_color: Option<u32>) {
+        if let Ok(mut state) = self.state.lock() {
+            let entry = state.known_forum_topics.entry(thread_id).or_default();
+            if let Some(name) = name.filter(|value| !value.trim().is_empty()) {
+                entry.name = Some(name);
+            }
+            if icon_color.is_some() {
+                entry.icon_color = icon_color;
+            }
+        }
+    }
+
+    fn known_forum_topics(&self) -> HashMap<i64, KnownForumTopicState> {
+        self.state
+            .lock()
+            .map(|state| state.known_forum_topics.clone())
+            .unwrap_or_default()
+    }
+
     fn remember_runtime_for_scope(&self, chat_id: i64, thread_id: Option<i64>, runtime_id: String) {
         if let Ok(mut state) = self.state.lock() {
             state
@@ -256,14 +433,156 @@ impl TelegramBridgeManager {
 
     fn clear_runtime_for_scope(&self, chat_id: i64, thread_id: Option<i64>, runtime_id: &str) {
         if let Ok(mut state) = self.state.lock() {
+            let key = scope_key(chat_id, thread_id);
             if state
                 .active_runtime_by_scope
-                .get(&scope_key(chat_id, thread_id))
+                .get(&key)
                 .is_some_and(|value| value == runtime_id)
             {
+                state.active_runtime_by_scope.remove(&key);
+            }
+            if state
+                .interactive_monitor_by_scope
+                .get(&key)
+                .is_some_and(|value| value == runtime_id)
+            {
+                state.interactive_monitor_by_scope.remove(&key);
+            }
+            state.pending_interactive_actions.remove(&key);
+            state.active_interactive_prompts.remove(&key);
+            state
+                .seen_interactive_tool_events
+                .retain(|tool_key, _| !tool_key.starts_with(&format!("{key}:")));
+        }
+    }
+
+    fn ensure_interactive_monitor_for_scope(
+        &self,
+        chat_id: i64,
+        thread_id: Option<i64>,
+        runtime_id: &str,
+    ) -> bool {
+        if let Ok(mut state) = self.state.lock() {
+            let key = scope_key(chat_id, thread_id);
+            if state
+                .interactive_monitor_by_scope
+                .get(&key)
+                .is_some_and(|value| value == runtime_id)
+            {
+                return false;
+            }
+            state
+                .interactive_monitor_by_scope
+                .insert(key, runtime_id.to_string());
+            return true;
+        }
+        true
+    }
+
+    fn queue_interactive_message(
+        &self,
+        chat_id: i64,
+        thread_id: Option<i64>,
+        message: String,
+    ) -> usize {
+        if let Ok(mut state) = self.state.lock() {
+            let queue = state
+                .pending_interactive_actions
+                .entry(scope_key(chat_id, thread_id))
+                .or_default();
+            queue.push_back(PendingInteractiveAction::FreeText(message));
+            return queue.len();
+        }
+        0
+    }
+
+    fn pop_pending_interactive_action(
+        &self,
+        chat_id: i64,
+        thread_id: Option<i64>,
+    ) -> Option<PendingInteractiveAction> {
+        let mut state = self.state.lock().ok()?;
+        let key = scope_key(chat_id, thread_id);
+        let queue = state.pending_interactive_actions.get_mut(&key)?;
+        let message = queue.pop_front();
+        if queue.is_empty() {
+            state.pending_interactive_actions.remove(&key);
+        }
+        message
+    }
+
+    fn remember_active_prompt(
+        &self,
+        chat_id: i64,
+        thread_id: Option<i64>,
+        prompt: ActiveInteractivePrompt,
+    ) {
+        if let Ok(mut state) = self.state.lock() {
+            state
+                .active_interactive_prompts
+                .insert(scope_key(chat_id, thread_id), prompt);
+        }
+    }
+
+    fn active_prompt_for_scope(
+        &self,
+        chat_id: i64,
+        thread_id: Option<i64>,
+    ) -> Option<ActiveInteractivePrompt> {
+        self.state.lock().ok().and_then(|state| {
+            state
+                .active_interactive_prompts
+                .get(&scope_key(chat_id, thread_id))
+                .cloned()
+        })
+    }
+
+    fn mutate_active_prompt_for_scope<T>(
+        &self,
+        chat_id: i64,
+        thread_id: Option<i64>,
+        mutate: impl FnOnce(&mut ActiveInteractivePrompt) -> T,
+    ) -> Option<T> {
+        let mut state = self.state.lock().ok()?;
+        let prompt = state
+            .active_interactive_prompts
+            .get_mut(&scope_key(chat_id, thread_id))?;
+        Some(mutate(prompt))
+    }
+
+    fn clear_active_prompt_for_scope(
+        &self,
+        chat_id: i64,
+        thread_id: Option<i64>,
+    ) -> Option<ActiveInteractivePrompt> {
+        self.state.lock().ok().and_then(|mut state| {
+            state
+                .active_interactive_prompts
+                .remove(&scope_key(chat_id, thread_id))
+        })
+    }
+
+    fn mark_interactive_tool_seen(
+        &self,
+        chat_id: i64,
+        thread_id: Option<i64>,
+        tool_use_id: &str,
+    ) -> bool {
+        let mut state = match self.state.lock() {
+            Ok(state) => state,
+            Err(_) => return false,
+        };
+        state
+            .seen_interactive_tool_events
+            .retain(|_, seen_at| seen_at.elapsed() <= INTERACTIVE_TOOL_SEEN_TTL);
+        let key = format!("{}:{}", scope_key(chat_id, thread_id), tool_use_id);
+        match state.seen_interactive_tool_events.get(&key) {
+            Some(_) => false,
+            None => {
                 state
-                    .active_runtime_by_scope
-                    .remove(&scope_key(chat_id, thread_id));
+                    .seen_interactive_tool_events
+                    .insert(key, Instant::now());
+                true
             }
         }
     }
@@ -280,12 +599,41 @@ impl TelegramBridgeManager {
             state.next_update_id = Some(update_id + 1);
         }
     }
+
+    fn cleanup_finished_worker(&self) {
+        if let Ok(mut worker) = self.worker.lock() {
+            if worker.as_ref().is_some_and(|handle| handle.is_finished()) {
+                if let Some(handle) = worker.take() {
+                    let _ = handle.join();
+                }
+            }
+        }
+    }
+
+    fn wait_for_worker_shutdown(&self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        loop {
+            self.cleanup_finished_worker();
+            let still_running = self
+                .worker
+                .lock()
+                .map(|worker| worker.as_ref().is_some_and(|handle| !handle.is_finished()))
+                .unwrap_or(false);
+            if !still_running {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(TELEGRAM_STOP_POLL_INTERVAL_MS));
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
 struct TelegramApiResponse<T> {
     ok: bool,
-    result: T,
+    result: Option<T>,
     description: Option<String>,
 }
 
@@ -298,19 +646,59 @@ struct TelegramUser {
 struct TelegramUpdate {
     update_id: i64,
     message: Option<TelegramMessage>,
+    #[serde(default)]
+    callback_query: Option<TelegramCallbackQuery>,
 }
 
 #[derive(Debug, Deserialize)]
 struct TelegramMessage {
+    #[serde(default)]
+    message_id: i64,
     chat: TelegramChat,
+    #[serde(default)]
+    from: Option<TelegramSender>,
     text: Option<String>,
     #[serde(default)]
     message_thread_id: Option<i64>,
+    #[serde(default)]
+    forum_topic_created: Option<TelegramForumTopicCreatedPayload>,
+    #[serde(default)]
+    forum_topic_edited: Option<TelegramForumTopicEditedPayload>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TelegramForumTopicCreatedPayload {
+    name: String,
+    #[serde(default)]
+    icon_color: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TelegramForumTopicEditedPayload {
+    #[serde(default)]
+    name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct TelegramChat {
     id: i64,
+    #[serde(default)]
+    is_forum: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TelegramSender {
+    id: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct TelegramCallbackQuery {
+    id: String,
+    from: TelegramSender,
+    #[serde(default)]
+    message: Option<TelegramMessage>,
+    #[serde(default)]
+    data: Option<String>,
 }
 
 pub fn telegram_settings_path() -> PathBuf {
@@ -372,18 +760,131 @@ pub fn send_configured_message(text: &str) -> Result<bool, String> {
 }
 
 fn scope_key(chat_id: i64, thread_id: Option<i64>) -> String {
-    format!("{}:{}", chat_id, thread_id.unwrap_or(0))
+    format!(
+        "{}:{}",
+        chat_id,
+        canonical_thread_id(thread_id).unwrap_or(0)
+    )
+}
+
+fn bind_scope_key(chat_id: i64, thread_id: i64) -> String {
+    scope_key(chat_id, Some(thread_id))
+}
+
+fn set_pending_bind_session(
+    manager: &TelegramBridgeManager,
+    chat_id: i64,
+    thread_id: i64,
+    session: PendingBindSession,
+) -> Result<(), String> {
+    let mut state = manager
+        .state
+        .lock()
+        .map_err(|_| "Failed to lock Telegram bridge state".to_string())?;
+    state
+        .pending_bind_sessions
+        .insert(bind_scope_key(chat_id, thread_id), session);
+    Ok(())
+}
+
+fn pending_bind_session(
+    manager: &TelegramBridgeManager,
+    chat_id: i64,
+    thread_id: i64,
+) -> Result<Option<PendingBindSession>, String> {
+    let state = manager
+        .state
+        .lock()
+        .map_err(|_| "Failed to lock Telegram bridge state".to_string())?;
+    Ok(state
+        .pending_bind_sessions
+        .get(&bind_scope_key(chat_id, thread_id))
+        .cloned())
+}
+
+fn with_pending_bind_session<R, F>(
+    manager: &TelegramBridgeManager,
+    chat_id: i64,
+    thread_id: i64,
+    update: F,
+) -> Result<Option<R>, String>
+where
+    F: FnOnce(&mut PendingBindSession) -> Result<R, String>,
+{
+    let mut state = manager
+        .state
+        .lock()
+        .map_err(|_| "Failed to lock Telegram bridge state".to_string())?;
+    let Some(session) = state
+        .pending_bind_sessions
+        .get_mut(&bind_scope_key(chat_id, thread_id))
+    else {
+        return Ok(None);
+    };
+    update(session).map(Some)
+}
+
+fn clear_pending_bind_session(
+    manager: &TelegramBridgeManager,
+    chat_id: i64,
+    thread_id: i64,
+) -> Result<(), String> {
+    let mut state = manager
+        .state
+        .lock()
+        .map_err(|_| "Failed to lock Telegram bridge state".to_string())?;
+    state
+        .pending_bind_sessions
+        .remove(&bind_scope_key(chat_id, thread_id));
+    Ok(())
 }
 
 fn find_topic_binding<'a>(
     settings: &'a TelegramSettings,
     thread_id: Option<i64>,
 ) -> Option<&'a TelegramTopicBinding> {
-    let thread_id = thread_id?;
+    let thread_id = canonical_thread_id(thread_id)?;
     settings
         .topic_bindings
         .iter()
         .find(|binding| binding.thread_id == thread_id)
+}
+
+fn find_topic_binding_by_project<'a>(
+    settings: &'a TelegramSettings,
+    project_dir: &str,
+    preferred_env: Option<&str>,
+    preferred_perm_mode: Option<&str>,
+) -> Option<&'a TelegramTopicBinding> {
+    settings.topic_bindings.iter().find(|binding| {
+        let binding_env = resolve_topic_env_name(settings, binding.preferred_env.as_deref());
+        let binding_perm =
+            resolve_topic_perm_mode(settings, binding.preferred_perm_mode.as_deref());
+        binding.project_dir == project_dir
+            && binding_env == preferred_env.unwrap_or_default()
+            && binding_perm == preferred_perm_mode.unwrap_or_default()
+    })
+}
+
+fn canonical_thread_id(thread_id: Option<i64>) -> Option<i64> {
+    match thread_id {
+        Some(TELEGRAM_GENERAL_TOPIC_THREAD_ID) | None => None,
+        value => value,
+    }
+}
+
+fn is_general_topic(thread_id: Option<i64>) -> bool {
+    canonical_thread_id(thread_id).is_none()
+}
+
+fn is_sender_allowed(settings: &TelegramSettings, user_id: Option<i64>) -> bool {
+    if settings.allowed_user_ids.is_empty() {
+        return true;
+    }
+
+    user_id
+        .map(|user_id| settings.allowed_user_ids.contains(&user_id))
+        .unwrap_or(false)
 }
 
 fn upsert_topic_binding(settings: &mut TelegramSettings, binding: TelegramTopicBinding) {
@@ -401,12 +902,646 @@ fn upsert_topic_binding(settings: &mut TelegramSettings, binding: TelegramTopicB
     }
 }
 
+fn save_topic_binding(
+    thread_id: i64,
+    project_dir: String,
+    preferred_env: Option<String>,
+    preferred_perm_mode: Option<String>,
+) -> Result<TelegramTopicBinding, String> {
+    with_telegram_settings_mut(|settings| {
+        let existing = settings
+            .topic_bindings
+            .iter()
+            .find(|binding| binding.thread_id == thread_id)
+            .cloned();
+        let binding = TelegramTopicBinding {
+            thread_id,
+            project_dir,
+            preferred_env,
+            preferred_perm_mode,
+            active_runtime_id: existing
+                .as_ref()
+                .and_then(|binding| binding.active_runtime_id.clone()),
+            last_claude_session_id: existing
+                .as_ref()
+                .and_then(|binding| binding.last_claude_session_id.clone()),
+            created_at: existing
+                .map(|binding| binding.created_at)
+                .unwrap_or_else(Utc::now),
+        };
+        upsert_topic_binding(settings, binding.clone());
+        binding
+    })
+}
+
 fn remove_topic_binding(settings: &mut TelegramSettings, thread_id: i64) -> bool {
     let before = settings.topic_bindings.len();
     settings
         .topic_bindings
         .retain(|binding| binding.thread_id != thread_id);
     before != settings.topic_bindings.len()
+}
+
+fn parse_permission_callback_data(data: &str) -> Option<(bool, &str)> {
+    if let Some(request_id) = data.strip_prefix("perm:approve:") {
+        return Some((true, request_id.trim()));
+    }
+
+    if let Some(request_id) = data.strip_prefix("perm:deny:") {
+        return Some((false, request_id.trim()));
+    }
+
+    None
+}
+
+fn parse_interactive_permission_callback_data(data: &str) -> Option<(bool, &str)> {
+    if let Some(session_id) = data.strip_prefix("perm_i:approve:") {
+        return Some((true, session_id.trim()));
+    }
+
+    if let Some(session_id) = data.strip_prefix("perm_i:deny:") {
+        return Some((false, session_id.trim()));
+    }
+
+    None
+}
+
+fn parse_interactive_tool_select_callback_data(data: &str) -> Option<usize> {
+    data.strip_prefix("tool_i:select:")
+        .and_then(|value| value.parse::<usize>().ok())
+}
+
+fn parse_interactive_tool_submit_callback_data(data: &str) -> bool {
+    data == "tool_i:submit"
+}
+
+fn parse_interactive_tool_cancel_callback_data(data: &str) -> bool {
+    data == "tool_i:cancel"
+}
+
+fn active_prompt_runtime_id(prompt: &ActiveInteractivePrompt) -> &str {
+    match prompt {
+        ActiveInteractivePrompt::Choice(prompt) => &prompt.runtime_id,
+    }
+}
+
+fn active_choice_question(prompt: &ActiveInteractiveChoicePrompt) -> Option<&ToolQuestionPrompt> {
+    prompt.questions.get(prompt.current_question_index)
+}
+
+fn active_choice_progress(prompt: &ActiveInteractiveChoicePrompt) -> Option<(usize, usize)> {
+    (prompt.questions.len() > 1).then_some((
+        prompt.current_question_index.saturating_add(1),
+        prompt.questions.len(),
+    ))
+}
+
+fn advance_active_choice_prompt(prompt: &mut ActiveInteractiveChoicePrompt) -> bool {
+    if prompt.current_question_index + 1 >= prompt.questions.len() {
+        return false;
+    }
+
+    prompt.current_question_index += 1;
+    prompt.selected_options.clear();
+    prompt.awaiting_text_entry = None;
+    true
+}
+
+fn format_active_choice_text(prompt: &ActiveInteractiveChoicePrompt) -> String {
+    active_choice_question(prompt)
+        .map(|question| format_interactive_choice_text(question, active_choice_progress(prompt)))
+        .unwrap_or_else(|| "Interactive question is no longer available.".to_string())
+}
+
+fn build_active_choice_markup(prompt: &ActiveInteractiveChoicePrompt) -> serde_json::Value {
+    active_choice_question(prompt)
+        .map(|question| build_interactive_choice_markup(question, &prompt.selected_options))
+        .unwrap_or_else(build_text_entry_markup)
+}
+
+fn selection_submit_options(
+    question: &ToolQuestionPrompt,
+    selected_options: &BTreeSet<usize>,
+) -> BTreeSet<usize> {
+    selected_options
+        .iter()
+        .copied()
+        .filter(|index| {
+            question
+                .options
+                .get(index.saturating_sub(1))
+                .is_none_or(|option| {
+                    !is_vscode_text_entry_option(&option.label)
+                        && !is_chat_about_this_option(&option.label)
+                })
+        })
+        .collect()
+}
+
+fn option_has_preview(option: &ToolQuestionOption) -> bool {
+    option
+        .preview
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|preview| !preview.is_empty())
+}
+
+fn is_vscode_text_entry_option(label: &str) -> bool {
+    let normalized = label.to_ascii_lowercase();
+    normalized.contains("type something")
+        || normalized.contains("type here")
+        || normalized.contains("other")
+}
+
+fn is_chat_about_this_option(label: &str) -> bool {
+    label.to_ascii_lowercase().contains("chat about this")
+}
+
+fn question_supports_chat_about_this(question: &ToolQuestionPrompt) -> bool {
+    question.options.iter().any(option_has_preview)
+}
+
+fn ensure_text_entry_option(question: &ToolQuestionPrompt) -> ToolQuestionPrompt {
+    if question_supports_chat_about_this(question) {
+        return question.clone();
+    }
+
+    if question
+        .options
+        .iter()
+        .any(|option| is_vscode_text_entry_option(&option.label))
+    {
+        return question.clone();
+    }
+
+    let mut question = question.clone();
+    question.options.push(ToolQuestionOption {
+        label: "Type something".to_string(),
+        description: None,
+        preview: None,
+    });
+    question
+}
+
+fn ensure_chat_about_this_option(question: &ToolQuestionPrompt) -> ToolQuestionPrompt {
+    if !question_supports_chat_about_this(question)
+        || question
+            .options
+            .iter()
+            .any(|option| is_chat_about_this_option(&option.label))
+    {
+        return question.clone();
+    }
+
+    let mut question = question.clone();
+    question.options.push(ToolQuestionOption {
+        label: "Chat about this".to_string(),
+        description: Some("Clarify the question before answering.".to_string()),
+        preview: None,
+    });
+    question
+}
+
+fn normalize_ask_user_questions_for_telegram(
+    questions: Vec<ToolQuestionPrompt>,
+) -> Vec<ToolQuestionPrompt> {
+    questions
+        .into_iter()
+        .map(|question| {
+            let question = ensure_chat_about_this_option(&question);
+            ensure_text_entry_option(&question)
+        })
+        .collect()
+}
+
+fn format_tool_started_message(
+    category: &ToolCategory,
+    raw_name: &str,
+    input_summary: &str,
+) -> Option<String> {
+    let trimmed = input_summary.trim();
+    match category {
+        ToolCategory::Execution { .. } => Some(if trimmed.is_empty() {
+            format!("⚙️ {raw_name}")
+        } else {
+            format!("⚙️ {raw_name}: {trimmed}")
+        }),
+        ToolCategory::FileOp { .. } => Some(if trimmed.is_empty() {
+            format!("📄 {raw_name}")
+        } else {
+            format!("📄 {raw_name}: {trimmed}")
+        }),
+        ToolCategory::TaskMgmt { .. } => Some(if trimmed.is_empty() {
+            format!("📋 {raw_name}")
+        } else {
+            format!("📋 {raw_name}: {trimmed}")
+        }),
+        ToolCategory::Unknown { .. } => Some(if trimmed.is_empty() {
+            format!("🔧 {raw_name}")
+        } else {
+            format!("🔧 {raw_name}: {trimmed}")
+        }),
+        ToolCategory::Search { .. } | ToolCategory::UserInput { .. } => None,
+    }
+}
+
+fn format_tool_completed_message(
+    raw_name: &str,
+    result_summary: &str,
+    success: bool,
+) -> Option<String> {
+    if is_interactive_user_input_tool(raw_name) {
+        return None;
+    }
+
+    let trimmed = result_summary.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{} {}: {}",
+        if success { "✅" } else { "⚠️" },
+        raw_name,
+        trimmed
+    ))
+}
+
+fn is_interactive_user_input_tool(raw_name: &str) -> bool {
+    raw_name.contains("AskUser")
+        || raw_name.contains("Question")
+        || (raw_name.contains("PlanMode") && raw_name.contains("Exit"))
+}
+
+fn summarize_interactive_prompt_resolution(raw_name: &str, result_summary: &str) -> String {
+    let trimmed = result_summary.trim();
+    if raw_name.contains("AskUser")
+        && (trimmed.contains("wants to clarify these questions")
+            || trimmed.contains("doesn't want to proceed with this tool use"))
+    {
+        return "Interactive prompt resolved via AskUserQuestion.\nClaude switched to clarification mode.".to_string();
+    }
+
+    if trimmed.is_empty() {
+        format!("Interactive prompt resolved via {}.", raw_name)
+    } else {
+        format!(
+            "Interactive prompt resolved via {}.\n{}",
+            raw_name, result_summary
+        )
+    }
+}
+
+fn format_interactive_choice_text(
+    question: &ToolQuestionPrompt,
+    progress: Option<(usize, usize)>,
+) -> String {
+    let mut lines = Vec::new();
+    if let Some((current, total)) = progress {
+        lines.push(format!("Question {current}/{total}"));
+        lines.push(String::new());
+    }
+    if let Some(header) = question.header.as_deref() {
+        lines.push(format!("{}:", header));
+    }
+    lines.push(question.question.clone());
+    lines.push(String::new());
+
+    for (index, option) in question.options.iter().enumerate() {
+        let prefix = format!("{}. {}", index + 1, option.label);
+        match option.description.as_deref() {
+            Some(description) if !description.trim().is_empty() => {
+                lines.push(format!("{prefix}\n{}", description.trim()));
+            }
+            _ => lines.push(prefix),
+        }
+    }
+
+    if question.multi_select {
+        lines.push(String::new());
+        lines.push("可多选，点按钮切换后再提交。".to_string());
+    }
+
+    lines.join("\n")
+}
+
+fn build_interactive_choice_markup(
+    question: &ToolQuestionPrompt,
+    selected_options: &BTreeSet<usize>,
+) -> serde_json::Value {
+    let mut rows = question
+        .options
+        .iter()
+        .enumerate()
+        .map(|(index, option)| {
+            let option_index = index + 1;
+            let selected = selected_options.contains(&option_index);
+            let marker = if selected { "☑" } else { "☐" };
+            serde_json::json!([{
+                "text": format!("{marker} {}. {}", option_index, option.label),
+                "callback_data": format!("tool_i:select:{option_index}"),
+            }])
+        })
+        .collect::<Vec<_>>();
+
+    if question.multi_select {
+        rows.push(serde_json::json!([
+            {
+                "text": "Submit",
+                "callback_data": "tool_i:submit",
+            },
+            {
+                "text": "Cancel",
+                "callback_data": "tool_i:cancel",
+            }
+        ]));
+    } else {
+        rows.push(serde_json::json!([{
+            "text": "Cancel",
+            "callback_data": "tool_i:cancel",
+        }]));
+    }
+
+    serde_json::json!({ "inline_keyboard": rows })
+}
+
+fn build_plan_exit_question(
+    plan_summary: Option<&str>,
+    allowed_prompts: &[String],
+) -> ToolQuestionPrompt {
+    let mut question =
+        "Claude has written up a plan and is ready to execute. Would you like to proceed?"
+            .to_string();
+    if let Some(plan_summary) = plan_summary
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        question = format!(
+            "Claude has written up a plan and is ready to execute.\n\n{}\n\nWould you like to proceed?",
+            truncate_for_telegram(plan_summary)
+        );
+    }
+
+    let custom_text_entry = allowed_prompts
+        .iter()
+        .find_map(|prompt| {
+            let trimmed = prompt.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        })
+        .unwrap_or_else(|| "Type here to tell Claude what to change".to_string());
+
+    ToolQuestionPrompt {
+        header: Some("Ready to code?".to_string()),
+        question,
+        multi_select: false,
+        options: vec![
+            ToolQuestionOption {
+                label: "Yes, clear context and auto-accept edits".to_string(),
+                description: None,
+                preview: None,
+            },
+            ToolQuestionOption {
+                label: "Yes, auto-accept edits".to_string(),
+                description: None,
+                preview: None,
+            },
+            ToolQuestionOption {
+                label: "Yes, manually approve edits".to_string(),
+                description: None,
+                preview: None,
+            },
+            ToolQuestionOption {
+                label: custom_text_entry,
+                description: None,
+                preview: None,
+            },
+        ],
+    }
+}
+
+fn build_text_entry_markup() -> serde_json::Value {
+    serde_json::json!({
+        "inline_keyboard": [[{
+            "text": "Cancel",
+            "callback_data": "tool_i:cancel",
+        }]]
+    })
+}
+
+fn send_interactive_input_sequence(
+    interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
+    runtime_id: &str,
+    steps: &[(&str, Duration)],
+) -> Result<(), String> {
+    for (data, delay) in steps {
+        interactive_runtime_manager.write_input(runtime_id, data)?;
+        if !delay.is_zero() {
+            thread::sleep(*delay);
+        }
+    }
+    Ok(())
+}
+
+fn build_multi_select_text_entry_steps(option_index: usize) -> Vec<(String, Duration)> {
+    let mut owned_steps = Vec::new();
+    for _ in 0..(option_index + 2) {
+        owned_steps.push(("\u{1b}[A".to_string(), Duration::from_millis(60)));
+    }
+    for _ in 0..option_index.saturating_sub(1) {
+        owned_steps.push(("\u{1b}[B".to_string(), Duration::from_millis(60)));
+    }
+    owned_steps.push(("\r".to_string(), Duration::from_millis(120)));
+    owned_steps
+}
+
+fn build_multi_select_submit_steps(selected_options: &BTreeSet<usize>) -> Vec<(String, Duration)> {
+    let mut owned_steps = selected_options
+        .iter()
+        .map(|option| (option.to_string(), Duration::from_millis(120)))
+        .collect::<Vec<_>>();
+    owned_steps.push(("\t".to_string(), Duration::from_millis(120)));
+    owned_steps.push(("\r".to_string(), Duration::from_millis(400)));
+    owned_steps.push(("1".to_string(), Duration::from_millis(0)));
+    owned_steps
+}
+
+fn build_chat_about_this_steps(option_count: usize) -> Vec<(String, Duration)> {
+    let mut owned_steps = Vec::new();
+    for _ in 0..option_count {
+        owned_steps.push(("\u{1b}[B".to_string(), Duration::from_millis(80)));
+    }
+    owned_steps.push(("\r".to_string(), Duration::from_millis(120)));
+    owned_steps
+}
+
+fn submit_single_select_answer(
+    interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
+    runtime_id: &str,
+    option_index: usize,
+) -> Result<(), String> {
+    let option = option_index.to_string();
+    send_interactive_input_sequence(
+        interactive_runtime_manager,
+        runtime_id,
+        &[
+            (option.as_str(), Duration::from_millis(120)),
+            ("\u{1b}[C", Duration::from_millis(120)),
+            ("\r", Duration::from_millis(400)),
+            ("\r", Duration::from_millis(0)),
+        ],
+    )
+}
+
+fn submit_choice_answer(
+    interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
+    runtime_id: &str,
+    submit_mode: InteractiveChoiceSubmitMode,
+    option_index: usize,
+    question_count: usize,
+) -> Result<(), String> {
+    match submit_mode {
+        InteractiveChoiceSubmitMode::AskUserQuestion => {
+            if question_count > 1 {
+                interactive_runtime_manager.write_input(runtime_id, &option_index.to_string())
+            } else {
+                submit_single_select_answer(interactive_runtime_manager, runtime_id, option_index)
+            }
+        }
+        InteractiveChoiceSubmitMode::PlanExit => {
+            interactive_runtime_manager.write_input(runtime_id, &option_index.to_string())
+        }
+    }
+}
+
+fn enter_text_entry_mode(
+    interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
+    runtime_id: &str,
+    option_index: usize,
+) -> Result<(), String> {
+    interactive_runtime_manager.write_input(runtime_id, &option_index.to_string())
+}
+
+fn enter_multi_select_text_entry_mode(
+    interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
+    runtime_id: &str,
+    option_index: usize,
+) -> Result<(), String> {
+    let owned_steps = build_multi_select_text_entry_steps(option_index);
+    let borrowed = owned_steps
+        .iter()
+        .map(|(step, delay)| (step.as_str(), *delay))
+        .collect::<Vec<_>>();
+    send_interactive_input_sequence(interactive_runtime_manager, runtime_id, &borrowed)
+}
+
+fn submit_text_entry_answer(
+    interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
+    runtime_id: &str,
+    text: &str,
+) -> Result<(), String> {
+    send_interactive_input_sequence(
+        interactive_runtime_manager,
+        runtime_id,
+        &[
+            (text, Duration::from_millis(120)),
+            ("\r", Duration::from_millis(0)), // Enter to confirm text input
+        ],
+    )
+}
+
+fn submit_multi_select_answer(
+    interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
+    runtime_id: &str,
+    selected_options: &BTreeSet<usize>,
+) -> Result<(), String> {
+    let owned_steps = build_multi_select_submit_steps(selected_options);
+    let borrowed = owned_steps
+        .iter()
+        .map(|(step, delay)| (step.as_str(), *delay))
+        .collect::<Vec<_>>();
+    send_interactive_input_sequence(interactive_runtime_manager, runtime_id, &borrowed)
+}
+
+fn select_chat_about_this(
+    interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
+    runtime_id: &str,
+    option_count: usize,
+) -> Result<(), String> {
+    let owned_steps = build_chat_about_this_steps(option_count);
+    let borrowed = owned_steps
+        .iter()
+        .map(|(step, delay)| (step.as_str(), *delay))
+        .collect::<Vec<_>>();
+    send_interactive_input_sequence(interactive_runtime_manager, runtime_id, &borrowed)
+}
+
+fn runtime_is_active(
+    runtime_manager: &Arc<HeadlessRuntimeManager>,
+    interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
+    runtime_id: &str,
+) -> bool {
+    runtime_manager
+        .summary(runtime_id)
+        .is_some_and(|summary| summary.is_active)
+        || interactive_runtime_manager
+            .summary(runtime_id)
+            .is_some_and(|summary| summary.is_active)
+}
+
+fn resolve_active_runtime_for_scope(
+    manager: &Arc<TelegramBridgeManager>,
+    runtime_manager: &Arc<HeadlessRuntimeManager>,
+    interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
+    settings: &TelegramSettings,
+    chat_id: i64,
+    thread_id: Option<i64>,
+    topic_binding: Option<&TelegramTopicBinding>,
+) -> Option<String> {
+    if let Some(runtime_id) = manager.active_runtime_for_scope(chat_id, thread_id) {
+        if runtime_is_active(runtime_manager, interactive_runtime_manager, &runtime_id) {
+            return Some(runtime_id);
+        }
+        manager.clear_runtime_for_scope(chat_id, thread_id, &runtime_id);
+    }
+
+    let binding = topic_binding?;
+    if let Some(runtime_id) = binding.active_runtime_id.clone() {
+        if runtime_is_active(runtime_manager, interactive_runtime_manager, &runtime_id) {
+            manager.remember_runtime_for_scope(chat_id, thread_id, runtime_id.clone());
+            return Some(runtime_id);
+        }
+    }
+
+    let env_name = resolve_topic_env_name(settings, binding.preferred_env.as_deref());
+    let perm_mode = resolve_topic_perm_mode(settings, binding.preferred_perm_mode.as_deref());
+    if let Some(summary) = interactive_runtime_manager.find_active_by_scope(
+        &binding.project_dir,
+        &env_name,
+        &perm_mode,
+    ) {
+        manager.remember_runtime_for_scope(chat_id, thread_id, summary.session_id.clone());
+        if let Some(thread_id) = thread_id {
+            let _ = sync_topic_binding_runtime(
+                thread_id,
+                Some(Some(summary.session_id.clone())),
+                Some(summary.claude_session_id.clone()),
+            );
+        }
+        return Some(summary.session_id);
+    }
+
+    if let Some(thread_id) = thread_id {
+        let _ = sync_topic_binding_runtime(thread_id, Some(None), None);
+    }
+    None
+}
+
+fn generate_telegram_runtime_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    format!("session-telegram-{timestamp}")
 }
 
 fn with_telegram_settings_mut<T>(
@@ -446,6 +1581,24 @@ struct BindCommand {
     preferred_perm_mode: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NewTopicCommand {
+    project_dir: String,
+    preferred_env: Option<String>,
+    preferred_perm_mode: Option<String>,
+    initial_prompt: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TelegramCreatedForumTopic {
+    message_thread_id: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct TelegramSentMessage {
+    message_id: i64,
+}
+
 fn parse_bind_command(text: &str) -> Result<BindCommand, String> {
     let args = text
         .strip_prefix("/bind")
@@ -479,10 +1632,122 @@ fn parse_bind_command(text: &str) -> Result<BindCommand, String> {
     }
 
     Ok(BindCommand {
-        project_dir,
+        project_dir: expand_home_dir(&project_dir),
         preferred_env,
         preferred_perm_mode,
     })
+}
+
+fn parse_new_topic_command(text: &str) -> Result<NewTopicCommand, String> {
+    let args = text.strip_prefix("/new").map(str::trim).unwrap_or_default();
+    if args.is_empty() {
+        return Err(
+            "Usage: /new <project_dir> [env=<name>|<env>] [perm=<mode>] [prompt...]".to_string(),
+        );
+    }
+
+    let tokens = args.split_whitespace().collect::<Vec<_>>();
+    let project_dir = expand_home_dir(tokens[0]);
+    let mut preferred_env = None;
+    let mut preferred_perm_mode = None;
+    let mut prompt_parts = Vec::new();
+
+    for (index, token) in tokens.iter().enumerate().skip(1) {
+        if let Some(value) = token.strip_prefix("env=") {
+            preferred_env = (!value.trim().is_empty()).then(|| value.trim().to_string());
+            continue;
+        }
+
+        if let Some(value) = token.strip_prefix("perm=") {
+            preferred_perm_mode = (!value.trim().is_empty()).then(|| value.trim().to_string());
+            continue;
+        }
+
+        if let Some(value) = token.strip_prefix("prompt=") {
+            if !value.trim().is_empty() {
+                prompt_parts.push(value.trim().to_string());
+            }
+            prompt_parts.extend(tokens.iter().skip(index + 1).map(|value| value.to_string()));
+            break;
+        }
+
+        if preferred_env.is_none() && !token.contains('=') {
+            preferred_env = Some((*token).to_string());
+            continue;
+        }
+
+        prompt_parts.push((*token).to_string());
+    }
+
+    if project_dir.trim().is_empty() {
+        return Err("Project directory is required".to_string());
+    }
+
+    Ok(NewTopicCommand {
+        project_dir,
+        preferred_env,
+        preferred_perm_mode,
+        initial_prompt: (!prompt_parts.is_empty()).then(|| prompt_parts.join(" ")),
+    })
+}
+
+fn expand_home_dir(path: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed == "~" {
+        return dirs::home_dir()
+            .map(|home| home.to_string_lossy().to_string())
+            .unwrap_or_else(|| trimmed.to_string());
+    }
+
+    if let Some(remainder) = trimmed.strip_prefix("~/") {
+        return dirs::home_dir()
+            .map(|home| home.join(remainder).to_string_lossy().to_string())
+            .unwrap_or_else(|| trimmed.to_string());
+    }
+
+    trimmed.to_string()
+}
+
+fn looks_like_project_path(value: &str) -> bool {
+    let trimmed = value.trim();
+    trimmed == "~"
+        || trimmed.starts_with("~/")
+        || trimmed.starts_with('/')
+        || trimmed.starts_with("./")
+        || trimmed.starts_with("../")
+        || trimmed.contains('/')
+}
+
+fn resolve_topic_env_name(settings: &TelegramSettings, preferred_env: Option<&str>) -> String {
+    preferred_env
+        .map(ToString::to_string)
+        .or_else(|| settings.default_env_name.clone())
+        .or_else(|| config::read_config().ok().and_then(|cfg| cfg.current))
+        .unwrap_or_else(|| "official".to_string())
+}
+
+fn resolve_topic_perm_mode(
+    settings: &TelegramSettings,
+    preferred_perm_mode: Option<&str>,
+) -> String {
+    preferred_perm_mode
+        .map(ToString::to_string)
+        .or_else(|| settings.default_perm_mode.clone())
+        .unwrap_or_else(|| "dev".to_string())
+}
+
+fn format_topic_title(project_dir: &str, env_name: &str, perm_mode: &str) -> String {
+    let project_path = PathBuf::from(project_dir);
+    let project_name = project_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(project_dir);
+    let mut title = format!("{project_name} [{env_name}/{perm_mode}]");
+    if title.chars().count() > 128 {
+        title = title.chars().take(128).collect();
+    }
+    title
 }
 
 fn format_topic_binding(binding: &TelegramTopicBinding) -> String {
@@ -531,10 +1796,273 @@ fn format_topic_bindings_message(settings: &TelegramSettings) -> String {
         .join("\n")
 }
 
+fn project_display_name(project_dir: &str) -> String {
+    PathBuf::from(project_dir)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(project_dir)
+        .to_string()
+}
+
+fn compact_project_label(project_dir: &str) -> String {
+    let path = expand_home_dir(project_dir);
+    let display = dirs::home_dir()
+        .and_then(|home| {
+            path.strip_prefix(home.to_string_lossy().as_ref())
+                .map(|remainder| format!("~{}", remainder))
+        })
+        .unwrap_or(path);
+    let parts = display
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    if parts.len() <= 2 {
+        return display;
+    }
+    format!(".../{}/{}", parts[parts.len() - 2], parts[parts.len() - 1])
+}
+
+fn ensure_accessible_project_dir(project_dir: &str) -> Result<(), String> {
+    let metadata = fs::metadata(project_dir)
+        .map_err(|error| format!("Project directory is not accessible: {}", error))?;
+    if metadata.is_dir() {
+        Ok(())
+    } else {
+        Err(format!("Project path is not a directory: {}", project_dir))
+    }
+}
+
+fn remember_forum_topic_from_message(manager: &TelegramBridgeManager, message: &TelegramMessage) {
+    let Some(thread_id) = canonical_thread_id(message.message_thread_id) else {
+        return;
+    };
+    let topic_name = message
+        .forum_topic_created
+        .as_ref()
+        .map(|payload| payload.name.clone())
+        .or_else(|| {
+            message
+                .forum_topic_edited
+                .as_ref()
+                .and_then(|payload| payload.name.clone())
+        });
+    let icon_color = message
+        .forum_topic_created
+        .as_ref()
+        .and_then(|payload| payload.icon_color);
+    manager.remember_forum_topic(thread_id, topic_name, icon_color);
+}
+
+fn collect_project_candidates(settings: &TelegramSettings) -> Vec<String> {
+    let mut candidates = Vec::new();
+    let mut seen = HashSet::new();
+    let mut push_candidate = |value: String| {
+        let normalized = expand_home_dir(&value);
+        if normalized.trim().is_empty() {
+            return;
+        }
+        if seen.insert(normalized.clone()) {
+            candidates.push(normalized);
+        }
+    };
+
+    for binding in &settings.topic_bindings {
+        push_candidate(binding.project_dir.clone());
+    }
+
+    if let Ok(app_config) = config::read_app_config() {
+        for favorite in app_config.favorites {
+            push_candidate(favorite.path);
+        }
+        for recent in app_config.recent {
+            push_candidate(recent.path);
+        }
+        if let Some(default_working_dir) = app_config.default_working_dir {
+            push_candidate(default_working_dir);
+        }
+    }
+
+    if let Some(default_working_dir) = settings.default_working_dir.clone() {
+        push_candidate(default_working_dir);
+    }
+
+    candidates.truncate(TELEGRAM_BIND_PROJECT_LIMIT);
+    candidates
+}
+
+fn collect_env_candidates() -> Vec<String> {
+    let Ok(config) = config::read_config() else {
+        return Vec::new();
+    };
+
+    let mut names = config.registries.keys().cloned().collect::<Vec<_>>();
+    names.sort();
+
+    if let Some(current) = config.current {
+        if let Some(index) = names.iter().position(|name| name == &current) {
+            let current_name = names.remove(index);
+            names.insert(0, current_name);
+        }
+    }
+
+    names
+}
+
+fn build_bind_project_keyboard(project_candidates: &[String]) -> serde_json::Value {
+    let mut rows = project_candidates
+        .iter()
+        .enumerate()
+        .map(|(index, project_dir)| {
+            vec![serde_json::json!({
+                "text": compact_project_label(project_dir),
+                "callback_data": format!("bind:project:{index}"),
+            })]
+        })
+        .collect::<Vec<_>>();
+    rows.push(vec![serde_json::json!({
+        "text": "Enter custom path...",
+        "callback_data": "bind:project:custom",
+    })]);
+    rows.push(vec![serde_json::json!({
+        "text": "Cancel",
+        "callback_data": "bind:cancel",
+    })]);
+    serde_json::json!({ "inline_keyboard": rows })
+}
+
+fn build_bind_env_keyboard(env_candidates: &[String]) -> serde_json::Value {
+    let mut rows = env_candidates
+        .iter()
+        .map(|env_name| {
+            vec![serde_json::json!({
+                "text": env_name,
+                "callback_data": format!("bind:env:{env_name}"),
+            })]
+        })
+        .collect::<Vec<_>>();
+    rows.push(vec![serde_json::json!({
+        "text": "Use current app environment",
+        "callback_data": "bind:env:__skip__",
+    })]);
+    rows.push(vec![serde_json::json!({
+        "text": "Cancel",
+        "callback_data": "bind:cancel",
+    })]);
+    serde_json::json!({ "inline_keyboard": rows })
+}
+
+fn build_bind_perm_keyboard() -> serde_json::Value {
+    let mut rows = TELEGRAM_BIND_PERM_MODES
+        .iter()
+        .map(|perm_mode| {
+            vec![serde_json::json!({
+                "text": perm_mode,
+                "callback_data": format!("bind:perm:{perm_mode}"),
+            })]
+        })
+        .collect::<Vec<_>>();
+    rows.push(vec![serde_json::json!({
+        "text": "Use app default permission mode",
+        "callback_data": "bind:perm:__skip__",
+    })]);
+    rows.push(vec![serde_json::json!({
+        "text": "Cancel",
+        "callback_data": "bind:cancel",
+    })]);
+    serde_json::json!({ "inline_keyboard": rows })
+}
+
+fn format_bind_project_prompt_text() -> String {
+    "Select a project directory for this topic.".to_string()
+}
+
+fn format_bind_env_prompt_text(project_dir: &str) -> String {
+    format!(
+        "Project: {}\n\nSelect the environment to prefer for this topic.",
+        project_dir
+    )
+}
+
+fn format_bind_perm_prompt_text(project_dir: &str, selected_env: Option<&str>) -> String {
+    let env_line = selected_env
+        .map(|value| format!("Env: {value}"))
+        .unwrap_or_else(|| "Env: use current app environment".to_string());
+    format!(
+        "Project: {}\n{}\n\nSelect the permission mode to prefer for this topic.",
+        project_dir, env_line
+    )
+}
+
+fn format_bind_custom_project_prompt_text() -> String {
+    "Type the project directory in your next message.".to_string()
+}
+
+fn get_known_forum_topics_internal(
+    manager: &TelegramBridgeManager,
+    settings: &TelegramSettings,
+) -> Vec<TelegramForumTopic> {
+    let cached_topics = manager.known_forum_topics();
+    let mut merged = HashMap::<i64, TelegramForumTopic>::new();
+
+    for (thread_id, cached_topic) in cached_topics {
+        let bound_project = settings
+            .topic_bindings
+            .iter()
+            .find(|binding| binding.thread_id == thread_id)
+            .map(|binding| binding.project_dir.clone());
+        let name = cached_topic
+            .name
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| bound_project.as_deref().map(project_display_name))
+            .unwrap_or_else(|| format!("Thread {}", thread_id));
+        merged.insert(
+            thread_id,
+            TelegramForumTopic {
+                thread_id,
+                name,
+                icon_color: cached_topic.icon_color,
+                is_bound: bound_project.is_some(),
+                bound_project,
+            },
+        );
+    }
+
+    for binding in &settings.topic_bindings {
+        merged
+            .entry(binding.thread_id)
+            .and_modify(|topic| {
+                topic.is_bound = true;
+                topic.bound_project = Some(binding.project_dir.clone());
+                if topic.name.trim().is_empty() || topic.name.starts_with("Thread ") {
+                    topic.name = project_display_name(&binding.project_dir);
+                }
+            })
+            .or_insert_with(|| TelegramForumTopic {
+                thread_id: binding.thread_id,
+                name: project_display_name(&binding.project_dir),
+                icon_color: None,
+                is_bound: true,
+                bound_project: Some(binding.project_dir.clone()),
+            });
+    }
+
+    let mut topics = merged.into_values().collect::<Vec<_>>();
+    topics.sort_by(|left, right| {
+        right
+            .is_bound
+            .cmp(&left.is_bound)
+            .then_with(|| left.thread_id.cmp(&right.thread_id))
+    });
+    topics
+}
+
 fn run_bridge_loop(
     manager: Arc<TelegramBridgeManager>,
     app: AppHandle,
     runtime_manager: Arc<HeadlessRuntimeManager>,
+    interactive_runtime_manager: Arc<InteractiveRuntimeManager>,
     token: String,
     settings: TelegramSettings,
     username: Option<String>,
@@ -552,6 +2080,7 @@ fn run_bridge_loop(
                             &manager,
                             &app,
                             &runtime_manager,
+                            &interactive_runtime_manager,
                             &token,
                             &effective_settings,
                             username.as_deref(),
@@ -560,13 +2089,43 @@ fn run_bridge_loop(
                             manager.set_last_error(error);
                         }
                     }
+                    if let Some(callback_query) = update.callback_query {
+                        let effective_settings =
+                            read_telegram_settings().unwrap_or_else(|_| settings.clone());
+                        if let Err(error) = handle_callback_query(
+                            &manager,
+                            &app,
+                            &runtime_manager,
+                            &interactive_runtime_manager,
+                            &token,
+                            &effective_settings,
+                            callback_query,
+                        ) {
+                            manager.set_last_error(error);
+                        }
+                    }
                 }
             }
             Err(error) => {
                 manager.set_last_error(error);
-                thread::sleep(Duration::from_secs(5));
+                interruptible_sleep(&manager, Duration::from_secs(5));
             }
         }
+    }
+}
+
+fn interruptible_sleep(manager: &TelegramBridgeManager, duration: Duration) {
+    let deadline = Instant::now() + duration;
+    loop {
+        if manager.stop_flag.load(Ordering::SeqCst) {
+            break;
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            break;
+        }
+        let remaining = deadline.saturating_duration_since(now);
+        thread::sleep(remaining.min(Duration::from_millis(TELEGRAM_STOP_POLL_INTERVAL_MS)));
     }
 }
 
@@ -574,16 +2133,23 @@ fn handle_message(
     manager: &Arc<TelegramBridgeManager>,
     app: &AppHandle,
     runtime_manager: &Arc<HeadlessRuntimeManager>,
+    interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
     token: &str,
     settings: &TelegramSettings,
     bot_username: Option<&str>,
     message: TelegramMessage,
 ) -> Result<(), String> {
+    let is_forum_chat = message.chat.is_forum.unwrap_or(false);
     let chat_id = message.chat.id;
     if let Some(allowed_chat_id) = settings.allowed_chat_id {
         if allowed_chat_id != chat_id {
             return Ok(());
         }
+    }
+    remember_forum_topic_from_message(manager, &message);
+    let user_id = message.from.as_ref().map(|sender| sender.id);
+    if !is_sender_allowed(settings, user_id) {
+        return Ok(());
     }
 
     let raw_text = match message.text.as_deref().map(str::trim) {
@@ -591,7 +2157,7 @@ fn handle_message(
         _ => return Ok(()),
     };
     let text = normalize_command_text(raw_text, bot_username);
-    let thread_id = message.message_thread_id;
+    let thread_id = canonical_thread_id(message.message_thread_id);
     let topic_binding = find_topic_binding(settings, thread_id).cloned();
 
     if text == "/start" || text == "/help" {
@@ -599,8 +2165,23 @@ fn handle_message(
             token,
             chat_id,
             thread_id,
-            "CCEM Telegram bridge is running.\nCommands:\n/help\n/sessions\n/new <prompt>\n/resume [prompt]\n/stop [runtime_id]\n/topics\n/topic\n/topic clear\n/bind <project_dir> [env=<name>] [perm=<mode>]\n/cron list\n/cron toggle <task>\n/cron run <task>\nPlain text in a bound topic will continue or start that topic's project console.",
+            "CCEM Telegram bridge is running.\nCommands:\n/help\n/whoami\n/sessions\n/envs\n/new <project_dir> [env=<name>|<env>] [perm=<mode>] [prompt...]\n/resume [prompt]\n/stop [runtime_id]\n/approve <request_id>\n/deny <request_id>\n/topics\n/topic\n/topic clear\n/bind [<project_dir>] [env=<name>] [perm=<mode>]\n/cron list\n/cron toggle <task>\n/cron run <task>\nPlain text in a bound topic will continue or start that topic's project console.",
         )?;
+        return Ok(());
+    }
+
+    if text == "/whoami" {
+        let message = format!(
+            "user_id: {}\nchat_id: {}\nthread_id: {}",
+            user_id
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            chat_id,
+            thread_id
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_string())
+        );
+        send_message(token, chat_id, thread_id, &message)?;
         return Ok(());
     }
 
@@ -617,6 +2198,30 @@ fn handle_message(
     if text == "/cron list" {
         let tasks = cron::list_cron_tasks()?;
         send_message(token, chat_id, thread_id, &format_cron_list_message(&tasks))?;
+        return Ok(());
+    }
+
+    if text == "/envs" {
+        let envs = config::read_config()?;
+        let current = envs.current.clone();
+        let body = if envs.registries.is_empty() {
+            "No environments configured yet.".to_string()
+        } else {
+            let mut names = envs.registries.keys().cloned().collect::<Vec<_>>();
+            names.sort();
+            names
+                .into_iter()
+                .map(|name| {
+                    if current.as_deref() == Some(name.as_str()) {
+                        format!("• {name} (current)")
+                    } else {
+                        format!("• {name}")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        send_message(token, chat_id, thread_id, &body)?;
         return Ok(());
     }
 
@@ -656,21 +2261,38 @@ fn handle_message(
     }
 
     if text == "/sessions" {
-        let sessions = runtime_manager.list_sessions();
-        let body = if sessions.is_empty() {
-            "No active headless sessions.".to_string()
+        let mut lines = runtime_manager
+            .list_sessions()
+            .into_iter()
+            .take(12)
+            .map(|session| {
+                format!(
+                    "{} · {} · {} · headless",
+                    session.runtime_id, session.status, session.project_dir
+                )
+            })
+            .collect::<Vec<_>>();
+
+        for binding in settings.topic_bindings.iter().take(12) {
+            let Some(runtime_id) = binding.active_runtime_id.as_deref() else {
+                continue;
+            };
+            let Some(summary) = interactive_runtime_manager.summary(runtime_id) else {
+                continue;
+            };
+            if !summary.is_active {
+                continue;
+            }
+            lines.push(format!(
+                "{} · {} · {} · interactive",
+                summary.session_id, summary.status, summary.project_dir
+            ));
+        }
+
+        let body = if lines.is_empty() {
+            "No active sessions.".to_string()
         } else {
-            sessions
-                .into_iter()
-                .take(12)
-                .map(|session| {
-                    format!(
-                        "{} · {} · {}",
-                        session.runtime_id, session.status, session.project_dir
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
+            lines.join("\n")
         };
         send_message(token, chat_id, thread_id, &body)?;
         return Ok(());
@@ -722,6 +2344,14 @@ fn handle_message(
         return Ok(());
     }
 
+    if !text.starts_with('/') {
+        if let Some(thread_id) = thread_id {
+            if handle_pending_bind_project_text(manager, token, chat_id, thread_id, &text)? {
+                return Ok(());
+            }
+        }
+    }
+
     if text.starts_with("/bind") {
         let Some(thread_id) = thread_id else {
             send_message(
@@ -733,31 +2363,46 @@ fn handle_message(
             return Ok(());
         };
 
-        let bind = parse_bind_command(&text)?;
-        let binding = with_telegram_settings_mut(|settings| {
-            let existing = settings
-                .topic_bindings
-                .iter()
-                .find(|binding| binding.thread_id == thread_id)
-                .cloned();
-            let binding = TelegramTopicBinding {
+        let bind_args = text
+            .strip_prefix("/bind")
+            .map(str::trim)
+            .unwrap_or_default();
+        if bind_args.is_empty() {
+            let project_candidates = collect_project_candidates(settings);
+            let message = send_message_with_markup(
+                token,
+                chat_id,
+                Some(thread_id),
+                &format_bind_project_prompt_text(),
+                Some(build_bind_project_keyboard(&project_candidates)),
+            )?;
+            set_pending_bind_session(
+                manager,
+                chat_id,
                 thread_id,
-                project_dir: bind.project_dir.clone(),
-                preferred_env: bind.preferred_env.clone(),
-                preferred_perm_mode: bind.preferred_perm_mode.clone(),
-                active_runtime_id: existing
-                    .as_ref()
-                    .and_then(|binding| binding.active_runtime_id.clone()),
-                last_claude_session_id: existing
-                    .as_ref()
-                    .and_then(|binding| binding.last_claude_session_id.clone()),
-                created_at: existing
-                    .map(|binding| binding.created_at)
-                    .unwrap_or_else(Utc::now),
-            };
-            upsert_topic_binding(settings, binding.clone());
-            binding
-        })?;
+                PendingBindSession {
+                    message_id: message.message_id,
+                    step: BindStep::SelectProject,
+                    project_candidates,
+                    selected_project: None,
+                    selected_env: None,
+                },
+            )?;
+            return Ok(());
+        }
+
+        let bind = parse_bind_command(&text)?;
+        let binding = save_topic_binding(
+            thread_id,
+            bind.project_dir.clone(),
+            bind.preferred_env.clone(),
+            bind.preferred_perm_mode.clone(),
+        )?;
+        manager.remember_forum_topic(
+            thread_id,
+            Some(project_display_name(&binding.project_dir)),
+            None,
+        );
         send_message(
             token,
             chat_id,
@@ -767,7 +2412,58 @@ fn handle_message(
         return Ok(());
     }
 
-    if let Some(prompt) = text.strip_prefix("/new ").map(str::trim) {
+    let active_runtime_id = resolve_active_runtime_for_scope(
+        manager,
+        runtime_manager,
+        interactive_runtime_manager,
+        settings,
+        chat_id,
+        thread_id,
+        topic_binding.as_ref(),
+    );
+
+    if let Some(argument) = text.strip_prefix("/new ").map(str::trim) {
+        let should_create_topic = is_forum_chat
+            && is_general_topic(thread_id)
+            && topic_binding.is_none()
+            && looks_like_project_path(argument.split_whitespace().next().unwrap_or_default());
+
+        if should_create_topic {
+            match parse_new_topic_command(&text) {
+                Ok(command) => {
+                    return create_telegram_topic_console(
+                        manager,
+                        app,
+                        runtime_manager,
+                        interactive_runtime_manager,
+                        token,
+                        settings,
+                        chat_id,
+                        command,
+                    );
+                }
+                Err(error) => {
+                    send_message(token, chat_id, thread_id, &error)?;
+                    return Ok(());
+                }
+            }
+        }
+
+        if topic_binding.is_some() {
+            return create_interactive_telegram_session(
+                manager,
+                app,
+                interactive_runtime_manager,
+                token,
+                settings,
+                chat_id,
+                thread_id,
+                argument,
+                None,
+                topic_binding.as_ref(),
+            );
+        }
+
         return create_telegram_session(
             manager,
             app,
@@ -776,14 +2472,19 @@ fn handle_message(
             settings,
             chat_id,
             thread_id,
-            prompt,
+            argument,
             None,
             topic_binding.as_ref(),
         );
     }
 
     if text == "/new" {
-        send_message(token, chat_id, thread_id, "Usage: /new <prompt>")?;
+        let usage = if is_forum_chat && is_general_topic(thread_id) && topic_binding.is_none() {
+            "Usage: /new <project_dir> [env=<name>|<env>] [perm=<mode>] [prompt...]"
+        } else {
+            "Usage: /new <prompt>"
+        };
+        send_message(token, chat_id, thread_id, usage)?;
         return Ok(());
     }
 
@@ -806,10 +2507,10 @@ fn handle_message(
             )?;
             return Ok(());
         };
-        return create_telegram_session(
+        return create_interactive_telegram_session(
             manager,
             app,
-            runtime_manager,
+            interactive_runtime_manager,
             token,
             settings,
             chat_id,
@@ -822,13 +2523,17 @@ fn handle_message(
 
     if let Some(argument) = text.strip_prefix("/stop").map(str::trim) {
         let runtime_id = if argument.is_empty() {
-            manager.active_runtime_for_scope(chat_id, thread_id)
+            active_runtime_id.clone()
         } else {
             Some(argument.to_string())
         };
 
         if let Some(runtime_id) = runtime_id {
-            runtime_manager.stop_session(app, &runtime_id)?;
+            if runtime_manager.summary(&runtime_id).is_some() {
+                runtime_manager.stop_session(app, &runtime_id)?;
+            } else {
+                interactive_runtime_manager.stop_session(&runtime_id)?;
+            }
             send_message(
                 token,
                 chat_id,
@@ -846,22 +2551,97 @@ fn handle_message(
         return Ok(());
     }
 
-    if let Some(runtime_id) = manager.active_runtime_for_scope(chat_id, thread_id) {
-        runtime_manager.send_user_message(app, &runtime_id, &text)?;
-        send_message(
-            token,
-            chat_id,
-            thread_id,
-            &format!("Sent follow-up to {runtime_id}"),
-        )?;
+    if text == "/approve" {
+        send_message(token, chat_id, thread_id, "Usage: /approve <request_id>")?;
+        return Ok(());
+    }
+
+    if let Some(request_id) = text.strip_prefix("/approve ").map(str::trim) {
+        if request_id.is_empty() {
+            send_message(token, chat_id, thread_id, "Usage: /approve <request_id>")?;
+            return Ok(());
+        }
+        match runtime_manager.respond_to_permission(app, request_id, true, "telegram") {
+            Ok(()) => {
+                send_message(
+                    token,
+                    chat_id,
+                    thread_id,
+                    &format!("Approved permission request {request_id}."),
+                )?;
+            }
+            Err(error) => {
+                send_message(
+                    token,
+                    chat_id,
+                    thread_id,
+                    &format!("Failed to approve {request_id}: {error}"),
+                )?;
+            }
+        }
+        return Ok(());
+    }
+
+    if text == "/deny" {
+        send_message(token, chat_id, thread_id, "Usage: /deny <request_id>")?;
+        return Ok(());
+    }
+
+    if let Some(request_id) = text.strip_prefix("/deny ").map(str::trim) {
+        if request_id.is_empty() {
+            send_message(token, chat_id, thread_id, "Usage: /deny <request_id>")?;
+            return Ok(());
+        }
+        match runtime_manager.respond_to_permission(app, request_id, false, "telegram") {
+            Ok(()) => {
+                send_message(
+                    token,
+                    chat_id,
+                    thread_id,
+                    &format!("Denied permission request {request_id}."),
+                )?;
+            }
+            Err(error) => {
+                send_message(
+                    token,
+                    chat_id,
+                    thread_id,
+                    &format!("Failed to deny {request_id}: {error}"),
+                )?;
+            }
+        }
+        return Ok(());
+    }
+
+    if let Some(runtime_id) = active_runtime_id {
+        if runtime_manager.summary(&runtime_id).is_some() {
+            runtime_manager.send_user_message(app, &runtime_id, &text)?;
+            send_message(
+                token,
+                chat_id,
+                thread_id,
+                &format!("Sent follow-up to {runtime_id}"),
+            )?;
+        } else {
+            send_or_queue_interactive_message(
+                manager,
+                interactive_runtime_manager,
+                token,
+                settings,
+                chat_id,
+                thread_id,
+                &runtime_id,
+                &text,
+            )?;
+        }
         return Ok(());
     }
 
     if let Some(binding) = topic_binding.as_ref() {
-        return create_telegram_session(
+        return create_interactive_telegram_session(
             manager,
             app,
-            runtime_manager,
+            interactive_runtime_manager,
             token,
             settings,
             chat_id,
@@ -881,6 +2661,655 @@ fn handle_message(
     Ok(())
 }
 
+fn handle_pending_bind_project_text(
+    manager: &Arc<TelegramBridgeManager>,
+    token: &str,
+    chat_id: i64,
+    thread_id: i64,
+    text: &str,
+) -> Result<bool, String> {
+    let Some(session) = pending_bind_session(manager, chat_id, thread_id)? else {
+        return Ok(false);
+    };
+    if session.step != BindStep::EnterCustomProject {
+        return Ok(false);
+    }
+
+    let project_dir = expand_home_dir(text);
+    if let Err(error) = ensure_accessible_project_dir(&project_dir) {
+        send_message(
+            token,
+            chat_id,
+            Some(thread_id),
+            &format!("{error}\nSend another path or tap Cancel above."),
+        )?;
+        return Ok(true);
+    }
+
+    let env_candidates = collect_env_candidates();
+    if with_pending_bind_session(manager, chat_id, thread_id, |pending| {
+        pending.selected_project = Some(project_dir.clone());
+        pending.selected_env = None;
+        pending.step = BindStep::SelectEnv;
+        Ok(())
+    })?
+    .is_none()
+    {
+        send_message(
+            token,
+            chat_id,
+            Some(thread_id),
+            "Binding session expired. Run /bind again.",
+        )?;
+        return Ok(true);
+    }
+
+    edit_message_text(
+        token,
+        chat_id,
+        session.message_id,
+        &format_bind_env_prompt_text(&project_dir),
+        Some(build_bind_env_keyboard(&env_candidates)),
+    )?;
+    Ok(true)
+}
+
+fn handle_bind_cancel_callback(
+    manager: &Arc<TelegramBridgeManager>,
+    token: &str,
+    chat_id: i64,
+    thread_id: i64,
+    message_id: i64,
+    callback_query_id: &str,
+) -> Result<(), String> {
+    clear_pending_bind_session(manager, chat_id, thread_id)?;
+    edit_message_text(token, chat_id, message_id, "Binding cancelled.", None)?;
+    answer_callback_query(token, callback_query_id, "Binding cancelled.", false)?;
+    Ok(())
+}
+
+fn handle_bind_project_callback(
+    manager: &Arc<TelegramBridgeManager>,
+    token: &str,
+    chat_id: i64,
+    thread_id: i64,
+    message_id: i64,
+    callback_query_id: &str,
+    selection: &str,
+) -> Result<(), String> {
+    let Some(session) = pending_bind_session(manager, chat_id, thread_id)? else {
+        answer_callback_query(
+            token,
+            callback_query_id,
+            "Binding session expired. Run /bind again.",
+            true,
+        )?;
+        return Ok(());
+    };
+
+    if selection == "custom" {
+        if with_pending_bind_session(manager, chat_id, thread_id, |pending| {
+            pending.step = BindStep::EnterCustomProject;
+            Ok(())
+        })?
+        .is_none()
+        {
+            answer_callback_query(
+                token,
+                callback_query_id,
+                "Binding session expired. Run /bind again.",
+                true,
+            )?;
+            return Ok(());
+        }
+        edit_message_text(
+            token,
+            chat_id,
+            message_id,
+            &format_bind_custom_project_prompt_text(),
+            Some(build_bind_project_keyboard(&session.project_candidates)),
+        )?;
+        answer_callback_query(
+            token,
+            callback_query_id,
+            "Send the path in your next message.",
+            false,
+        )?;
+        return Ok(());
+    }
+
+    let Ok(index) = selection.parse::<usize>() else {
+        answer_callback_query(token, callback_query_id, "Unknown project selection.", true)?;
+        return Ok(());
+    };
+    let Some(project_dir) = session.project_candidates.get(index).cloned() else {
+        answer_callback_query(token, callback_query_id, "Unknown project selection.", true)?;
+        return Ok(());
+    };
+
+    let env_candidates = collect_env_candidates();
+    if with_pending_bind_session(manager, chat_id, thread_id, |pending| {
+        pending.selected_project = Some(project_dir.clone());
+        pending.selected_env = None;
+        pending.step = BindStep::SelectEnv;
+        Ok(())
+    })?
+    .is_none()
+    {
+        answer_callback_query(
+            token,
+            callback_query_id,
+            "Binding session expired. Run /bind again.",
+            true,
+        )?;
+        return Ok(());
+    }
+
+    edit_message_text(
+        token,
+        chat_id,
+        message_id,
+        &format_bind_env_prompt_text(&project_dir),
+        Some(build_bind_env_keyboard(&env_candidates)),
+    )?;
+    answer_callback_query(token, callback_query_id, "Project selected.", false)?;
+    Ok(())
+}
+
+fn handle_bind_env_callback(
+    manager: &Arc<TelegramBridgeManager>,
+    token: &str,
+    chat_id: i64,
+    thread_id: i64,
+    message_id: i64,
+    callback_query_id: &str,
+    selection: &str,
+) -> Result<(), String> {
+    let env_choice = (selection != "__skip__").then(|| selection.to_string());
+    let env_choice_for_update = env_choice.clone();
+    let Some((project_dir, selected_env)) =
+        with_pending_bind_session(manager, chat_id, thread_id, move |pending| {
+            let project_dir = pending
+                .selected_project
+                .clone()
+                .ok_or_else(|| "Choose a project first.".to_string())?;
+            pending.selected_env = env_choice_for_update.clone();
+            pending.step = BindStep::SelectPerm;
+            Ok((project_dir, pending.selected_env.clone()))
+        })?
+    else {
+        answer_callback_query(
+            token,
+            callback_query_id,
+            "Binding session expired. Run /bind again.",
+            true,
+        )?;
+        return Ok(());
+    };
+
+    edit_message_text(
+        token,
+        chat_id,
+        message_id,
+        &format_bind_perm_prompt_text(&project_dir, selected_env.as_deref()),
+        Some(build_bind_perm_keyboard()),
+    )?;
+    answer_callback_query(token, callback_query_id, "Environment selected.", false)?;
+    Ok(())
+}
+
+fn handle_bind_perm_callback(
+    manager: &Arc<TelegramBridgeManager>,
+    token: &str,
+    chat_id: i64,
+    thread_id: i64,
+    message_id: i64,
+    callback_query_id: &str,
+    selection: &str,
+) -> Result<(), String> {
+    let Some(session) = pending_bind_session(manager, chat_id, thread_id)? else {
+        answer_callback_query(
+            token,
+            callback_query_id,
+            "Binding session expired. Run /bind again.",
+            true,
+        )?;
+        return Ok(());
+    };
+
+    let Some(project_dir) = session.selected_project.clone() else {
+        answer_callback_query(token, callback_query_id, "Choose a project first.", true)?;
+        return Ok(());
+    };
+
+    let binding = save_topic_binding(
+        thread_id,
+        project_dir,
+        session.selected_env.clone(),
+        (selection != "__skip__").then(|| selection.to_string()),
+    )?;
+    clear_pending_bind_session(manager, chat_id, thread_id)?;
+    manager.remember_forum_topic(
+        thread_id,
+        Some(project_display_name(&binding.project_dir)),
+        None,
+    );
+    edit_message_text(
+        token,
+        chat_id,
+        message_id,
+        &format!("Bound this topic to:\n{}", format_topic_binding(&binding)),
+        None,
+    )?;
+    answer_callback_query(token, callback_query_id, "Topic bound.", false)?;
+    Ok(())
+}
+
+pub fn get_known_forum_topics(
+    manager: &Arc<TelegramBridgeManager>,
+) -> Result<Vec<TelegramForumTopic>, String> {
+    let settings = read_telegram_settings()?;
+    Ok(get_known_forum_topics_internal(manager, &settings))
+}
+
+pub fn bind_topic_from_desktop(
+    manager: &Arc<TelegramBridgeManager>,
+    project_dir: String,
+    env_name: Option<String>,
+    perm_mode: Option<String>,
+    thread_id: Option<i64>,
+    create_new_topic: bool,
+) -> Result<TelegramTopicBinding, String> {
+    let settings = read_telegram_settings()?;
+    let token = settings
+        .bot_token
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Telegram bot token is not configured.".to_string())?
+        .to_string();
+    let chat_id = settings.allowed_chat_id.ok_or_else(|| {
+        "Allowed Chat ID is required before binding a Telegram topic.".to_string()
+    })?;
+    let project_dir = expand_home_dir(&project_dir);
+    ensure_accessible_project_dir(&project_dir)?;
+
+    let target_thread_id = if create_new_topic {
+        let topic_title = format_topic_title(
+            &project_dir,
+            &resolve_topic_env_name(&settings, env_name.as_deref()),
+            &resolve_topic_perm_mode(&settings, perm_mode.as_deref()),
+        );
+        let created_thread_id = create_forum_topic(&token, chat_id, &topic_title)?;
+        manager.remember_forum_topic(
+            created_thread_id,
+            Some(topic_title),
+            Some(TELEGRAM_DEFAULT_TOPIC_ICON_COLOR),
+        );
+        created_thread_id
+    } else {
+        canonical_thread_id(thread_id)
+            .ok_or_else(|| "Choose an existing Telegram topic or create a new one.".to_string())?
+    };
+
+    let binding = save_topic_binding(target_thread_id, project_dir, env_name, perm_mode)?;
+    manager.remember_forum_topic(
+        target_thread_id,
+        Some(project_display_name(&binding.project_dir)),
+        None,
+    );
+    send_message(
+        &token,
+        chat_id,
+        Some(target_thread_id),
+        &format!("Bound this topic to:\n{}", format_topic_binding(&binding)),
+    )?;
+    Ok(binding)
+}
+
+fn handle_callback_query(
+    manager: &Arc<TelegramBridgeManager>,
+    app: &AppHandle,
+    runtime_manager: &Arc<HeadlessRuntimeManager>,
+    interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
+    token: &str,
+    settings: &TelegramSettings,
+    callback_query: TelegramCallbackQuery,
+) -> Result<(), String> {
+    let user_id = Some(callback_query.from.id);
+    if !is_sender_allowed(settings, user_id) {
+        answer_callback_query(
+            token,
+            &callback_query.id,
+            "You are not allowed to control this bot.",
+            true,
+        )?;
+        return Ok(());
+    }
+
+    let Some(message) = callback_query.message else {
+        answer_callback_query(
+            token,
+            &callback_query.id,
+            "This action is no longer attached to a message.",
+            true,
+        )?;
+        return Ok(());
+    };
+
+    let chat_id = message.chat.id;
+    if let Some(allowed_chat_id) = settings.allowed_chat_id {
+        if allowed_chat_id != chat_id {
+            answer_callback_query(
+                token,
+                &callback_query.id,
+                "This chat is not allowed to control the bot.",
+                true,
+            )?;
+            return Ok(());
+        }
+    }
+
+    let Some(data) = callback_query.data.as_deref() else {
+        answer_callback_query(token, &callback_query.id, "Missing callback payload.", true)?;
+        return Ok(());
+    };
+
+    if let Some((approved, request_id)) = parse_permission_callback_data(data) {
+        if request_id.is_empty() {
+            answer_callback_query(token, &callback_query.id, "Missing request id.", true)?;
+            return Ok(());
+        }
+
+        match runtime_manager.respond_to_permission(app, request_id, approved, "telegram") {
+            Ok(()) => {
+                answer_callback_query(
+                    token,
+                    &callback_query.id,
+                    if approved {
+                        "Permission approved."
+                    } else {
+                        "Permission denied."
+                    },
+                    false,
+                )?;
+            }
+            Err(error) => {
+                answer_callback_query(
+                    token,
+                    &callback_query.id,
+                    &truncate_for_telegram(&format!("Failed: {error}")),
+                    true,
+                )?;
+            }
+        }
+        return Ok(());
+    }
+
+    if let Some((approved, session_id)) = parse_interactive_permission_callback_data(data) {
+        if session_id.is_empty() {
+            answer_callback_query(token, &callback_query.id, "Missing session id.", true)?;
+            return Ok(());
+        }
+
+        match interactive_runtime_manager.send_approval(session_id, approved) {
+            Ok(()) => {
+                let text = if approved {
+                    "Interactive approval sent."
+                } else {
+                    "Interactive denial sent."
+                };
+                let _ = edit_message_text(token, chat_id, message.message_id, text, None);
+                answer_callback_query(token, &callback_query.id, text, false)?;
+            }
+            Err(error) => {
+                answer_callback_query(
+                    token,
+                    &callback_query.id,
+                    &truncate_for_telegram(&format!("Failed: {error}")),
+                    true,
+                )?;
+            }
+        }
+        return Ok(());
+    }
+
+    if let Some(option_index) = parse_interactive_tool_select_callback_data(data) {
+        return handle_interactive_tool_select_callback(
+            manager,
+            interactive_runtime_manager,
+            token,
+            chat_id,
+            canonical_thread_id(message.message_thread_id),
+            message.message_id,
+            &callback_query.id,
+            option_index,
+        );
+    }
+
+    if parse_interactive_tool_submit_callback_data(data) {
+        return handle_interactive_tool_submit_callback(
+            manager,
+            interactive_runtime_manager,
+            token,
+            chat_id,
+            canonical_thread_id(message.message_thread_id),
+            message.message_id,
+            &callback_query.id,
+        );
+    }
+
+    if parse_interactive_tool_cancel_callback_data(data) {
+        return handle_interactive_tool_cancel_callback(
+            manager,
+            interactive_runtime_manager,
+            token,
+            chat_id,
+            canonical_thread_id(message.message_thread_id),
+            message.message_id,
+            &callback_query.id,
+        );
+    }
+
+    let Some(thread_id) = canonical_thread_id(message.message_thread_id) else {
+        answer_callback_query(
+            token,
+            &callback_query.id,
+            "Use this action from inside a Telegram forum topic.",
+            true,
+        )?;
+        return Ok(());
+    };
+
+    if data == "bind:cancel" {
+        return handle_bind_cancel_callback(
+            manager,
+            token,
+            chat_id,
+            thread_id,
+            message.message_id,
+            &callback_query.id,
+        );
+    }
+
+    if let Some(selection) = data.strip_prefix("bind:project:") {
+        return handle_bind_project_callback(
+            manager,
+            token,
+            chat_id,
+            thread_id,
+            message.message_id,
+            &callback_query.id,
+            selection,
+        );
+    }
+
+    if let Some(selection) = data.strip_prefix("bind:env:") {
+        return handle_bind_env_callback(
+            manager,
+            token,
+            chat_id,
+            thread_id,
+            message.message_id,
+            &callback_query.id,
+            selection,
+        );
+    }
+
+    if let Some(selection) = data.strip_prefix("bind:perm:") {
+        return handle_bind_perm_callback(
+            manager,
+            token,
+            chat_id,
+            thread_id,
+            message.message_id,
+            &callback_query.id,
+            selection,
+        );
+    }
+
+    answer_callback_query(
+        token,
+        &callback_query.id,
+        "Unsupported callback action.",
+        true,
+    )?;
+    Ok(())
+}
+
+fn create_telegram_topic_console(
+    manager: &Arc<TelegramBridgeManager>,
+    app: &AppHandle,
+    runtime_manager: &Arc<HeadlessRuntimeManager>,
+    interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
+    token: &str,
+    settings: &TelegramSettings,
+    chat_id: i64,
+    command: NewTopicCommand,
+) -> Result<(), String> {
+    let metadata = fs::metadata(&command.project_dir)
+        .map_err(|error| format!("Project directory is not accessible: {}", error))?;
+    if !metadata.is_dir() {
+        return Err(format!(
+            "Project path is not a directory: {}",
+            command.project_dir
+        ));
+    }
+
+    let env_name = resolve_topic_env_name(settings, command.preferred_env.as_deref());
+    let perm_mode = resolve_topic_perm_mode(settings, command.preferred_perm_mode.as_deref());
+    let _ = config::resolve_claude_env(&env_name)?;
+
+    if let Some(existing_binding) = find_topic_binding_by_project(
+        settings,
+        &command.project_dir,
+        Some(env_name.as_str()),
+        Some(perm_mode.as_str()),
+    )
+    .cloned()
+    {
+        if let Some(active_runtime_id) = existing_binding.active_runtime_id.as_ref() {
+            if runtime_is_active(
+                runtime_manager,
+                interactive_runtime_manager,
+                active_runtime_id,
+            ) {
+                send_message(
+                    token,
+                    chat_id,
+                    None,
+                    &format!(
+                        "Topic #{} already has an active session: {}",
+                        existing_binding.thread_id, active_runtime_id
+                    ),
+                )?;
+                return Ok(());
+            }
+        }
+
+        if let Some(summary) = interactive_runtime_manager.find_active_by_scope(
+            &existing_binding.project_dir,
+            &env_name,
+            &perm_mode,
+        ) {
+            return attach_existing_interactive_session(
+                manager,
+                interactive_runtime_manager,
+                token,
+                settings,
+                chat_id,
+                Some(existing_binding.thread_id),
+                &summary.session_id,
+                command.initial_prompt.as_deref(),
+            );
+        }
+
+        send_message(
+            token,
+            chat_id,
+            None,
+            &format!(
+                "Reusing topic #{} for {}.",
+                existing_binding.thread_id, existing_binding.project_dir
+            ),
+        )?;
+        return create_interactive_telegram_session(
+            manager,
+            app,
+            interactive_runtime_manager,
+            token,
+            settings,
+            chat_id,
+            Some(existing_binding.thread_id),
+            command.initial_prompt.as_deref().unwrap_or_default(),
+            existing_binding.last_claude_session_id.clone(),
+            Some(&existing_binding),
+        );
+    }
+
+    let thread_id = create_forum_topic(
+        token,
+        chat_id,
+        &format_topic_title(&command.project_dir, &env_name, &perm_mode),
+    )?;
+    let binding = with_telegram_settings_mut(|settings| {
+        let binding = TelegramTopicBinding {
+            thread_id,
+            project_dir: command.project_dir.clone(),
+            preferred_env: Some(env_name.clone()),
+            preferred_perm_mode: Some(perm_mode.clone()),
+            active_runtime_id: None,
+            last_claude_session_id: None,
+            created_at: Utc::now(),
+        };
+        upsert_topic_binding(settings, binding.clone());
+        binding
+    })?;
+
+    send_message(
+        token,
+        chat_id,
+        None,
+        &format!(
+            "Created topic #{} for {}.\nStarting the project console there.",
+            thread_id, binding.project_dir
+        ),
+    )?;
+
+    create_interactive_telegram_session(
+        manager,
+        app,
+        interactive_runtime_manager,
+        token,
+        settings,
+        chat_id,
+        Some(thread_id),
+        command.initial_prompt.as_deref().unwrap_or_default(),
+        None,
+        Some(&binding),
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn create_telegram_session(
     manager: &Arc<TelegramBridgeManager>,
@@ -894,6 +3323,7 @@ fn create_telegram_session(
     resume_session_id: Option<String>,
     binding: Option<&TelegramTopicBinding>,
 ) -> Result<(), String> {
+    let thread_id = canonical_thread_id(thread_id);
     let env_name = binding
         .and_then(|binding| binding.preferred_env.clone())
         .or_else(|| settings.default_env_name.clone())
@@ -942,7 +3372,7 @@ fn create_telegram_session(
         chat_id,
         thread_id,
         &format!(
-            "Started {} in {}\nI will reply here when it finishes.",
+            "Started {} in {}\nI will reply here when Claude responds.",
             summary.runtime_id, working_dir
         ),
     )?;
@@ -965,6 +3395,754 @@ fn create_telegram_session(
     Ok(())
 }
 
+fn handle_interactive_tool_select_callback(
+    manager: &Arc<TelegramBridgeManager>,
+    interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
+    token: &str,
+    chat_id: i64,
+    thread_id: Option<i64>,
+    message_id: i64,
+    callback_query_id: &str,
+    option_index: usize,
+) -> Result<(), String> {
+    let Some(prompt) = manager.active_prompt_for_scope(chat_id, thread_id) else {
+        answer_callback_query(
+            token,
+            callback_query_id,
+            "This interactive question is no longer active.",
+            true,
+        )?;
+        return Ok(());
+    };
+
+    match prompt {
+        ActiveInteractivePrompt::Choice(active_prompt) => {
+            let Some(question) = active_choice_question(&active_prompt).cloned() else {
+                answer_callback_query(
+                    token,
+                    callback_query_id,
+                    "This interactive question is no longer available.",
+                    true,
+                )?;
+                return Ok(());
+            };
+
+            if option_index == 0 || option_index > question.options.len() {
+                answer_callback_query(token, callback_query_id, "Unknown option.", true)?;
+                return Ok(());
+            }
+
+            let option = &question.options[option_index - 1];
+            if is_chat_about_this_option(&option.label) {
+                select_chat_about_this(
+                    interactive_runtime_manager,
+                    &active_prompt.runtime_id,
+                    question.options.len().saturating_sub(1),
+                )?;
+                manager.clear_active_prompt_for_scope(chat_id, thread_id);
+                let _ = edit_message_text(
+                    token,
+                    chat_id,
+                    message_id,
+                    "Selected `Chat about this` via Telegram.\nClaude will switch to clarification mode.",
+                    None,
+                );
+                answer_callback_query(
+                    token,
+                    callback_query_id,
+                    "Switched to clarification mode.",
+                    false,
+                )?;
+                return Ok(());
+            }
+
+            if question.multi_select {
+                if is_vscode_text_entry_option(&option.label) {
+                    if active_prompt.selected_options.contains(&option_index)
+                        && active_prompt.awaiting_text_entry.is_none()
+                    {
+                        answer_callback_query(
+                            token,
+                            callback_query_id,
+                            "Text answer already captured. Choose more options or tap Submit.",
+                            false,
+                        )?;
+                        return Ok(());
+                    }
+
+                    // Update Telegram state and message BEFORE TUI interaction
+                    // so the user always sees the text entry prompt even if TUI keys fail
+                    let _ = manager.mutate_active_prompt_for_scope(chat_id, thread_id, |prompt| {
+                        match prompt {
+                            ActiveInteractivePrompt::Choice(prompt) => {
+                                prompt.selected_options.insert(option_index);
+                                prompt.awaiting_text_entry = Some(option_index);
+                            }
+                        }
+                    });
+                    if let Err(err) = edit_message_text(
+                        token,
+                        chat_id,
+                        message_id,
+                        &format!(
+                            "{}\n\nText entry mode selected. Send your answer as a normal Telegram message, then tap Submit to finish this question.",
+                            format_active_choice_text(&active_prompt)
+                        ),
+                        Some(build_text_entry_markup()),
+                    ) {
+                        eprintln!("[telegram] edit_message_text failed for Type something prompt: {err}");
+                    }
+                    answer_callback_query(
+                        token,
+                        callback_query_id,
+                        "✏️ Text entry enabled. Send your answer as a normal message, then tap Submit.",
+                        true,
+                    )?;
+                    if let Err(err) = enter_multi_select_text_entry_mode(
+                        interactive_runtime_manager,
+                        &active_prompt.runtime_id,
+                        option_index,
+                    ) {
+                        eprintln!("[telegram] enter_multi_select_text_entry_mode failed: {err}");
+                    }
+                    return Ok(());
+                }
+
+                let selected_options = manager
+                    .mutate_active_prompt_for_scope(chat_id, thread_id, |prompt| match prompt {
+                        ActiveInteractivePrompt::Choice(prompt) => {
+                            if prompt.selected_options.contains(&option_index) {
+                                prompt.selected_options.remove(&option_index);
+                            } else {
+                                prompt.selected_options.insert(option_index);
+                            }
+                            prompt.selected_options.clone()
+                        }
+                    })
+                    .unwrap_or_default();
+
+                let mut preview_prompt = active_prompt.clone();
+                preview_prompt.selected_options = selected_options.clone();
+                let text = format_active_choice_text(&preview_prompt);
+                let markup = build_active_choice_markup(&preview_prompt);
+                let _ = edit_message_text(token, chat_id, message_id, &text, Some(markup));
+                answer_callback_query(token, callback_query_id, "Selection updated.", false)?;
+                return Ok(());
+            }
+
+            if is_vscode_text_entry_option(&option.label) {
+                // Update Telegram state and message BEFORE TUI interaction
+                let _ =
+                    manager.mutate_active_prompt_for_scope(
+                        chat_id,
+                        thread_id,
+                        |prompt| match prompt {
+                            ActiveInteractivePrompt::Choice(prompt) => {
+                                prompt.awaiting_text_entry = Some(option_index);
+                                prompt.selected_options.clear();
+                            }
+                        },
+                    );
+                if let Err(err) = edit_message_text(
+                    token,
+                    chat_id,
+                    message_id,
+                    &format!(
+                        "{}\n\nText entry mode selected. Send your answer as a normal Telegram message, and CCEM will submit it to Claude.",
+                        format_active_choice_text(&active_prompt)
+                    ),
+                    Some(build_text_entry_markup()),
+                ) {
+                    eprintln!("[telegram] edit_message_text failed for Type something prompt: {err}");
+                }
+                answer_callback_query(
+                    token,
+                    callback_query_id,
+                    "✏️ Text entry enabled. Send your answer as a normal message.",
+                    true,
+                )?;
+                if let Err(err) = enter_text_entry_mode(
+                    interactive_runtime_manager,
+                    &active_prompt.runtime_id,
+                    option_index,
+                ) {
+                    eprintln!("[telegram] enter_text_entry_mode failed: {err}");
+                }
+                return Ok(());
+            }
+
+            submit_choice_answer(
+                interactive_runtime_manager,
+                &active_prompt.runtime_id,
+                active_prompt.submit_mode,
+                option_index,
+                active_prompt.questions.len(),
+            )?;
+            let has_next_question =
+                active_prompt.current_question_index + 1 < active_prompt.questions.len();
+            if has_next_question {
+                let next_prompt = manager.mutate_active_prompt_for_scope(
+                    chat_id,
+                    thread_id,
+                    |prompt| match prompt {
+                        ActiveInteractivePrompt::Choice(prompt) => {
+                            advance_active_choice_prompt(prompt);
+                            prompt.clone()
+                        }
+                    },
+                );
+
+                if let Some(next_prompt) = next_prompt {
+                    if let Err(err) = edit_message_text(
+                        token,
+                        chat_id,
+                        message_id,
+                        &format_active_choice_text(&next_prompt),
+                        Some(build_active_choice_markup(&next_prompt)),
+                    ) {
+                        eprintln!("[telegram] edit_message_text failed for next question after single-select: {err}");
+                    }
+                }
+                answer_callback_query(
+                    token,
+                    callback_query_id,
+                    "Answer submitted. Next question ready.",
+                    false,
+                )?;
+            } else {
+                manager.clear_active_prompt_for_scope(chat_id, thread_id);
+                if let Err(err) = edit_message_text(
+                    token,
+                    chat_id,
+                    message_id,
+                    &format!("Submitted answer via Telegram.\n{}", option.label.trim()),
+                    None,
+                ) {
+                    eprintln!("[telegram] edit_message_text failed for final submit: {err}");
+                }
+                answer_callback_query(token, callback_query_id, "Answer submitted.", false)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_interactive_tool_submit_callback(
+    manager: &Arc<TelegramBridgeManager>,
+    interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
+    token: &str,
+    chat_id: i64,
+    thread_id: Option<i64>,
+    message_id: i64,
+    callback_query_id: &str,
+) -> Result<(), String> {
+    let Some(prompt) = manager.active_prompt_for_scope(chat_id, thread_id) else {
+        answer_callback_query(
+            token,
+            callback_query_id,
+            "This interactive question is no longer active.",
+            true,
+        )?;
+        return Ok(());
+    };
+
+    match prompt {
+        ActiveInteractivePrompt::Choice(active_prompt) => {
+            let Some(question) = active_choice_question(&active_prompt).cloned() else {
+                answer_callback_query(
+                    token,
+                    callback_query_id,
+                    "This interactive question is no longer available.",
+                    true,
+                )?;
+                return Ok(());
+            };
+
+            if !question.multi_select {
+                answer_callback_query(token, callback_query_id, "Pick one option directly.", true)?;
+                return Ok(());
+            }
+
+            if active_prompt.awaiting_text_entry.is_some() {
+                answer_callback_query(
+                    token,
+                    callback_query_id,
+                    "Send your custom text answer first, then tap Submit.",
+                    true,
+                )?;
+                return Ok(());
+            }
+
+            if active_prompt.selected_options.is_empty() {
+                answer_callback_query(
+                    token,
+                    callback_query_id,
+                    "Pick at least one option before submitting.",
+                    true,
+                )?;
+                return Ok(());
+            }
+
+            let submit_options =
+                selection_submit_options(&question, &active_prompt.selected_options);
+
+            submit_multi_select_answer(
+                interactive_runtime_manager,
+                &active_prompt.runtime_id,
+                &submit_options,
+            )?;
+            let selected_labels = active_prompt
+                .selected_options
+                .iter()
+                .filter_map(|index| question.options.get(index.saturating_sub(1)))
+                .map(|option| option.label.clone())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let has_next_question =
+                active_prompt.current_question_index + 1 < active_prompt.questions.len();
+            eprintln!(
+                "[telegram] multi-select submit: question_index={}, questions_len={}, has_next={}",
+                active_prompt.current_question_index,
+                active_prompt.questions.len(),
+                has_next_question,
+            );
+            if has_next_question {
+                let next_prompt = manager.mutate_active_prompt_for_scope(
+                    chat_id,
+                    thread_id,
+                    |prompt| match prompt {
+                        ActiveInteractivePrompt::Choice(prompt) => {
+                            advance_active_choice_prompt(prompt);
+                            prompt.clone()
+                        }
+                    },
+                );
+                if let Some(next_prompt) = next_prompt {
+                    if let Err(err) = edit_message_text(
+                        token,
+                        chat_id,
+                        message_id,
+                        &format_active_choice_text(&next_prompt),
+                        Some(build_active_choice_markup(&next_prompt)),
+                    ) {
+                        eprintln!("[telegram] edit_message_text failed for next question after multi-select submit: {err}");
+                    }
+                }
+                answer_callback_query(
+                    token,
+                    callback_query_id,
+                    "Answers submitted. Next question ready.",
+                    false,
+                )?;
+            } else {
+                manager.clear_active_prompt_for_scope(chat_id, thread_id);
+                if let Err(err) = edit_message_text(
+                    token,
+                    chat_id,
+                    message_id,
+                    &format!("Submitted answers via Telegram.\n{}", selected_labels),
+                    None,
+                ) {
+                    eprintln!(
+                        "[telegram] edit_message_text failed for multi-select final submit: {err}"
+                    );
+                }
+                answer_callback_query(token, callback_query_id, "Answers submitted.", false)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_interactive_tool_cancel_callback(
+    manager: &Arc<TelegramBridgeManager>,
+    interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
+    token: &str,
+    chat_id: i64,
+    thread_id: Option<i64>,
+    message_id: i64,
+    callback_query_id: &str,
+) -> Result<(), String> {
+    let Some(prompt) = manager.clear_active_prompt_for_scope(chat_id, thread_id) else {
+        answer_callback_query(
+            token,
+            callback_query_id,
+            "This interactive question is no longer active.",
+            true,
+        )?;
+        return Ok(());
+    };
+
+    interactive_runtime_manager.write_input(active_prompt_runtime_id(&prompt), "\u{1b}")?;
+    let _ = edit_message_text(
+        token,
+        chat_id,
+        message_id,
+        "Interactive question cancelled.",
+        None,
+    );
+    answer_callback_query(token, callback_query_id, "Cancelled.", false)?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_interactive_telegram_session(
+    manager: &Arc<TelegramBridgeManager>,
+    app: &AppHandle,
+    interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
+    token: &str,
+    settings: &TelegramSettings,
+    chat_id: i64,
+    thread_id: Option<i64>,
+    prompt: &str,
+    resume_session_id: Option<String>,
+    binding: Option<&TelegramTopicBinding>,
+) -> Result<(), String> {
+    let thread_id = canonical_thread_id(thread_id);
+    let env_name = binding
+        .and_then(|binding| binding.preferred_env.clone())
+        .or_else(|| settings.default_env_name.clone())
+        .or_else(|| config::read_config().ok().and_then(|cfg| cfg.current))
+        .unwrap_or_else(|| "official".to_string());
+    let perm_mode = binding
+        .and_then(|binding| binding.preferred_perm_mode.clone())
+        .or_else(|| settings.default_perm_mode.clone())
+        .unwrap_or_else(|| "dev".to_string());
+    let working_dir = binding
+        .map(|binding| binding.project_dir.clone())
+        .or_else(|| settings.default_working_dir.clone())
+        .or_else(config::get_default_working_dir)
+        .or_else(|| dirs::home_dir().map(|path| path.to_string_lossy().to_string()))
+        .unwrap_or_else(|| ".".to_string());
+    let resolved = config::resolve_claude_env(&env_name)?;
+    let session_manager = app.state::<Arc<SessionManager>>().inner().clone();
+    let runtime_id = generate_telegram_runtime_id();
+    let resume_target = resume_session_id.clone();
+
+    let session = interactive_runtime_manager.create_session(
+        app.clone(),
+        session_manager,
+        InteractiveSessionOptions {
+            session_id: runtime_id,
+            env_name: resolved.env_name,
+            perm_mode,
+            working_dir: working_dir.clone(),
+            resume_session_id,
+            env_vars: resolved.env_vars,
+        },
+    )?;
+
+    if let Some(session_id) = resume_target.as_deref() {
+        let _ = clear_runtime_recovery_candidates_by_claude_session_id(session_id);
+    }
+
+    manager.remember_runtime_for_scope(chat_id, thread_id, session.id.clone());
+    if let Some(thread_id) = thread_id {
+        let _ = sync_topic_binding_runtime(thread_id, Some(Some(session.id.clone())), None);
+    }
+
+    let status_message = if prompt.trim().is_empty() {
+        format!(
+            "Attached interactive session {} in {}.",
+            session.id, working_dir
+        )
+    } else {
+        format!(
+            "Started interactive session {} in {}.\nSending your prompt now.",
+            session.id, working_dir
+        )
+    };
+    send_message(token, chat_id, thread_id, &status_message)?;
+
+    if !prompt.trim().is_empty() {
+        interactive_runtime_manager.send_message(&session.id, prompt)?;
+    }
+
+    ensure_interactive_monitor(
+        manager,
+        interactive_runtime_manager,
+        token,
+        settings,
+        chat_id,
+        thread_id,
+        &session.id,
+    );
+
+    Ok(())
+}
+
+fn attach_existing_interactive_session(
+    manager: &Arc<TelegramBridgeManager>,
+    interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
+    token: &str,
+    settings: &TelegramSettings,
+    chat_id: i64,
+    thread_id: Option<i64>,
+    runtime_id: &str,
+    prompt: Option<&str>,
+) -> Result<(), String> {
+    let thread_id = canonical_thread_id(thread_id);
+    manager.remember_runtime_for_scope(chat_id, thread_id, runtime_id.to_string());
+    if let Some(thread_id) = thread_id {
+        let _ = sync_topic_binding_runtime(thread_id, Some(Some(runtime_id.to_string())), None);
+    }
+
+    ensure_interactive_monitor(
+        manager,
+        interactive_runtime_manager,
+        token,
+        settings,
+        chat_id,
+        thread_id,
+        runtime_id,
+    );
+
+    if let Some(prompt) = prompt.filter(|value| !value.trim().is_empty()) {
+        send_or_queue_interactive_message(
+            manager,
+            interactive_runtime_manager,
+            token,
+            settings,
+            chat_id,
+            thread_id,
+            runtime_id,
+            prompt,
+        )?;
+    } else {
+        send_message(
+            token,
+            chat_id,
+            thread_id,
+            &format!("Attached to existing interactive session {runtime_id}."),
+        )?;
+    }
+
+    Ok(())
+}
+
+fn ensure_interactive_monitor(
+    manager: &Arc<TelegramBridgeManager>,
+    interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
+    token: &str,
+    settings: &TelegramSettings,
+    chat_id: i64,
+    thread_id: Option<i64>,
+    runtime_id: &str,
+) {
+    let thread_id = canonical_thread_id(thread_id);
+    if !manager.ensure_interactive_monitor_for_scope(chat_id, thread_id, runtime_id) {
+        return;
+    }
+
+    let manager = Arc::clone(manager);
+    let interactive_runtime_manager = Arc::clone(interactive_runtime_manager);
+    let token = token.to_string();
+    let runtime_id = runtime_id.to_string();
+    let settings = settings.clone();
+    thread::spawn(move || {
+        monitor_interactive_session(
+            manager,
+            interactive_runtime_manager,
+            token,
+            settings,
+            chat_id,
+            thread_id,
+            runtime_id,
+        );
+    });
+}
+
+fn send_or_queue_interactive_message(
+    manager: &Arc<TelegramBridgeManager>,
+    interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
+    token: &str,
+    settings: &TelegramSettings,
+    chat_id: i64,
+    thread_id: Option<i64>,
+    runtime_id: &str,
+    text: &str,
+) -> Result<(), String> {
+    ensure_interactive_monitor(
+        manager,
+        interactive_runtime_manager,
+        token,
+        settings,
+        chat_id,
+        thread_id,
+        runtime_id,
+    );
+
+    if let Some(ActiveInteractivePrompt::Choice(prompt)) =
+        manager.active_prompt_for_scope(chat_id, thread_id)
+    {
+        if prompt.awaiting_text_entry.is_some() {
+            let current_question = active_choice_question(&prompt).cloned();
+            let is_multi_select = current_question
+                .as_ref()
+                .is_some_and(|question| question.multi_select);
+            eprintln!(
+                "[telegram] text entry submit: question_index={}, questions_len={}, multi_select={}, current_question_exists={}",
+                prompt.current_question_index,
+                prompt.questions.len(),
+                is_multi_select,
+                current_question.is_some(),
+            );
+            submit_text_entry_answer(interactive_runtime_manager, runtime_id, text)?;
+            if is_multi_select {
+                let updated_prompt = manager.mutate_active_prompt_for_scope(
+                    chat_id,
+                    thread_id,
+                    |prompt| match prompt {
+                        ActiveInteractivePrompt::Choice(prompt) => {
+                            prompt.awaiting_text_entry = None;
+                            prompt.clone()
+                        }
+                    },
+                );
+
+                if let Some(updated_prompt) = updated_prompt {
+                    if let Some(message_id) = updated_prompt.message_id {
+                        if let Err(err) = edit_message_text(
+                            token,
+                            chat_id,
+                            message_id,
+                            &format!(
+                                "{}\n\nText answer saved. Choose more options or tap Submit when ready.",
+                                format_active_choice_text(&updated_prompt)
+                            ),
+                            Some(build_active_choice_markup(&updated_prompt)),
+                        ) {
+                            eprintln!("[telegram] edit_message_text failed after multi-select text entry: {err}");
+                        }
+                    }
+                }
+                send_message(
+                    token,
+                    chat_id,
+                    thread_id,
+                    "Text answer saved. Choose more options or tap Submit when ready.",
+                )?;
+            } else {
+                let has_next_question = prompt.current_question_index + 1 < prompt.questions.len();
+                if has_next_question {
+                    let next_prompt =
+                        manager.mutate_active_prompt_for_scope(chat_id, thread_id, |prompt| {
+                            match prompt {
+                                ActiveInteractivePrompt::Choice(prompt) => {
+                                    advance_active_choice_prompt(prompt);
+                                    prompt.clone()
+                                }
+                            }
+                        });
+
+                    if let Some(next_prompt) = next_prompt {
+                        if let Some(message_id) = next_prompt.message_id {
+                            if let Err(err) = edit_message_text(
+                                token,
+                                chat_id,
+                                message_id,
+                                &format_active_choice_text(&next_prompt),
+                                Some(build_active_choice_markup(&next_prompt)),
+                            ) {
+                                eprintln!("[telegram] edit_message_text failed for next question after text entry: {err}");
+                            }
+                        }
+                    }
+                    send_message(
+                        token,
+                        chat_id,
+                        thread_id,
+                        "Text answer submitted. Continue with the next question.",
+                    )?;
+                } else {
+                    // TUI auto-navigated to Submit tab, press Enter to submit the form
+                    send_interactive_input_sequence(
+                        interactive_runtime_manager,
+                        runtime_id,
+                        &[("\r", Duration::from_millis(0))],
+                    )?;
+                    manager.clear_active_prompt_for_scope(chat_id, thread_id);
+                    if let Some(message_id) = prompt.message_id {
+                        if let Err(err) = edit_message_text(
+                            token,
+                            chat_id,
+                            message_id,
+                            &format!(
+                                "Submitted text answer via Telegram.\n{}",
+                                truncate_for_telegram(text)
+                            ),
+                            None,
+                        ) {
+                            eprintln!("[telegram] edit_message_text failed for final text entry submit: {err}");
+                        }
+                    }
+                    send_message(
+                        token,
+                        chat_id,
+                        thread_id,
+                        &format!("Sent text answer to interactive question in {runtime_id}"),
+                    )?;
+                }
+            }
+            return Ok(());
+        }
+
+        let current_question = active_choice_question(&prompt).cloned();
+        send_message(
+            token,
+            chat_id,
+            thread_id,
+            if current_question
+                .as_ref()
+                .is_some_and(|question| question.options.is_empty())
+            {
+                "Claude is waiting for an interactive answer that currently requires local terminal / VS Code interaction. Finish that prompt locally before sending a new follow-up."
+            } else {
+                "Claude is waiting for an interactive answer. Use the buttons in the active question message before sending a new follow-up."
+            },
+        )?;
+        return Ok(());
+    }
+
+    match interactive_runtime_manager.get_state(runtime_id)? {
+        ClaudeTerminalState::Idle => {
+            interactive_runtime_manager.send_message(runtime_id, text)?;
+            send_message(
+                token,
+                chat_id,
+                thread_id,
+                &format!("Sent follow-up to {runtime_id}"),
+            )?;
+        }
+        ClaudeTerminalState::WaitingApproval => {
+            send_message(
+                token,
+                chat_id,
+                thread_id,
+                "Claude is waiting for approval. Approve or deny the request before sending a new message.",
+            )?;
+        }
+        ClaudeTerminalState::Processing | ClaudeTerminalState::Unknown => {
+            let position = manager.queue_interactive_message(chat_id, thread_id, text.to_string());
+            let suffix = if position > 0 {
+                format!(" (position {position})")
+            } else {
+                String::new()
+            };
+            send_message(
+                token,
+                chat_id,
+                thread_id,
+                &format!("Claude is busy. Queued your message for {runtime_id}{suffix}"),
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
 fn monitor_session_completion(
     manager: Arc<TelegramBridgeManager>,
     runtime_manager: Arc<HeadlessRuntimeManager>,
@@ -975,6 +4153,12 @@ fn monitor_session_completion(
 ) {
     let started = Instant::now();
     let timeout = Duration::from_secs(60 * 15);
+    let mut last_seen_seq = None;
+    let mut announced_requests = HashSet::new();
+    let mut announced_responses = HashSet::new();
+    let mut permission_messages: HashMap<String, TelegramSentMessage> = HashMap::new();
+    let mut pending_stdout = Vec::new();
+    let mut pending_stderr = Vec::new();
 
     loop {
         if started.elapsed() > timeout {
@@ -991,23 +4175,141 @@ fn monitor_session_completion(
             break;
         }
 
+        if let Ok(batch) = runtime_manager.replay_events(&runtime_id, last_seen_seq) {
+            if let Some(newest_seq) = batch.newest_available_seq {
+                last_seen_seq = Some(newest_seq);
+            }
+
+            for event in batch.events {
+                match event.payload {
+                    SessionEventPayload::AssistantChunk { text } => {
+                        if !text.trim().is_empty() {
+                            pending_stdout.push(text);
+                        }
+                    }
+                    SessionEventPayload::StdErrLine { line } => {
+                        if !line.trim().is_empty() {
+                            pending_stderr.push(line);
+                        }
+                    }
+                    SessionEventPayload::Lifecycle { stage, detail } => {
+                        if matches!(
+                            stage.as_str(),
+                            "stderr_error" | "stdout_error" | "process_failure"
+                        ) {
+                            pending_stderr.push(format!("[{stage}] {detail}"));
+                        }
+                    }
+                    SessionEventPayload::PermissionRequired {
+                        request_id,
+                        tool_name,
+                    } => {
+                        if announced_requests.insert(request_id.clone()) {
+                            if let Ok(sent_message) = send_permission_request_message(
+                                &token,
+                                chat_id,
+                                thread_id,
+                                &request_id,
+                                &tool_name,
+                            ) {
+                                permission_messages.insert(request_id.clone(), sent_message);
+                            }
+                        }
+                    }
+                    SessionEventPayload::PermissionResponded {
+                        request_id,
+                        approved,
+                        responder,
+                    } => {
+                        if announced_responses.insert(request_id.clone()) {
+                            let text = format!(
+                                "Permission request {request_id} was {} by {responder}.",
+                                if approved { "approved" } else { "denied" }
+                            );
+                            if let Some(sent_message) = permission_messages.remove(&request_id) {
+                                if edit_message_text(
+                                    &token,
+                                    chat_id,
+                                    sent_message.message_id,
+                                    &text,
+                                    None,
+                                )
+                                .is_err()
+                                {
+                                    let _ = send_message(&token, chat_id, thread_id, &text);
+                                }
+                            } else {
+                                let _ = send_message(&token, chat_id, thread_id, &text);
+                            }
+                        }
+                    }
+                    SessionEventPayload::ClaudeJson {
+                        message_type,
+                        raw_json,
+                    } if message_type.as_deref() == Some("result") => {
+                        let result = parse_headless_result_payload(&raw_json);
+                        if pending_stdout.is_empty() {
+                            if let Some(text) = result
+                                .as_ref()
+                                .and_then(|payload| payload.result_text.as_deref())
+                                .filter(|text| !text.trim().is_empty())
+                                .filter(|_| {
+                                    !result.as_ref().is_some_and(|payload| payload.is_error)
+                                })
+                            {
+                                pending_stdout.push(text.to_string());
+                            }
+                        }
+                        if pending_stderr.is_empty() {
+                            if let Some(text) = result
+                                .as_ref()
+                                .and_then(|payload| payload.result_text.as_deref())
+                                .filter(|text| !text.trim().is_empty())
+                                .filter(|_| result.as_ref().is_some_and(|payload| payload.is_error))
+                            {
+                                pending_stderr.push(text.to_string());
+                            }
+                        }
+
+                        let message = format_headless_turn_message(
+                            &runtime_id,
+                            &pending_stdout.join("\n"),
+                            &pending_stderr.join("\n"),
+                        );
+                        let _ = send_message(&token, chat_id, thread_id, &message);
+                        pending_stdout.clear();
+                        pending_stderr.clear();
+                    }
+                    SessionEventPayload::SessionCompleted { reason } => {
+                        if reason != "completed" && reason != "stopped" {
+                            pending_stderr.push(reason);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         match runtime_manager.summary(&runtime_id) {
             Some(summary)
                 if !summary.is_active
                     || matches!(summary.status.as_str(), "completed" | "stopped" | "error") =>
             {
-                let replay =
-                    runtime_manager
-                        .replay_events(&runtime_id, None)
-                        .unwrap_or(ReplayBatch {
-                            gap_detected: false,
-                            oldest_available_seq: None,
-                            newest_available_seq: None,
-                            events: Vec::new(),
-                        });
-                let (stdout, stderr) = collect_runtime_output(&replay);
-                let message = format_result_message(&runtime_id, &summary.status, &stdout, &stderr);
-                let _ = send_message(&token, chat_id, thread_id, &message);
+                if !pending_stdout.is_empty() || !pending_stderr.is_empty() {
+                    let message = format_headless_turn_message(
+                        &runtime_id,
+                        &pending_stdout.join("\n"),
+                        &pending_stderr.join("\n"),
+                    );
+                    let _ = send_message(&token, chat_id, thread_id, &message);
+                    pending_stdout.clear();
+                    pending_stderr.clear();
+                }
+
+                if matches!(summary.status.as_str(), "stopped" | "error") {
+                    let message = format_result_message(&runtime_id, &summary.status, "", "");
+                    let _ = send_message(&token, chat_id, thread_id, &message);
+                }
                 let _ = runtime_manager.remove_session(&runtime_id);
                 manager.clear_runtime_for_scope(chat_id, thread_id, &runtime_id);
                 if let Some(thread_id) = thread_id {
@@ -1033,33 +4335,370 @@ fn monitor_session_completion(
     }
 }
 
-fn collect_runtime_output(replay: &ReplayBatch) -> (String, String) {
-    let mut stdout_lines = Vec::new();
-    let mut stderr_lines = Vec::new();
+fn monitor_interactive_session(
+    manager: Arc<TelegramBridgeManager>,
+    interactive_runtime_manager: Arc<InteractiveRuntimeManager>,
+    token: String,
+    settings: TelegramSettings,
+    chat_id: i64,
+    thread_id: Option<i64>,
+    runtime_id: String,
+) {
+    let flush_interval = Duration::from_millis(settings.preferences.flush_interval_ms.max(500));
+    let mut last_seen_seq = None;
+    let mut last_flush_at = Instant::now();
+    let mut pending_lines = Vec::new();
+    let mut last_state = ClaudeTerminalState::Unknown;
+    let mut approval_message: Option<TelegramSentMessage> = None;
+    let mut last_claude_session_id =
+        interactive_runtime_manager.current_claude_session_id(&runtime_id);
 
-    for event in &replay.events {
-        match &event.payload {
-            SessionEventPayload::AssistantChunk { text } => stdout_lines.push(text.clone()),
-            SessionEventPayload::SystemMessage { message } => stdout_lines.push(message.clone()),
-            SessionEventPayload::StdErrLine { line } => stderr_lines.push(line.clone()),
-            SessionEventPayload::Lifecycle { stage, detail } => {
-                if matches!(
-                    stage.as_str(),
-                    "stderr_error" | "stdout_error" | "process_failure"
+    loop {
+        if manager.stop_flag.load(Ordering::SeqCst) {
+            break;
+        }
+
+        if let Ok(batch) = interactive_runtime_manager.replay_events(&runtime_id, last_seen_seq) {
+            if let Some(newest_seq) = batch.newest_available_seq {
+                last_seen_seq = Some(newest_seq);
+            }
+
+            for event in batch.events {
+                match event.payload {
+                    SessionEventPayload::AssistantChunk { text } => {
+                        if !text.trim().is_empty() {
+                            pending_lines.push(text);
+                        }
+                    }
+                    SessionEventPayload::SystemMessage { message } => {
+                        if !message.trim().is_empty() {
+                            pending_lines.push(message);
+                        }
+                    }
+                    SessionEventPayload::ToolUseStarted {
+                        tool_use_id,
+                        category,
+                        raw_name,
+                        input_summary,
+                        needs_response,
+                        prompt,
+                    } => {
+                        if !manager.mark_interactive_tool_seen(chat_id, thread_id, &tool_use_id) {
+                            continue;
+                        }
+
+                        if needs_response {
+                            match prompt {
+                                Some(InteractiveToolPrompt::AskUserQuestion { questions })
+                                    if !questions.is_empty() =>
+                                {
+                                    let questions =
+                                        normalize_ask_user_questions_for_telegram(questions);
+                                    let prompt_state = ActiveInteractiveChoicePrompt {
+                                        runtime_id: runtime_id.clone(),
+                                        tool_use_id: tool_use_id.clone(),
+                                        questions,
+                                        current_question_index: 0,
+                                        submit_mode: InteractiveChoiceSubmitMode::AskUserQuestion,
+                                        selected_options: BTreeSet::new(),
+                                        awaiting_text_entry: None,
+                                        message_id: None,
+                                    };
+                                    let text = format_active_choice_text(&prompt_state);
+                                    let markup = build_active_choice_markup(&prompt_state);
+                                    if let Ok(sent) = send_message_with_markup(
+                                        &token,
+                                        chat_id,
+                                        thread_id,
+                                        &text,
+                                        Some(markup),
+                                    ) {
+                                        let mut prompt_state = prompt_state;
+                                        prompt_state.message_id = Some(sent.message_id);
+                                        manager.remember_active_prompt(
+                                            chat_id,
+                                            thread_id,
+                                            ActiveInteractivePrompt::Choice(prompt_state),
+                                        );
+                                    }
+                                }
+                                Some(InteractiveToolPrompt::PlanExit {
+                                    allowed_prompts,
+                                    plan_summary,
+                                }) => {
+                                    let question = build_plan_exit_question(
+                                        plan_summary
+                                            .as_deref()
+                                            .or((!input_summary.trim().is_empty())
+                                                .then_some(input_summary.as_str())),
+                                        &allowed_prompts,
+                                    );
+                                    let prompt_state = ActiveInteractiveChoicePrompt {
+                                        runtime_id: runtime_id.clone(),
+                                        tool_use_id: tool_use_id.clone(),
+                                        questions: vec![question],
+                                        current_question_index: 0,
+                                        submit_mode: InteractiveChoiceSubmitMode::PlanExit,
+                                        selected_options: BTreeSet::new(),
+                                        awaiting_text_entry: None,
+                                        message_id: None,
+                                    };
+                                    let text = format_active_choice_text(&prompt_state);
+                                    let markup = build_active_choice_markup(&prompt_state);
+                                    if let Ok(sent) = send_message_with_markup(
+                                        &token,
+                                        chat_id,
+                                        thread_id,
+                                        &truncate_for_telegram(&text),
+                                        Some(markup),
+                                    ) {
+                                        let mut prompt_state = prompt_state;
+                                        prompt_state.message_id = Some(sent.message_id);
+                                        manager.remember_active_prompt(
+                                            chat_id,
+                                            thread_id,
+                                            ActiveInteractivePrompt::Choice(prompt_state),
+                                        );
+                                    }
+                                }
+                                _ => {
+                                    pending_lines
+                                        .push(format!("🔧 {}: {}", raw_name, input_summary));
+                                }
+                            }
+                        } else {
+                            if matches!(prompt, Some(InteractiveToolPrompt::PlanEntry)) {
+                                pending_lines.push("🧭 Claude entered plan mode.".to_string());
+                            }
+                            if settings.preferences.show_tool_calls {
+                                if let Some(message) = format_tool_started_message(
+                                    &category,
+                                    &raw_name,
+                                    &input_summary,
+                                ) {
+                                    pending_lines.push(message);
+                                }
+                            }
+                        }
+                    }
+                    SessionEventPayload::ToolUseCompleted {
+                        tool_use_id,
+                        raw_name,
+                        result_summary,
+                        success,
+                    } => {
+                        if let Some(active_prompt) =
+                            manager.active_prompt_for_scope(chat_id, thread_id)
+                        {
+                            let (matches_active, message_id) = match active_prompt {
+                                ActiveInteractivePrompt::Choice(prompt) => {
+                                    (prompt.tool_use_id == tool_use_id, prompt.message_id)
+                                }
+                            };
+
+                            if matches_active {
+                                manager.clear_active_prompt_for_scope(chat_id, thread_id);
+                                if let Some(message_id) = message_id {
+                                    let final_text = summarize_interactive_prompt_resolution(
+                                        &raw_name,
+                                        &result_summary,
+                                    );
+                                    let _ = edit_message_text(
+                                        &token,
+                                        chat_id,
+                                        message_id,
+                                        &truncate_for_telegram(&final_text),
+                                        None,
+                                    );
+                                }
+                            }
+                        }
+
+                        if settings.preferences.show_tool_calls {
+                            if let Some(message) =
+                                format_tool_completed_message(&raw_name, &result_summary, success)
+                            {
+                                pending_lines.push(message);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if !pending_lines.is_empty() && last_flush_at.elapsed() >= flush_interval {
+            let body = truncate_for_telegram(&pending_lines.join("\n\n"));
+            let _ = send_message(&token, chat_id, thread_id, &body);
+            pending_lines.clear();
+            last_flush_at = Instant::now();
+        }
+
+        if let Ok(state) = interactive_runtime_manager.get_state(&runtime_id) {
+            if state == ClaudeTerminalState::WaitingApproval
+                && last_state != ClaudeTerminalState::WaitingApproval
+            {
+                if let Ok(sent) = send_interactive_permission_request_message(
+                    &token,
+                    chat_id,
+                    thread_id,
+                    &runtime_id,
                 ) {
-                    stderr_lines.push(format!("[{stage}] {detail}"));
+                    approval_message = Some(sent);
+                }
+            } else if last_state == ClaudeTerminalState::WaitingApproval
+                && state != ClaudeTerminalState::WaitingApproval
+            {
+                if let Some(sent) = approval_message.take() {
+                    let _ = edit_message_text(
+                        &token,
+                        chat_id,
+                        sent.message_id,
+                        "Interactive approval request resolved.",
+                        None,
+                    );
                 }
             }
-            SessionEventPayload::SessionCompleted { reason } => {
-                if reason != "completed" && reason != "stopped" {
-                    stderr_lines.push(reason.clone());
+
+            if state == ClaudeTerminalState::Idle {
+                if let Some(PendingInteractiveAction::FreeText(queued_message)) =
+                    manager.pop_pending_interactive_action(chat_id, thread_id)
+                {
+                    match interactive_runtime_manager.send_message(&runtime_id, &queued_message) {
+                        Ok(()) => {
+                            let _ = send_message(
+                                &token,
+                                chat_id,
+                                thread_id,
+                                &format!("Sent queued follow-up to {runtime_id}"),
+                            );
+                        }
+                        Err(error) => {
+                            let restored_position = manager.queue_interactive_message(
+                                chat_id,
+                                thread_id,
+                                queued_message,
+                            );
+                            let suffix = if restored_position > 0 {
+                                format!(" (still queued at position {restored_position})")
+                            } else {
+                                String::new()
+                            };
+                            let _ = send_message(
+                                &token,
+                                chat_id,
+                                thread_id,
+                                &format!(
+                                    "Failed to send queued follow-up to {runtime_id}: {}{}",
+                                    truncate_for_telegram(&error),
+                                    suffix
+                                ),
+                            );
+                        }
+                    }
                 }
             }
-            _ => {}
+            last_state = state;
+        }
+
+        let current_claude_session_id =
+            interactive_runtime_manager.current_claude_session_id(&runtime_id);
+        if current_claude_session_id != last_claude_session_id {
+            if let Some(thread_id) = thread_id {
+                let _ = sync_topic_binding_runtime(
+                    thread_id,
+                    None,
+                    Some(current_claude_session_id.clone()),
+                );
+            }
+            last_claude_session_id = current_claude_session_id;
+        }
+
+        match interactive_runtime_manager.summary(&runtime_id) {
+            Some(summary)
+                if summary.is_active
+                    && !matches!(summary.status.as_str(), "stopped" | "error" | "completed") =>
+            {
+                thread::sleep(Duration::from_millis(700));
+            }
+            Some(summary) => {
+                if !pending_lines.is_empty() {
+                    let body = truncate_for_telegram(&pending_lines.join("\n\n"));
+                    let _ = send_message(&token, chat_id, thread_id, &body);
+                }
+                let _ = send_message(
+                    &token,
+                    chat_id,
+                    thread_id,
+                    &format!(
+                        "Interactive session {} is now {}.",
+                        summary.session_id, summary.status
+                    ),
+                );
+                manager.clear_runtime_for_scope(chat_id, thread_id, &runtime_id);
+                if let Some(thread_id) = thread_id {
+                    let _ = sync_topic_binding_runtime(
+                        thread_id,
+                        Some(None),
+                        Some(summary.claude_session_id.clone()),
+                    );
+                }
+                break;
+            }
+            None => {
+                if !pending_lines.is_empty() {
+                    let body = truncate_for_telegram(&pending_lines.join("\n\n"));
+                    let _ = send_message(&token, chat_id, thread_id, &body);
+                }
+                manager.clear_runtime_for_scope(chat_id, thread_id, &runtime_id);
+                if let Some(thread_id) = thread_id {
+                    let _ = sync_topic_binding_runtime(
+                        thread_id,
+                        Some(None),
+                        Some(last_claude_session_id.clone()),
+                    );
+                }
+                break;
+            }
         }
     }
+}
 
-    (stdout_lines.join("\n"), stderr_lines.join("\n"))
+#[derive(Debug)]
+struct HeadlessResultPayload {
+    is_error: bool,
+    result_text: Option<String>,
+}
+
+fn parse_headless_result_payload(raw_json: &str) -> Option<HeadlessResultPayload> {
+    let value = serde_json::from_str::<serde_json::Value>(raw_json).ok()?;
+    if value.get("type").and_then(serde_json::Value::as_str) != Some("result") {
+        return None;
+    }
+    Some(HeadlessResultPayload {
+        is_error: value
+            .get("is_error")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        result_text: value
+            .get("result")
+            .and_then(serde_json::Value::as_str)
+            .map(ToString::to_string),
+    })
+}
+
+fn format_headless_turn_message(runtime_id: &str, stdout: &str, stderr: &str) -> String {
+    let mut lines = vec![format!("Session {runtime_id} replied:")];
+    if !stdout.trim().is_empty() {
+        lines.push(String::new());
+        lines.push(truncate_for_telegram(stdout));
+    }
+    if !stderr.trim().is_empty() {
+        lines.push(String::new());
+        lines.push("Errors:".to_string());
+        lines.push(truncate_for_telegram(stderr));
+    }
+    lines.join("\n")
 }
 
 fn format_result_message(runtime_id: &str, status: &str, stdout: &str, stderr: &str) -> String {
@@ -1165,7 +4804,8 @@ fn truncate_for_telegram(value: &str) -> String {
 fn normalize_command_text(text: &str, bot_username: Option<&str>) -> String {
     let mut parts = text.splitn(2, ' ');
     let command = parts.next().unwrap_or_default();
-    let remainder = parts.next().unwrap_or_default().trim();
+    let remainder =
+        strip_bot_username_mentions(parts.next().unwrap_or_default().trim(), bot_username);
 
     let normalized_command = if let Some(username) = bot_username {
         let suffix = format!("@{username}");
@@ -1181,18 +4821,31 @@ fn normalize_command_text(text: &str, bot_username: Option<&str>) -> String {
     }
 }
 
+fn strip_bot_username_mentions(text: &str, bot_username: Option<&str>) -> String {
+    let Some(username) = bot_username else {
+        return text.to_string();
+    };
+
+    let mention = format!("@{username}");
+    text.split_whitespace()
+        .filter(|token| !token.eq_ignore_ascii_case(&mention))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn get_me(token: &str) -> Result<TelegramUser, String> {
-    let client = reqwest::blocking::Client::new();
+    let client = telegram_http_client(None)?;
     let url = format!("{TELEGRAM_API_BASE}/bot{token}/getMe");
     let response = client
         .get(url)
         .send()
         .map_err(|error| format!("Telegram getMe failed: {}", error))?;
-    let payload = response
-        .json::<TelegramApiResponse<TelegramUser>>()
-        .map_err(|error| format!("Failed to parse Telegram getMe response: {}", error))?;
+    let payload: TelegramApiResponse<TelegramUser> =
+        parse_telegram_response(response, "Telegram getMe response")?;
     if payload.ok {
-        Ok(payload.result)
+        payload
+            .result
+            .ok_or_else(|| "Telegram getMe returned ok=true without result".to_string())
     } else {
         Err(payload
             .description
@@ -1201,12 +4854,9 @@ fn get_me(token: &str) -> Result<TelegramUser, String> {
 }
 
 fn get_updates(token: &str, offset: Option<i64>) -> Result<Vec<TelegramUpdate>, String> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(35))
-        .build()
-        .map_err(|error| format!("Failed to build Telegram client: {}", error))?;
+    let client = telegram_http_client(Some(Duration::from_secs(TELEGRAM_HTTP_TIMEOUT_SECS)))?;
     let url = format!("{TELEGRAM_API_BASE}/bot{token}/getUpdates");
-    let mut query = vec![("timeout", "20".to_string())];
+    let mut query = vec![("timeout", TELEGRAM_LONG_POLL_TIMEOUT_SECS.to_string())];
     if let Some(offset) = offset {
         query.push(("offset", offset.to_string()));
     }
@@ -1216,15 +4866,49 @@ fn get_updates(token: &str, offset: Option<i64>) -> Result<Vec<TelegramUpdate>, 
         .query(&query)
         .send()
         .map_err(|error| format!("Telegram getUpdates failed: {}", error))?;
-    let payload = response
-        .json::<TelegramApiResponse<Vec<TelegramUpdate>>>()
-        .map_err(|error| format!("Failed to parse Telegram updates: {}", error))?;
+    let payload: TelegramApiResponse<Vec<TelegramUpdate>> =
+        parse_telegram_response(response, "Telegram updates")?;
     if payload.ok {
-        Ok(payload.result)
+        payload
+            .result
+            .ok_or_else(|| "Telegram getUpdates returned ok=true without result".to_string())
     } else {
         Err(payload
             .description
             .unwrap_or_else(|| "Telegram getUpdates returned an error".to_string()))
+    }
+}
+
+fn create_forum_topic(token: &str, chat_id: i64, name: &str) -> Result<i64, String> {
+    #[derive(Serialize)]
+    struct CreateForumTopicBody<'a> {
+        chat_id: i64,
+        name: &'a str,
+        icon_color: u32,
+    }
+
+    let client = telegram_http_client(None)?;
+    let url = format!("{TELEGRAM_API_BASE}/bot{token}/createForumTopic");
+    let response = client
+        .post(url)
+        .json(&CreateForumTopicBody {
+            chat_id,
+            name,
+            icon_color: TELEGRAM_DEFAULT_TOPIC_ICON_COLOR,
+        })
+        .send()
+        .map_err(|error| format!("Telegram createForumTopic failed: {}", error))?;
+    let payload: TelegramApiResponse<TelegramCreatedForumTopic> =
+        parse_telegram_response(response, "Telegram createForumTopic response")?;
+    if payload.ok {
+        payload
+            .result
+            .map(|result| result.message_thread_id)
+            .ok_or_else(|| "Telegram createForumTopic returned ok=true without result".to_string())
+    } else {
+        Err(payload
+            .description
+            .unwrap_or_else(|| "Telegram createForumTopic returned an error".to_string()))
     }
 }
 
@@ -1234,30 +4918,101 @@ fn send_message(
     thread_id: Option<i64>,
     text: &str,
 ) -> Result<(), String> {
+    send_message_with_markup(token, chat_id, thread_id, text, None).map(|_| ())
+}
+
+fn send_permission_request_message(
+    token: &str,
+    chat_id: i64,
+    thread_id: Option<i64>,
+    request_id: &str,
+    tool_name: &str,
+) -> Result<TelegramSentMessage, String> {
+    let markup = serde_json::json!({
+        "inline_keyboard": [[
+            {
+                "text": "Approve",
+                "callback_data": format!("perm:approve:{request_id}"),
+            },
+            {
+                "text": "Deny",
+                "callback_data": format!("perm:deny:{request_id}"),
+            }
+        ]]
+    });
+
+    send_message_with_markup(
+        token,
+        chat_id,
+        thread_id,
+        &format!("Permission required for {tool_name}.\nRequest: {request_id}"),
+        Some(markup),
+    )
+}
+
+fn send_interactive_permission_request_message(
+    token: &str,
+    chat_id: i64,
+    thread_id: Option<i64>,
+    session_id: &str,
+) -> Result<TelegramSentMessage, String> {
+    let markup = serde_json::json!({
+        "inline_keyboard": [[
+            {
+                "text": "Approve",
+                "callback_data": format!("perm_i:approve:{session_id}"),
+            },
+            {
+                "text": "Deny",
+                "callback_data": format!("perm_i:deny:{session_id}"),
+            }
+        ]]
+    });
+
+    send_message_with_markup(
+        token,
+        chat_id,
+        thread_id,
+        &format!("Interactive approval required for session {session_id}."),
+        Some(markup),
+    )
+}
+
+fn send_message_with_markup(
+    token: &str,
+    chat_id: i64,
+    thread_id: Option<i64>,
+    text: &str,
+    reply_markup: Option<serde_json::Value>,
+) -> Result<TelegramSentMessage, String> {
     #[derive(Serialize)]
     struct SendMessageBody<'a> {
         chat_id: i64,
         text: &'a str,
         #[serde(skip_serializing_if = "Option::is_none")]
         message_thread_id: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reply_markup: Option<serde_json::Value>,
     }
 
-    let client = reqwest::blocking::Client::new();
+    let client = telegram_http_client(None)?;
     let url = format!("{TELEGRAM_API_BASE}/bot{token}/sendMessage");
     let response = client
         .post(url)
         .json(&SendMessageBody {
             chat_id,
             text,
-            message_thread_id: thread_id,
+            message_thread_id: canonical_thread_id(thread_id),
+            reply_markup,
         })
         .send()
         .map_err(|error| format!("Telegram sendMessage failed: {}", error))?;
-    let payload = response
-        .json::<TelegramApiResponse<serde_json::Value>>()
-        .map_err(|error| format!("Failed to parse Telegram sendMessage response: {}", error))?;
+    let payload: TelegramApiResponse<TelegramSentMessage> =
+        parse_telegram_response(response, "Telegram sendMessage response")?;
     if payload.ok {
-        Ok(())
+        payload
+            .result
+            .ok_or_else(|| "Telegram sendMessage returned ok=true without result".to_string())
     } else {
         Err(payload
             .description
@@ -1265,13 +5020,147 @@ fn send_message(
     }
 }
 
+fn edit_message_text(
+    token: &str,
+    chat_id: i64,
+    message_id: i64,
+    text: &str,
+    reply_markup: Option<serde_json::Value>,
+) -> Result<(), String> {
+    #[derive(Serialize)]
+    struct EditMessageTextBody<'a> {
+        chat_id: i64,
+        message_id: i64,
+        text: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reply_markup: Option<serde_json::Value>,
+    }
+
+    let client = telegram_http_client(None)?;
+    let url = format!("{TELEGRAM_API_BASE}/bot{token}/editMessageText");
+    let response = client
+        .post(url)
+        .json(&EditMessageTextBody {
+            chat_id,
+            message_id,
+            text,
+            reply_markup,
+        })
+        .send()
+        .map_err(|error| format!("Telegram editMessageText failed: {}", error))?;
+    let payload: TelegramApiResponse<serde_json::Value> =
+        parse_telegram_response(response, "Telegram editMessageText response")?;
+    if payload.ok {
+        payload
+            .result
+            .map(|_| ())
+            .ok_or_else(|| "Telegram editMessageText returned ok=true without result".to_string())
+    } else {
+        Err(payload
+            .description
+            .unwrap_or_else(|| "Telegram editMessageText returned an error".to_string()))
+    }
+}
+
+fn answer_callback_query(
+    token: &str,
+    callback_query_id: &str,
+    text: &str,
+    show_alert: bool,
+) -> Result<(), String> {
+    #[derive(Serialize)]
+    struct AnswerCallbackQueryBody<'a> {
+        callback_query_id: &'a str,
+        text: &'a str,
+        show_alert: bool,
+    }
+
+    let client = telegram_http_client(None)?;
+    let url = format!("{TELEGRAM_API_BASE}/bot{token}/answerCallbackQuery");
+    let response = client
+        .post(url)
+        .json(&AnswerCallbackQueryBody {
+            callback_query_id,
+            text,
+            show_alert,
+        })
+        .send()
+        .map_err(|error| format!("Telegram answerCallbackQuery failed: {}", error))?;
+    let payload: TelegramApiResponse<serde_json::Value> =
+        parse_telegram_response(response, "Telegram answerCallbackQuery response")?;
+    if payload.ok {
+        payload.result.map(|_| ()).ok_or_else(|| {
+            "Telegram answerCallbackQuery returned ok=true without result".to_string()
+        })
+    } else {
+        Err(payload
+            .description
+            .unwrap_or_else(|| "Telegram answerCallbackQuery returned an error".to_string()))
+    }
+}
+
+fn telegram_http_client(timeout: Option<Duration>) -> Result<reqwest::blocking::Client, String> {
+    let mut builder = reqwest::blocking::Client::builder();
+    if telegram_no_proxy_requested() {
+        builder = builder.no_proxy();
+    }
+    if let Some(timeout) = timeout {
+        builder = builder.timeout(timeout);
+    }
+    builder
+        .build()
+        .map_err(|error| format!("Failed to build Telegram client: {}", error))
+}
+
+fn telegram_no_proxy_requested() -> bool {
+    std::env::var("CCEM_TELEGRAM_NO_PROXY")
+        .ok()
+        .map(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn parse_telegram_response<T>(response: Response, context: &str) -> Result<T, String>
+where
+    T: DeserializeOwned,
+{
+    let status = response.status();
+    let body = response
+        .text()
+        .map_err(|error| format!("Failed to read {context}: {}", error))?;
+    serde_json::from_str(&body).map_err(|error| {
+        format!(
+            "Failed to parse {context}: {} (status {}, body: {})",
+            error,
+            status,
+            truncate_for_telegram(&body)
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_command_text, parse_bind_command, remove_topic_binding, upsert_topic_binding,
-        TelegramSettings, TelegramTopicBinding,
+        active_choice_question, advance_active_choice_prompt, build_chat_about_this_steps,
+        build_multi_select_submit_steps, build_multi_select_text_entry_steps,
+        build_plan_exit_question, canonical_thread_id, ensure_chat_about_this_option,
+        ensure_text_entry_option, expand_home_dir, format_active_choice_text,
+        format_tool_completed_message, is_chat_about_this_option, is_sender_allowed,
+        is_vscode_text_entry_option, normalize_command_text, parse_bind_command,
+        parse_interactive_tool_cancel_callback_data, parse_interactive_tool_select_callback_data,
+        parse_interactive_tool_submit_callback_data, parse_new_topic_command,
+        parse_permission_callback_data, remove_topic_binding, selection_submit_options,
+        summarize_interactive_prompt_resolution, upsert_topic_binding,
+        ActiveInteractiveChoicePrompt, InteractiveChoiceSubmitMode, PendingInteractiveAction,
+        TelegramBridgeManager, TelegramSettings, TelegramTopicBinding,
     };
+    use crate::event_bus::{ToolQuestionOption, ToolQuestionPrompt};
     use chrono::Utc;
+    use std::collections::BTreeSet;
 
     #[test]
     fn normalize_command_text_strips_bot_username() {
@@ -1290,12 +5179,62 @@ mod tests {
     }
 
     #[test]
+    fn normalize_command_text_strips_trailing_bot_mention_from_remainder() {
+        assert_eq!(
+            normalize_command_text(
+                "/bind /Users/g/Github/home env=glm perm=dev @ClawdCode996Bot",
+                Some("ClawdCode996Bot")
+            ),
+            "/bind /Users/g/Github/home env=glm perm=dev"
+        );
+    }
+
+    #[test]
+    fn parse_permission_callback_data_extracts_action_and_request_id() {
+        assert_eq!(
+            parse_permission_callback_data("perm:approve:req-123"),
+            Some((true, "req-123"))
+        );
+        assert_eq!(
+            parse_permission_callback_data("perm:deny:req-456"),
+            Some((false, "req-456"))
+        );
+        assert_eq!(parse_permission_callback_data("noop:req-123"), None);
+    }
+
+    #[test]
     fn parse_bind_command_supports_env_and_perm() {
         let parsed =
             parse_bind_command("/bind /Users/g/Github/home env=glm perm=dev").expect("parse bind");
         assert_eq!(parsed.project_dir, "/Users/g/Github/home");
         assert_eq!(parsed.preferred_env.as_deref(), Some("glm"));
         assert_eq!(parsed.preferred_perm_mode.as_deref(), Some("dev"));
+    }
+
+    #[test]
+    fn parse_new_topic_command_supports_env_perm_and_prompt() {
+        let parsed =
+            parse_new_topic_command("/new ~/Github/home glm perm=dev check the repo status")
+                .expect("parse new topic");
+        assert!(parsed.project_dir.ends_with("/Github/home"));
+        assert_eq!(parsed.preferred_env.as_deref(), Some("glm"));
+        assert_eq!(parsed.preferred_perm_mode.as_deref(), Some("dev"));
+        assert_eq!(
+            parsed.initial_prompt.as_deref(),
+            Some("check the repo status")
+        );
+    }
+
+    #[test]
+    fn canonical_thread_id_omits_general_topic_id() {
+        assert_eq!(canonical_thread_id(Some(1)), None);
+        assert_eq!(canonical_thread_id(Some(42)), Some(42));
+        assert_eq!(canonical_thread_id(None), None);
+    }
+
+    #[test]
+    fn expand_home_dir_preserves_plain_paths() {
+        assert_eq!(expand_home_dir("/tmp/project"), "/tmp/project");
     }
 
     #[test]
@@ -1353,5 +5292,348 @@ mod tests {
         assert!(remove_topic_binding(&mut settings, 99));
         assert!(settings.topic_bindings.is_empty());
         assert!(!remove_topic_binding(&mut settings, 99));
+    }
+
+    #[test]
+    fn allowed_user_ids_gate_only_blocks_unknown_senders_when_configured() {
+        let settings = TelegramSettings {
+            allowed_user_ids: vec![1, 2, 3],
+            ..TelegramSettings::default()
+        };
+
+        assert!(is_sender_allowed(&settings, Some(2)));
+        assert!(!is_sender_allowed(&settings, Some(9)));
+        assert!(!is_sender_allowed(&settings, None));
+
+        let open_settings = TelegramSettings::default();
+        assert!(is_sender_allowed(&open_settings, None));
+    }
+
+    #[test]
+    fn interactive_monitor_tracking_is_idempotent_per_scope() {
+        let manager = TelegramBridgeManager::default();
+        assert!(manager.ensure_interactive_monitor_for_scope(1, Some(2), "runtime-1"));
+        assert!(!manager.ensure_interactive_monitor_for_scope(1, Some(2), "runtime-1"));
+        assert!(manager.ensure_interactive_monitor_for_scope(1, Some(2), "runtime-2"));
+    }
+
+    #[test]
+    fn pending_interactive_messages_are_fifo_per_scope() {
+        let manager = TelegramBridgeManager::default();
+        assert_eq!(
+            manager.queue_interactive_message(1, Some(2), "first".to_string()),
+            1
+        );
+        assert_eq!(
+            manager.queue_interactive_message(1, Some(2), "second".to_string()),
+            2
+        );
+        assert_eq!(
+            manager.pop_pending_interactive_action(1, Some(2)),
+            Some(PendingInteractiveAction::FreeText("first".to_string()))
+        );
+        assert_eq!(
+            manager.pop_pending_interactive_action(1, Some(2)),
+            Some(PendingInteractiveAction::FreeText("second".to_string()))
+        );
+        assert_eq!(manager.pop_pending_interactive_action(1, Some(2)), None);
+    }
+
+    #[test]
+    fn interactive_tool_callback_parsers_accept_expected_payloads() {
+        assert_eq!(
+            parse_interactive_tool_select_callback_data("tool_i:select:2"),
+            Some(2)
+        );
+        assert_eq!(
+            parse_interactive_tool_select_callback_data("tool_i:select:not-a-number"),
+            None
+        );
+        assert!(parse_interactive_tool_submit_callback_data("tool_i:submit"));
+        assert!(parse_interactive_tool_cancel_callback_data("tool_i:cancel"));
+    }
+
+    #[test]
+    fn text_entry_option_detection_supports_type_here_variants() {
+        assert!(is_vscode_text_entry_option("Type something"));
+        assert!(is_vscode_text_entry_option(
+            "Type here to tell Claude what to change"
+        ));
+        assert!(!is_vscode_text_entry_option("Yes, manually approve edits"));
+    }
+
+    #[test]
+    fn chat_about_this_detection_matches_tui_label() {
+        assert!(is_chat_about_this_option("Chat about this"));
+        assert!(!is_chat_about_this_option("Type something"));
+    }
+
+    #[test]
+    fn build_plan_exit_question_includes_text_entry_option() {
+        let prompt = build_plan_exit_question(
+            Some("Step 1: write hello.sh\nStep 2: run it"),
+            &["Type here to tell Claude what to change".to_string()],
+        );
+
+        assert_eq!(prompt.header.as_deref(), Some("Ready to code?"));
+        assert!(prompt.question.contains("Would you like to proceed?"));
+        assert_eq!(prompt.options.len(), 4);
+        assert!(prompt.options[3].label.contains("Type here"));
+    }
+
+    #[test]
+    fn ensure_text_entry_option_appends_missing_type_something_choice() {
+        let prompt = ToolQuestionPrompt {
+            header: Some("Question".to_string()),
+            question: "你更喜欢哪种工作方式?".to_string(),
+            multi_select: false,
+            options: vec![ToolQuestionOption {
+                label: "独立工作".to_string(),
+                description: None,
+                preview: None,
+            }],
+        };
+
+        let enriched = ensure_text_entry_option(&prompt);
+        assert_eq!(enriched.options.len(), 2);
+        assert_eq!(enriched.options[1].label, "Type something");
+    }
+
+    #[test]
+    fn ensure_chat_about_this_option_appends_for_preview_questions() {
+        let prompt = ToolQuestionPrompt {
+            header: Some("UI 风格".to_string()),
+            question: "你更喜欢哪种 UI 风格？".to_string(),
+            multi_select: false,
+            options: vec![ToolQuestionOption {
+                label: "Glassmorphism".to_string(),
+                description: Some("玻璃质感".to_string()),
+                preview: Some("preview".to_string()),
+            }],
+        };
+
+        let enriched = ensure_chat_about_this_option(&prompt);
+        assert_eq!(enriched.options.len(), 2);
+        assert_eq!(enriched.options[1].label, "Chat about this");
+
+        let normalized = ensure_text_entry_option(&enriched);
+        assert_eq!(normalized.options.len(), 2);
+        assert!(normalized
+            .options
+            .iter()
+            .all(|option| option.label != "Type something"));
+    }
+
+    #[test]
+    fn ensure_text_entry_option_supports_text_only_prompt() {
+        let prompt = ToolQuestionPrompt {
+            header: None,
+            question: "请描述你的工作方式".to_string(),
+            multi_select: false,
+            options: vec![],
+        };
+
+        let enriched = ensure_text_entry_option(&prompt);
+        assert_eq!(enriched.options.len(), 1);
+        assert_eq!(enriched.options[0].label, "Type something");
+    }
+
+    #[test]
+    fn selection_submit_options_skips_type_something_choice() {
+        let prompt = ToolQuestionPrompt {
+            header: None,
+            question: "你希望 CCEM 未来增加哪些功能？".to_string(),
+            multi_select: true,
+            options: vec![
+                ToolQuestionOption {
+                    label: "团队协作".to_string(),
+                    description: None,
+                    preview: None,
+                },
+                ToolQuestionOption {
+                    label: "Type something".to_string(),
+                    description: None,
+                    preview: None,
+                },
+            ],
+        };
+
+        let selected: BTreeSet<usize> = [1usize, 2usize].into_iter().collect();
+        let filtered = selection_submit_options(&prompt, &selected);
+        assert_eq!(filtered, [1usize].into_iter().collect());
+    }
+
+    #[test]
+    fn selection_submit_options_skips_chat_about_this_choice() {
+        let prompt = ToolQuestionPrompt {
+            header: Some("UI 风格".to_string()),
+            question: "你更喜欢哪种 UI 风格？".to_string(),
+            multi_select: false,
+            options: vec![
+                ToolQuestionOption {
+                    label: "Glassmorphism".to_string(),
+                    description: None,
+                    preview: Some("preview".to_string()),
+                },
+                ToolQuestionOption {
+                    label: "Chat about this".to_string(),
+                    description: Some("Clarify".to_string()),
+                    preview: None,
+                },
+            ],
+        };
+
+        let selected: BTreeSet<usize> = [1usize, 2usize].into_iter().collect();
+        let filtered = selection_submit_options(&prompt, &selected);
+        assert_eq!(filtered, [1usize].into_iter().collect());
+    }
+
+    #[test]
+    fn build_multi_select_text_entry_steps_focuses_requested_option() {
+        let steps = build_multi_select_text_entry_steps(4);
+        let keys = steps
+            .iter()
+            .map(|(step, _)| step.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(keys[..6], ["\u{1b}[A"; 6]);
+        assert_eq!(keys[6..9], ["\u{1b}[B"; 3]);
+        assert_eq!(keys[9], "\r");
+    }
+
+    #[test]
+    fn build_multi_select_submit_steps_tabs_then_confirms() {
+        let selected: BTreeSet<usize> = [1usize, 3usize].into_iter().collect();
+        let steps = build_multi_select_submit_steps(&selected);
+        let keys = steps
+            .iter()
+            .map(|(step, _)| step.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(keys, vec!["1", "3", "\t", "\r", "1"]);
+    }
+
+    #[test]
+    fn build_chat_about_this_steps_navigates_below_visible_options() {
+        let steps = build_chat_about_this_steps(3);
+        let keys = steps
+            .iter()
+            .map(|(step, _)| step.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(keys, vec!["\u{1b}[B", "\u{1b}[B", "\u{1b}[B", "\r"]);
+    }
+
+    #[test]
+    fn summarize_interactive_prompt_resolution_compacts_clarify_mode() {
+        let summary = summarize_interactive_prompt_resolution(
+            "AskUserQuestion",
+            "The user doesn't want to proceed with this tool use. The tool use was rejected. The user wants to clarify these questions.",
+        );
+        assert!(summary.contains("clarification mode"));
+        assert!(!summary.contains("doesn't want to proceed"));
+    }
+
+    #[test]
+    fn format_tool_completed_message_suppresses_interactive_user_input_noise() {
+        assert_eq!(
+            format_tool_completed_message(
+                "AskUserQuestion",
+                "The user wants to clarify these questions.",
+                false,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn multi_question_prompt_text_includes_progress_and_uses_current_question() {
+        let prompt = ActiveInteractiveChoicePrompt {
+            runtime_id: "runtime-1".to_string(),
+            tool_use_id: "toolu-1".to_string(),
+            questions: vec![
+                ToolQuestionPrompt {
+                    header: Some("Question A".to_string()),
+                    question: "你写代码多少年了？".to_string(),
+                    multi_select: false,
+                    options: vec![ToolQuestionOption {
+                        label: "0-1 年".to_string(),
+                        description: None,
+                        preview: None,
+                    }],
+                },
+                ToolQuestionPrompt {
+                    header: Some("Question B".to_string()),
+                    question: "你更喜欢什么工作模式？".to_string(),
+                    multi_select: false,
+                    options: vec![ToolQuestionOption {
+                        label: "远程".to_string(),
+                        description: None,
+                        preview: None,
+                    }],
+                },
+            ],
+            current_question_index: 0,
+            submit_mode: InteractiveChoiceSubmitMode::AskUserQuestion,
+            selected_options: BTreeSet::new(),
+            awaiting_text_entry: None,
+            message_id: None,
+        };
+
+        let text = format_active_choice_text(&prompt);
+        assert!(text.contains("Question 1/2"));
+        assert!(text.contains("你写代码多少年了？"));
+        assert!(!text.contains("你更喜欢什么工作模式？"));
+    }
+
+    #[test]
+    fn advancing_multi_question_prompt_moves_to_next_question() {
+        let mut prompt = ActiveInteractiveChoicePrompt {
+            runtime_id: "runtime-1".to_string(),
+            tool_use_id: "toolu-1".to_string(),
+            questions: vec![
+                ToolQuestionPrompt {
+                    header: None,
+                    question: "第一题".to_string(),
+                    multi_select: false,
+                    options: vec![ToolQuestionOption {
+                        label: "A".to_string(),
+                        description: None,
+                        preview: None,
+                    }],
+                },
+                ToolQuestionPrompt {
+                    header: None,
+                    question: "第二题".to_string(),
+                    multi_select: true,
+                    options: vec![ToolQuestionOption {
+                        label: "B".to_string(),
+                        description: None,
+                        preview: None,
+                    }],
+                },
+            ],
+            current_question_index: 0,
+            submit_mode: InteractiveChoiceSubmitMode::AskUserQuestion,
+            selected_options: [1usize].into_iter().collect(),
+            awaiting_text_entry: Some(1),
+            message_id: Some(42),
+        };
+
+        assert!(advance_active_choice_prompt(&mut prompt));
+        assert_eq!(prompt.current_question_index, 1);
+        assert!(prompt.selected_options.is_empty());
+        assert_eq!(prompt.awaiting_text_entry, None);
+        assert_eq!(
+            active_choice_question(&prompt).map(|question| question.question.as_str()),
+            Some("第二题")
+        );
+    }
+
+    #[test]
+    fn mark_interactive_tool_seen_is_scoped_and_deduplicated() {
+        let manager = TelegramBridgeManager::default();
+
+        assert!(manager.mark_interactive_tool_seen(1, Some(2), "toolu-1"));
+        assert!(!manager.mark_interactive_tool_seen(1, Some(2), "toolu-1"));
+        assert!(manager.mark_interactive_tool_seen(1, Some(3), "toolu-1"));
+        assert!(manager.mark_interactive_tool_seen(1, Some(2), "toolu-2"));
     }
 }

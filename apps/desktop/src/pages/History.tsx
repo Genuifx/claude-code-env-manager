@@ -197,7 +197,7 @@ export function History() {
     }
   }, [selectedSession, launchClaudeCode, t]);
 
-  const handleExport = useCallback(() => {
+  const handleExport = useCallback(async () => {
     if (!selectedSession) return;
 
     try {
@@ -209,25 +209,22 @@ export function History() {
         messages,
       };
 
-      const blob = new Blob([JSON.stringify(payload, null, 2)], {
-        type: 'application/json;charset=utf-8',
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-
       const safeTitle = (selectedSession.display || 'conversation')
         .replace(/[^\w\-.]+/g, '-')
         .replace(/-+/g, '-')
         .replace(/^-|-$/g, '')
         .slice(0, 60) || selectedSession.id;
       const date = new Date(selectedSession.timestamp).toISOString().slice(0, 10);
-      a.download = `${date}-${safeTitle}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      toast.success(t('history.exported'));
+      const defaultName = `${date}-${safeTitle}.json`;
+
+      const saved = await invoke<boolean>('save_file_dialog', {
+        content: JSON.stringify(payload, null, 2),
+        defaultName,
+      });
+
+      if (saved) {
+        toast.success(t('history.exported'));
+      }
     } catch (err) {
       console.error('Failed to export conversation:', err);
       toast.error(t('history.exportFailed'));

@@ -211,6 +211,16 @@ impl SessionManager {
         self.save_to_disk();
     }
 
+    pub fn update_session_pid(&self, id: &str, pid: Option<u32>) {
+        {
+            let mut sessions = self.sessions.lock().unwrap();
+            if let Some(session) = sessions.iter_mut().find(|s| s.id == id) {
+                session.pid = pid;
+            }
+        }
+        self.save_to_disk();
+    }
+
     /// Get all running sessions that have terminal metadata
     pub fn get_running_terminal_sessions(&self) -> Vec<Session> {
         self.sessions
@@ -277,11 +287,14 @@ impl SessionManager {
 /// Check if a process with the given PID is still running
 #[cfg(unix)]
 fn is_process_alive(pid: u32) -> bool {
-    use std::process::Command;
+    use std::process::{Command, Stdio};
 
     // Use kill -0 to check if process exists (doesn't actually send a signal)
     Command::new("kill")
         .args(["-0", &pid.to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)

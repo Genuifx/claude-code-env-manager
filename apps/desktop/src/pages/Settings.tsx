@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Moon, Sun, MonitorSmartphone, Lightbulb, Terminal, CheckCircle2, XCircle, Copy, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search, FolderOpen, X, Bot, Play, Square, MessageSquareWarning } from 'lucide-react';
+import { Moon, Sun, MonitorSmartphone, Lightbulb, Terminal, CheckCircle2, XCircle, Copy, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search, FolderOpen, X, Bot, Play, Square, MessageSquareWarning, ChevronDown, ChevronUp } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store';
@@ -13,6 +13,7 @@ import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { TelegramBridgeStatus, TelegramSettings } from '@/lib/tauri-ipc';
 import { TelegramTopicBindingsEditor } from '@/components/settings/TelegramTopicBindingsEditor';
+import { BindToTelegramDialog } from '@/components/telegram/BindToTelegramDialog';
 
 const MODE_DISPLAY_NAMES: Record<PermissionModeName, string> = {
   yolo: 'YOLO',
@@ -39,6 +40,28 @@ interface InstallStatusState {
   ccem: boolean | null;
   claude: boolean | null;
   codex: boolean | null;
+  tmux: boolean | null;
+}
+
+function parseTelegramUserIdsInput(input: string): { values: number[]; invalid: string[] } {
+  const parts = input
+    .split(/[\s,]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const values: number[] = [];
+  const invalid: string[] = [];
+
+  for (const part of parts) {
+    if (!/^-?\d+$/.test(part)) {
+      invalid.push(part);
+      continue;
+    }
+
+    values.push(Number(part));
+  }
+
+  return { values, invalid };
 }
 
 export function Settings() {
@@ -60,6 +83,7 @@ export function Settings() {
   const [telegramSettings, setTelegramSettings] = useState<TelegramSettings>({
     enabled: false,
     botToken: '',
+    allowedUserIds: [],
     allowedChatId: null,
     notificationsThreadId: null,
     defaultEnvName: null,
@@ -76,12 +100,16 @@ export function Settings() {
     configured: false,
     running: false,
   });
+  const [telegramAllowedUserIdsInput, setTelegramAllowedUserIdsInput] = useState('');
+  const [showTelegramAdvanced, setShowTelegramAdvanced] = useState(false);
+  const [quickBindOpen, setQuickBindOpen] = useState(false);
   const [isSavingTelegram, setIsSavingTelegram] = useState(false);
   const [isTogglingTelegram, setIsTogglingTelegram] = useState(false);
   const [installStatus, setInstallStatus] = useState<InstallStatusState>({
     ccem: null,
     claude: null,
     codex: null,
+    tmux: null,
   });
   const [webkitVersion, setWebkitVersion] = useState<string | null>(null);
   const loaded = useRef(false);
@@ -91,10 +119,11 @@ export function Settings() {
     let cancelled = false;
 
     const loadInstallStatus = async () => {
-      const [ccem, claude, codex] = await Promise.allSettled([
+      const [ccem, claude, codex, tmux] = await Promise.allSettled([
         invoke<boolean>('check_ccem_installed'),
         invoke<boolean>('check_claude_installed'),
         invoke<boolean>('check_codex_installed'),
+        invoke<boolean>('check_tmux_installed'),
       ]);
 
       if (cancelled) {
@@ -105,6 +134,7 @@ export function Settings() {
         ccem: ccem.status === 'fulfilled' ? ccem.value : false,
         claude: claude.status === 'fulfilled' ? claude.value : false,
         codex: codex.status === 'fulfilled' ? codex.value : false,
+        tmux: tmux.status === 'fulfilled' ? tmux.value : false,
       });
     };
 
@@ -167,6 +197,7 @@ export function Settings() {
         setTelegramSettings({
           enabled: settings.enabled ?? false,
           botToken: settings.botToken ?? '',
+          allowedUserIds: settings.allowedUserIds ?? [],
           allowedChatId: settings.allowedChatId ?? null,
           notificationsThreadId: settings.notificationsThreadId ?? null,
           defaultEnvName: settings.defaultEnvName ?? null,
@@ -179,6 +210,7 @@ export function Settings() {
             flushIntervalMs: 3000,
           },
         });
+        setTelegramAllowedUserIdsInput((settings.allowedUserIds ?? []).join(', '));
         setTelegramStatus(status);
       } catch (error) {
         if (!cancelled) {
@@ -249,9 +281,19 @@ export function Settings() {
   const handleSaveTelegram = async () => {
     setIsSavingTelegram(true);
     try {
+      const parsedAllowedUserIds = parseTelegramUserIdsInput(telegramAllowedUserIdsInput);
+      if (parsedAllowedUserIds.invalid.length > 0) {
+        toast.error(
+          t('settings.telegramAllowedUserIdsInvalid')
+            .replace('{value}', parsedAllowedUserIds.invalid.join(', '))
+        );
+        return;
+      }
+
       await saveTelegramSettings({
         enabled: telegramSettings.enabled,
         botToken: telegramSettings.botToken?.trim() || null,
+        allowedUserIds: parsedAllowedUserIds.values,
         allowedChatId: telegramSettings.allowedChatId,
         notificationsThreadId: telegramSettings.notificationsThreadId,
         defaultEnvName: telegramSettings.defaultEnvName || null,
@@ -264,6 +306,11 @@ export function Settings() {
           flushIntervalMs: 3000,
         },
       });
+      setTelegramSettings((current) => ({
+        ...current,
+        allowedUserIds: parsedAllowedUserIds.values,
+      }));
+      setTelegramAllowedUserIdsInput(parsedAllowedUserIds.values.join(', '));
       setTelegramStatus(await getTelegramBridgeStatus());
       toast.success(t('settings.telegramSaved'));
     } catch (error) {
@@ -521,113 +568,161 @@ export function Settings() {
 
             <div className="space-y-1.5">
               <label className="block text-xs font-medium text-muted-foreground">
-                {t('settings.telegramAllowedChatId')}
+                {t('settings.telegramAllowedUserIds')}
               </label>
               <input
-                type="number"
+                type="text"
                 className="w-full px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 transition-all"
-                value={telegramSettings.allowedChatId ?? ''}
-                onChange={(event) => setTelegramSettings((current) => ({
-                  ...current,
-                  allowedChatId: event.target.value ? Number(event.target.value) : null,
-                }))}
-                placeholder={t('settings.telegramAllowedChatIdPlaceholder')}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-muted-foreground">
-                {t('settings.telegramNotificationsThreadId')}
-              </label>
-              <input
-                type="number"
-                className="w-full px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 transition-all"
-                value={telegramSettings.notificationsThreadId ?? ''}
-                onChange={(event) => setTelegramSettings((current) => ({
-                  ...current,
-                  notificationsThreadId: event.target.value ? Number(event.target.value) : null,
-                }))}
-                placeholder={t('settings.telegramNotificationsThreadIdPlaceholder')}
+                value={telegramAllowedUserIdsInput}
+                onChange={(event) => setTelegramAllowedUserIdsInput(event.target.value)}
+                placeholder={t('settings.telegramAllowedUserIdsPlaceholder')}
               />
               <p className="text-[11px] text-muted-foreground">
-                {t('settings.telegramNotificationsThreadIdDesc')}
+                {t('settings.telegramAllowedUserIdsDesc')}
               </p>
+              {telegramSettings.enabled && telegramAllowedUserIdsInput.trim().length === 0 ? (
+                <p className="text-[11px] text-warning">
+                  {t('settings.telegramAllowedUserIdsWarning')}
+                </p>
+              ) : null}
             </div>
-          </div>
 
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-muted-foreground">
-                {t('settings.telegramDefaultEnv')}
-              </label>
-              <Select
-                value={telegramSettings.defaultEnvName || '__current__'}
-                onValueChange={(value) => setTelegramSettings((current) => ({
-                  ...current,
-                  defaultEnvName: value === '__current__' ? null : value,
-                }))}
+            <div className="rounded-xl border border-black/[0.08] dark:border-white/[0.08] bg-black/[0.02] dark:bg-white/[0.03]">
+              <button
+                type="button"
+                onClick={() => setShowTelegramAdvanced((current) => !current)}
+                className="flex w-full items-center justify-between px-3 py-2 text-left"
               >
-                <SelectTrigger className="w-full h-auto px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm">
-                  <SelectValue placeholder={t('settings.telegramUseCurrentEnv')} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__current__">{t('settings.telegramUseCurrentEnv')}</SelectItem>
-                  {environments.map((env) => (
-                    <SelectItem key={env.name} value={env.name}>{env.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+                <div>
+                  <p className="text-sm font-medium text-foreground">{t('settings.telegramAdvanced')}</p>
+                  <p className="text-[11px] text-muted-foreground">{t('settings.telegramAdvancedDesc')}</p>
+                </div>
+                {showTelegramAdvanced ? (
+                  <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                )}
+              </button>
 
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-muted-foreground">
-                {t('settings.telegramDefaultPerm')}
-              </label>
-              <Select
-                value={telegramSettings.defaultPermMode || '__app_default__'}
-                onValueChange={(value) => setTelegramSettings((current) => ({
-                  ...current,
-                  defaultPermMode: value === '__app_default__' ? null : value,
-                }))}
-              >
-                <SelectTrigger className="w-full h-auto px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm">
-                  <SelectValue placeholder={t('settings.telegramUseDefaultPerm')} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__app_default__">{t('settings.telegramUseDefaultPerm')}</SelectItem>
-                  {Object.keys(PERMISSION_PRESETS).map((key) => (
-                    <SelectItem key={key} value={key}>{MODE_DISPLAY_NAMES[key as PermissionModeName] || key}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+              {showTelegramAdvanced ? (
+                <div className="grid grid-cols-1 gap-4 border-t glass-divider px-3 py-3 lg:grid-cols-2">
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-medium text-muted-foreground">
+                        {t('settings.telegramAllowedChatId')}
+                      </label>
+                      <input
+                        type="number"
+                        className="w-full px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 transition-all"
+                        value={telegramSettings.allowedChatId ?? ''}
+                        onChange={(event) => setTelegramSettings((current) => ({
+                          ...current,
+                          allowedChatId: event.target.value ? Number(event.target.value) : null,
+                        }))}
+                        placeholder={t('settings.telegramAllowedChatIdPlaceholder')}
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        {t('settings.telegramAllowedChatIdDesc')}
+                      </p>
+                    </div>
 
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-muted-foreground">
-                {t('settings.telegramWorkingDir')}
-              </label>
-              <div className="flex gap-2">
-                <input
-                  className="w-full px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 transition-all font-mono"
-                  value={telegramSettings.defaultWorkingDir ?? ''}
-                  onChange={(event) => setTelegramSettings((current) => ({ ...current, defaultWorkingDir: event.target.value || null }))}
-                  placeholder={defaultWorkingDir || t('settings.telegramWorkingDirPlaceholder')}
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="glass-btn-outline shrink-0"
-                  onClick={async () => {
-                    const path = await openDirectoryPicker();
-                    if (path) {
-                      setTelegramSettings((current) => ({ ...current, defaultWorkingDir: path }));
-                    }
-                  }}
-                >
-                  <FolderOpen className="w-3.5 h-3.5 mr-1.5" />
-                  {t('settings.selectDir')}
-                </Button>
-              </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-medium text-muted-foreground">
+                        {t('settings.telegramNotificationsThreadId')}
+                      </label>
+                      <input
+                        type="number"
+                        className="w-full px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 transition-all"
+                        value={telegramSettings.notificationsThreadId ?? ''}
+                        onChange={(event) => setTelegramSettings((current) => ({
+                          ...current,
+                          notificationsThreadId: event.target.value ? Number(event.target.value) : null,
+                        }))}
+                        placeholder={t('settings.telegramNotificationsThreadIdPlaceholder')}
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        {t('settings.telegramNotificationsThreadIdDesc')}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-medium text-muted-foreground">
+                        {t('settings.telegramDefaultEnv')}
+                      </label>
+                      <Select
+                        value={telegramSettings.defaultEnvName || '__current__'}
+                        onValueChange={(value) => setTelegramSettings((current) => ({
+                          ...current,
+                          defaultEnvName: value === '__current__' ? null : value,
+                        }))}
+                      >
+                        <SelectTrigger className="w-full h-auto px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm">
+                          <SelectValue placeholder={t('settings.telegramUseCurrentEnv')} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__current__">{t('settings.telegramUseCurrentEnv')}</SelectItem>
+                          {environments.map((env) => (
+                            <SelectItem key={env.name} value={env.name}>{env.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-medium text-muted-foreground">
+                        {t('settings.telegramDefaultPerm')}
+                      </label>
+                      <Select
+                        value={telegramSettings.defaultPermMode || '__app_default__'}
+                        onValueChange={(value) => setTelegramSettings((current) => ({
+                          ...current,
+                          defaultPermMode: value === '__app_default__' ? null : value,
+                        }))}
+                      >
+                        <SelectTrigger className="w-full h-auto px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm">
+                          <SelectValue placeholder={t('settings.telegramUseDefaultPerm')} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__app_default__">{t('settings.telegramUseDefaultPerm')}</SelectItem>
+                          {Object.keys(PERMISSION_PRESETS).map((key) => (
+                            <SelectItem key={key} value={key}>{MODE_DISPLAY_NAMES[key as PermissionModeName] || key}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-medium text-muted-foreground">
+                        {t('settings.telegramWorkingDir')}
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          className="w-full px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 transition-all font-mono"
+                          value={telegramSettings.defaultWorkingDir ?? ''}
+                          onChange={(event) => setTelegramSettings((current) => ({ ...current, defaultWorkingDir: event.target.value || null }))}
+                          placeholder={defaultWorkingDir || t('settings.telegramWorkingDirPlaceholder')}
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="glass-btn-outline shrink-0"
+                          onClick={async () => {
+                            const path = await openDirectoryPicker();
+                            if (path) {
+                              setTelegramSettings((current) => ({ ...current, defaultWorkingDir: path }));
+                            }
+                          }}
+                        >
+                          <FolderOpen className="w-3.5 h-3.5 mr-1.5" />
+                          {t('settings.selectDir')}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -663,14 +758,34 @@ export function Settings() {
           </div>
         </div>
 
-        <TelegramTopicBindingsEditor
-          bindings={telegramSettings.topicBindings ?? []}
-          environmentNames={environments.map((env) => env.name)}
-          defaultWorkingDir={defaultWorkingDir || null}
-          onChange={(topicBindings) => setTelegramSettings((current) => ({ ...current, topicBindings }))}
-          onPickDirectory={openDirectoryPicker}
-        />
+        {showTelegramAdvanced ? (
+          <TelegramTopicBindingsEditor
+            bindings={telegramSettings.topicBindings ?? []}
+            environmentNames={environments.map((env) => env.name)}
+            defaultWorkingDir={defaultWorkingDir || null}
+            onChange={(topicBindings) => setTelegramSettings((current) => ({ ...current, topicBindings }))}
+            onPickDirectory={openDirectoryPicker}
+            onQuickBind={() => setQuickBindOpen(true)}
+          />
+        ) : null}
       </Card>
+
+      <BindToTelegramDialog
+        open={quickBindOpen}
+        onOpenChange={setQuickBindOpen}
+        initialProjectDir={telegramSettings.defaultWorkingDir ?? defaultWorkingDir ?? null}
+        initialEnvName={telegramSettings.defaultEnvName ?? null}
+        initialPermMode={telegramSettings.defaultPermMode ?? null}
+        onBound={(binding) => {
+          setTelegramSettings((current) => {
+            const topicBindings = [
+              ...(current.topicBindings ?? []).filter((item) => item.threadId !== binding.threadId),
+              binding,
+            ].sort((left, right) => left.threadId - right.threadId);
+            return { ...current, topicBindings };
+          });
+        }}
+      />
 
       {/* Row 3: About */}
       <Card className="p-5">
@@ -713,6 +828,12 @@ export function Settings() {
             </span>
             <InstallStatusBadge status={installStatus.codex} />
           </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">
+              {t('settings.tmuxStatus')}
+            </span>
+            <InstallStatusBadge status={installStatus.tmux} />
+          </div>
           {installStatus.ccem === false && (
             <div className="flex items-center gap-2">
               <button
@@ -731,6 +852,26 @@ export function Settings() {
             <p className="text-xs text-muted-foreground/80 flex items-center gap-1">
               <Lightbulb className="w-3 h-3 text-primary shrink-0" />
               {t('settings.cliInstallHint')}
+            </p>
+          )}
+          {installStatus.tmux === false && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(t('settings.tmuxInstallCmd'));
+                  toast.success(t('settings.tmuxInstallCmd'));
+                }}
+                className="inline-flex items-center gap-1 text-[11px] font-mono text-primary hover:text-primary/80 glass-btn-outline px-2 py-0.5 rounded-md"
+              >
+                <Copy className="w-3 h-3" />
+                {t('settings.tmuxInstallCmd')}
+              </button>
+            </div>
+          )}
+          {installStatus.tmux === false && (
+            <p className="text-xs text-muted-foreground/80 flex items-center gap-1">
+              <Lightbulb className="w-3 h-3 text-primary shrink-0" />
+              {t('settings.tmuxInstallHint')}
             </p>
           )}
           <div className="flex gap-2 pt-1">

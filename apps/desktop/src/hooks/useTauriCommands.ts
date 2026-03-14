@@ -9,7 +9,9 @@ import type {
   ReplayBatch,
   RuntimeRecoveryCandidate,
   TelegramBridgeStatus,
+  TelegramForumTopic,
   TelegramSettings,
+  TelegramTopicBinding,
 } from '@/lib/tauri-ipc';
 
 interface TauriEnvConfig {
@@ -378,6 +380,16 @@ export function useTauriCommands() {
     });
   }, []);
 
+  const getInteractiveSessionEvents = useCallback(async (
+    sessionId: string,
+    sinceSeq?: number | null,
+  ): Promise<ReplayBatch> => {
+    return invoke<ReplayBatch>('get_interactive_session_events', {
+      sessionId,
+      sinceSeq: sinceSeq ?? null,
+    });
+  }, []);
+
   const resizeInteractiveSession = useCallback(async (
     sessionId: string,
     cols: number,
@@ -401,6 +413,15 @@ export function useTauriCommands() {
       toast.success('Session focused successfully');
     } catch (err) {
       toast.error(`Failed to focus session: ${err}`);
+    }
+  }, []);
+
+  const openInteractiveSessionInTerminal = useCallback(async (sessionId: string) => {
+    try {
+      await invoke('open_interactive_session_in_terminal', { sessionId });
+    } catch (err) {
+      toast.error(`Failed to open session in terminal: ${err}`);
+      throw err;
     }
   }, []);
 
@@ -484,6 +505,18 @@ export function useTauriCommands() {
   const stopManagedSession = useCallback(async (runtimeId: string): Promise<void> => {
     await stopHeadlessSession(runtimeId);
   }, [stopHeadlessSession]);
+
+  const respondHeadlessPermission = useCallback(async (
+    requestId: string,
+    approved: boolean,
+    responder = 'desktop',
+  ): Promise<void> => {
+    await invoke('respond_headless_permission', {
+      requestId,
+      approved,
+      responder,
+    });
+  }, []);
 
   const removeHeadlessSession = useCallback(async (runtimeId: string): Promise<void> => {
     await invoke('remove_headless_session', { runtimeId });
@@ -604,6 +637,14 @@ export function useTauriCommands() {
     }
   }, []);
 
+  const checkTmuxInstalled = useCallback(async (): Promise<boolean> => {
+    try {
+      return await invoke<boolean>('check_tmux_installed');
+    } catch {
+      return false;
+    }
+  }, []);
+
   const loadInstalledSkills = useCallback(async () => {
     try {
       const skills = await invoke<InstalledSkill[]>('list_installed_skills');
@@ -631,6 +672,9 @@ export function useTauriCommands() {
     workingDir: string;
     envName?: string;
     executionProfile?: 'conservative' | 'standard' | 'autonomous';
+    maxBudgetUsd?: number | null;
+    allowedTools?: string[];
+    disallowedTools?: string[];
     timeoutSecs?: number;
     templateId?: string;
   }) => {
@@ -641,6 +685,9 @@ export function useTauriCommands() {
       workingDir: data.workingDir,
       envName: data.envName || null,
       executionProfile: data.executionProfile || 'conservative',
+      maxBudgetUsd: data.maxBudgetUsd ?? null,
+      allowedTools: data.allowedTools ?? [],
+      disallowedTools: data.disallowedTools ?? [],
       timeoutSecs: data.timeoutSecs || 300,
       templateId: data.templateId || null,
     });
@@ -657,6 +704,9 @@ export function useTauriCommands() {
     workingDir?: string;
     envName?: string;
     executionProfile?: 'conservative' | 'standard' | 'autonomous';
+    maxBudgetUsd?: number | null;
+    allowedTools?: string[];
+    disallowedTools?: string[];
     timeoutSecs?: number;
   }) => {
     const task = await invoke<CronTask>('update_cron_task', data);
@@ -731,6 +781,26 @@ export function useTauriCommands() {
     return invoke<TelegramBridgeStatus>('stop_telegram_bridge');
   }, []);
 
+  const getTelegramForumTopics = useCallback(async (): Promise<TelegramForumTopic[]> => {
+    return invoke<TelegramForumTopic[]>('get_telegram_forum_topics');
+  }, []);
+
+  const bindTelegramTopic = useCallback(async (options: {
+    projectDir: string;
+    envName?: string | null;
+    permMode?: string | null;
+    threadId?: number | null;
+    createNewTopic: boolean;
+  }): Promise<TelegramTopicBinding> => {
+    return invoke<TelegramTopicBinding>('bind_telegram_topic', {
+      projectDir: options.projectDir,
+      envName: options.envName ?? null,
+      permMode: options.permMode ?? null,
+      threadId: options.threadId ?? null,
+      createNewTopic: options.createNewTopic,
+    });
+  }, []);
+
   const setProxyDebugEnabled = useCallback(async (enabled: boolean): Promise<ProxyDebugState> => {
     return invoke<ProxyDebugState>('set_proxy_debug_enabled', { enabled });
   }, []);
@@ -790,9 +860,11 @@ export function useTauriCommands() {
     stopInteractiveSession,
     writeInteractiveInput,
     getInteractiveSessionOutput,
+    getInteractiveSessionEvents,
     resizeInteractiveSession,
     deleteSession,
     focusSession,
+    openInteractiveSessionInTerminal,
     closeSession,
     minimizeSession,
     createHeadlessSession,
@@ -805,6 +877,7 @@ export function useTauriCommands() {
     getManagedSessionEvents,
     stopHeadlessSession,
     stopManagedSession,
+    respondHeadlessPermission,
     removeHeadlessSession,
     removeManagedSession,
     loadAppConfig,
@@ -817,6 +890,7 @@ export function useTauriCommands() {
     arrangeSessions,
     checkArrangeSupport,
     checkCodexInstalled,
+    checkTmuxInstalled,
     loadInstalledSkills,
     loadCronTasks,
     addCronTask,
@@ -834,6 +908,8 @@ export function useTauriCommands() {
     getTelegramBridgeStatus,
     startTelegramBridge,
     stopTelegramBridge,
+    getTelegramForumTopics,
+    bindTelegramTopic,
     getProxyDebugState,
     setProxyDebugEnabled,
     updateProxyDebugConfig,

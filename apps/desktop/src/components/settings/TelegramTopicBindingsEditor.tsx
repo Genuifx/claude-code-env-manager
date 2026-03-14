@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FolderOpen, Link2, Pencil, RotateCcw, Trash2 } from 'lucide-react';
+import { FolderOpen, Link2, Pencil, PlusSquare, RotateCcw, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useLocale } from '@/locales';
@@ -16,6 +16,7 @@ interface TelegramTopicBindingsEditorProps {
   defaultWorkingDir: string | null;
   onChange: (bindings: TelegramTopicBinding[]) => void;
   onPickDirectory: () => Promise<string | null>;
+  onQuickBind?: () => void;
 }
 
 interface BindingDraft {
@@ -56,6 +57,7 @@ export function TelegramTopicBindingsEditor({
   defaultWorkingDir,
   onChange,
   onPickDirectory,
+  onQuickBind,
 }: TelegramTopicBindingsEditorProps) {
   const { t } = useLocale();
   const [draft, setDraft] = useState<BindingDraft>(EMPTY_DRAFT);
@@ -117,9 +119,23 @@ export function TelegramTopicBindingsEditor({
             {t('settings.telegramTopicBindingsDesc')}
           </p>
         </div>
-        <span className="text-xs px-2 py-1 rounded-full bg-black/5 dark:bg-white/[0.08] text-muted-foreground">
-          {bindings.length}
-        </span>
+        <div className="flex items-center gap-2">
+          {onQuickBind ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="glass-btn-outline"
+              onClick={onQuickBind}
+            >
+              <PlusSquare className="w-3.5 h-3.5 mr-1.5" />
+              {t('settings.telegramQuickBind')}
+            </Button>
+          ) : null}
+          <span className="text-xs px-2 py-1 rounded-full bg-black/5 dark:bg-white/[0.08] text-muted-foreground">
+            {bindings.length}
+          </span>
+        </div>
       </div>
 
       {bindings.length === 0 ? (

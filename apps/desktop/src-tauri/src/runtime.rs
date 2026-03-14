@@ -8,7 +8,7 @@ use crate::terminal::resolve_claude_path;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{self, BufRead, BufReader, ErrorKind, Write};
 use std::path::{Path, PathBuf};
@@ -23,8 +23,52 @@ const RUNTIME_STATE_NOTE: &str =
     "Cold resume only. Used for orphan cleanup and --resume, not stdio reattachment.";
 const LEGACY_MANAGED_SESSION_EVENT: &str = "managed-session-event";
 const HEADLESS_SESSION_EVENT: &str = "headless-session-event";
+const CCEM_PERMISSION_MCP_SERVER_NAME: &str = "ccem_permission";
+const CCEM_PERMISSION_MCP_TOOL_NAME: &str = "mcp__ccem_permission__approval_prompt";
+const PERMISSION_BRIDGE_REQUEST_POLL_MS: u64 = 300;
+const PERMISSION_BRIDGE_RESPONSE_TIMEOUT_SECS: u64 = 60 * 30;
+const PERMISSION_MCP_SERVER_SOURCE: &str =
+    include_str!("../resources/ccem-permission-mcp-server.mjs");
 
 static USER_PATH: OnceLock<String> = OnceLock::new();
+
+#[derive(Debug, Clone)]
+struct PermissionPromptBridge {
+    bridge_dir: PathBuf,
+    requests_dir: PathBuf,
+    responses_dir: PathBuf,
+    mcp_config_path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+struct PendingPermissionRequest {
+    runtime_id: String,
+    bridge: PermissionPromptBridge,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PermissionPromptRequestFile {
+    request_id: String,
+    tool_name: String,
+    input: Value,
+    #[serde(default)]
+    tool_use_id: Option<String>,
+    created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PermissionPromptResponseFile {
+    behavior: String,
+    #[serde(rename = "updatedInput", skip_serializing_if = "Option::is_none")]
+    updated_input: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+}
+
+struct BuildClaudeCommandResult {
+    command: Command,
+    permission_bridge: Option<PermissionPromptBridge>,
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -86,6 +130,14 @@ pub struct RuntimeStateEntry {
     pub saved_at: DateTime<Utc>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<CompactedSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tmux_session: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tmux_window: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tmux_window_index: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jsonl_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -165,11 +217,13 @@ struct ManagedSessionHandle {
     record: Mutex<ManagedSessionRecord>,
     stdin: Mutex<Option<ChildStdin>>,
     events: Mutex<SessionStore>,
+    permission_bridge: Option<PermissionPromptBridge>,
     alive: AtomicBool,
 }
 
 pub struct RuntimeManager {
     sessions: Mutex<HashMap<String, Arc<ManagedSessionHandle>>>,
+    pending_permissions: Mutex<HashMap<String, PendingPermissionRequest>>,
 }
 
 pub type HeadlessRuntimeManager = RuntimeManager;
@@ -178,6 +232,7 @@ impl Default for RuntimeManager {
     fn default() -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
+            pending_permissions: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -189,7 +244,8 @@ impl RuntimeManager {
         options: ManagedSessionOptions,
     ) -> Result<ManagedSessionSummary, String> {
         let runtime_id = generate_runtime_id();
-        let mut command = build_claude_command(&options, &runtime_id)?;
+        let build = build_claude_command(&options, &runtime_id)?;
+        let mut command = build.command;
         let mut child = command
             .spawn()
             .map_err(|error| format!("Failed to spawn Claude CLI: {}", error))?;
@@ -222,6 +278,7 @@ impl RuntimeManager {
             }),
             stdin: Mutex::new(Some(stdin)),
             events: Mutex::new(SessionStore::new(runtime_id.clone())),
+            permission_bridge: build.permission_bridge.clone(),
             alive: AtomicBool::new(true),
         });
 
@@ -238,6 +295,13 @@ impl RuntimeManager {
         self.spawn_stdout_reader(app.clone(), runtime_id.clone(), stdout);
         self.spawn_stderr_reader(app.clone(), runtime_id.clone(), stderr);
         self.spawn_waiter(app.clone(), runtime_id.clone(), child);
+        if let Some(permission_bridge) = build.permission_bridge {
+            self.spawn_permission_request_watcher(
+                app.clone(),
+                runtime_id.clone(),
+                permission_bridge,
+            );
+        }
 
         if let Some(initial_prompt) = options.initial_prompt.as_ref() {
             self.send_user_message(&app, &runtime_id, initial_prompt)?;
@@ -381,9 +445,63 @@ impl RuntimeManager {
             ));
         }
 
+        let bridge_dir = sessions.get(runtime_id).and_then(|handle| {
+            handle
+                .permission_bridge
+                .as_ref()
+                .map(|bridge| bridge.bridge_dir.clone())
+        });
         sessions.remove(runtime_id);
         drop(sessions);
+        self.clear_pending_permissions_for_runtime(runtime_id);
+        if let Some(bridge_dir) = bridge_dir {
+            let _ = fs::remove_dir_all(bridge_dir);
+        }
         self.persist_state_best_effort();
+        Ok(())
+    }
+
+    pub fn respond_to_permission(
+        &self,
+        app: &AppHandle,
+        request_id: &str,
+        approved: bool,
+        responder: &str,
+    ) -> Result<(), String> {
+        let pending = {
+            let mut pending_permissions = self
+                .pending_permissions
+                .lock()
+                .map_err(|_| "Failed to lock pending permission requests".to_string())?;
+            pending_permissions
+                .remove(request_id)
+                .ok_or_else(|| format!("Permission request not found: {}", request_id))?
+        };
+
+        write_permission_prompt_response(
+            &pending.bridge,
+            request_id,
+            PermissionPromptResponseFile {
+                behavior: if approved {
+                    "allow".to_string()
+                } else {
+                    "deny".to_string()
+                },
+                updated_input: None,
+                message: None,
+            },
+        )?;
+
+        self.set_state(&pending.runtime_id, ManagedSessionStatus::Processing);
+        let _ = self.append_event(
+            app,
+            &pending.runtime_id,
+            SessionEventPayload::PermissionResponded {
+                request_id: request_id.to_string(),
+                approved,
+                responder: responder.to_string(),
+            },
+        );
         Ok(())
     }
 
@@ -395,6 +513,11 @@ impl RuntimeManager {
             .unwrap_or_default();
 
         for handle in handles {
+            let runtime_id = handle
+                .record
+                .lock()
+                .ok()
+                .map(|record| record.runtime_id.clone());
             let pid = {
                 let mut stdin_guard = match handle.stdin.lock() {
                     Ok(guard) => guard,
@@ -414,6 +537,13 @@ impl RuntimeManager {
 
             if let Some(pid) = pid {
                 let _ = terminate_process(pid);
+            }
+
+            if let Some(runtime_id) = runtime_id.as_deref() {
+                self.clear_pending_permissions_for_runtime(runtime_id);
+            }
+            if let Some(bridge) = handle.permission_bridge.as_ref() {
+                let _ = fs::remove_dir_all(&bridge.bridge_dir);
             }
         }
 
@@ -452,6 +582,10 @@ impl RuntimeManager {
                             source: record.source,
                             saved_at: Utc::now(),
                             summary: None,
+                            tmux_session: None,
+                            tmux_window: None,
+                            tmux_window_index: None,
+                            jsonl_path: None,
                         }
                     })
                     .collect()
@@ -542,6 +676,130 @@ impl RuntimeManager {
                 detail: detail.into(),
             },
         );
+    }
+
+    fn spawn_permission_request_watcher(
+        self: &Arc<Self>,
+        app: AppHandle,
+        runtime_id: String,
+        bridge: PermissionPromptBridge,
+    ) {
+        let manager = Arc::clone(self);
+        thread::spawn(move || {
+            let mut seen_requests = HashSet::new();
+
+            while manager
+                .get_handle(&runtime_id)
+                .ok()
+                .is_some_and(|handle| handle.alive.load(Ordering::SeqCst))
+            {
+                let request_files = match list_permission_request_files(&bridge) {
+                    Ok(files) => files,
+                    Err(error) => {
+                        manager.append_lifecycle_event(
+                            &app,
+                            &runtime_id,
+                            "permission_bridge_error",
+                            error,
+                        );
+                        thread::sleep(std::time::Duration::from_millis(
+                            PERMISSION_BRIDGE_REQUEST_POLL_MS,
+                        ));
+                        continue;
+                    }
+                };
+
+                for path in request_files {
+                    let request_id = match permission_request_id_from_path(&path) {
+                        Some(request_id) => request_id,
+                        None => continue,
+                    };
+
+                    if seen_requests.contains(&request_id) {
+                        continue;
+                    }
+
+                    match read_permission_prompt_request(&path) {
+                        Ok(request) => {
+                            seen_requests.insert(request.request_id.clone());
+                            manager.register_permission_request(
+                                &app,
+                                &runtime_id,
+                                bridge.clone(),
+                                request,
+                            );
+                        }
+                        Err(error) => {
+                            manager.append_lifecycle_event(
+                                &app,
+                                &runtime_id,
+                                "permission_bridge_error",
+                                format!("Failed to read permission request: {}", error),
+                            );
+                        }
+                    }
+                }
+
+                thread::sleep(std::time::Duration::from_millis(
+                    PERMISSION_BRIDGE_REQUEST_POLL_MS,
+                ));
+            }
+        });
+    }
+
+    fn register_permission_request(
+        &self,
+        app: &AppHandle,
+        runtime_id: &str,
+        bridge: PermissionPromptBridge,
+        request: PermissionPromptRequestFile,
+    ) {
+        let inserted = if let Ok(mut pending_permissions) = self.pending_permissions.lock() {
+            if pending_permissions.contains_key(&request.request_id) {
+                false
+            } else {
+                pending_permissions.insert(
+                    request.request_id.clone(),
+                    PendingPermissionRequest {
+                        runtime_id: runtime_id.to_string(),
+                        bridge,
+                    },
+                );
+                true
+            }
+        } else {
+            self.append_lifecycle_event(
+                app,
+                runtime_id,
+                "permission_bridge_error",
+                "Failed to lock pending permission requests",
+            );
+            false
+        };
+
+        if inserted {
+            self.set_state(
+                runtime_id,
+                ManagedSessionStatus::WaitingPermission {
+                    request_id: request.request_id.clone(),
+                    tool_name: request.tool_name.clone(),
+                },
+            );
+            let _ = self.append_event(
+                app,
+                runtime_id,
+                SessionEventPayload::PermissionRequired {
+                    request_id: request.request_id,
+                    tool_name: request.tool_name,
+                },
+            );
+        }
+    }
+
+    fn clear_pending_permissions_for_runtime(&self, runtime_id: &str) {
+        if let Ok(mut pending_permissions) = self.pending_permissions.lock() {
+            pending_permissions.retain(|_, pending| pending.runtime_id != runtime_id);
+        }
     }
 
     fn spawn_stdout_reader(
@@ -732,12 +990,21 @@ impl RuntimeManager {
             runtime_id,
             SessionEventPayload::SessionCompleted { reason },
         );
+        self.clear_pending_permissions_for_runtime(runtime_id);
+        if let Ok(handle) = self.get_handle(runtime_id) {
+            if let Some(bridge) = handle.permission_bridge.as_ref() {
+                let _ = fs::remove_dir_all(&bridge.bridge_dir);
+            }
+        }
         self.persist_state_best_effort();
     }
 
     fn handle_process_failure(&self, app: &AppHandle, runtime_id: &str, message: String) {
         if let Ok(handle) = self.get_handle(runtime_id) {
             handle.alive.store(false, Ordering::SeqCst);
+            if let Some(bridge) = handle.permission_bridge.as_ref() {
+                let _ = fs::remove_dir_all(&bridge.bridge_dir);
+            }
         }
         self.set_state(
             runtime_id,
@@ -745,6 +1012,7 @@ impl RuntimeManager {
                 message: message.clone(),
             },
         );
+        self.clear_pending_permissions_for_runtime(runtime_id);
         self.append_lifecycle_event(app, runtime_id, "process_failure", message);
         self.persist_state_best_effort();
     }
@@ -764,10 +1032,24 @@ impl RuntimeManager {
 
 fn build_claude_command(
     options: &ManagedSessionOptions,
-    _runtime_id: &str,
-) -> Result<Command, String> {
+    runtime_id: &str,
+) -> Result<BuildClaudeCommandResult, String> {
     let claude_binary = resolve_claude_path().unwrap_or_else(|| "claude".to_string());
     let mut command = Command::new(&claude_binary);
+    let permission_mode = official_permission_mode(&options.perm_mode);
+    let permission_bridge = if permission_mode == "bypassPermissions" {
+        None
+    } else {
+        Some(prepare_permission_prompt_bridge(runtime_id)?)
+    };
+    let mut allowed_tools = options.allowed_tools.clone();
+    if permission_bridge.is_some()
+        && !allowed_tools
+            .iter()
+            .any(|tool| tool == CCEM_PERMISSION_MCP_TOOL_NAME)
+    {
+        allowed_tools.push(CCEM_PERMISSION_MCP_TOOL_NAME.to_string());
+    }
 
     // `stream-json` is only available in print/headless mode.
     command.args([
@@ -787,9 +1069,9 @@ fn build_claude_command(
         command.args(["--max-budget-usd", &format!("{max_budget_usd:.2}")]);
     }
 
-    if !options.allowed_tools.is_empty() {
+    if !allowed_tools.is_empty() {
         command.arg("--allowedTools");
-        command.args(&options.allowed_tools);
+        command.args(&allowed_tools);
     }
 
     if !options.disallowed_tools.is_empty() {
@@ -799,6 +1081,17 @@ fn build_claude_command(
 
     if let Some(resume_session_id) = options.resume_session_id.as_ref() {
         command.args(["--resume", resume_session_id]);
+    }
+
+    if let Some(bridge) = permission_bridge.as_ref() {
+        command.args([
+            "--mcp-config",
+            bridge
+                .mcp_config_path
+                .to_str()
+                .ok_or_else(|| "Permission bridge config path is not valid UTF-8".to_string())?,
+        ]);
+        command.args(["--permission-prompt-tool", CCEM_PERMISSION_MCP_TOOL_NAME]);
     }
 
     command
@@ -813,20 +1106,28 @@ fn build_claude_command(
         command.env(key, value);
     }
 
-    Ok(command)
+    Ok(BuildClaudeCommandResult {
+        command,
+        permission_bridge,
+    })
 }
 
 fn build_permission_args(mode_name: &str) -> Vec<String> {
-    let official_mode = match mode_name {
+    vec![
+        "--permission-mode".to_string(),
+        official_permission_mode(mode_name).to_string(),
+    ]
+}
+
+fn official_permission_mode(mode_name: &str) -> &str {
+    match mode_name {
         "yolo" => "bypassPermissions",
         "dev" => "acceptEdits",
         "readonly" | "audit" => "plan",
         "safe" | "ci" => "default",
         "acceptEdits" | "bypassPermissions" | "default" | "dontAsk" | "plan" | "auto" => mode_name,
         _ => "acceptEdits",
-    };
-
-    vec!["--permission-mode".to_string(), official_mode.to_string()]
+    }
 }
 
 fn get_user_path() -> &'static str {
@@ -864,6 +1165,134 @@ fn summarize_user_input(text: &str) -> String {
         summary.push_str("...");
     }
     summary
+}
+
+fn ensure_permission_mcp_server_script() -> Result<PathBuf, String> {
+    let script_dir = ccem_runtime_tools_dir();
+    fs::create_dir_all(&script_dir)
+        .map_err(|error| format!("Failed to create runtime tools dir: {}", error))?;
+
+    let script_path = script_dir.join("ccem-permission-mcp-server.mjs");
+    let should_write = match fs::read_to_string(&script_path) {
+        Ok(existing) => existing != PERMISSION_MCP_SERVER_SOURCE,
+        Err(error) if error.kind() == ErrorKind::NotFound => true,
+        Err(error) => {
+            return Err(format!(
+                "Failed to read permission MCP server script: {}",
+                error
+            ))
+        }
+    };
+
+    if should_write {
+        fs::write(&script_path, PERMISSION_MCP_SERVER_SOURCE)
+            .map_err(|error| format!("Failed to write permission MCP server script: {}", error))?;
+    }
+
+    Ok(script_path)
+}
+
+fn prepare_permission_prompt_bridge(runtime_id: &str) -> Result<PermissionPromptBridge, String> {
+    let script_path = ensure_permission_mcp_server_script()?;
+    let bridge_dir = permission_bridge_root_dir().join(runtime_id);
+    let requests_dir = bridge_dir.join("requests");
+    let responses_dir = bridge_dir.join("responses");
+    fs::create_dir_all(&requests_dir)
+        .map_err(|error| format!("Failed to create permission request dir: {}", error))?;
+    fs::create_dir_all(&responses_dir)
+        .map_err(|error| format!("Failed to create permission response dir: {}", error))?;
+
+    let config_path = bridge_dir.join("mcp-config.json");
+    let mut server_config = serde_json::json!({
+        "type": "stdio",
+        "command": "node",
+        "args": [
+            script_path.to_string_lossy().to_string(),
+            "--bridge-dir",
+            bridge_dir.to_string_lossy().to_string(),
+            "--timeout-secs",
+            PERMISSION_BRIDGE_RESPONSE_TIMEOUT_SECS.to_string()
+        ]
+    });
+
+    if cfg!(debug_assertions) {
+        // Development builds keep the MCP bridge log so protocol mismatches are observable.
+        server_config["env"] = serde_json::json!({
+            "CCEM_PERMISSION_MCP_DEBUG": "1",
+        });
+    }
+
+    let config = serde_json::json!({
+        "mcpServers": {
+            CCEM_PERMISSION_MCP_SERVER_NAME: server_config
+        }
+    });
+    fs::write(
+        &config_path,
+        serde_json::to_string_pretty(&config)
+            .map_err(|error| format!("Failed to encode MCP config: {}", error))?,
+    )
+    .map_err(|error| format!("Failed to write MCP config: {}", error))?;
+
+    Ok(PermissionPromptBridge {
+        bridge_dir,
+        requests_dir,
+        responses_dir,
+        mcp_config_path: config_path,
+    })
+}
+
+fn permission_bridge_root_dir() -> PathBuf {
+    if cfg!(test) {
+        return std::env::temp_dir().join("ccem-runtime-permission-bridges");
+    }
+    dirs::home_dir()
+        .map(|home| home.join(".ccem/runtime-permission-bridges"))
+        .unwrap_or_else(|| PathBuf::from(".ccem/runtime-permission-bridges"))
+}
+
+fn ccem_runtime_tools_dir() -> PathBuf {
+    if cfg!(test) {
+        return std::env::temp_dir().join("ccem-runtime-tools");
+    }
+    dirs::home_dir()
+        .map(|home| home.join(".ccem/runtime-tools"))
+        .unwrap_or_else(|| PathBuf::from(".ccem/runtime-tools"))
+}
+
+fn list_permission_request_files(bridge: &PermissionPromptBridge) -> Result<Vec<PathBuf>, String> {
+    let mut files = fs::read_dir(&bridge.requests_dir)
+        .map_err(|error| format!("Failed to read permission request dir: {}", error))?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .collect::<Vec<_>>();
+    files.sort();
+    Ok(files)
+}
+
+fn permission_request_id_from_path(path: &Path) -> Option<String> {
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(ToString::to_string)
+}
+
+fn read_permission_prompt_request(path: &Path) -> Result<PermissionPromptRequestFile, String> {
+    let content = fs::read_to_string(path)
+        .map_err(|error| format!("Failed to read permission prompt request file: {}", error))?;
+    serde_json::from_str(&content)
+        .map_err(|error| format!("Failed to parse permission prompt request file: {}", error))
+}
+
+fn write_permission_prompt_response(
+    bridge: &PermissionPromptBridge,
+    request_id: &str,
+    response: PermissionPromptResponseFile,
+) -> Result<(), String> {
+    let response_path = bridge.responses_dir.join(format!("{request_id}.json"));
+    let payload = serde_json::to_string_pretty(&response)
+        .map_err(|error| format!("Failed to encode permission response: {}", error))?;
+    fs::write(response_path, payload)
+        .map_err(|error| format!("Failed to write permission response: {}", error))
 }
 
 fn extract_protocol_events(value: &Value) -> Vec<SessionEventPayload> {
@@ -1157,6 +1586,9 @@ pub fn cleanup_orphaned_runtime_processes_from(path: &Path) -> io::Result<Runtim
 fn process_exists(pid: u32) -> bool {
     Command::new("kill")
         .args(["-0", &pid.to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status()
         .map(|status| status.success())
         .unwrap_or(false)
@@ -1203,6 +1635,9 @@ fn terminate_process(pid: u32) -> Result<(), String> {
 fn send_signal(pid: u32, signal: &str) -> Result<(), String> {
     let status = Command::new("kill")
         .args([format!("-{}", signal).as_str(), &pid.to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status()
         .map_err(|error| {
             format!(
@@ -1246,7 +1681,9 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("system time before unix epoch")
             .as_nanos();
-        std::env::temp_dir().join(format!("ccem-runtime-state-{nanos}.json"))
+        let dir = std::env::temp_dir().join(format!("ccem-runtime-tests-{nanos}"));
+        let _ = fs::create_dir_all(&dir);
+        dir.join("state.json")
     }
 
     #[test]
@@ -1265,6 +1702,10 @@ mod tests {
                 source: ManagedSessionSource::Desktop,
                 saved_at: now,
                 summary: None,
+                tmux_session: None,
+                tmux_window: None,
+                tmux_window_index: None,
+                jsonl_path: None,
             }],
             ..RuntimeStateFile::default()
         };
@@ -1297,6 +1738,10 @@ mod tests {
                         source: ManagedSessionSource::Desktop,
                         saved_at: now,
                         summary: None,
+                        tmux_session: None,
+                        tmux_window: None,
+                        tmux_window_index: None,
+                        jsonl_path: None,
                     },
                     RuntimeStateEntry {
                         runtime_id: "headless-1".to_string(),
@@ -1309,6 +1754,10 @@ mod tests {
                         source: ManagedSessionSource::Desktop,
                         saved_at: now,
                         summary: None,
+                        tmux_session: None,
+                        tmux_window: None,
+                        tmux_window_index: None,
+                        jsonl_path: None,
                     },
                 ],
                 ..RuntimeStateFile::default()
@@ -1330,6 +1779,10 @@ mod tests {
                 source: ManagedSessionSource::Desktop,
                 saved_at: now,
                 summary: None,
+                tmux_session: None,
+                tmux_window: None,
+                tmux_window_index: None,
+                jsonl_path: None,
             }],
         )
         .expect("replace runtime kind entries");
@@ -1370,6 +1823,10 @@ mod tests {
                         source: ManagedSessionSource::Desktop,
                         saved_at: now,
                         summary: None,
+                        tmux_session: None,
+                        tmux_window: None,
+                        tmux_window_index: None,
+                        jsonl_path: None,
                     },
                     RuntimeStateEntry {
                         runtime_id: "headless-summary".to_string(),
@@ -1387,6 +1844,10 @@ mod tests {
                             outcome: "completed".to_string(),
                             finished_at: now,
                         }),
+                        tmux_session: None,
+                        tmux_window: None,
+                        tmux_window_index: None,
+                        jsonl_path: None,
                     },
                     RuntimeStateEntry {
                         runtime_id: "missing-session-id".to_string(),
@@ -1399,6 +1860,10 @@ mod tests {
                         source: ManagedSessionSource::Desktop,
                         saved_at: now,
                         summary: None,
+                        tmux_session: None,
+                        tmux_window: None,
+                        tmux_window_index: None,
+                        jsonl_path: None,
                     },
                 ],
                 ..RuntimeStateFile::default()
@@ -1445,6 +1910,10 @@ mod tests {
                         source: ManagedSessionSource::Desktop,
                         saved_at: now,
                         summary: None,
+                        tmux_session: None,
+                        tmux_window: None,
+                        tmux_window_index: None,
+                        jsonl_path: None,
                     },
                     RuntimeStateEntry {
                         runtime_id: "headless-1".to_string(),
@@ -1457,6 +1926,10 @@ mod tests {
                         source: ManagedSessionSource::Desktop,
                         saved_at: now,
                         summary: None,
+                        tmux_session: None,
+                        tmux_window: None,
+                        tmux_window_index: None,
+                        jsonl_path: None,
                     },
                 ],
                 ..RuntimeStateFile::default()
@@ -1494,6 +1967,10 @@ mod tests {
                         source: ManagedSessionSource::Desktop,
                         saved_at: now,
                         summary: None,
+                        tmux_session: None,
+                        tmux_window: None,
+                        tmux_window_index: None,
+                        jsonl_path: None,
                     },
                     RuntimeStateEntry {
                         runtime_id: "headless-1".to_string(),
@@ -1506,6 +1983,10 @@ mod tests {
                         source: ManagedSessionSource::Desktop,
                         saved_at: now,
                         summary: None,
+                        tmux_session: None,
+                        tmux_window: None,
+                        tmux_window_index: None,
+                        jsonl_path: None,
                     },
                     RuntimeStateEntry {
                         runtime_id: "headless-2".to_string(),
@@ -1518,6 +1999,10 @@ mod tests {
                         source: ManagedSessionSource::Desktop,
                         saved_at: now,
                         summary: None,
+                        tmux_session: None,
+                        tmux_window: None,
+                        tmux_window_index: None,
+                        jsonl_path: None,
                     },
                 ],
                 ..RuntimeStateFile::default()
@@ -1598,6 +2083,7 @@ mod tests {
             }),
             stdin: std::sync::Mutex::new(None),
             events: std::sync::Mutex::new(crate::event_bus::SessionStore::new("runtime-2")),
+            permission_bridge: None,
             alive: AtomicBool::new(true),
         };
 
@@ -1632,6 +2118,7 @@ mod tests {
             }),
             stdin: std::sync::Mutex::new(None),
             events: std::sync::Mutex::new(crate::event_bus::SessionStore::new("runtime-active")),
+            permission_bridge: None,
             alive: AtomicBool::new(true),
         };
 
@@ -1662,6 +2149,7 @@ mod tests {
             }),
             stdin: std::sync::Mutex::new(None),
             events: std::sync::Mutex::new(crate::event_bus::SessionStore::new("runtime-done")),
+            permission_bridge: None,
             alive: AtomicBool::new(false),
         };
 
@@ -1712,6 +2200,7 @@ mod tests {
 
         let command = build_claude_command(&options, "runtime-test").expect("build command");
         let args = command
+            .command
             .get_args()
             .map(|value| value.to_string_lossy().to_string())
             .collect::<Vec<_>>();

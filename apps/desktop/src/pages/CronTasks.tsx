@@ -31,6 +31,19 @@ function formatTime(iso?: string | null) {
   }
 }
 
+function parseToolListInput(input: string) {
+  return Array.from(new Set(
+    input
+      .split(/[\n,]+/)
+      .map((value) => value.trim())
+      .filter(Boolean),
+  ));
+}
+
+function formatToolListInput(values?: string[] | null) {
+  return (values ?? []).join(', ');
+}
+
 const TEMPLATE_ICONS: Record<string, typeof Clock> = {
   'git-pr-review': GitPullRequest,
   'test-runner': FlaskConical,
@@ -75,7 +88,18 @@ const INPUT_CLS = 'w-full px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.
 function TaskDialog({ open, onClose, onSave, editTask, environments }: {
   open: boolean;
   onClose: () => void;
-  onSave: (d: { name: string; cronExpression: string; prompt: string; workingDir: string; envName?: string; executionProfile: CronTask['executionProfile']; timeoutSecs?: number }) => Promise<void>;
+  onSave: (d: {
+    name: string;
+    cronExpression: string;
+    prompt: string;
+    workingDir: string;
+    envName?: string;
+    executionProfile: CronTask['executionProfile'];
+    maxBudgetUsd?: number | null;
+    allowedTools?: string[];
+    disallowedTools?: string[];
+    timeoutSecs?: number;
+  }) => Promise<void>;
   editTask?: CronTask;
   environments: { name: string }[];
 }) {
@@ -87,6 +111,9 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
   const [workDir, setWorkDir] = useState('');
   const [envName, setEnvName] = useState('');
   const [executionProfile, setExecutionProfile] = useState<CronTask['executionProfile']>('conservative');
+  const [maxBudgetUsdInput, setMaxBudgetUsdInput] = useState('');
+  const [allowedToolsInput, setAllowedToolsInput] = useState('');
+  const [disallowedToolsInput, setDisallowedToolsInput] = useState('');
   const [timeoutSecs, setTimeoutSecs] = useState(300);
   const [saving, setSaving] = useState(false);
 
@@ -98,6 +125,9 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
       setWorkDir(editTask.workingDir);
       setEnvName(editTask.envName || '');
       setExecutionProfile(editTask.executionProfile || 'conservative');
+      setMaxBudgetUsdInput(editTask.maxBudgetUsd != null ? String(editTask.maxBudgetUsd) : '');
+      setAllowedToolsInput(formatToolListInput(editTask.allowedTools));
+      setDisallowedToolsInput(formatToolListInput(editTask.disallowedTools));
       setTimeoutSecs(editTask.timeoutSecs);
     } else {
       setName('');
@@ -106,6 +136,9 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
       setWorkDir('');
       setEnvName('');
       setExecutionProfile('conservative');
+      setMaxBudgetUsdInput('');
+      setAllowedToolsInput('');
+      setDisallowedToolsInput('');
       setTimeoutSecs(300);
     }
   }, [editTask, open]);
@@ -114,6 +147,11 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
 
   const doSave = async () => {
     if (!name.trim() || !cronExpr.trim() || !prompt.trim() || !workDir.trim()) return;
+    const parsedBudget = maxBudgetUsdInput.trim() ? Number(maxBudgetUsdInput.trim()) : null;
+    if (maxBudgetUsdInput.trim() && (!Number.isFinite(parsedBudget) || Number(parsedBudget) <= 0)) {
+      toast.error(t('cron.invalidBudget'));
+      return;
+    }
     setSaving(true);
     try {
       await onSave({
@@ -123,6 +161,9 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
         workingDir: workDir.trim(),
         envName: envName || undefined,
         executionProfile,
+        maxBudgetUsd: parsedBudget,
+        allowedTools: parseToolListInput(allowedToolsInput),
+        disallowedTools: parseToolListInput(disallowedToolsInput),
         timeoutSecs,
       });
       onClose();
@@ -216,6 +257,46 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
                     ? t('cron.profileStandardDesc')
                     : t('cron.profileAutonomousDesc')}
               </p>
+            </div>
+          </div>
+          <div className="rounded-xl border border-black/[0.08] dark:border-white/[0.08] bg-black/[0.02] dark:bg-white/[0.03] p-3 space-y-3">
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-foreground">{t('cron.customToolPolicy')}</p>
+              <p className="text-2xs text-muted-foreground">{t('cron.customToolPolicyDesc')}</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">{t('cron.profileBudget')}</label>
+                <input
+                  type="number"
+                  min={0.01}
+                  step={0.01}
+                  className={INPUT_CLS}
+                  value={maxBudgetUsdInput}
+                  onChange={(e) => setMaxBudgetUsdInput(e.target.value)}
+                  placeholder={t('cron.profileBudgetPlaceholder')}
+                />
+              </div>
+              <div className="space-y-1.5 md:col-span-2">
+                <label className="text-xs font-medium text-muted-foreground">{t('cron.allowedTools')}</label>
+                <textarea
+                  className={cn(INPUT_CLS, 'min-h-[72px] resize-y')}
+                  value={allowedToolsInput}
+                  onChange={(e) => setAllowedToolsInput(e.target.value)}
+                  placeholder={t('cron.toolListPlaceholder')}
+                  rows={3}
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">{t('cron.disallowedTools')}</label>
+              <textarea
+                className={cn(INPUT_CLS, 'min-h-[72px] resize-y')}
+                value={disallowedToolsInput}
+                onChange={(e) => setDisallowedToolsInput(e.target.value)}
+                placeholder={t('cron.toolListPlaceholder')}
+                rows={3}
+              />
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-black/[0.06] dark:border-white/[0.06]">
@@ -382,6 +463,9 @@ export function CronTasks() {
       workingDir: task.workingDir,
       envName: null,
       executionProfile: 'conservative',
+      maxBudgetUsd: null,
+      allowedTools: [],
+      disallowedTools: [],
       enabled: true,
       timeoutSecs: 300,
       templateId: null,
@@ -398,7 +482,7 @@ export function CronTasks() {
     try {
       const task = await addCronTask({
         name: tpl.name, cronExpression: tpl.cronExpression,
-        prompt: tpl.prompt, workingDir: '~', templateId: tpl.id, executionProfile: 'conservative',
+        prompt: tpl.prompt, workingDir: '~', templateId: tpl.id, executionProfile: 'conservative', maxBudgetUsd: null, allowedTools: [], disallowedTools: [],
       });
       toast.success(t('cron.taskCreated'));
       setSelectedTaskId(task.id);
@@ -411,7 +495,7 @@ export function CronTasks() {
 
   const handleSave = useCallback(async (data: {
     name: string; cronExpression: string; prompt: string;
-    workingDir: string; envName?: string; executionProfile: CronTask['executionProfile']; timeoutSecs?: number;
+    workingDir: string; envName?: string; executionProfile: CronTask['executionProfile']; maxBudgetUsd?: number | null; allowedTools?: string[]; disallowedTools?: string[]; timeoutSecs?: number;
   }) => {
     if (editingTask) {
       await updateCronTask({ id: editingTask.id, ...data });
@@ -575,14 +659,32 @@ export function CronTasks() {
                       <div>
                         <span className="text-2xs text-muted-foreground">{t('cron.profileBudget')}</span>
                         <p className="text-xs text-foreground/80 mt-0.5">
-                          {selectedTask.executionProfile === 'autonomous'
-                            ? '$5.00'
-                            : selectedTask.executionProfile === 'standard'
-                              ? '$2.00'
-                              : '$0.50'}
+                          {selectedTask.maxBudgetUsd != null
+                            ? `$${selectedTask.maxBudgetUsd.toFixed(2)}`
+                            : selectedTask.executionProfile === 'autonomous'
+                              ? '$5.00'
+                              : selectedTask.executionProfile === 'standard'
+                                ? '$2.00'
+                                : '$0.50'}
                         </p>
                       </div>
                     </div>
+                    {(selectedTask.allowedTools?.length || selectedTask.disallowedTools?.length) ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                        <div>
+                          <span className="text-2xs text-muted-foreground">{t('cron.allowedTools')}</span>
+                          <p className="text-xs text-foreground/80 mt-0.5 break-words">
+                            {(selectedTask.allowedTools ?? []).join(', ')}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-2xs text-muted-foreground">{t('cron.disallowedTools')}</span>
+                          <p className="text-xs text-foreground/80 mt-0.5 break-words">
+                            {(selectedTask.disallowedTools ?? []).join(', ')}
+                          </p>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
                 <RunHistoryPanel taskId={selectedTask.id} />
