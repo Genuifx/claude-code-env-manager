@@ -151,6 +151,106 @@ fn normalize_config(raw: RawCcemConfig) -> CcemConfig {
     }
 }
 
+fn is_tier_model_alias(value: &str) -> bool {
+    matches!(value, "opus" | "sonnet" | "haiku")
+}
+
+fn should_recover_tier_model(value: &Option<String>) -> bool {
+    match value.as_deref() {
+        None => true,
+        Some(model) => is_tier_model_alias(model),
+    }
+}
+
+fn recover_env_from_legacy(current: &mut EnvConfig, legacy: &EnvConfig) -> bool {
+    let mut changed = false;
+
+    if current.auth_token.is_none() {
+        if let Some(auth_token) = legacy.auth_token.clone() {
+            current.auth_token = Some(auth_token);
+            changed = true;
+        }
+    }
+
+    if should_recover_tier_model(&current.default_opus_model) {
+        if let Some(default_opus_model) = legacy.default_opus_model.clone() {
+            if current.default_opus_model.as_ref() != Some(&default_opus_model) {
+                current.default_opus_model = Some(default_opus_model);
+                changed = true;
+            }
+        }
+    }
+
+    if should_recover_tier_model(&current.default_sonnet_model) {
+        if let Some(default_sonnet_model) = legacy.default_sonnet_model.clone() {
+            if current.default_sonnet_model.as_ref() != Some(&default_sonnet_model) {
+                current.default_sonnet_model = Some(default_sonnet_model);
+                changed = true;
+            }
+        }
+    }
+
+    if should_recover_tier_model(&current.default_haiku_model) {
+        if let Some(default_haiku_model) = legacy.default_haiku_model.clone() {
+            if current.default_haiku_model.as_ref() != Some(&default_haiku_model) {
+                current.default_haiku_model = Some(default_haiku_model);
+                changed = true;
+            }
+        }
+    }
+
+    if current.subagent_model.is_none() {
+        if let Some(subagent_model) = legacy.subagent_model.clone() {
+            current.subagent_model = Some(subagent_model);
+            changed = true;
+        }
+    }
+
+    changed
+}
+
+fn recover_config_from_legacy(current: &mut CcemConfig, legacy: &CcemConfig) -> bool {
+    let current_auth_count = current
+        .registries
+        .values()
+        .filter(|env| env.auth_token.is_some())
+        .count();
+    if current_auth_count > 0 {
+        return false;
+    }
+
+    let recoverable_auth_count = current
+        .registries
+        .iter()
+        .filter(|(name, env)| {
+            env.auth_token.is_none()
+                && legacy
+                    .registries
+                    .get(*name)
+                    .and_then(|legacy_env| legacy_env.auth_token.as_ref())
+                    .is_some()
+        })
+        .count();
+
+    if recoverable_auth_count == 0 {
+        return false;
+    }
+
+    let mut changed = false;
+    for (name, env) in current.registries.iter_mut() {
+        if let Some(legacy_env) = legacy.registries.get(name) {
+            changed |= recover_env_from_legacy(env, legacy_env);
+        }
+    }
+
+    changed
+}
+
+fn read_normalized_config_file(config_path: &PathBuf) -> Result<CcemConfig, String> {
+    let (_, raw) = read_raw_config_file(config_path)?;
+    Ok(normalize_config(raw))
+}
+
 const MANAGED_CLAUDE_ENV_KEYS: &[&str] = &[
     "ANTHROPIC_BASE_URL",
     "ANTHROPIC_AUTH_TOKEN",
@@ -317,12 +417,19 @@ pub fn migrate_if_needed() -> Result<bool, String> {
 /// Read config from ~/.ccem/config.json with file lock
 pub fn read_config() -> Result<CcemConfig, String> {
     let config_path = get_config_path();
+    let legacy_config_path = get_legacy_config_path();
 
     if !config_path.exists() {
         return Ok(CcemConfig::default());
     }
 
-    let (original_value, config) = {
+    let legacy_config = if legacy_config_path.exists() {
+        read_normalized_config_file(&legacy_config_path).ok()
+    } else {
+        None
+    };
+
+    let (original_value, mut config) = {
         let lock_file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -339,6 +446,10 @@ pub fn read_config() -> Result<CcemConfig, String> {
         (original_value, normalize_config(raw))
     };
 
+    if let Some(legacy_config) = legacy_config.as_ref() {
+        recover_config_from_legacy(&mut config, legacy_config);
+    }
+
     let normalized_value =
         serde_json::to_value(&config).map_err(|e| format!("Failed to serialize config: {}", e))?;
     if normalized_value != original_value {
@@ -354,7 +465,10 @@ pub fn read_config() -> Result<CcemConfig, String> {
             .map_err(|e| format!("Failed to acquire lock: {}", e))?;
 
         let (latest_value, latest_raw) = read_raw_config_file(&config_path)?;
-        let latest_config = normalize_config(latest_raw);
+        let mut latest_config = normalize_config(latest_raw);
+        if let Some(legacy_config) = legacy_config.as_ref() {
+            recover_config_from_legacy(&mut latest_config, legacy_config);
+        }
         let latest_normalized_value = serde_json::to_value(&latest_config)
             .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
@@ -606,7 +720,8 @@ pub fn create_env_with_encrypted_key(
 
 #[cfg(test)]
 mod tests {
-    use super::{env_config_to_process_env, EnvConfig};
+    use super::{env_config_to_process_env, recover_config_from_legacy, CcemConfig, EnvConfig};
+    use std::collections::HashMap;
 
     #[test]
     fn process_env_includes_auth_token_when_present() {
@@ -651,6 +766,59 @@ mod tests {
                 .get("CLAUDE_CODE_SUBAGENT_MODEL")
                 .map(String::as_str),
             Some("claude-subagent-test")
+        );
+    }
+
+    #[test]
+    fn recover_config_restores_missing_auth_and_tier_models_from_legacy() {
+        let mut current_registries = HashMap::new();
+        current_registries.insert(
+            "glm".to_string(),
+            EnvConfig {
+                base_url: Some("https://open.bigmodel.cn/api/anthropic".to_string()),
+                auth_token: None,
+                default_opus_model: Some("opus".to_string()),
+                default_sonnet_model: Some("opus".to_string()),
+                default_haiku_model: None,
+                model: Some("opus".to_string()),
+                subagent_model: None,
+            },
+        );
+        let mut current = CcemConfig {
+            registries: current_registries,
+            current: Some("glm".to_string()),
+            default_mode: Some("dev".to_string()),
+        };
+
+        let mut legacy_registries = HashMap::new();
+        legacy_registries.insert(
+            "glm".to_string(),
+            EnvConfig {
+                base_url: Some("https://open.bigmodel.cn/api/anthropic".to_string()),
+                auth_token: Some("enc:legacy-token".to_string()),
+                default_opus_model: Some("glm-5".to_string()),
+                default_sonnet_model: Some("glm-5".to_string()),
+                default_haiku_model: Some("glm-4.5-air".to_string()),
+                model: Some("opus".to_string()),
+                subagent_model: None,
+            },
+        );
+        let legacy = CcemConfig {
+            registries: legacy_registries,
+            current: Some("glm".to_string()),
+            default_mode: Some("dev".to_string()),
+        };
+
+        let changed = recover_config_from_legacy(&mut current, &legacy);
+        let recovered = current.registries.get("glm").expect("glm env should exist");
+
+        assert!(changed);
+        assert_eq!(recovered.auth_token.as_deref(), Some("enc:legacy-token"));
+        assert_eq!(recovered.default_opus_model.as_deref(), Some("glm-5"));
+        assert_eq!(recovered.default_sonnet_model.as_deref(), Some("glm-5"));
+        assert_eq!(
+            recovered.default_haiku_model.as_deref(),
+            Some("glm-4.5-air")
         );
     }
 }

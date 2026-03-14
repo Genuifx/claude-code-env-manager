@@ -23,6 +23,7 @@ import {
   encrypt,
   ENV_PRESETS,
   normalizeEnvConfig,
+  recoverEnvConfigFromLegacy,
   PERMISSION_PRESETS,
   getCcemConfigDir,
   ensureCcemDir,
@@ -137,6 +138,49 @@ const config = new Conf({
   }
 });
 
+const recoverRegistriesFromLegacy = (
+  registries: Record<string, EnvConfig>
+): Record<string, EnvConfig> => {
+  const currentAuthCount = Object.values(registries).filter(
+    (env) => Boolean(env.ANTHROPIC_AUTH_TOKEN)
+  ).length;
+
+  if (currentAuthCount > 0) {
+    return registries;
+  }
+
+  const legacyConfigPath = getLegacyConfigPath();
+  if (!fs.existsSync(legacyConfigPath)) {
+    return registries;
+  }
+
+  try {
+    const legacyRaw = JSON.parse(fs.readFileSync(legacyConfigPath, 'utf-8')) as {
+      registries?: Record<string, StoredEnvConfig>;
+    };
+    const legacyRegistries = legacyRaw.registries ?? {};
+    let changed = false;
+    const recovered: Record<string, EnvConfig> = { ...registries };
+
+    for (const [name, envConfig] of Object.entries(registries)) {
+      const legacyEnvConfig = legacyRegistries[name];
+      if (!legacyEnvConfig) {
+        continue;
+      }
+
+      const recoveredEnv = recoverEnvConfigFromLegacy(envConfig, legacyEnvConfig);
+      if (JSON.stringify(recoveredEnv) !== JSON.stringify(envConfig)) {
+        recovered[name] = recoveredEnv;
+        changed = true;
+      }
+    }
+
+    return changed ? recovered : registries;
+  } catch {
+    return registries;
+  }
+};
+
 const getRegistries = (): Record<string, EnvConfig> => {
   const rawRegistries = (config.get('registries') as Record<string, StoredEnvConfig> | undefined) ?? {};
   const normalizedEntries = Object.entries(rawRegistries).map(([name, envConfig]) => [
@@ -144,19 +188,20 @@ const getRegistries = (): Record<string, EnvConfig> => {
     normalizeEnvConfig(envConfig ?? {}),
   ]);
   const normalizedRegistries = Object.fromEntries(normalizedEntries) as Record<string, EnvConfig>;
-  if (!normalizedRegistries.official) {
-    normalizedRegistries.official = { ...DEFAULT_OFFICIAL_ENV };
+  const repairedRegistries = recoverRegistriesFromLegacy(normalizedRegistries);
+  if (!repairedRegistries.official) {
+    repairedRegistries.official = { ...DEFAULT_OFFICIAL_ENV };
   }
 
   const changed =
-    Object.keys(rawRegistries).length !== Object.keys(normalizedRegistries).length ||
-    JSON.stringify(rawRegistries) !== JSON.stringify(normalizedRegistries);
+    Object.keys(rawRegistries).length !== Object.keys(repairedRegistries).length ||
+    JSON.stringify(rawRegistries) !== JSON.stringify(repairedRegistries);
 
   if (changed) {
-    config.set('registries', normalizedRegistries);
+    config.set('registries', repairedRegistries);
   }
 
-  return normalizedRegistries;
+  return repairedRegistries;
 };
 
 const setRegistries = (registries: Record<string, EnvConfig>): void => {
@@ -395,6 +440,145 @@ const switchEnvironment = async (name: string) => {
   }
 };
 
+type RuntimeStateSessionEntry = {
+  runtime_id: string;
+  runtime_kind?: 'interactive' | 'headless';
+  project_dir: string;
+  env_name: string;
+  perm_mode: string;
+  saved_at: string;
+  tmux_session?: string;
+  tmux_window?: string;
+  tmux_window_index?: number;
+};
+
+type RuntimeStateFile = {
+  sessions?: RuntimeStateSessionEntry[];
+};
+
+type StoredSessionEntry = {
+  id: string;
+  env_name: string;
+  perm_mode: string;
+  working_dir: string;
+  start_time: string;
+  status: string;
+  terminal_type?: string | null;
+  window_id?: string | null;
+};
+
+type InteractiveAttachSession = {
+  id: string;
+  projectDir: string;
+  envName: string;
+  permMode: string;
+  status: string;
+  tmuxTarget: string;
+  sortTime: string;
+};
+
+const getSessionsFilePath = (): string => path.join(getCcemConfigDir(), 'sessions.json');
+const getRuntimeStateFilePath = (): string => path.join(getCcemConfigDir(), 'runtime-state.json');
+
+const parseJsonFile = <T>(filePath: string): T | null => {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8')) as T;
+  } catch {
+    return null;
+  }
+};
+
+const readInteractiveAttachSessions = (): InteractiveAttachSession[] => {
+  const sessionsById = new Map<string, InteractiveAttachSession>();
+  const runtimeState = parseJsonFile<RuntimeStateFile>(getRuntimeStateFilePath());
+  const persistedSessions = parseJsonFile<StoredSessionEntry[]>(getSessionsFilePath()) ?? [];
+
+  for (const entry of runtimeState?.sessions ?? []) {
+    if (entry.runtime_kind && entry.runtime_kind !== 'interactive') {
+      continue;
+    }
+
+    const fallback = persistedSessions.find((session) => session.id === entry.runtime_id);
+    const tmuxTarget = entry.tmux_session && entry.tmux_window
+      ? `${entry.tmux_session}:${entry.tmux_window}`
+      : fallback?.window_id ?? null;
+
+    if (!tmuxTarget) {
+      continue;
+    }
+
+    sessionsById.set(entry.runtime_id, {
+      id: entry.runtime_id,
+      projectDir: entry.project_dir,
+      envName: entry.env_name,
+      permMode: entry.perm_mode,
+      status: fallback?.status ?? 'running',
+      tmuxTarget,
+      sortTime: entry.saved_at,
+    });
+  }
+
+  for (const session of persistedSessions) {
+    if (session.status !== 'running' || session.terminal_type !== 'embedded' || !session.window_id) {
+      continue;
+    }
+
+    if (sessionsById.has(session.id)) {
+      continue;
+    }
+
+    sessionsById.set(session.id, {
+      id: session.id,
+      projectDir: session.working_dir,
+      envName: session.env_name,
+      permMode: session.perm_mode,
+      status: session.status,
+      tmuxTarget: session.window_id,
+      sortTime: session.start_time,
+    });
+  }
+
+  return [...sessionsById.values()].sort((left, right) =>
+    right.sortTime.localeCompare(left.sortTime)
+  );
+};
+
+const findAttachSession = (id?: string): InteractiveAttachSession | undefined => {
+  const sessions = readInteractiveAttachSessions();
+  if (!id) {
+    return sessions[0];
+  }
+
+  const exact = sessions.find((session) => session.id === id);
+  if (exact) {
+    return exact;
+  }
+
+  return sessions.find((session) => session.id.startsWith(id));
+};
+
+const attachTmuxTarget = (target: string): Promise<void> => {
+  const args = process.env.TMUX
+    ? ['switch-client', '-t', target]
+    : ['attach-session', '-t', target];
+
+  return new Promise((resolve, reject) => {
+    const child = spawn('tmux', args, { stdio: 'inherit' });
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      if (code === 0 || code === null) {
+        resolve();
+      } else {
+        reject(new Error(`tmux exited with code ${code}`));
+      }
+    });
+  });
+};
+
 // 环境管理命令
 program
   .command('ls')
@@ -426,6 +610,52 @@ program
   .description('Switch to a specific environment')
   .action(async (name) => {
     await switchEnvironment(name);
+  });
+
+program
+  .command('sessions')
+  .description('List tmux-backed interactive sessions')
+  .action(() => {
+    const sessions = readInteractiveAttachSessions();
+    if (sessions.length === 0) {
+      console.log(chalk.yellow('No tmux-backed interactive sessions found.'));
+      return;
+    }
+
+    const table = new Table({
+      head: ['ID', 'Project', 'Env', 'Status', 'Tmux'],
+      style: { head: ['cyan'] }
+    });
+
+    sessions.forEach((session) => {
+      table.push([
+        session.id,
+        session.projectDir,
+        session.envName,
+        session.status,
+        session.tmuxTarget,
+      ]);
+    });
+
+    console.log(table.toString());
+  });
+
+program
+  .command('attach [id]')
+  .description('Attach to a tmux-backed interactive session')
+  .action(async (id?: string) => {
+    const session = findAttachSession(id);
+    if (!session) {
+      console.error(chalk.red(id ? `Interactive session '${id}' not found.` : 'No interactive session available to attach.'));
+      process.exit(1);
+    }
+
+    try {
+      await attachTmuxTarget(session.tmuxTarget);
+    } catch (error) {
+      console.error(chalk.red(`Failed to attach ${session.tmuxTarget}: ${String(error)}`));
+      process.exit(1);
+    }
   });
 
 program

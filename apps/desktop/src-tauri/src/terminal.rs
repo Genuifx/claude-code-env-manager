@@ -341,6 +341,20 @@ pub fn resolve_codex_path() -> Option<String> {
     resolve_binary_path("codex", &candidates)
 }
 
+/// Resolve the full path to the `tmux` binary.
+pub fn resolve_tmux_path() -> Option<String> {
+    let home = dirs::home_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let candidates = vec![
+        format!("{}/.local/bin/tmux", home),
+        "/usr/local/bin/tmux".to_string(),
+        "/opt/homebrew/bin/tmux".to_string(),
+        "/usr/bin/tmux".to_string(),
+    ];
+    resolve_binary_path("tmux", &candidates)
+}
+
 /// Returns whether ccem is installed.
 pub fn is_ccem_installed() -> bool {
     *CCEM_INSTALLED.get_or_init(|| resolve_ccem_path().is_some())
@@ -454,6 +468,14 @@ fn build_shell_command(
     parts.join(" && ")
 }
 
+/// Build the shell command to attach a new terminal window to an existing tmux target.
+fn build_tmux_attach_command(target: &str) -> String {
+    let escaped_target = target.replace("'", "'\\''");
+    let tmux = resolve_tmux_path().unwrap_or_else(|| "tmux".to_string());
+    let escaped_tmux = tmux.replace("'", "'\\''");
+    format!("'{}' attach-session -t '{}'", escaped_tmux, escaped_target)
+}
+
 /// Build the shell command to launch Codex and write exit code for session tracking.
 fn build_codex_shell_command(
     env_vars: &HashMap<String, String>,
@@ -504,7 +526,7 @@ fn iterm2_script(shell_command: &str) -> String {
     // IMPORTANT: Escape backslashes FIRST, then double quotes
     let escaped_cmd = shell_command.replace("\\", "\\\\").replace("\"", "\\\"");
     format!(
-        r#"tell application "iTerm2"
+        r#"tell application "iTerm"
     set newWindow to (create window with default profile)
     set theSession to current session of current tab of newWindow
     tell theSession
@@ -607,6 +629,48 @@ pub fn launch_in_terminal(
     }
 }
 
+/// Launch a new terminal window and attach it to an existing tmux target.
+pub fn open_tmux_target_in_terminal(
+    terminal: TerminalType,
+    target: &str,
+) -> Result<(Option<String>, Option<String>), String> {
+    let shell_command = build_tmux_attach_command(target);
+    let script = match terminal {
+        TerminalType::TerminalApp => terminal_app_script(&shell_command),
+        TerminalType::ITerm2 => iterm2_script(&shell_command),
+    };
+
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|e| format!("Failed to execute AppleScript: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("AppleScript failed: {}", stderr.trim()));
+    }
+
+    match terminal {
+        TerminalType::ITerm2 => {
+            let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if let Some((window_id, session_id)) = raw.split_once('|') {
+                Ok((Some(window_id.to_string()), Some(session_id.to_string())))
+            } else {
+                Ok((Some(raw), None))
+            }
+        }
+        TerminalType::TerminalApp => {
+            let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if raw.is_empty() {
+                Ok((None, None))
+            } else {
+                Ok((Some(raw), None))
+            }
+        }
+    }
+}
+
 /// Focus a terminal window by window ID
 pub fn focus_terminal_window(terminal: TerminalType, window_id: &str) -> Result<(), String> {
     let script = match terminal {
@@ -616,7 +680,7 @@ end tell"#
             .to_string(),
         TerminalType::ITerm2 => {
             format!(
-                r#"tell application "iTerm2"
+                r#"tell application "iTerm"
     repeat with aWindow in windows
         if id of aWindow is {} then
             select aWindow
@@ -649,7 +713,7 @@ end tell"#,
 
 /// Batch query all iTerm2 window IDs (single AppleScript call for performance)
 pub fn list_iterm_sessions() -> Vec<String> {
-    let script = r#"tell application "iTerm2"
+    let script = r#"tell application "iTerm"
     if not running then return ""
     set windowIds to {}
     repeat with aWindow in windows
@@ -709,7 +773,7 @@ pub fn close_terminal_session(terminal: TerminalType, window_id: &str) -> Result
         }
         TerminalType::ITerm2 => {
             let script = format!(
-                r#"tell application "iTerm2"
+                r#"tell application "iTerm"
     repeat with aWindow in windows
         if id of aWindow is {} then
             close aWindow
@@ -746,7 +810,7 @@ pub fn minimize_terminal_window(terminal: TerminalType, window_id: &str) -> Resu
         ),
         TerminalType::ITerm2 => {
             let script = format!(
-                r#"tell application "iTerm2"
+                r#"tell application "iTerm"
     repeat with aWindow in windows
         if id of aWindow is {} then
             set miniaturized of aWindow to true
@@ -833,7 +897,7 @@ end tell"#;
 /// Used to backfill sessions launched before this feature existed
 pub fn get_iterm_session_id(window_id: &str) -> Result<String, String> {
     let script = format!(
-        r#"tell application "iTerm2"
+        r#"tell application "iTerm"
     repeat with aWindow in windows
         if id of aWindow is {} then
             return unique id of current session of current tab of aWindow
@@ -865,7 +929,7 @@ end tell"#,
 /// Check if iTerm2 supports the invoke API expression (3.5+)
 pub fn check_arrange_support() -> Result<bool, String> {
     // Try a harmless invoke API expression to test support
-    let script = r#"tell application "iTerm2"
+    let script = r#"tell application "iTerm"
     if not running then return "not_running"
     try
         set v to version
@@ -937,7 +1001,7 @@ pub fn arrange_iterm_sessions(
             }
             // Move B right of A: vertical=true, before=false
             format!(
-                r#"tell application "iTerm2"
+                r#"tell application "iTerm"
     invoke API expression "iterm2.move_session(session: \"{}\", destination: \"{}\", vertical: true, before: false)"
     delay 0.8
     -- Find the window containing session A
@@ -961,7 +1025,7 @@ end tell"#,
             }
             // Move B below A: vertical=false, before=true
             format!(
-                r#"tell application "iTerm2"
+                r#"tell application "iTerm"
     invoke API expression "iterm2.move_session(session: \"{}\", destination: \"{}\", vertical: false, before: true)"
     delay 0.8
     repeat with aWindow in windows
@@ -1015,7 +1079,7 @@ end tell"#,
             }
 
             format!(
-                r#"tell application "iTerm2"
+                r#"tell application "iTerm"
 {}    -- Find the window containing session A
     repeat with aWindow in windows
         repeat with aTab in tabs of aWindow
@@ -1057,7 +1121,7 @@ end tell"#,
             }
 
             format!(
-                r#"tell application "iTerm2"
+                r#"tell application "iTerm"
 {}    repeat with aWindow in windows
         repeat with aTab in tabs of aWindow
             repeat with aSession in sessions of aTab
@@ -1218,5 +1282,11 @@ mod tests {
     fn test_terminal_type_display_name() {
         assert_eq!(TerminalType::TerminalApp.display_name(), "Terminal.app");
         assert_eq!(TerminalType::ITerm2.display_name(), "iTerm2");
+    }
+
+    #[test]
+    fn test_build_tmux_attach_command() {
+        let cmd = build_tmux_attach_command("ccem:ccem-1234abcd");
+        assert!(cmd.ends_with("attach-session -t 'ccem:ccem-1234abcd'"));
     }
 }

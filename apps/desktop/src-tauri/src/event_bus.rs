@@ -5,6 +5,78 @@ use std::collections::VecDeque;
 pub const DEFAULT_SESSION_EVENT_CAPACITY: usize = 500;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum UserInputKind {
+    Question,
+    PlanEntry,
+    PlanExit,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "category", rename_all = "snake_case")]
+pub enum ToolCategory {
+    UserInput {
+        kind: UserInputKind,
+        raw_name: String,
+    },
+    FileOp {
+        raw_name: String,
+    },
+    Execution {
+        raw_name: String,
+    },
+    Search {
+        raw_name: String,
+    },
+    TaskMgmt {
+        raw_name: String,
+    },
+    Unknown {
+        raw_name: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ToolQuestionOption {
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ToolQuestionPrompt {
+    pub question: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header: Option<String>,
+    #[serde(rename = "multiSelect")]
+    pub multi_select: bool,
+    pub options: Vec<ToolQuestionOption>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "prompt_type", rename_all = "snake_case")]
+pub enum InteractiveToolPrompt {
+    AskUserQuestion {
+        questions: Vec<ToolQuestionPrompt>,
+    },
+    PlanEntry,
+    PlanExit {
+        #[serde(default)]
+        allowed_prompts: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        plan_summary: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalPromptKind {
+    Permission,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionEventPayload {
     SystemMessage {
@@ -24,6 +96,21 @@ pub enum SessionEventPayload {
     AssistantChunk {
         text: String,
     },
+    ToolUseStarted {
+        tool_use_id: String,
+        category: ToolCategory,
+        raw_name: String,
+        input_summary: String,
+        needs_response: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prompt: Option<InteractiveToolPrompt>,
+    },
+    ToolUseCompleted {
+        tool_use_id: String,
+        raw_name: String,
+        result_summary: String,
+        success: bool,
+    },
     PermissionRequired {
         request_id: String,
         tool_name: String,
@@ -35,6 +122,14 @@ pub enum SessionEventPayload {
     },
     SessionCompleted {
         reason: String,
+    },
+    TerminalPromptRequired {
+        prompt_kind: TerminalPromptKind,
+        prompt_text: String,
+    },
+    TerminalPromptResolved {
+        prompt_kind: TerminalPromptKind,
+        approved: bool,
     },
     GapNotification {
         last_seen_seq: u64,
@@ -146,7 +241,10 @@ impl SessionStore {
 
 #[cfg(test)]
 mod tests {
-    use super::{SessionEventPayload, SessionStore};
+    use super::{
+        InteractiveToolPrompt, SessionEventPayload, SessionStore, ToolCategory, ToolQuestionOption,
+        ToolQuestionPrompt, UserInputKind,
+    };
 
     #[test]
     fn session_store_emits_monotonic_sequence_numbers() {
@@ -191,6 +289,43 @@ mod tests {
         assert_eq!(replay.events.len(), 2);
         assert_eq!(replay.events[0].seq, 2);
         assert_eq!(replay.events[1].seq, 3);
+    }
+
+    #[test]
+    fn tool_use_started_round_trips_with_lightweight_prompt_payload() {
+        let payload = SessionEventPayload::ToolUseStarted {
+            tool_use_id: "toolu-1".to_string(),
+            category: ToolCategory::UserInput {
+                kind: UserInputKind::Question,
+                raw_name: "AskUserQuestion".to_string(),
+            },
+            raw_name: "AskUserQuestion".to_string(),
+            input_summary: "需要用户回答 1 个问题".to_string(),
+            needs_response: true,
+            prompt: Some(InteractiveToolPrompt::AskUserQuestion {
+                questions: vec![ToolQuestionPrompt {
+                    question: "Which one?".to_string(),
+                    header: Some("Choice".to_string()),
+                    multi_select: false,
+                    options: vec![
+                        ToolQuestionOption {
+                            label: "A".to_string(),
+                            description: None,
+                            preview: None,
+                        },
+                        ToolQuestionOption {
+                            label: "B".to_string(),
+                            description: Some("Preferred".to_string()),
+                            preview: None,
+                        },
+                    ],
+                }],
+            }),
+        };
+
+        let encoded = serde_json::to_string(&payload).expect("serialize");
+        let decoded: SessionEventPayload = serde_json::from_str(&encoded).expect("deserialize");
+        assert_eq!(decoded, payload);
     }
 
     #[test]

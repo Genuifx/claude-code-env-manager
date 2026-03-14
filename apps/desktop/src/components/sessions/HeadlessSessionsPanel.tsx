@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { Bot, LoaderCircle, RefreshCw, Send, Square, Sparkles, TerminalSquare, Trash2 } from 'lucide-react';
+import { Bot, CheckCircle2, LoaderCircle, RefreshCw, Send, Sparkles, Square, TerminalSquare, Trash2, XCircle } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -30,6 +30,26 @@ function lastEventSeq(events?: SessionEventRecord[]) {
     return null;
   }
   return events[events.length - 1]?.seq ?? null;
+}
+
+function pendingPermissionRequests(events: SessionEventRecord[]) {
+  const pending = new Map<string, { requestId: string; toolName: string }>();
+
+  for (const event of events) {
+    if (event.payload.type === 'permission_required') {
+      pending.set(event.payload.request_id, {
+        requestId: event.payload.request_id,
+        toolName: event.payload.tool_name,
+      });
+      continue;
+    }
+
+    if (event.payload.type === 'permission_responded') {
+      pending.delete(event.payload.request_id);
+    }
+  }
+
+  return Array.from(pending.values());
 }
 
 function statusTone(status: string) {
@@ -108,6 +128,7 @@ export function HeadlessSessionsPanel() {
   const [isCreating, setIsCreating] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
+  const [respondingRequestId, setRespondingRequestId] = useState<string | null>(null);
   const [isRefreshing, startRefreshTransition] = useTransition();
   const {
     currentEnv,
@@ -126,6 +147,7 @@ export function HeadlessSessionsPanel() {
     getHeadlessSessionEvents,
     sendToHeadlessSession,
     stopHeadlessSession,
+    respondHeadlessPermission,
     removeHeadlessSession,
   } = useTauriCommands();
 
@@ -217,6 +239,12 @@ export function HeadlessSessionsPanel() {
     const events = selectedRuntimeId ? eventsByRuntime[selectedRuntimeId] ?? [] : [];
     return events.filter((event) => showRawJson || event.payload.type !== 'claude_json');
   }, [eventsByRuntime, selectedRuntimeId, showRawJson]);
+  const pendingPermissions = useMemo(() => {
+    if (!selectedRuntimeId) {
+      return [];
+    }
+    return pendingPermissionRequests(eventsByRuntime[selectedRuntimeId] ?? []);
+  }, [eventsByRuntime, selectedRuntimeId]);
 
   const effectiveWorkingDir = selectedWorkingDir || defaultWorkingDir || null;
 
@@ -285,6 +313,19 @@ export function HeadlessSessionsPanel() {
       setIsRemoving(false);
     }
   }, [refreshSessions, removeHeadlessSession, selectedRuntimeId]);
+
+  const handlePermissionResponse = useCallback(async (requestId: string, approved: boolean) => {
+    setRespondingRequestId(requestId);
+    try {
+      await respondHeadlessPermission(requestId, approved, 'desktop');
+      if (selectedRuntimeId) {
+        await refreshEvents(selectedRuntimeId, lastEventSeq(eventsByRuntime[selectedRuntimeId]));
+        await refreshSessions();
+      }
+    } finally {
+      setRespondingRequestId(null);
+    }
+  }, [eventsByRuntime, refreshEvents, refreshSessions, respondHeadlessPermission, selectedRuntimeId]);
 
   return (
     <Card className="p-4 space-y-4">
@@ -443,6 +484,56 @@ export function HeadlessSessionsPanel() {
                     {showRawJson ? t('sessions.headlessHideRaw') : t('sessions.headlessShowRaw')}
                   </button>
                 </div>
+
+                {pendingPermissions.length > 0 ? (
+                  <div className="rounded-2xl border border-warning/30 bg-warning/5 p-3 space-y-3">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">{t('sessions.headlessPermissionTitle')}</p>
+                      <p className="text-xs text-muted-foreground mt-1">{t('sessions.headlessPermissionSubtitle')}</p>
+                    </div>
+                    <div className="space-y-2">
+                      {pendingPermissions.map((request) => (
+                        <div
+                          key={request.requestId}
+                          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-black/[0.06] bg-background/70 px-3 py-2 dark:border-white/[0.08]"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-foreground truncate">{request.toolName}</p>
+                            <p className="text-[11px] font-mono text-muted-foreground break-all">{request.requestId}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="glass-btn-outline"
+                              disabled={respondingRequestId === request.requestId}
+                              onClick={() => handlePermissionResponse(request.requestId, false)}
+                            >
+                              {respondingRequestId === request.requestId ? (
+                                <LoaderCircle className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <XCircle className="w-4 h-4" />
+                              )}
+                              {t('sessions.headlessDeny')}
+                            </Button>
+                            <Button
+                              size="sm"
+                              disabled={respondingRequestId === request.requestId}
+                              onClick={() => handlePermissionResponse(request.requestId, true)}
+                            >
+                              {respondingRequestId === request.requestId ? (
+                                <LoaderCircle className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <CheckCircle2 className="w-4 h-4" />
+                              )}
+                              {t('sessions.headlessApprove')}
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] bg-background/70 min-h-[250px] max-h-[420px] overflow-y-auto">
                   {visibleEvents.length === 0 ? (

@@ -22,6 +22,9 @@ import { shallow } from 'zustand/shallow';
 const EmbeddedTerminalPanel = lazy(async () =>
   import('@/components/sessions/EmbeddedTerminalPanel').then((m) => ({ default: m.EmbeddedTerminalPanel }))
 );
+const InteractiveToolEventsPanel = lazy(async () =>
+  import('@/components/sessions/InteractiveToolEventsPanel').then((m) => ({ default: m.InteractiveToolEventsPanel }))
+);
 
 interface SessionsProps {
   onLaunch: () => void;
@@ -58,7 +61,15 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
     }),
     shallow
   );
-  const { focusSession, minimizeSession, closeSession, arrangeSessions, launchClaudeCode, openDirectoryPicker } = useTauriCommands();
+  const {
+    focusSession,
+    openInteractiveSessionInTerminal,
+    minimizeSession,
+    closeSession,
+    arrangeSessions,
+    launchClaudeCode,
+    openDirectoryPicker,
+  } = useTauriCommands();
 
   const runningSessions = sessions.filter(s => s.status === 'running');
   const embeddedSessions = sessions.filter((session) => session.terminalType === 'embedded');
@@ -239,6 +250,14 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
     }
   };
 
+  const handleOpenInTerminal = async (id: string) => {
+    try {
+      await openInteractiveSessionInTerminal(id);
+    } catch (err) {
+      console.error('Failed to open interactive session in terminal:', err);
+    }
+  };
+
   const handleRequestClose = (id: string) => {
     setConfirmingId(id);
   };
@@ -407,27 +426,29 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
               {viewMode === 'card' ? (
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                   {sessions.map((session) => (
-                    <SessionCard
-                      key={session.id}
-                      session={session}
-                      onFocus={handleFocus}
-                      onMinimize={handleMinimize}
-                      onClose={handleRequestClose}
-                      confirmingClose={confirmingId === session.id}
-                      onCancelClose={handleCancelClose}
-                      onConfirmClose={handleConfirmClose}
+              <SessionCard
+                key={session.id}
+                session={session}
+                onFocus={handleFocus}
+                onOpenInTerminal={handleOpenInTerminal}
+                onMinimize={handleMinimize}
+                onClose={handleRequestClose}
+                confirmingClose={confirmingId === session.id}
+                onCancelClose={handleCancelClose}
+                onConfirmClose={handleConfirmClose}
                     />
                   ))}
                 </div>
               ) : (
-                <SessionList
-                  sessions={sessions}
-                  onFocus={handleFocus}
-                  onMinimize={handleMinimize}
-                  onClose={handleRequestClose}
-                  confirmingId={confirmingId}
-                  onCancelClose={handleCancelClose}
-                  onConfirmClose={handleConfirmClose}
+            <SessionList
+              sessions={sessions}
+              onFocus={handleFocus}
+              onOpenInTerminal={handleOpenInTerminal}
+              onMinimize={handleMinimize}
+              onClose={handleRequestClose}
+              confirmingId={confirmingId}
+              onCancelClose={handleCancelClose}
+              onConfirmClose={handleConfirmClose}
                 />
               )}
 
@@ -446,19 +467,31 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
               )}
             </Card>
             {embeddedSessions.length > 0 && (
-              <Suspense
-                fallback={(
-                  <Card className="p-4">
-                    <div className="h-[520px] animate-pulse rounded-xl bg-black/[0.04] dark:bg-white/[0.06]" />
-                  </Card>
-                )}
-              >
-                <EmbeddedTerminalPanel
-                  sessions={embeddedSessions}
-                  activeSessionId={selectedEmbeddedSessionId}
-                  onSelect={setSelectedEmbeddedSessionId}
-                />
-              </Suspense>
+              <>
+                <Suspense
+                  fallback={(
+                    <Card className="p-4">
+                      <div className="h-[520px] animate-pulse rounded-xl bg-black/[0.04] dark:bg-white/[0.06]" />
+                    </Card>
+                  )}
+                >
+                  <EmbeddedTerminalPanel
+                    sessions={embeddedSessions}
+                    activeSessionId={selectedEmbeddedSessionId}
+                    onSelect={setSelectedEmbeddedSessionId}
+                    onOpenInTerminal={handleOpenInTerminal}
+                  />
+                </Suspense>
+                <Suspense
+                  fallback={(
+                    <Card className="p-4">
+                      <div className="h-[240px] animate-pulse rounded-xl bg-black/[0.04] dark:bg-white/[0.06]" />
+                    </Card>
+                  )}
+                >
+                  <InteractiveToolEventsPanel sessionId={selectedEmbeddedSessionId} />
+                </Suspense>
+              </>
             )}
           </>
         )}

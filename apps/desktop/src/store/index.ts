@@ -66,6 +66,9 @@ export interface CronTask {
   workingDir: string;
   envName: string | null;
   executionProfile: 'conservative' | 'standard' | 'autonomous';
+  maxBudgetUsd?: number | null;
+  allowedTools?: string[];
+  disallowedTools?: string[];
   enabled: boolean;
   timeoutSecs: number;
   templateId: string | null;

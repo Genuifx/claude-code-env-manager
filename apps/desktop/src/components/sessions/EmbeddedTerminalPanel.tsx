@@ -2,11 +2,13 @@ import { useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { Monitor, SquareTerminal } from 'lucide-react';
+import { Monitor, SquareArrowOutUpRight, SquareTerminal } from 'lucide-react';
 import type { Session } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import '@xterm/xterm/css/xterm.css';
+import { useLocale } from '../../locales';
 
 interface InteractiveOutputChunk {
   session_id: string;
@@ -19,6 +21,7 @@ interface EmbeddedTerminalPanelProps {
   sessions: Session[];
   activeSessionId: string | null;
   onSelect: (sessionId: string) => void;
+  onOpenInTerminal: (sessionId: string) => void;
 }
 
 function sessionLabel(session: Session) {
@@ -29,13 +32,16 @@ export function EmbeddedTerminalPanel({
   sessions,
   activeSessionId,
   onSelect,
+  onOpenInTerminal,
 }: EmbeddedTerminalPanelProps) {
+  const { t } = useLocale();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const activeSessionIdRef = useRef<string | null>(activeSessionId);
   const lastSeqRef = useRef<number | null>(null);
   const { getInteractiveSessionOutput, resizeInteractiveSession, writeInteractiveInput } = useTauriCommands();
+  const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
 
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
@@ -184,33 +190,45 @@ export function EmbeddedTerminalPanel({
   return (
     <div className="rounded-2xl border border-black/[0.08] bg-[linear-gradient(180deg,rgba(15,23,42,0.98),rgba(15,23,42,0.94))] shadow-[0_24px_80px_rgba(15,23,42,0.24)] overflow-hidden">
       <div className="border-b border-white/10 px-4 py-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="mr-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-300/80">
-            <SquareTerminal className="h-4 w-4" />
-            Embedded Terminal
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="mr-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-300/80">
+              <SquareTerminal className="h-4 w-4" />
+              Embedded Terminal
+            </div>
+            {sessions.map((session) => {
+              const isActive = session.id === activeSessionId;
+              return (
+                <button
+                  key={session.id}
+                  type="button"
+                  onClick={() => onSelect(session.id)}
+                  className={cn(
+                    'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors',
+                    isActive
+                      ? 'border-cyan-300/60 bg-cyan-300/15 text-white'
+                      : 'border-white/10 bg-white/5 text-slate-300 hover:border-white/20 hover:bg-white/10'
+                  )}
+                >
+                  <Monitor className="h-3.5 w-3.5" />
+                  <span>{sessionLabel(session)}</span>
+                  <span className="text-[10px] uppercase tracking-[0.16em] text-slate-400">
+                    {session.envName}
+                  </span>
+                </button>
+              );
+            })}
           </div>
-          {sessions.map((session) => {
-            const isActive = session.id === activeSessionId;
-            return (
-              <button
-                key={session.id}
-                type="button"
-                onClick={() => onSelect(session.id)}
-                className={cn(
-                  'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors',
-                  isActive
-                    ? 'border-cyan-300/60 bg-cyan-300/15 text-white'
-                    : 'border-white/10 bg-white/5 text-slate-300 hover:border-white/20 hover:bg-white/10'
-                )}
-              >
-                <Monitor className="h-3.5 w-3.5" />
-                <span>{sessionLabel(session)}</span>
-                <span className="text-[10px] uppercase tracking-[0.16em] text-slate-400">
-                  {session.envName}
-                </span>
-              </button>
-            );
-          })}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => activeSession && onOpenInTerminal(activeSession.id)}
+            disabled={!activeSession || activeSession.status !== 'running'}
+            className="glass-btn-outline border-white/10 text-slate-200 hover:bg-white/10"
+          >
+            <SquareArrowOutUpRight className="mr-1 h-4 w-4" />
+            {t('sessions.openInTerminal')}
+          </Button>
         </div>
       </div>
 

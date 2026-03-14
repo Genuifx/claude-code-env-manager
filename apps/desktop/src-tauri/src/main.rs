@@ -8,6 +8,7 @@ mod crypto;
 mod event_bus;
 mod history;
 mod interactive_runtime;
+mod jsonl_watcher;
 mod permission;
 mod proxy_debug;
 mod runtime;
@@ -15,6 +16,7 @@ mod session;
 mod skills;
 mod telegram;
 mod terminal;
+mod tmux;
 mod tray;
 
 use analytics::{
@@ -48,7 +50,11 @@ use std::fs;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use telegram::{TelegramBridgeManager, TelegramBridgeStatus, TelegramSettings};
+use telegram::{
+    TelegramBridgeManager, TelegramBridgeStatus, TelegramForumTopic, TelegramSettings,
+    TelegramTopicBinding,
+};
+use tmux::ClaudeTerminalState;
 
 /// Global flag: when true, CloseRequested should NOT be intercepted.
 static FORCE_QUIT: AtomicBool = AtomicBool::new(false);
@@ -601,6 +607,22 @@ fn remove_headless_session(
 }
 
 #[tauri::command]
+fn respond_headless_permission(
+    app: tauri::AppHandle,
+    runtime_state: State<'_, Arc<HeadlessRuntimeManager>>,
+    request_id: String,
+    approved: bool,
+    responder: Option<String>,
+) -> Result<(), String> {
+    runtime_state.respond_to_permission(
+        &app,
+        &request_id,
+        approved,
+        responder.as_deref().unwrap_or("desktop"),
+    )
+}
+
+#[tauri::command]
 async fn create_interactive_session(
     app: tauri::AppHandle,
     state: State<'_, Arc<SessionManager>>,
@@ -737,6 +759,31 @@ fn focus_interactive_session(
 }
 
 #[tauri::command]
+fn open_interactive_session_in_terminal(
+    state: State<'_, Arc<SessionManager>>,
+    session_id: String,
+) -> Result<(), String> {
+    let session = state
+        .get_session(&session_id)
+        .ok_or_else(|| format!("Session {} not found", session_id))?;
+
+    if session.terminal_type.as_deref() != Some("embedded") {
+        return Err(
+            "Only tmux-backed embedded sessions can be opened in a new terminal".to_string(),
+        );
+    }
+
+    let target = session
+        .window_id
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| format!("Session {} does not have a tmux target", session_id))?;
+
+    let preferred_terminal = terminal::get_preferred_terminal();
+    terminal::open_tmux_target_in_terminal(preferred_terminal, &target)?;
+    Ok(())
+}
+
+#[tauri::command]
 fn close_interactive_session(
     state: State<'_, Arc<SessionManager>>,
     interactive_state: State<'_, Arc<InteractiveRuntimeManager>>,
@@ -782,12 +829,47 @@ fn write_interactive_input(
 }
 
 #[tauri::command]
+fn send_interactive_input(
+    interactive_state: State<'_, Arc<InteractiveRuntimeManager>>,
+    session_id: String,
+    text: String,
+) -> Result<(), String> {
+    interactive_state.send_message(&session_id, &text)
+}
+
+#[tauri::command]
+fn send_interactive_approval(
+    interactive_state: State<'_, Arc<InteractiveRuntimeManager>>,
+    session_id: String,
+    approved: bool,
+) -> Result<(), String> {
+    interactive_state.send_approval(&session_id, approved)
+}
+
+#[tauri::command]
 fn get_interactive_session_output(
     interactive_state: State<'_, Arc<InteractiveRuntimeManager>>,
     session_id: String,
     since_seq: Option<u64>,
 ) -> Result<InteractiveReplayBatch, String> {
     interactive_state.replay_output(&session_id, since_seq)
+}
+
+#[tauri::command]
+fn get_interactive_session_events(
+    interactive_state: State<'_, Arc<InteractiveRuntimeManager>>,
+    session_id: String,
+    since_seq: Option<u64>,
+) -> Result<event_bus::ReplayBatch, String> {
+    interactive_state.replay_events(&session_id, since_seq)
+}
+
+#[tauri::command]
+fn get_interactive_state(
+    interactive_state: State<'_, Arc<InteractiveRuntimeManager>>,
+    session_id: String,
+) -> Result<ClaudeTerminalState, String> {
+    interactive_state.get_state(&session_id)
 }
 
 #[tauri::command]
@@ -1305,6 +1387,11 @@ fn check_codex_installed() -> bool {
     terminal::is_codex_installed()
 }
 
+#[tauri::command]
+fn check_tmux_installed() -> bool {
+    tmux::TmuxManager::check_tmux_installed().is_ok()
+}
+
 #[derive(Debug, serde::Deserialize)]
 struct RemoteResponse {
     encrypted: String,
@@ -1570,11 +1657,13 @@ fn start_telegram_bridge(
     app: tauri::AppHandle,
     telegram_state: State<'_, Arc<TelegramBridgeManager>>,
     runtime_state: State<'_, Arc<HeadlessRuntimeManager>>,
+    interactive_state: State<'_, Arc<InteractiveRuntimeManager>>,
 ) -> Result<TelegramBridgeStatus, String> {
-    telegram_state
-        .inner()
-        .clone()
-        .start(app, runtime_state.inner().clone())
+    telegram_state.inner().clone().start(
+        app,
+        runtime_state.inner().clone(),
+        interactive_state.inner().clone(),
+    )
 }
 
 #[tauri::command]
@@ -1582,6 +1671,37 @@ fn stop_telegram_bridge(
     telegram_state: State<'_, Arc<TelegramBridgeManager>>,
 ) -> TelegramBridgeStatus {
     telegram_state.stop()
+}
+
+#[tauri::command]
+fn get_telegram_forum_topics(
+    telegram_state: State<'_, Arc<TelegramBridgeManager>>,
+) -> Result<Vec<TelegramForumTopic>, String> {
+    telegram::get_known_forum_topics(telegram_state.inner())
+}
+
+#[tauri::command]
+async fn bind_telegram_topic(
+    telegram_state: State<'_, Arc<TelegramBridgeManager>>,
+    project_dir: String,
+    env_name: Option<String>,
+    perm_mode: Option<String>,
+    thread_id: Option<i64>,
+    create_new_topic: bool,
+) -> Result<TelegramTopicBinding, String> {
+    let manager = telegram_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        telegram::bind_topic_from_desktop(
+            &manager,
+            project_dir,
+            env_name,
+            perm_mode,
+            thread_id,
+            create_new_topic,
+        )
+    })
+    .await
+    .map_err(|error| format!("Failed to join bind_telegram_topic task: {}", error))?
 }
 
 #[tauri::command]
@@ -1697,6 +1817,34 @@ fn sanitize_filename(raw: &str) -> String {
     }
 }
 
+/// Save content to a file via native save dialog.
+#[tauri::command]
+async fn save_file_dialog(
+    app: tauri::AppHandle,
+    content: String,
+    default_name: String,
+) -> Result<bool, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    app.dialog()
+        .file()
+        .set_file_name(&default_name)
+        .add_filter("JSON", &["json"])
+        .save_file(move |path| {
+            let _ = tx.send(path.map(|p| p.to_string()));
+        });
+
+    match rx.recv().map_err(|e| format!("Dialog error: {}", e))? {
+        Some(path) => {
+            fs::write(&path, &content).map_err(|e| format!("Failed to write file: {}", e))?;
+            Ok(true)
+        }
+        None => Ok(false), // user cancelled
+    }
+}
+
 /// Force-quit the app, bypassing closeToTray.
 /// Called from frontend Cmd+Q handler.
 #[tauri::command]
@@ -1716,6 +1864,7 @@ fn main() {
     let session_manager_for_setup = session_manager.clone();
     let proxy_manager_for_setup = proxy_debug_manager.clone();
     let proxy_manager_for_run = proxy_debug_manager.clone();
+    let interactive_manager_for_setup = interactive_runtime_manager.clone();
     let interactive_manager_for_run = interactive_runtime_manager.clone();
     let headless_manager_for_run = headless_runtime_manager.clone();
     let telegram_manager_for_setup = telegram_bridge_manager.clone();
@@ -1764,10 +1913,15 @@ fn main() {
             list_interactive_sessions,
             stop_interactive_session,
             focus_interactive_session,
+            open_interactive_session_in_terminal,
             close_interactive_session,
             minimize_interactive_session,
             write_interactive_input,
+            send_interactive_input,
+            send_interactive_approval,
             get_interactive_session_output,
+            get_interactive_session_events,
+            get_interactive_state,
             resize_interactive_session,
             create_managed_session,
             list_managed_sessions,
@@ -1781,6 +1935,7 @@ fn main() {
             get_headless_session_events,
             stop_headless_session,
             remove_headless_session,
+            respond_headless_permission,
             list_sessions,
             stop_session,
             remove_session,
@@ -1797,6 +1952,7 @@ fn main() {
             check_ccem_installed,
             check_claude_installed,
             check_codex_installed,
+            check_tmux_installed,
             load_from_remote,
             arrange_sessions,
             check_arrange_support,
@@ -1827,6 +1983,8 @@ fn main() {
             get_telegram_bridge_status,
             start_telegram_bridge,
             stop_telegram_bridge,
+            get_telegram_forum_topics,
+            bind_telegram_topic,
             get_proxy_debug_state,
             set_proxy_debug_enabled,
             update_proxy_debug_config,
@@ -1834,6 +1992,7 @@ fn main() {
             get_proxy_traffic_detail,
             clear_proxy_traffic,
             open_text_in_vscode,
+            save_file_dialog,
             quit_app
         ])
         .on_window_event(|window, event| {
@@ -1860,6 +2019,11 @@ fn main() {
 
             // Validate persisted sessions against actual terminal state
             session_manager_for_setup.validate_and_reconcile();
+            if let Err(error) = interactive_manager_for_setup
+                .rehydrate_existing(app.handle().clone(), session_manager_for_setup.clone())
+            {
+                eprintln!("Interactive tmux rehydrate warning: {}", error);
+            }
 
             proxy_manager_for_setup.set_app_handle(app.handle().clone());
 
@@ -1931,10 +2095,11 @@ fn main() {
                         .as_ref()
                         .is_some_and(|value| !value.trim().is_empty())
                 {
-                    if let Err(error) = telegram_manager_for_setup
-                        .clone()
-                        .start(app.handle().clone(), headless_runtime_manager.clone())
-                    {
+                    if let Err(error) = telegram_manager_for_setup.clone().start(
+                        app.handle().clone(),
+                        headless_runtime_manager.clone(),
+                        interactive_runtime_manager.clone(),
+                    ) {
                         eprintln!("Telegram bridge auto-start warning: {}", error);
                     }
                 }

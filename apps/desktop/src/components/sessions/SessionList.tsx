@@ -1,4 +1,4 @@
-import { Clock, FolderOpen, Minus, X } from 'lucide-react';
+import { Clock, FolderOpen, Minus, SquareArrowOutUpRight, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useLocale } from '../../locales';
 import type { Session } from '@/store';
@@ -6,6 +6,7 @@ import type { Session } from '@/store';
 interface SessionListProps {
   sessions: Session[];
   onFocus: (id: string) => void;
+  onOpenInTerminal: (id: string) => void;
   onMinimize: (id: string) => void;
   onClose: (id: string) => void;
   confirmingId?: string | null;
@@ -13,7 +14,16 @@ interface SessionListProps {
   onConfirmClose?: (id: string) => void;
 }
 
-export function SessionList({ sessions, onFocus, onMinimize, onClose, confirmingId, onCancelClose, onConfirmClose }: SessionListProps) {
+export function SessionList({
+  sessions,
+  onFocus,
+  onOpenInTerminal,
+  onMinimize,
+  onClose,
+  confirmingId,
+  onCancelClose,
+  onConfirmClose,
+}: SessionListProps) {
   const { t } = useLocale();
 
   const getStatusDot = (status: Session['status']) => {
@@ -108,15 +118,28 @@ export function SessionList({ sessions, onFocus, onMinimize, onClose, confirming
                 >
                   {t('sessions.focus')}
                 </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => onMinimize(session.id)}
-                  disabled={session.status !== 'running' || isEmbedded}
-                  className="glass-btn-outline"
-                >
-                  <Minus className="w-4 h-4" />
-                </Button>
+                {isEmbedded ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => onOpenInTerminal(session.id)}
+                    disabled={session.status !== 'running'}
+                    className="glass-btn-outline"
+                  >
+                    <SquareArrowOutUpRight className="mr-1 h-4 w-4" />
+                    {t('sessions.openInTerminal')}
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => onMinimize(session.id)}
+                    disabled={session.status !== 'running'}
+                    className="glass-btn-outline"
+                  >
+                    <Minus className="w-4 h-4" />
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="ghost"
