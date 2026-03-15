@@ -3,15 +3,19 @@ import { useAppStore, type Environment, type Session, type ArrangeLayout, type I
 import { useCallback } from 'react';
 import { toast } from 'sonner';
 import type {
+  ChannelKind,
   HeadlessSessionSummary,
   InteractiveReplayBatch,
   ManagedSessionSummary,
   ReplayBatch,
+  RuntimeInput,
   RuntimeRecoveryCandidate,
   TelegramBridgeStatus,
   TelegramForumTopic,
   TelegramSettings,
   TelegramTopicBinding,
+  UnifiedSessionDebugComparison,
+  UnifiedSessionInfo,
 } from '@/lib/tauri-ipc';
 
 interface TauriEnvConfig {
@@ -388,6 +392,49 @@ export function useTauriCommands() {
       sessionId,
       sinceSeq: sinceSeq ?? null,
     });
+  }, []);
+
+  const listUnifiedSessions = useCallback(async (): Promise<UnifiedSessionInfo[]> => {
+    return invoke<UnifiedSessionInfo[]>('list_unified_sessions');
+  }, []);
+
+  const getSessionEvents = useCallback(async (
+    runtimeId: string,
+    sinceSeq?: number | null,
+  ): Promise<ReplayBatch> => {
+    return invoke<ReplayBatch>('get_session_events', {
+      runtimeId,
+      sinceSeq: sinceSeq ?? null,
+    });
+  }, []);
+
+  const sendSessionInput = useCallback(async (
+    runtimeId: string,
+    input: RuntimeInput,
+  ): Promise<void> => {
+    await invoke('send_session_input', { runtimeId, input });
+  }, []);
+
+  const stopUnifiedSession = useCallback(async (runtimeId: string): Promise<void> => {
+    await invoke('stop_unified_session', { runtimeId });
+  }, []);
+
+  const attachChannel = useCallback(async (
+    runtimeId: string,
+    channel: ChannelKind,
+  ): Promise<void> => {
+    await invoke('attach_channel', { runtimeId, channel });
+  }, []);
+
+  const detachChannel = useCallback(async (
+    runtimeId: string,
+    channel: ChannelKind,
+  ): Promise<void> => {
+    await invoke('detach_channel', { runtimeId, channel });
+  }, []);
+
+  const debugCompareSessions = useCallback(async (): Promise<UnifiedSessionDebugComparison> => {
+    return invoke<UnifiedSessionDebugComparison>('debug_compare_sessions');
   }, []);
 
   const resizeInteractiveSession = useCallback(async (
@@ -861,6 +908,13 @@ export function useTauriCommands() {
     writeInteractiveInput,
     getInteractiveSessionOutput,
     getInteractiveSessionEvents,
+    listUnifiedSessions,
+    getSessionEvents,
+    sendSessionInput,
+    stopUnifiedSession,
+    attachChannel,
+    detachChannel,
+    debugCompareSessions,
     resizeInteractiveSession,
     deleteSession,
     focusSession,

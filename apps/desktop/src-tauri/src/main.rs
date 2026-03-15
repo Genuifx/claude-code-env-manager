@@ -2,10 +2,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod analytics;
+mod channel;
 mod config;
 mod cron;
 mod crypto;
 mod event_bus;
+mod event_dispatcher;
 mod history;
 mod interactive_runtime;
 mod jsonl_watcher;
@@ -18,15 +20,19 @@ mod telegram;
 mod terminal;
 mod tmux;
 mod tray;
+mod unified_runtime;
+mod unified_session;
 
 use analytics::{
     get_continuous_usage_days, get_usage_history, get_usage_model_breakdown, get_usage_stats,
 };
+use channel::ChannelKind;
 use config::{
     create_env_with_encrypted_key, resolve_claude_env, AppConfig, DesktopSettings, EnvConfig,
     FavoriteProject, JetBrainsProject, RecentProject, VSCodeProject,
 };
 use cron::{start_cron_scheduler, CronScheduler};
+use event_dispatcher::EventDispatcher;
 use history::{get_conversation_history, get_conversation_messages, get_conversation_segments};
 use interactive_runtime::{
     InteractiveReplayBatch, InteractiveRuntimeManager, InteractiveSessionOptions,
@@ -55,6 +61,8 @@ use telegram::{
     TelegramTopicBinding,
 };
 use tmux::ClaudeTerminalState;
+use unified_runtime::UnifiedSessionManager;
+use unified_session::{RuntimeInput, UnifiedSessionDebugComparison, UnifiedSessionInfo};
 
 /// Global flag: when true, CloseRequested should NOT be intercepted.
 static FORCE_QUIT: AtomicBool = AtomicBool::new(false);
@@ -620,6 +628,73 @@ fn respond_headless_permission(
         approved,
         responder.as_deref().unwrap_or("desktop"),
     )
+}
+
+#[tauri::command]
+fn list_unified_sessions(
+    unified_state: State<'_, Arc<UnifiedSessionManager>>,
+) -> Vec<UnifiedSessionInfo> {
+    unified_state.list_sessions()
+}
+
+#[tauri::command]
+fn get_session_events(
+    app: tauri::AppHandle,
+    unified_state: State<'_, Arc<UnifiedSessionManager>>,
+    runtime_id: String,
+    since_seq: Option<u64>,
+) -> Result<event_bus::ReplayBatch, String> {
+    unified_state.get_session_events(&app, &runtime_id, since_seq)
+}
+
+#[tauri::command]
+fn send_session_input(
+    app: tauri::AppHandle,
+    unified_state: State<'_, Arc<UnifiedSessionManager>>,
+    runtime_id: String,
+    input: RuntimeInput,
+) -> Result<(), String> {
+    unified_state.send_input(&app, &runtime_id, input)
+}
+
+#[tauri::command]
+fn stop_unified_session(
+    app: tauri::AppHandle,
+    unified_state: State<'_, Arc<UnifiedSessionManager>>,
+    runtime_id: String,
+) -> Result<(), String> {
+    unified_state.stop_session(&app, &runtime_id)
+}
+
+#[tauri::command]
+fn attach_channel(
+    app: tauri::AppHandle,
+    unified_state: State<'_, Arc<UnifiedSessionManager>>,
+    runtime_id: String,
+    channel: ChannelKind,
+) -> Result<(), String> {
+    match channel {
+        ChannelKind::DesktopUi => unified_state.attach_desktop_channel(&app, &runtime_id),
+        ChannelKind::Telegram { .. } => {
+            Err("Telegram channels are managed internally by the Telegram bridge".to_string())
+        }
+    }
+}
+
+#[tauri::command]
+fn detach_channel(
+    unified_state: State<'_, Arc<UnifiedSessionManager>>,
+    runtime_id: String,
+    channel: ChannelKind,
+) -> Result<(), String> {
+    unified_state.detach_channel(&runtime_id, &channel)
+}
+
+#[tauri::command]
+fn debug_compare_sessions(
+    unified_state: State<'_, Arc<UnifiedSessionManager>>,
+) -> UnifiedSessionDebugComparison {
+    unified_state.debug_compare_sessions()
 }
 
 #[tauri::command]
@@ -1636,13 +1711,23 @@ fn get_telegram_settings() -> Result<TelegramSettings, String> {
 }
 
 #[tauri::command]
-fn save_telegram_settings(
+async fn save_telegram_settings(
     telegram_state: State<'_, Arc<TelegramBridgeManager>>,
     settings: TelegramSettings,
 ) -> Result<(), String> {
-    telegram::write_telegram_settings(&settings)?;
-    telegram_state.sync_settings(&settings);
-    Ok(())
+    let manager = telegram_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let was_running = manager.status().running;
+        let previous_settings = telegram::read_telegram_settings().ok();
+        telegram::write_telegram_settings(&settings)?;
+        manager.sync_settings(&settings);
+        if was_running {
+            telegram::reconcile_registered_commands(previous_settings.as_ref(), &settings)?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|error| format!("Failed to join save_telegram_settings task: {}", error))?
 }
 
 #[tauri::command]
@@ -1653,24 +1738,30 @@ fn get_telegram_bridge_status(
 }
 
 #[tauri::command]
-fn start_telegram_bridge(
+async fn start_telegram_bridge(
     app: tauri::AppHandle,
     telegram_state: State<'_, Arc<TelegramBridgeManager>>,
     runtime_state: State<'_, Arc<HeadlessRuntimeManager>>,
     interactive_state: State<'_, Arc<InteractiveRuntimeManager>>,
 ) -> Result<TelegramBridgeStatus, String> {
-    telegram_state.inner().clone().start(
-        app,
-        runtime_state.inner().clone(),
-        interactive_state.inner().clone(),
-    )
+    let manager = telegram_state.inner().clone();
+    let runtime_manager = runtime_state.inner().clone();
+    let interactive_manager = interactive_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        manager.start(app, runtime_manager, interactive_manager)
+    })
+    .await
+    .map_err(|error| format!("Failed to join start_telegram_bridge task: {}", error))?
 }
 
 #[tauri::command]
-fn stop_telegram_bridge(
+async fn stop_telegram_bridge(
     telegram_state: State<'_, Arc<TelegramBridgeManager>>,
-) -> TelegramBridgeStatus {
-    telegram_state.stop()
+) -> Result<TelegramBridgeStatus, String> {
+    let manager = telegram_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.stop())
+        .await
+        .map_err(|error| format!("Failed to join stop_telegram_bridge task: {}", error))
 }
 
 #[tauri::command]
@@ -1858,6 +1949,12 @@ fn main() {
     let session_manager = Arc::new(SessionManager::load_from_disk());
     let interactive_runtime_manager = Arc::new(InteractiveRuntimeManager::default());
     let headless_runtime_manager = Arc::new(HeadlessRuntimeManager::default());
+    let event_dispatcher = Arc::new(EventDispatcher::default());
+    let unified_session_manager = Arc::new(UnifiedSessionManager::new(
+        headless_runtime_manager.clone(),
+        interactive_runtime_manager.clone(),
+        event_dispatcher.clone(),
+    ));
     let proxy_debug_manager = ProxyDebugManager::new(session_manager.clone())
         .expect("failed to initialize proxy debug manager");
     let telegram_bridge_manager = Arc::new(TelegramBridgeManager::default());
@@ -1889,6 +1986,8 @@ fn main() {
         .manage(session_manager.clone())
         .manage(interactive_runtime_manager.clone())
         .manage(headless_runtime_manager.clone())
+        .manage(event_dispatcher.clone())
+        .manage(unified_session_manager.clone())
         .manage(telegram_bridge_manager.clone())
         .manage(proxy_debug_manager.clone())
         .invoke_handler(tauri::generate_handler![
@@ -1936,6 +2035,13 @@ fn main() {
             stop_headless_session,
             remove_headless_session,
             respond_headless_permission,
+            list_unified_sessions,
+            get_session_events,
+            send_session_input,
+            stop_unified_session,
+            attach_channel,
+            detach_channel,
+            debug_compare_sessions,
             list_sessions,
             stop_session,
             remove_session,
@@ -2085,7 +2191,7 @@ fn main() {
             let cron_scheduler = Arc::new(CronScheduler::default());
             app.manage(cron_scheduler.clone());
             let cron_app = app.handle().clone();
-            start_cron_scheduler(cron_app, cron_scheduler, headless_runtime_manager.clone());
+            start_cron_scheduler(cron_app, cron_scheduler, unified_session_manager.clone());
 
             if let Ok(settings) = telegram::read_telegram_settings() {
                 telegram_manager_for_setup.sync_settings(&settings);

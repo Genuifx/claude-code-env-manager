@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { HistoryList, type HistorySessionItem, type HistorySource } from '@/components/history/HistoryList';
 import type { ConversationMessageData } from '@/components/history/MessageBubble';
 import type { HistorySegment } from '@/components/history/HistoryDetail';
+import { getHistorySessionDisplay } from '@/components/history/historySession';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
@@ -194,6 +195,8 @@ export function History() {
       setTimeout(() => setLaunched(false), 1200);
     } catch (err) {
       console.error('Failed to resume session:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(`${t('history.resumeFailed')}: ${message}`);
     }
   }, [selectedSession, launchClaudeCode, t]);
 
@@ -201,15 +204,19 @@ export function History() {
     if (!selectedSession) return;
 
     try {
+      const sessionTitle = getHistorySessionDisplay(selectedSession, t('history.untitledSession'));
       const payload = {
         schemaVersion: 1,
         exportedAt: new Date().toISOString(),
-        session: selectedSession,
+        session: {
+          ...selectedSession,
+          display: sessionTitle,
+        },
         segments,
         messages,
       };
 
-      const safeTitle = (selectedSession.display || 'conversation')
+      const safeTitle = sessionTitle
         .replace(/[^\w\-.]+/g, '-')
         .replace(/-+/g, '-')
         .replace(/^-|-$/g, '')

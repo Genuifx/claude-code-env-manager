@@ -246,7 +246,7 @@ fn load_claude_history_from_paths(
                 None => continue,
             };
 
-            let display = parsed.display.unwrap_or_else(|| "Untitled".to_string());
+            let display = normalize_history_display(parsed.display);
             let timestamp = parse_timestamp_value(&parsed.timestamp);
             let project = parsed.project.unwrap_or_default();
             let project_name = parsed.project_name.unwrap_or_else(|| {
@@ -386,7 +386,7 @@ fn parse_claude_project_session_index(path: &Path) -> Option<HistorySession> {
     Some(HistorySession {
         id: session_id,
         source: SOURCE_CLAUDE.to_string(),
-        display: display.unwrap_or_else(|| "Untitled".to_string()),
+        display: normalize_history_display(display),
         timestamp,
         project,
         project_name,
@@ -686,7 +686,7 @@ fn upsert_codex_history_session(
     };
 
     let timestamp = parse_codex_history_timestamp(&parsed.ts);
-    let display = parsed.text.unwrap_or_else(|| "Untitled".to_string());
+    let display = normalize_history_display(parsed.text);
 
     if let Some(existing) = session_map.get_mut(&id) {
         if timestamp > existing.timestamp {
@@ -1381,6 +1381,15 @@ fn normalize_unix_timestamp(ts: u64) -> u64 {
     }
 }
 
+fn normalize_history_display(display: Option<String>) -> String {
+    let trimmed = display.unwrap_or_default().trim().to_string();
+    if trimmed.is_empty() {
+        "Untitled".to_string()
+    } else {
+        trimmed
+    }
+}
+
 /// Returns true if display text is command noise, not a real topic.
 fn is_noise_display(display: &str) -> bool {
     let trimmed = display.trim();
@@ -1498,8 +1507,9 @@ fn extract_usage_fields(
 #[cfg(test)]
 mod tests {
     use super::{
-        is_noise_display, load_claude_history_from_paths, normalize_history_source,
-        parse_codex_history_timestamp, upsert_codex_history_session, CodexHistoryLine,
+        is_noise_display, load_claude_history_from_paths, normalize_history_display,
+        normalize_history_source, parse_codex_history_timestamp, upsert_codex_history_session,
+        CodexHistoryLine,
     };
     use std::collections::HashMap;
     use std::fs;
@@ -1599,6 +1609,16 @@ mod tests {
             serde_json::Number::from(1_700_000_000u64),
         )));
         assert_eq!(ts, 1_700_000_000_000);
+    }
+
+    #[test]
+    fn test_normalize_history_display_falls_back_for_blank_values() {
+        assert_eq!(normalize_history_display(None), "Untitled");
+        assert_eq!(normalize_history_display(Some(String::new())), "Untitled");
+        assert_eq!(
+            normalize_history_display(Some("   keep title   ".to_string())),
+            "keep title"
+        );
     }
 
     #[test]

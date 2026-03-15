@@ -1,3 +1,8 @@
+/**
+ * @deprecated This component is superseded by the unified session view in Sessions.tsx.
+ * Headless sessions now render in the main session card grid via UnifiedSession.
+ * This file will be removed in the backend cleanup phase (Task 1 Phase 4).
+ */
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { Bot, CheckCircle2, LoaderCircle, RefreshCw, Send, Sparkles, Square, TerminalSquare, Trash2, XCircle } from 'lucide-react';

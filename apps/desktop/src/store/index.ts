@@ -101,6 +101,31 @@ export interface CronTemplate {
   icon: string;
 }
 
+export interface ChannelInfo {
+  kind: string; // 'desktop_ui' | 'telegram'
+  connectedAt: string;
+  label?: string;
+  /** Raw backend ChannelKind for detach operations */
+  rawKind?: import('@/lib/tauri-ipc').ChannelKind;
+}
+
+export interface UnifiedSession {
+  id: string;
+  runtimeKind: 'interactive' | 'headless';
+  source: 'desktop' | 'telegram' | 'cron' | 'cli';
+  status: string;
+  projectDir: string;
+  envName: string;
+  permMode: string;
+  createdAt: string;
+  isActive: boolean;
+  pid?: number;
+  claudeSessionId?: string;
+  tmuxTarget?: string;
+  client?: string;
+  channels: ChannelInfo[];
+}
+
 interface AppState {
   // Environments
   environments: Environment[];
@@ -126,6 +151,14 @@ interface AppState {
   updateSessionStatus: (id: string, status: Session['status']) => void;
   arrangeLayout: ArrangeLayout | null;
   setArrangeLayout: (layout: ArrangeLayout | null) => void;
+
+  // Unified Sessions
+  unifiedSessions: UnifiedSession[];
+  isLoadingUnifiedSessions: boolean;
+  sessionFilter: 'all' | 'interactive' | 'headless';
+  setUnifiedSessions: (sessions: UnifiedSession[]) => void;
+  setLoadingUnifiedSessions: (loading: boolean) => void;
+  setSessionFilter: (filter: 'all' | 'interactive' | 'headless') => void;
 
   // Projects
   favorites: FavoriteProject[];
@@ -222,6 +255,14 @@ export const useAppStore = create<AppState>((set) => ({
     })),
   arrangeLayout: null,
   setArrangeLayout: (layout) => set({ arrangeLayout: layout }),
+
+  // Unified Sessions
+  unifiedSessions: [],
+  isLoadingUnifiedSessions: false,
+  sessionFilter: 'all',
+  setUnifiedSessions: (sessions) => set({ unifiedSessions: sessions }),
+  setLoadingUnifiedSessions: (loading) => set({ isLoadingUnifiedSessions: loading }),
+  setSessionFilter: (filter) => set({ sessionFilter: filter }),
 
   // Projects
   favorites: [],

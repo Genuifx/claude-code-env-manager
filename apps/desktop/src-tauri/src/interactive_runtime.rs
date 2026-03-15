@@ -1,4 +1,6 @@
+use crate::channel::{DesktopChannel, InteractiveOutputChunk};
 use crate::event_bus::{ReplayBatch, SessionEventPayload, SessionStore, TerminalPromptKind};
+use crate::event_dispatcher::EventDispatcher;
 use crate::jsonl_watcher::{JsonlPollResult, JsonlWatcher};
 use crate::runtime::{
     replace_runtime_entries_for_kind, runtime_state_file_path, RuntimeKind, RuntimeStateEntry,
@@ -14,13 +16,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Manager};
 
 const CAPTURE_HISTORY_LINES: u32 = 1200;
 const CAPTURE_POLL_INTERVAL: Duration = Duration::from_millis(700);
 const MAX_TRANSCRIPT_CHUNKS: usize = 1200;
-const INTERACTIVE_OUTPUT_EVENT: &str = "interactive-session-output";
-
 #[derive(Debug, Clone)]
 pub struct InteractiveSessionOptions {
     pub session_id: String,
@@ -29,14 +29,6 @@ pub struct InteractiveSessionOptions {
     pub working_dir: String,
     pub resume_session_id: Option<String>,
     pub env_vars: HashMap<String, String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct InteractiveOutputChunk {
-    pub session_id: String,
-    pub seq: u64,
-    pub occurred_at: DateTime<Utc>,
-    pub data: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -179,6 +171,7 @@ impl InteractiveRuntimeManager {
         });
 
         self.insert_handle(session.id.clone(), handle.clone())?;
+        let _ = attach_desktop_channel(&app, &session.id);
         session_manager.add_session(session.clone());
         self.persist_state_best_effort();
 
@@ -191,7 +184,7 @@ impl InteractiveRuntimeManager {
             ),
         );
 
-        self.sample_jsonl_events(&session.id).ok();
+        self.sample_jsonl_events(&app, &session.id).ok();
         self.sample_tmux_output(&app, &session.id).ok();
         self.spawn_capture_poller(app, session_manager, session.id.clone());
 
@@ -256,7 +249,8 @@ impl InteractiveRuntimeManager {
             });
 
             self.insert_handle(hydrated.id.clone(), handle)?;
-            self.sample_jsonl_events(&hydrated.id).ok();
+            let _ = attach_desktop_channel(&app, &hydrated.id);
+            self.sample_jsonl_events(&app, &hydrated.id).ok();
             self.sample_tmux_output(&app, &hydrated.id).ok();
             self.spawn_capture_poller(app.clone(), session_manager.clone(), hydrated.id.clone());
         }
@@ -296,6 +290,9 @@ impl InteractiveRuntimeManager {
     pub fn stop_session(&self, session_id: &str) -> Result<(), String> {
         let handle = self.get_handle(session_id)?;
         handle.alive.store(false, Ordering::SeqCst);
+        if let Ok(mut session) = handle.session.lock() {
+            session.status = "stopped".to_string();
+        }
         self.tmux.stop_session(session_id)
     }
 
@@ -344,6 +341,20 @@ impl InteractiveRuntimeManager {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    pub fn list_sessions(&self) -> Vec<Session> {
+        let handles = self
+            .sessions
+            .lock()
+            .map(|sessions| sessions.values().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        let mut sessions = handles
+            .into_iter()
+            .filter_map(|handle| handle.session.lock().ok().map(|session| session.clone()))
+            .collect::<Vec<_>>();
+        sessions.sort_by(|left, right| right.start_time.cmp(&left.start_time));
+        sessions
     }
 
     #[allow(dead_code)]
@@ -470,12 +481,12 @@ impl InteractiveRuntimeManager {
         if let Ok(handle) = self.get_handle(session_id) {
             if let Ok(mut transcript) = handle.transcript.lock() {
                 let chunk = transcript.append(session_id, data);
-                let _ = app.emit(INTERACTIVE_OUTPUT_EVENT, &chunk);
+                dispatch_interactive_output(app, session_id, &chunk);
             }
         }
     }
 
-    fn sample_jsonl_events(&self, session_id: &str) -> Result<(), String> {
+    fn sample_jsonl_events(&self, app: &AppHandle, session_id: &str) -> Result<(), String> {
         let handle = self.get_handle(session_id)?;
         let poll_result = {
             let mut watcher = handle
@@ -485,13 +496,14 @@ impl InteractiveRuntimeManager {
             watcher.poll()?
         };
 
-        self.apply_jsonl_poll_result(session_id, &handle, poll_result)?;
+        self.apply_jsonl_poll_result(app, session_id, &handle, poll_result)?;
         Ok(())
     }
 
     fn apply_jsonl_poll_result(
         &self,
-        _session_id: &str,
+        app: &AppHandle,
+        session_id: &str,
         handle: &Arc<InteractiveSessionHandle>,
         poll_result: JsonlPollResult,
     ) -> Result<(), String> {
@@ -537,7 +549,8 @@ impl InteractiveRuntimeManager {
             .lock()
             .map_err(|_| "Failed to lock interactive event store".to_string())?;
         for payload in poll_result.events {
-            let _ = store.append(payload);
+            let record = store.append(payload);
+            dispatch_session_event(app, session_id, &record);
         }
 
         Ok(())
@@ -549,7 +562,7 @@ impl InteractiveRuntimeManager {
             .tmux
             .capture_pane_target(&handle.tmux_window.target, CAPTURE_HISTORY_LINES)?;
         let state = crate::tmux::detect_state_from_capture(&snapshot);
-        self.track_terminal_prompt_events(&handle, state)?;
+        self.track_terminal_prompt_events(app, session_id, &handle, state)?;
 
         let mut previous = handle
             .last_snapshot
@@ -570,6 +583,8 @@ impl InteractiveRuntimeManager {
 
     fn track_terminal_prompt_events(
         &self,
+        app: &AppHandle,
+        session_id: &str,
         handle: &Arc<InteractiveSessionHandle>,
         state: ClaudeTerminalState,
     ) -> Result<(), String> {
@@ -588,15 +603,17 @@ impl InteractiveRuntimeManager {
             .map_err(|_| "Failed to lock interactive event store".to_string())?;
 
         if state == ClaudeTerminalState::WaitingApproval {
-            let _ = store.append(SessionEventPayload::TerminalPromptRequired {
+            let record = store.append(SessionEventPayload::TerminalPromptRequired {
                 prompt_kind: TerminalPromptKind::Permission,
                 prompt_text: "Claude is waiting for approval.".to_string(),
             });
+            dispatch_session_event(app, session_id, &record);
         } else if *last_state == ClaudeTerminalState::WaitingApproval {
-            let _ = store.append(SessionEventPayload::TerminalPromptResolved {
+            let record = store.append(SessionEventPayload::TerminalPromptResolved {
                 prompt_kind: TerminalPromptKind::Permission,
                 approved: true,
             });
+            dispatch_session_event(app, session_id, &record);
         }
 
         *last_state = state;
@@ -618,7 +635,7 @@ impl InteractiveRuntimeManager {
                 break;
             }
 
-            if let Err(error) = manager.sample_jsonl_events(&session_id) {
+            if let Err(error) = manager.sample_jsonl_events(&app, &session_id) {
                 eprintln!(
                     "Interactive JSONL poll warning for {}: {}",
                     session_id, error
@@ -627,6 +644,9 @@ impl InteractiveRuntimeManager {
 
             if let Err(error) = manager.sample_tmux_output(&app, &session_id) {
                 handle.alive.store(false, Ordering::SeqCst);
+                if let Ok(mut session) = handle.session.lock() {
+                    session.status = "stopped".to_string();
+                }
                 session_manager.update_session_status(&session_id, "stopped");
                 manager.append_output(
                     &app,
@@ -646,6 +666,28 @@ impl InteractiveRuntimeManager {
             eprintln!("Failed to persist interactive runtime state: {}", error);
         }
     }
+}
+
+fn attach_desktop_channel(app: &AppHandle, runtime_id: &str) -> Result<(), String> {
+    let dispatcher = app.state::<Arc<EventDispatcher>>().inner().clone();
+    dispatcher.attach_channel(
+        runtime_id.to_string(),
+        Arc::new(DesktopChannel::interactive(app.clone())),
+    )
+}
+
+fn dispatch_session_event(
+    app: &AppHandle,
+    runtime_id: &str,
+    record: &crate::event_bus::SessionEventRecord,
+) {
+    let dispatcher = app.state::<Arc<EventDispatcher>>().inner().clone();
+    dispatcher.dispatch_event(runtime_id, record);
+}
+
+fn dispatch_interactive_output(app: &AppHandle, runtime_id: &str, chunk: &InteractiveOutputChunk) {
+    let dispatcher = app.state::<Arc<EventDispatcher>>().inner().clone();
+    dispatcher.dispatch_interactive_output(runtime_id, chunk);
 }
 
 fn build_claude_args(mode_name: &str, resume_session_id: Option<&str>) -> Vec<String> {

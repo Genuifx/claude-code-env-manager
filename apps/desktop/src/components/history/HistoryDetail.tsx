@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
+import { getHistorySessionDisplay } from './historySession';
 
 interface ContentBlock {
   type: string;
@@ -138,6 +139,7 @@ export function HistoryDetail({
   const [, startTransition] = useTransition();
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const formatTokens = (v: number) => v.toLocaleString();
+  const sessionTitle = getHistorySessionDisplay(selectedSession, t('history.untitledSession'));
 
   const mergedMessages = useMemo(() => mergeToolResults(messages), [messages]);
   const sessionUsage = useMemo<SessionTokenUsage>(() => {
@@ -184,55 +186,59 @@ export function HistoryDetail({
   return (
     <>
       <div className="glass-header glass-noise shrink-0 border-b border-white/[0.06] px-5 py-2.5">
-        <div className="flex items-center gap-2.5">
-          <h3 className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-            {selectedSession.display}
-          </h3>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 gap-1.5 px-3 text-xs"
-            onClick={onExport}
-            disabled={isLoadingMessages}
-          >
-            <Download className="h-3.5 w-3.5" />
-            {t('history.export')}
-          </Button>
-          {isCodexSessionSelected ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-8 gap-1.5 px-3 text-xs"
-                    onClick={onResume}
-                    disabled
-                  >
-                    <Play className="h-3.5 w-3.5" />
-                    {t('history.resume')}
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>{t('history.resumeUnsupportedCodex')}</TooltipContent>
-            </Tooltip>
-          ) : (
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate text-sm font-medium text-foreground" title={sessionTitle}>
+              {sessionTitle}
+            </h3>
+            <p className="mt-1 min-w-0 truncate text-[11px] text-muted-foreground">
+              {selectedSession.projectName} · {formatHeaderDate(selectedSession.timestamp)}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
             <Button
               size="sm"
-              variant={launched ? 'ghost' : 'outline'}
+              variant="outline"
               className="h-8 gap-1.5 px-3 text-xs"
-              onClick={onResume}
-              disabled={launched}
+              onClick={onExport}
+              disabled={isLoadingMessages}
             >
-              {launched ? <Check className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-              {launched ? t('history.resumed') : t('history.resume')}
+              <Download className="h-3.5 w-3.5" />
+              {t('history.export')}
             </Button>
-          )}
+            {isCodexSessionSelected ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 gap-1.5 px-3 text-xs"
+                      onClick={onResume}
+                      disabled
+                    >
+                      <Play className="h-3.5 w-3.5" />
+                      {t('history.resume')}
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{t('history.resumeUnsupportedCodex')}</TooltipContent>
+              </Tooltip>
+            ) : (
+              <Button
+                size="sm"
+                variant={launched ? 'ghost' : 'outline'}
+                className="h-8 gap-1.5 px-3 text-xs"
+                onClick={onResume}
+                disabled={launched}
+              >
+                {launched ? <Check className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                {launched ? t('history.resumed') : t('history.resume')}
+              </Button>
+            )}
+          </div>
         </div>
         <div className="mt-1 flex items-center gap-3">
-          <p className="min-w-0 truncate text-[11px] text-muted-foreground">
-            {selectedSession.projectName} · {formatHeaderDate(selectedSession.timestamp)}
-          </p>
           {segments.length > 1 && (
             <div
               className="ml-auto max-w-[55%] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"

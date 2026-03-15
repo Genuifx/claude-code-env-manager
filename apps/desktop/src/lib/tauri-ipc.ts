@@ -118,6 +118,19 @@ export interface TauriCommands {
     { sessionId: string; sinceSeq?: number | null },
     ReplayBatch
   ];
+  list_unified_sessions: [void, UnifiedSessionInfo[]];
+  get_session_events: [
+    { runtimeId: string; sinceSeq?: number | null },
+    ReplayBatch
+  ];
+  send_session_input: [
+    { runtimeId: string; input: RuntimeInput },
+    void
+  ];
+  stop_unified_session: [{ runtimeId: string }, void];
+  attach_channel: [{ runtimeId: string; channel: ChannelKind }, void];
+  detach_channel: [{ runtimeId: string; channel: ChannelKind }, void];
+  debug_compare_sessions: [void, UnifiedSessionDebugComparison];
   resize_interactive_session: [{ sessionId: string; cols: number; rows: number }, void];
   create_managed_session: [
     {
@@ -346,11 +359,13 @@ export interface TelegramSettings {
   botToken?: string | null;
   allowedUserIds?: number[];
   allowedChatId?: number | null;
+  notificationsChatId?: number | null;
   notificationsThreadId?: number | null;
   defaultEnvName?: string | null;
   defaultPermMode?: string | null;
   defaultWorkingDir?: string | null;
   topicBindings?: TelegramTopicBinding[];
+  useChannelMonitor?: boolean;
   preferences?: TelegramBridgePreferences;
 }
 
@@ -452,6 +467,45 @@ export interface InteractiveOutputChunk {
 }
 
 export type HeadlessSessionSummary = ManagedSessionSummary;
+
+export type ChannelKind =
+  | { kind: 'desktop_ui' }
+  | { kind: 'telegram'; chat_id: number; thread_id?: number | null };
+
+export interface AttachedChannelInfo {
+  kind: ChannelKind;
+  connected_at: string;
+  label?: string | null;
+}
+
+export type RuntimeInput =
+  | { type: 'message'; text: string }
+  | { type: 'approval'; approved: boolean; responder?: string | null }
+  | { type: 'raw_terminal'; data: string };
+
+export interface UnifiedSessionInfo {
+  id: string;
+  runtime_kind: 'interactive' | 'headless';
+  source: ManagedSessionSource;
+  status: string;
+  project_dir: string;
+  env_name: string;
+  perm_mode: string;
+  created_at: string;
+  is_active: boolean;
+  pid?: number | null;
+  claude_session_id?: string | null;
+  tmux_target?: string | null;
+  client?: string | null;
+  channels: AttachedChannelInfo[];
+}
+
+export interface UnifiedSessionDebugComparison {
+  headless_count: number;
+  interactive_count: number;
+  unified_count: number;
+  matched: boolean;
+}
 
 export interface ReplayBatch {
   gap_detected: boolean;
