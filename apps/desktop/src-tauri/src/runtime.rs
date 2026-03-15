@@ -3,7 +3,9 @@
 //! This module manages `claude -p` / `stream-json` sessions used by automation
 //! and remote adapters. It is not the primary local interactive runtime.
 
+use crate::channel::DesktopChannel;
 use crate::event_bus::{ReplayBatch, SessionEventPayload, SessionStore};
+use crate::event_dispatcher::EventDispatcher;
 use crate::terminal::resolve_claude_path;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -17,12 +19,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Manager};
 
 const RUNTIME_STATE_NOTE: &str =
     "Cold resume only. Used for orphan cleanup and --resume, not stdio reattachment.";
-const LEGACY_MANAGED_SESSION_EVENT: &str = "managed-session-event";
-const HEADLESS_SESSION_EVENT: &str = "headless-session-event";
 const CCEM_PERMISSION_MCP_SERVER_NAME: &str = "ccem_permission";
 const CCEM_PERMISSION_MCP_TOOL_NAME: &str = "mcp__ccem_permission__approval_prompt";
 const PERMISSION_BRIDGE_REQUEST_POLL_MS: u64 = 300;
@@ -283,6 +283,7 @@ impl RuntimeManager {
         });
 
         self.insert_handle(runtime_id.clone(), handle.clone())?;
+        let _ = attach_desktop_channel(&app, &runtime_id, DesktopChannel::headless(app.clone()));
         self.persist_state_best_effort();
 
         self.append_lifecycle_event(
@@ -473,10 +474,14 @@ impl RuntimeManager {
                 .pending_permissions
                 .lock()
                 .map_err(|_| "Failed to lock pending permission requests".to_string())?;
-            pending_permissions
-                .remove(request_id)
-                .ok_or_else(|| format!("Permission request not found: {}", request_id))?
-        };
+            pending_permissions.remove(request_id)
+        }
+        .or_else(|| {
+            recover_pending_permission_from_disk(request_id)
+                .ok()
+                .flatten()
+        })
+        .ok_or_else(|| format!("Permission request not found: {}", request_id))?;
 
         write_permission_prompt_response(
             &pending.bridge,
@@ -503,6 +508,26 @@ impl RuntimeManager {
             },
         );
         Ok(())
+    }
+
+    pub fn respond_to_permission_for_runtime(
+        &self,
+        app: &AppHandle,
+        runtime_id: &str,
+        approved: bool,
+        responder: &str,
+    ) -> Result<(), String> {
+        let request_id = self
+            .pending_permissions
+            .lock()
+            .map_err(|_| "Failed to lock pending permission requests".to_string())?
+            .iter()
+            .find_map(|(request_id, pending)| {
+                (pending.runtime_id == runtime_id).then(|| request_id.clone())
+            })
+            .ok_or_else(|| format!("No pending permission request found for {}", runtime_id))?;
+
+        self.respond_to_permission(app, &request_id, approved, responder)
     }
 
     pub fn shutdown_all(&self) {
@@ -656,8 +681,7 @@ impl RuntimeManager {
             let mut events = handle.events.lock().ok()?;
             events.append(payload)
         };
-        let _ = app.emit(LEGACY_MANAGED_SESSION_EVENT, &record);
-        let _ = app.emit(HEADLESS_SESSION_EVENT, &record);
+        dispatch_session_event(app, runtime_id, &record);
         Some(())
     }
 
@@ -1030,6 +1054,24 @@ impl RuntimeManager {
     }
 }
 
+fn attach_desktop_channel(
+    app: &AppHandle,
+    runtime_id: &str,
+    channel: DesktopChannel,
+) -> Result<(), String> {
+    let dispatcher = app.state::<Arc<EventDispatcher>>().inner().clone();
+    dispatcher.attach_channel(runtime_id.to_string(), Arc::new(channel))
+}
+
+fn dispatch_session_event(
+    app: &AppHandle,
+    runtime_id: &str,
+    record: &crate::event_bus::SessionEventRecord,
+) {
+    let dispatcher = app.state::<Arc<EventDispatcher>>().inner().clone();
+    dispatcher.dispatch_event(runtime_id, record);
+}
+
 fn build_claude_command(
     options: &ManagedSessionOptions,
     runtime_id: &str,
@@ -1293,6 +1335,53 @@ fn write_permission_prompt_response(
         .map_err(|error| format!("Failed to encode permission response: {}", error))?;
     fs::write(response_path, payload)
         .map_err(|error| format!("Failed to write permission response: {}", error))
+}
+
+fn recover_pending_permission_from_disk(
+    request_id: &str,
+) -> Result<Option<PendingPermissionRequest>, String> {
+    let bridge_root = permission_bridge_root_dir();
+    let entries = match fs::read_dir(&bridge_root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "Failed to read permission bridge root dir: {}",
+                error
+            ))
+        }
+    };
+
+    for entry in entries {
+        let path = match entry {
+            Ok(entry) => entry.path(),
+            Err(_) => continue,
+        };
+        if !path.is_dir() {
+            continue;
+        }
+
+        let request_path = path.join("requests").join(format!("{request_id}.json"));
+        if !request_path.is_file() {
+            continue;
+        }
+
+        let Some(runtime_id) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+
+        return Ok(Some(PendingPermissionRequest {
+            runtime_id: runtime_id.to_string(),
+            bridge: PermissionPromptBridge {
+                bridge_dir: path.clone(),
+                requests_dir: path.join("requests"),
+                responses_dir: path.join("responses"),
+                mcp_config_path: path.join("mcp-config.json"),
+            },
+        }));
+    }
+
+    Ok(None)
 }
 
 fn extract_protocol_events(value: &Value) -> Vec<SessionEventPayload> {
@@ -1662,10 +1751,11 @@ mod tests {
         build_claude_command, build_permission_args,
         clear_runtime_recovery_candidates_by_claude_session_id_from,
         dismiss_runtime_recovery_candidate_from, extract_protocol_events,
-        list_runtime_recovery_candidates_from, read_runtime_state_from,
-        replace_runtime_entries_for_kind, status_name, write_runtime_state_to,
-        ManagedSessionOptions, ManagedSessionRecord, ManagedSessionSource, ManagedSessionStatus,
-        RuntimeKind, RuntimeManager, RuntimeRecoveryCandidate, RuntimeStateEntry, RuntimeStateFile,
+        list_runtime_recovery_candidates_from, permission_bridge_root_dir, read_runtime_state_from,
+        recover_pending_permission_from_disk, replace_runtime_entries_for_kind, status_name,
+        write_runtime_state_to, ManagedSessionOptions, ManagedSessionRecord, ManagedSessionSource,
+        ManagedSessionStatus, RuntimeKind, RuntimeManager, RuntimeRecoveryCandidate,
+        RuntimeStateEntry, RuntimeStateFile,
     };
     use chrono::Utc;
     use serde_json::json;
@@ -2213,6 +2303,28 @@ mod tests {
         assert!(args.contains(&"Grep".to_string()));
         assert!(args.contains(&"--disallowedTools".to_string()));
         assert!(args.contains(&"WebSearch".to_string()));
+    }
+
+    #[test]
+    fn recover_pending_permission_from_disk_finds_request_file() {
+        let bridge_root = permission_bridge_root_dir();
+        let _ = fs::remove_dir_all(&bridge_root);
+
+        let runtime_id = "headless-runtime-test";
+        let requests_dir = bridge_root.join(runtime_id).join("requests");
+        let responses_dir = bridge_root.join(runtime_id).join("responses");
+        fs::create_dir_all(&requests_dir).expect("create requests dir");
+        fs::create_dir_all(&responses_dir).expect("create responses dir");
+        fs::write(requests_dir.join("req-123.json"), "{}").expect("write request file");
+
+        let recovered = recover_pending_permission_from_disk("req-123")
+            .expect("recover request")
+            .expect("request should exist");
+        assert_eq!(recovered.runtime_id, runtime_id);
+        assert_eq!(recovered.bridge.requests_dir, requests_dir);
+        assert_eq!(recovered.bridge.responses_dir, responses_dir);
+
+        let _ = fs::remove_dir_all(&bridge_root);
     }
 
     #[test]

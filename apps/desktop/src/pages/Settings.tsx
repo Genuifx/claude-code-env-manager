@@ -85,6 +85,7 @@ export function Settings() {
     botToken: '',
     allowedUserIds: [],
     allowedChatId: null,
+    notificationsChatId: null,
     notificationsThreadId: null,
     defaultEnvName: null,
     defaultPermMode: null,
@@ -199,6 +200,7 @@ export function Settings() {
           botToken: settings.botToken ?? '',
           allowedUserIds: settings.allowedUserIds ?? [],
           allowedChatId: settings.allowedChatId ?? null,
+          notificationsChatId: settings.notificationsChatId ?? null,
           notificationsThreadId: settings.notificationsThreadId ?? null,
           defaultEnvName: settings.defaultEnvName ?? null,
           defaultPermMode: settings.defaultPermMode ?? null,
@@ -295,6 +297,7 @@ export function Settings() {
         botToken: telegramSettings.botToken?.trim() || null,
         allowedUserIds: parsedAllowedUserIds.values,
         allowedChatId: telegramSettings.allowedChatId,
+        notificationsChatId: telegramSettings.notificationsChatId,
         notificationsThreadId: telegramSettings.notificationsThreadId,
         defaultEnvName: telegramSettings.defaultEnvName || null,
         defaultPermMode: telegramSettings.defaultPermMode || null,
@@ -623,6 +626,25 @@ export function Settings() {
                       />
                       <p className="text-[11px] text-muted-foreground">
                         {t('settings.telegramAllowedChatIdDesc')}
+                      </p>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-medium text-muted-foreground">
+                        {t('settings.telegramNotificationsChatId')}
+                      </label>
+                      <input
+                        type="number"
+                        className="w-full px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 transition-all"
+                        value={telegramSettings.notificationsChatId ?? ''}
+                        onChange={(event) => setTelegramSettings((current) => ({
+                          ...current,
+                          notificationsChatId: event.target.value ? Number(event.target.value) : null,
+                        }))}
+                        placeholder={t('settings.telegramNotificationsChatIdPlaceholder')}
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        {t('settings.telegramNotificationsChatIdDesc')}
                       </p>
                     </div>
 

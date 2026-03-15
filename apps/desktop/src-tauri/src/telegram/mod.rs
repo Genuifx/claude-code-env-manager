@@ -1,3 +1,6 @@
+mod channel;
+
+use crate::channel::OutputChannel;
 use crate::config;
 use crate::cron;
 use crate::crypto;
@@ -16,6 +19,7 @@ use chrono::{DateTime, Utc};
 use reqwest::blocking::Response;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::any::Any;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::PathBuf;
@@ -24,6 +28,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
+
+use self::channel::TelegramChannel;
 
 const TELEGRAM_API_BASE: &str = "https://api.telegram.org";
 const TELEGRAM_GENERAL_TOPIC_THREAD_ID: i64 = 1;
@@ -35,6 +41,76 @@ const TELEGRAM_STOP_GRACE_TIMEOUT_SECS: u64 = 7;
 const TELEGRAM_STOP_POLL_INTERVAL_MS: u64 = 100;
 const TELEGRAM_BIND_PROJECT_LIMIT: usize = 8;
 const TELEGRAM_BIND_PERM_MODES: &[&str] = &["yolo", "dev", "readonly", "safe", "ci", "audit"];
+const TELEGRAM_MINIMAL_GROUP_COMMANDS: &[TelegramBotCommand] = &[
+    TelegramBotCommand {
+        command: "help",
+        description: "Show available commands",
+    },
+    TelegramBotCommand {
+        command: "whoami",
+        description: "Show your Telegram ids",
+    },
+];
+const TELEGRAM_PRIVATE_COMMANDS: &[TelegramBotCommand] = &[
+    TelegramBotCommand {
+        command: "help",
+        description: "Show available commands",
+    },
+    TelegramBotCommand {
+        command: "whoami",
+        description: "Show your Telegram ids",
+    },
+    TelegramBotCommand {
+        command: "sessions",
+        description: "List active sessions",
+    },
+    TelegramBotCommand {
+        command: "envs",
+        description: "List configured environments",
+    },
+    TelegramBotCommand {
+        command: "stop",
+        description: "Stop an active session",
+    },
+];
+const TELEGRAM_FULL_GROUP_COMMANDS: &[TelegramBotCommand] = &[
+    TelegramBotCommand {
+        command: "help",
+        description: "Show available commands",
+    },
+    TelegramBotCommand {
+        command: "whoami",
+        description: "Show chat and topic ids",
+    },
+    TelegramBotCommand {
+        command: "sessions",
+        description: "List active sessions",
+    },
+    TelegramBotCommand {
+        command: "envs",
+        description: "List configured environments",
+    },
+    TelegramBotCommand {
+        command: "resume",
+        description: "Resume the bound topic session",
+    },
+    TelegramBotCommand {
+        command: "stop",
+        description: "Stop an active session",
+    },
+    TelegramBotCommand {
+        command: "topics",
+        description: "List saved topic bindings",
+    },
+    TelegramBotCommand {
+        command: "topic",
+        description: "Inspect the current topic binding",
+    },
+    TelegramBotCommand {
+        command: "bind",
+        description: "Bind this topic to a project",
+    },
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TelegramTopicBinding {
@@ -112,6 +188,12 @@ pub struct TelegramSettings {
     pub allowed_user_ids: Vec<i64>,
     #[serde(rename = "allowedChatId", default)]
     pub allowed_chat_id: Option<i64>,
+    #[serde(
+        rename = "notificationsChatId",
+        alias = "notifications_chat_id",
+        default
+    )]
+    pub notifications_chat_id: Option<i64>,
     #[serde(rename = "notificationsThreadId", default)]
     pub notifications_thread_id: Option<i64>,
     #[serde(rename = "defaultEnvName", default)]
@@ -122,6 +204,8 @@ pub struct TelegramSettings {
     pub default_working_dir: Option<String>,
     #[serde(rename = "topicBindings", alias = "topic_bindings", default)]
     pub topic_bindings: Vec<TelegramTopicBinding>,
+    #[serde(rename = "useChannelMonitor", alias = "use_channel_monitor", default)]
+    pub use_channel_monitor: bool,
     #[serde(default)]
     pub preferences: TelegramBridgePreferences,
 }
@@ -258,6 +342,7 @@ impl Default for TelegramBridgeManager {
 
 impl TelegramBridgeManager {
     pub fn status(&self) -> TelegramBridgeStatus {
+        self.cleanup_finished_worker();
         let state = self
             .state
             .lock()
@@ -320,6 +405,7 @@ impl TelegramBridgeManager {
             .filter(|value| !value.trim().is_empty())
             .ok_or_else(|| "Telegram bot token is not configured".to_string())?;
         let me = get_me(&token)?;
+        sync_registered_commands(&token, &settings)?;
 
         {
             let mut state = self
@@ -392,6 +478,7 @@ impl TelegramBridgeManager {
     fn clear_last_error(&self) {
         if let Ok(mut state) = self.state.lock() {
             state.last_error = None;
+            state.running = true;
         }
     }
 
@@ -604,7 +691,22 @@ impl TelegramBridgeManager {
         if let Ok(mut worker) = self.worker.lock() {
             if worker.as_ref().is_some_and(|handle| handle.is_finished()) {
                 if let Some(handle) = worker.take() {
-                    let _ = handle.join();
+                    let stopped_intentionally = self.stop_flag.load(Ordering::SeqCst);
+                    let join_result = handle.join();
+                    if let Ok(mut state) = self.state.lock() {
+                        state.running = false;
+                        if stopped_intentionally {
+                            state.last_error = None;
+                        } else if let Err(payload) = join_result {
+                            state.last_error = Some(format!(
+                                "Telegram bridge worker panicked: {}",
+                                panic_payload_to_string(payload)
+                            ));
+                        } else if state.last_error.is_none() {
+                            state.last_error =
+                                Some("Telegram bridge worker exited unexpectedly.".to_string());
+                        }
+                    }
                 }
             }
         }
@@ -635,6 +737,27 @@ struct TelegramApiResponse<T> {
     ok: bool,
     result: Option<T>,
     description: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+struct TelegramBotCommand {
+    command: &'static str,
+    description: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum TelegramBotCommandScope {
+    Default,
+    AllPrivateChats,
+    AllGroupChats,
+    Chat { chat_id: i64 },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TelegramCommandRegistration {
+    scope: TelegramBotCommandScope,
+    commands: Vec<TelegramBotCommand>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -750,12 +873,17 @@ pub fn send_configured_message(text: &str) -> Result<bool, String> {
         Some(token) => token.to_string(),
         None => return Ok(false),
     };
-    let chat_id = match settings.allowed_chat_id {
+    let chat_id = match settings.notifications_chat_id.or(settings.allowed_chat_id) {
         Some(chat_id) => chat_id,
         None => return Ok(false),
     };
+    let thread_id = if chat_id > 0 {
+        None
+    } else {
+        settings.notifications_thread_id
+    };
 
-    send_message(&token, chat_id, settings.notifications_thread_id, text)?;
+    send_message(&token, chat_id, thread_id, text)?;
     Ok(true)
 }
 
@@ -885,6 +1013,16 @@ fn is_sender_allowed(settings: &TelegramSettings, user_id: Option<i64>) -> bool 
     user_id
         .map(|user_id| settings.allowed_user_ids.contains(&user_id))
         .unwrap_or(false)
+}
+
+fn is_private_chat_scope(chat_id: i64, user_id: Option<i64>) -> bool {
+    user_id.is_some_and(|user_id| user_id == chat_id)
+}
+
+fn is_chat_allowed(settings: &TelegramSettings, chat_id: i64, user_id: Option<i64>) -> bool {
+    settings.allowed_chat_id.is_none_or(|allowed_chat_id| {
+        allowed_chat_id == chat_id || is_private_chat_scope(chat_id, user_id)
+    })
 }
 
 fn upsert_topic_binding(settings: &mut TelegramSettings, binding: TelegramTopicBinding) {
@@ -1772,6 +1910,36 @@ fn format_topic_binding(binding: &TelegramTopicBinding) -> String {
     lines.join("\n")
 }
 
+fn format_topic_command_hint() -> String {
+    [
+        "Topic commands:",
+        "/new <prompt> - start or continue work here",
+        "/resume [prompt] - resume the last session for this topic",
+        "/topic - show the current binding",
+        "/topic clear - remove this binding",
+        "/cron list - list cron tasks",
+        "",
+        "Tip: type / in this topic to open the group command list.",
+    ]
+    .join("\n")
+}
+
+fn format_topic_binding_success_message(binding: &TelegramTopicBinding) -> String {
+    format!(
+        "Bound this topic to:\n{}\n\n{}",
+        format_topic_binding(binding),
+        format_topic_command_hint()
+    )
+}
+
+fn format_new_topic_welcome_message(binding: &TelegramTopicBinding) -> String {
+    format!(
+        "This topic is ready for {}.\n\n{}",
+        compact_project_label(&binding.project_dir),
+        format_topic_command_hint()
+    )
+}
+
 fn format_topic_bindings_message(settings: &TelegramSettings) -> String {
     if settings.topic_bindings.is_empty() {
         return "No Telegram topic bindings configured yet.".to_string();
@@ -2129,6 +2297,16 @@ fn interruptible_sleep(manager: &TelegramBridgeManager, duration: Duration) {
     }
 }
 
+fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
+    match payload.downcast::<String>() {
+        Ok(message) => *message,
+        Err(payload) => match payload.downcast::<&'static str>() {
+            Ok(message) => (*message).to_string(),
+            Err(_) => "unknown panic".to_string(),
+        },
+    }
+}
+
 fn handle_message(
     manager: &Arc<TelegramBridgeManager>,
     app: &AppHandle,
@@ -2139,15 +2317,17 @@ fn handle_message(
     bot_username: Option<&str>,
     message: TelegramMessage,
 ) -> Result<(), String> {
+    if !settings.enabled {
+        return Ok(());
+    }
+
     let is_forum_chat = message.chat.is_forum.unwrap_or(false);
     let chat_id = message.chat.id;
-    if let Some(allowed_chat_id) = settings.allowed_chat_id {
-        if allowed_chat_id != chat_id {
-            return Ok(());
-        }
+    let user_id = message.from.as_ref().map(|sender| sender.id);
+    if !is_chat_allowed(settings, chat_id, user_id) {
+        return Ok(());
     }
     remember_forum_topic_from_message(manager, &message);
-    let user_id = message.from.as_ref().map(|sender| sender.id);
     if !is_sender_allowed(settings, user_id) {
         return Ok(());
     }
@@ -2247,7 +2427,13 @@ fn handle_message(
 
     if let Some(selector) = text.strip_prefix("/cron run ").map(str::trim) {
         let task = resolve_cron_task(selector)?;
-        cron::run_cron_task_now(app.clone(), Arc::clone(runtime_manager), &task.id)?;
+        let unified_runtime_manager =
+            app.state::<Arc<crate::unified_runtime::UnifiedSessionManager>>();
+        cron::run_cron_task_now(
+            app.clone(),
+            unified_runtime_manager.inner().clone(),
+            &task.id,
+        )?;
         send_message(
             token,
             chat_id,
@@ -2407,7 +2593,7 @@ fn handle_message(
             token,
             chat_id,
             Some(thread_id),
-            &format!("Bound this topic to:\n{}", format_topic_binding(&binding)),
+            &format_topic_binding_success_message(&binding),
         )?;
         return Ok(());
     }
@@ -2625,6 +2811,7 @@ fn handle_message(
         } else {
             send_or_queue_interactive_message(
                 manager,
+                app,
                 interactive_runtime_manager,
                 token,
                 settings,
@@ -2649,6 +2836,21 @@ fn handle_message(
             &text,
             binding.last_claude_session_id.clone(),
             Some(binding),
+        );
+    }
+
+    if is_private_chat_scope(chat_id, user_id) {
+        return create_telegram_session(
+            manager,
+            app,
+            runtime_manager,
+            token,
+            settings,
+            chat_id,
+            thread_id,
+            &text,
+            None,
+            None,
         );
     }
 
@@ -2898,7 +3100,7 @@ fn handle_bind_perm_callback(
         token,
         chat_id,
         message_id,
-        &format!("Bound this topic to:\n{}", format_topic_binding(&binding)),
+        &format_topic_binding_success_message(&binding),
         None,
     )?;
     answer_callback_query(token, callback_query_id, "Topic bound.", false)?;
@@ -2962,7 +3164,7 @@ pub fn bind_topic_from_desktop(
         &token,
         chat_id,
         Some(target_thread_id),
-        &format!("Bound this topic to:\n{}", format_topic_binding(&binding)),
+        &format_topic_binding_success_message(&binding),
     )?;
     Ok(binding)
 }
@@ -2976,6 +3178,10 @@ fn handle_callback_query(
     settings: &TelegramSettings,
     callback_query: TelegramCallbackQuery,
 ) -> Result<(), String> {
+    if !settings.enabled {
+        return Ok(());
+    }
+
     let user_id = Some(callback_query.from.id);
     if !is_sender_allowed(settings, user_id) {
         answer_callback_query(
@@ -2998,16 +3204,14 @@ fn handle_callback_query(
     };
 
     let chat_id = message.chat.id;
-    if let Some(allowed_chat_id) = settings.allowed_chat_id {
-        if allowed_chat_id != chat_id {
-            answer_callback_query(
-                token,
-                &callback_query.id,
-                "This chat is not allowed to control the bot.",
-                true,
-            )?;
-            return Ok(());
-        }
+    if !is_chat_allowed(settings, chat_id, user_id) {
+        answer_callback_query(
+            token,
+            &callback_query.id,
+            "This chat is not allowed to control the bot.",
+            true,
+        )?;
+        return Ok(());
     }
 
     let Some(data) = callback_query.data.as_deref() else {
@@ -3234,6 +3438,7 @@ fn create_telegram_topic_console(
         ) {
             return attach_existing_interactive_session(
                 manager,
+                app,
                 interactive_runtime_manager,
                 token,
                 settings,
@@ -3294,6 +3499,13 @@ fn create_telegram_topic_console(
             "Created topic #{} for {}.\nStarting the project console there.",
             thread_id, binding.project_dir
         ),
+    )?;
+
+    send_message(
+        token,
+        chat_id,
+        Some(thread_id),
+        &format_new_topic_welcome_message(&binding),
     )?;
 
     create_interactive_telegram_session(
@@ -3381,16 +3593,43 @@ fn create_telegram_session(
     let runtime_manager = Arc::clone(runtime_manager);
     let token = token.to_string();
     let runtime_id = summary.runtime_id.clone();
-    thread::spawn(move || {
-        monitor_session_completion(
-            manager,
-            runtime_manager,
-            token,
+    let app_handle = app.clone();
+    if settings.use_channel_monitor {
+        let channel = Arc::new(TelegramChannel::headless(
+            Arc::clone(&manager),
+            token.clone(),
+            settings.clone(),
+            runtime_id.clone(),
             chat_id,
             thread_id,
-            runtime_id,
-        );
-    });
+        ));
+        attach_telegram_output_channel(app, &runtime_id, channel.clone())?;
+        replay_headless_events_to_channel(&runtime_manager, &runtime_id, channel.as_ref());
+        thread::spawn(move || {
+            monitor_session_completion_with_channel(
+                manager,
+                app_handle,
+                runtime_manager,
+                token,
+                chat_id,
+                thread_id,
+                runtime_id,
+                channel,
+            );
+        });
+    } else {
+        thread::spawn(move || {
+            monitor_session_completion(
+                manager,
+                app_handle,
+                runtime_manager,
+                token,
+                chat_id,
+                thread_id,
+                runtime_id,
+            );
+        });
+    }
 
     Ok(())
 }
@@ -3856,12 +4095,9 @@ fn create_interactive_telegram_session(
     };
     send_message(token, chat_id, thread_id, &status_message)?;
 
-    if !prompt.trim().is_empty() {
-        interactive_runtime_manager.send_message(&session.id, prompt)?;
-    }
-
     ensure_interactive_monitor(
         manager,
+        app,
         interactive_runtime_manager,
         token,
         settings,
@@ -3870,11 +4106,16 @@ fn create_interactive_telegram_session(
         &session.id,
     );
 
+    if !prompt.trim().is_empty() {
+        interactive_runtime_manager.send_message(&session.id, prompt)?;
+    }
+
     Ok(())
 }
 
 fn attach_existing_interactive_session(
     manager: &Arc<TelegramBridgeManager>,
+    app: &AppHandle,
     interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
     token: &str,
     settings: &TelegramSettings,
@@ -3891,6 +4132,7 @@ fn attach_existing_interactive_session(
 
     ensure_interactive_monitor(
         manager,
+        app,
         interactive_runtime_manager,
         token,
         settings,
@@ -3902,6 +4144,7 @@ fn attach_existing_interactive_session(
     if let Some(prompt) = prompt.filter(|value| !value.trim().is_empty()) {
         send_or_queue_interactive_message(
             manager,
+            app,
             interactive_runtime_manager,
             token,
             settings,
@@ -3924,6 +4167,7 @@ fn attach_existing_interactive_session(
 
 fn ensure_interactive_monitor(
     manager: &Arc<TelegramBridgeManager>,
+    app: &AppHandle,
     interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
     token: &str,
     settings: &TelegramSettings,
@@ -3941,21 +4185,54 @@ fn ensure_interactive_monitor(
     let token = token.to_string();
     let runtime_id = runtime_id.to_string();
     let settings = settings.clone();
-    thread::spawn(move || {
-        monitor_interactive_session(
-            manager,
-            interactive_runtime_manager,
-            token,
-            settings,
+    let app_handle = app.clone();
+    if settings.use_channel_monitor {
+        let channel = Arc::new(TelegramChannel::interactive(
+            Arc::clone(&manager),
+            token.clone(),
+            settings.clone(),
+            runtime_id.clone(),
             chat_id,
             thread_id,
-            runtime_id,
+        ));
+        if attach_telegram_output_channel(app, &runtime_id, channel.clone()).is_err() {
+            return;
+        }
+        replay_interactive_events_to_channel(
+            &interactive_runtime_manager,
+            &runtime_id,
+            channel.as_ref(),
         );
-    });
+        thread::spawn(move || {
+            monitor_interactive_session_with_channel(
+                manager,
+                app_handle,
+                interactive_runtime_manager,
+                token,
+                chat_id,
+                thread_id,
+                runtime_id,
+                channel,
+            );
+        });
+    } else {
+        thread::spawn(move || {
+            monitor_interactive_session(
+                manager,
+                interactive_runtime_manager,
+                token,
+                settings,
+                chat_id,
+                thread_id,
+                runtime_id,
+            );
+        });
+    }
 }
 
 fn send_or_queue_interactive_message(
     manager: &Arc<TelegramBridgeManager>,
+    app: &AppHandle,
     interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
     token: &str,
     settings: &TelegramSettings,
@@ -3966,6 +4243,7 @@ fn send_or_queue_interactive_message(
 ) -> Result<(), String> {
     ensure_interactive_monitor(
         manager,
+        app,
         interactive_runtime_manager,
         token,
         settings,
@@ -4143,8 +4421,256 @@ fn send_or_queue_interactive_message(
     Ok(())
 }
 
+fn attach_telegram_output_channel(
+    app: &AppHandle,
+    runtime_id: &str,
+    channel: Arc<TelegramChannel>,
+) -> Result<(), String> {
+    let unified_runtime_manager = app.state::<Arc<crate::unified_runtime::UnifiedSessionManager>>();
+    unified_runtime_manager
+        .inner()
+        .attach_output_channel(runtime_id, channel)
+}
+
+fn replay_headless_events_to_channel(
+    runtime_manager: &Arc<HeadlessRuntimeManager>,
+    runtime_id: &str,
+    channel: &TelegramChannel,
+) {
+    let Ok(batch) = runtime_manager.replay_events(runtime_id, None) else {
+        return;
+    };
+
+    for event in batch.events {
+        let _ = channel.send_event(&event);
+    }
+}
+
+fn replay_interactive_events_to_channel(
+    interactive_runtime_manager: &Arc<InteractiveRuntimeManager>,
+    runtime_id: &str,
+    channel: &TelegramChannel,
+) {
+    let Ok(batch) = interactive_runtime_manager.replay_events(runtime_id, None) else {
+        return;
+    };
+
+    for event in batch.events {
+        let _ = channel.send_event(&event);
+    }
+}
+
+fn detach_telegram_output_channel(
+    app: &AppHandle,
+    runtime_id: &str,
+    chat_id: i64,
+    thread_id: Option<i64>,
+) {
+    let unified_runtime_manager = app.state::<Arc<crate::unified_runtime::UnifiedSessionManager>>();
+    let _ = unified_runtime_manager.inner().detach_channel(
+        runtime_id,
+        &crate::channel::ChannelKind::Telegram { chat_id, thread_id },
+    );
+}
+
+fn monitor_session_completion_with_channel(
+    manager: Arc<TelegramBridgeManager>,
+    app: AppHandle,
+    runtime_manager: Arc<HeadlessRuntimeManager>,
+    token: String,
+    chat_id: i64,
+    thread_id: Option<i64>,
+    runtime_id: String,
+    channel: Arc<TelegramChannel>,
+) {
+    let started = Instant::now();
+    let timeout = Duration::from_secs(60 * 15);
+
+    loop {
+        if manager.stop_flag.load(Ordering::SeqCst) {
+            break;
+        }
+
+        if started.elapsed() > timeout {
+            let _ = runtime_manager.stop_session(&app, &runtime_id);
+            channel.flush_if_due(true);
+            let _ = send_message(
+                &token,
+                chat_id,
+                thread_id,
+                &format!("Session {runtime_id} timed out while waiting for completion."),
+            );
+            manager.clear_runtime_for_scope(chat_id, thread_id, &runtime_id);
+            if let Some(thread_id) = thread_id {
+                let _ = sync_topic_binding_runtime(thread_id, Some(None), None);
+            }
+            detach_telegram_output_channel(&app, &runtime_id, chat_id, thread_id);
+            break;
+        }
+
+        channel.flush_if_due(false);
+
+        match runtime_manager.summary(&runtime_id) {
+            Some(summary)
+                if !summary.is_active
+                    || matches!(summary.status.as_str(), "completed" | "stopped" | "error") =>
+            {
+                channel.flush_if_due(true);
+                if matches!(summary.status.as_str(), "stopped" | "error") {
+                    let message = format_result_message(&runtime_id, &summary.status, "", "");
+                    let _ = send_message(&token, chat_id, thread_id, &message);
+                }
+                let _ = runtime_manager.remove_session(&runtime_id);
+                manager.clear_runtime_for_scope(chat_id, thread_id, &runtime_id);
+                if let Some(thread_id) = thread_id {
+                    let _ = sync_topic_binding_runtime(
+                        thread_id,
+                        Some(None),
+                        Some(summary.claude_session_id.clone()),
+                    );
+                }
+                detach_telegram_output_channel(&app, &runtime_id, chat_id, thread_id);
+                break;
+            }
+            Some(_) => {
+                thread::sleep(Duration::from_millis(700));
+            }
+            None => {
+                channel.flush_if_due(true);
+                manager.clear_runtime_for_scope(chat_id, thread_id, &runtime_id);
+                if let Some(thread_id) = thread_id {
+                    let _ = sync_topic_binding_runtime(thread_id, Some(None), None);
+                }
+                detach_telegram_output_channel(&app, &runtime_id, chat_id, thread_id);
+                break;
+            }
+        }
+    }
+}
+
+fn monitor_interactive_session_with_channel(
+    manager: Arc<TelegramBridgeManager>,
+    app: AppHandle,
+    interactive_runtime_manager: Arc<InteractiveRuntimeManager>,
+    token: String,
+    chat_id: i64,
+    thread_id: Option<i64>,
+    runtime_id: String,
+    channel: Arc<TelegramChannel>,
+) {
+    let mut last_claude_session_id =
+        interactive_runtime_manager.current_claude_session_id(&runtime_id);
+
+    loop {
+        if manager.stop_flag.load(Ordering::SeqCst) {
+            break;
+        }
+
+        channel.flush_if_due(false);
+
+        if let Ok(state) = interactive_runtime_manager.get_state(&runtime_id) {
+            if state == ClaudeTerminalState::Idle {
+                if let Some(PendingInteractiveAction::FreeText(queued_message)) =
+                    manager.pop_pending_interactive_action(chat_id, thread_id)
+                {
+                    match interactive_runtime_manager.send_message(&runtime_id, &queued_message) {
+                        Ok(()) => {
+                            let _ = send_message(
+                                &token,
+                                chat_id,
+                                thread_id,
+                                &format!("Sent queued follow-up to {runtime_id}"),
+                            );
+                        }
+                        Err(error) => {
+                            let restored_position = manager.queue_interactive_message(
+                                chat_id,
+                                thread_id,
+                                queued_message,
+                            );
+                            let suffix = if restored_position > 0 {
+                                format!(" (still queued at position {restored_position})")
+                            } else {
+                                String::new()
+                            };
+                            let _ = send_message(
+                                &token,
+                                chat_id,
+                                thread_id,
+                                &format!(
+                                    "Failed to send queued follow-up to {runtime_id}: {}{}",
+                                    truncate_for_telegram(&error),
+                                    suffix
+                                ),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        let current_claude_session_id =
+            interactive_runtime_manager.current_claude_session_id(&runtime_id);
+        if current_claude_session_id != last_claude_session_id {
+            if let Some(thread_id) = thread_id {
+                let _ = sync_topic_binding_runtime(
+                    thread_id,
+                    None,
+                    Some(current_claude_session_id.clone()),
+                );
+            }
+            last_claude_session_id = current_claude_session_id;
+        }
+
+        match interactive_runtime_manager.summary(&runtime_id) {
+            Some(summary)
+                if summary.is_active
+                    && !matches!(summary.status.as_str(), "stopped" | "error" | "completed") =>
+            {
+                thread::sleep(Duration::from_millis(700));
+            }
+            Some(summary) => {
+                channel.flush_if_due(true);
+                let _ = send_message(
+                    &token,
+                    chat_id,
+                    thread_id,
+                    &format!(
+                        "Interactive session {} is now {}.",
+                        summary.session_id, summary.status
+                    ),
+                );
+                manager.clear_runtime_for_scope(chat_id, thread_id, &runtime_id);
+                if let Some(thread_id) = thread_id {
+                    let _ = sync_topic_binding_runtime(
+                        thread_id,
+                        Some(None),
+                        Some(summary.claude_session_id.clone()),
+                    );
+                }
+                detach_telegram_output_channel(&app, &runtime_id, chat_id, thread_id);
+                break;
+            }
+            None => {
+                channel.flush_if_due(true);
+                manager.clear_runtime_for_scope(chat_id, thread_id, &runtime_id);
+                if let Some(thread_id) = thread_id {
+                    let _ = sync_topic_binding_runtime(
+                        thread_id,
+                        Some(None),
+                        Some(last_claude_session_id.clone()),
+                    );
+                }
+                detach_telegram_output_channel(&app, &runtime_id, chat_id, thread_id);
+                break;
+            }
+        }
+    }
+}
+
 fn monitor_session_completion(
     manager: Arc<TelegramBridgeManager>,
+    app: AppHandle,
     runtime_manager: Arc<HeadlessRuntimeManager>,
     token: String,
     chat_id: i64,
@@ -4162,6 +4688,7 @@ fn monitor_session_completion(
 
     loop {
         if started.elapsed() > timeout {
+            let _ = runtime_manager.stop_session(&app, &runtime_id);
             let _ = send_message(
                 &token,
                 chat_id,
@@ -4833,6 +5360,94 @@ fn strip_bot_username_mentions(text: &str, bot_username: Option<&str>) -> String
         .join(" ")
 }
 
+fn build_command_registrations(settings: &TelegramSettings) -> Vec<TelegramCommandRegistration> {
+    let mut registrations = vec![TelegramCommandRegistration {
+        scope: TelegramBotCommandScope::AllPrivateChats,
+        commands: TELEGRAM_PRIVATE_COMMANDS.to_vec(),
+    }];
+
+    if let Some(chat_id) = settings.allowed_chat_id.filter(|chat_id| *chat_id < 0) {
+        registrations.push(TelegramCommandRegistration {
+            scope: TelegramBotCommandScope::AllGroupChats,
+            commands: TELEGRAM_MINIMAL_GROUP_COMMANDS.to_vec(),
+        });
+        registrations.push(TelegramCommandRegistration {
+            scope: TelegramBotCommandScope::Chat { chat_id },
+            commands: TELEGRAM_FULL_GROUP_COMMANDS.to_vec(),
+        });
+    } else {
+        registrations.push(TelegramCommandRegistration {
+            scope: TelegramBotCommandScope::AllGroupChats,
+            commands: TELEGRAM_FULL_GROUP_COMMANDS.to_vec(),
+        });
+    }
+
+    registrations
+}
+
+fn command_scopes_to_clear(settings: &TelegramSettings) -> Vec<TelegramBotCommandScope> {
+    let mut scopes = vec![
+        TelegramBotCommandScope::Default,
+        TelegramBotCommandScope::AllPrivateChats,
+        TelegramBotCommandScope::AllGroupChats,
+    ];
+    if let Some(chat_id) = settings.allowed_chat_id.filter(|chat_id| *chat_id < 0) {
+        scopes.push(TelegramBotCommandScope::Chat { chat_id });
+    }
+    scopes
+}
+
+fn clear_registered_commands(token: &str, settings: &TelegramSettings) -> Result<(), String> {
+    for scope in command_scopes_to_clear(settings) {
+        delete_my_commands(token, Some(&scope))?;
+    }
+
+    Ok(())
+}
+
+fn sync_registered_commands(token: &str, settings: &TelegramSettings) -> Result<(), String> {
+    clear_registered_commands(token, settings)?;
+
+    for registration in build_command_registrations(settings) {
+        set_my_commands(token, &registration.commands, Some(&registration.scope))?;
+    }
+
+    Ok(())
+}
+
+pub fn reconcile_registered_commands(
+    previous: Option<&TelegramSettings>,
+    next: &TelegramSettings,
+) -> Result<(), String> {
+    let previous_token = previous
+        .and_then(|settings| settings.bot_token.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let next_token = next
+        .bot_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    if previous_token != next_token {
+        return Ok(());
+    }
+
+    let Some(token) = next_token.or(previous_token) else {
+        return Ok(());
+    };
+
+    if let Some(previous) = previous {
+        clear_registered_commands(token, previous)?;
+    }
+
+    if next.enabled {
+        sync_registered_commands(token, next)?;
+    }
+
+    Ok(())
+}
+
 fn get_me(token: &str) -> Result<TelegramUser, String> {
     let client = telegram_http_client(None)?;
     let url = format!("{TELEGRAM_API_BASE}/bot{token}/getMe");
@@ -4850,6 +5465,69 @@ fn get_me(token: &str) -> Result<TelegramUser, String> {
         Err(payload
             .description
             .unwrap_or_else(|| "Telegram getMe returned an error".to_string()))
+    }
+}
+
+fn set_my_commands(
+    token: &str,
+    commands: &[TelegramBotCommand],
+    scope: Option<&TelegramBotCommandScope>,
+) -> Result<(), String> {
+    #[derive(Serialize)]
+    struct SetMyCommandsBody<'a> {
+        commands: &'a [TelegramBotCommand],
+        #[serde(skip_serializing_if = "Option::is_none")]
+        scope: Option<&'a TelegramBotCommandScope>,
+    }
+
+    let client = telegram_http_client(None)?;
+    let url = format!("{TELEGRAM_API_BASE}/bot{token}/setMyCommands");
+    let response = client
+        .post(url)
+        .json(&SetMyCommandsBody { commands, scope })
+        .send()
+        .map_err(|error| format!("Telegram setMyCommands failed: {}", error))?;
+    let payload: TelegramApiResponse<bool> =
+        parse_telegram_response(response, "Telegram setMyCommands response")?;
+    if payload.ok {
+        payload
+            .result
+            .filter(|ok| *ok)
+            .map(|_| ())
+            .ok_or_else(|| "Telegram setMyCommands returned ok=true without result".to_string())
+    } else {
+        Err(payload
+            .description
+            .unwrap_or_else(|| "Telegram setMyCommands returned an error".to_string()))
+    }
+}
+
+fn delete_my_commands(token: &str, scope: Option<&TelegramBotCommandScope>) -> Result<(), String> {
+    #[derive(Serialize)]
+    struct DeleteMyCommandsBody<'a> {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        scope: Option<&'a TelegramBotCommandScope>,
+    }
+
+    let client = telegram_http_client(None)?;
+    let url = format!("{TELEGRAM_API_BASE}/bot{token}/deleteMyCommands");
+    let response = client
+        .post(url)
+        .json(&DeleteMyCommandsBody { scope })
+        .send()
+        .map_err(|error| format!("Telegram deleteMyCommands failed: {}", error))?;
+    let payload: TelegramApiResponse<bool> =
+        parse_telegram_response(response, "Telegram deleteMyCommands response")?;
+    if payload.ok {
+        payload
+            .result
+            .filter(|ok| *ok)
+            .map(|_| ())
+            .ok_or_else(|| "Telegram deleteMyCommands returned ok=true without result".to_string())
+    } else {
+        Err(payload
+            .description
+            .unwrap_or_else(|| "Telegram deleteMyCommands returned an error".to_string()))
     }
 }
 
@@ -5146,17 +5824,19 @@ where
 mod tests {
     use super::{
         active_choice_question, advance_active_choice_prompt, build_chat_about_this_steps,
-        build_multi_select_submit_steps, build_multi_select_text_entry_steps,
-        build_plan_exit_question, canonical_thread_id, ensure_chat_about_this_option,
-        ensure_text_entry_option, expand_home_dir, format_active_choice_text,
-        format_tool_completed_message, is_chat_about_this_option, is_sender_allowed,
-        is_vscode_text_entry_option, normalize_command_text, parse_bind_command,
-        parse_interactive_tool_cancel_callback_data, parse_interactive_tool_select_callback_data,
-        parse_interactive_tool_submit_callback_data, parse_new_topic_command,
-        parse_permission_callback_data, remove_topic_binding, selection_submit_options,
-        summarize_interactive_prompt_resolution, upsert_topic_binding,
+        build_command_registrations, build_multi_select_submit_steps,
+        build_multi_select_text_entry_steps, build_plan_exit_question, canonical_thread_id,
+        command_scopes_to_clear, ensure_chat_about_this_option, ensure_text_entry_option,
+        expand_home_dir, format_active_choice_text, format_new_topic_welcome_message,
+        format_tool_completed_message, format_topic_binding_success_message,
+        is_chat_about_this_option, is_chat_allowed, is_sender_allowed, is_vscode_text_entry_option,
+        normalize_command_text, parse_bind_command, parse_interactive_tool_cancel_callback_data,
+        parse_interactive_tool_select_callback_data, parse_interactive_tool_submit_callback_data,
+        parse_new_topic_command, parse_permission_callback_data, remove_topic_binding,
+        selection_submit_options, summarize_interactive_prompt_resolution, upsert_topic_binding,
         ActiveInteractiveChoicePrompt, InteractiveChoiceSubmitMode, PendingInteractiveAction,
-        TelegramBridgeManager, TelegramSettings, TelegramTopicBinding,
+        TelegramBotCommandScope, TelegramBridgeManager, TelegramSettings, TelegramTopicBinding,
+        TELEGRAM_FULL_GROUP_COMMANDS, TELEGRAM_MINIMAL_GROUP_COMMANDS, TELEGRAM_PRIVATE_COMMANDS,
     };
     use crate::event_bus::{ToolQuestionOption, ToolQuestionPrompt};
     use chrono::Utc;
@@ -5310,11 +5990,174 @@ mod tests {
     }
 
     #[test]
+    fn allowed_chat_id_still_allows_matching_chat() {
+        let settings = TelegramSettings {
+            allowed_chat_id: Some(-100123),
+            ..TelegramSettings::default()
+        };
+
+        assert!(is_chat_allowed(&settings, -100123, Some(42)));
+        assert!(!is_chat_allowed(&settings, -100124, Some(42)));
+    }
+
+    #[test]
+    fn allowed_chat_id_still_allows_private_chat_with_sender() {
+        let settings = TelegramSettings {
+            allowed_chat_id: Some(-100123),
+            ..TelegramSettings::default()
+        };
+
+        assert!(is_chat_allowed(&settings, 42, Some(42)));
+        assert!(!is_chat_allowed(&settings, 42, Some(7)));
+    }
+
+    #[test]
+    fn command_registrations_use_full_group_scope_when_no_allowed_chat_is_set() {
+        let settings = TelegramSettings {
+            ..TelegramSettings::default()
+        };
+        let registrations = build_command_registrations(&settings);
+
+        assert_eq!(registrations.len(), 2);
+        assert_eq!(
+            registrations[0].scope,
+            TelegramBotCommandScope::AllPrivateChats
+        );
+        assert_eq!(
+            registrations[0].commands,
+            TELEGRAM_PRIVATE_COMMANDS.to_vec()
+        );
+        assert_eq!(
+            registrations[1].scope,
+            TelegramBotCommandScope::AllGroupChats
+        );
+        assert_eq!(
+            registrations[1].commands,
+            TELEGRAM_FULL_GROUP_COMMANDS.to_vec()
+        );
+    }
+
+    #[test]
+    fn command_registrations_limit_global_group_menu_when_allowed_chat_is_configured() {
+        let settings = TelegramSettings {
+            allowed_chat_id: Some(-100123),
+            ..TelegramSettings::default()
+        };
+        let registrations = build_command_registrations(&settings);
+
+        assert_eq!(registrations.len(), 3);
+        assert_eq!(
+            registrations[1].scope,
+            TelegramBotCommandScope::AllGroupChats
+        );
+        assert_eq!(
+            registrations[1].commands,
+            TELEGRAM_MINIMAL_GROUP_COMMANDS.to_vec()
+        );
+        assert_eq!(
+            registrations[2].scope,
+            TelegramBotCommandScope::Chat { chat_id: -100123 }
+        );
+        assert_eq!(
+            registrations[2].commands,
+            TELEGRAM_FULL_GROUP_COMMANDS.to_vec()
+        );
+    }
+
+    #[test]
+    fn registered_menus_omit_argument_only_commands() {
+        let private_commands = TELEGRAM_PRIVATE_COMMANDS
+            .iter()
+            .map(|command| command.command)
+            .collect::<Vec<_>>();
+        assert!(!private_commands.contains(&"new"));
+        assert!(!private_commands.contains(&"approve"));
+        assert!(!private_commands.contains(&"deny"));
+        assert!(!private_commands.contains(&"cron"));
+
+        let group_commands = TELEGRAM_FULL_GROUP_COMMANDS
+            .iter()
+            .map(|command| command.command)
+            .collect::<Vec<_>>();
+        assert!(!group_commands.contains(&"new"));
+        assert!(!group_commands.contains(&"approve"));
+        assert!(!group_commands.contains(&"deny"));
+        assert!(!group_commands.contains(&"cron"));
+    }
+
+    #[test]
+    fn command_scopes_to_clear_include_chat_scope_for_restricted_group() {
+        let settings = TelegramSettings {
+            allowed_chat_id: Some(-100123),
+            ..TelegramSettings::default()
+        };
+
+        assert_eq!(
+            command_scopes_to_clear(&settings),
+            vec![
+                TelegramBotCommandScope::Default,
+                TelegramBotCommandScope::AllPrivateChats,
+                TelegramBotCommandScope::AllGroupChats,
+                TelegramBotCommandScope::Chat { chat_id: -100123 },
+            ]
+        );
+    }
+
+    #[test]
+    fn topic_binding_success_message_includes_command_hint() {
+        let binding = TelegramTopicBinding {
+            thread_id: 42,
+            project_dir: "/tmp/project".to_string(),
+            preferred_env: Some("official".to_string()),
+            preferred_perm_mode: Some("dev".to_string()),
+            active_runtime_id: None,
+            last_claude_session_id: None,
+            created_at: Utc::now(),
+        };
+
+        let message = format_topic_binding_success_message(&binding);
+        assert!(message.contains("Bound this topic to:"));
+        assert!(message.contains("Topic commands:"));
+        assert!(message.contains("/new <prompt>"));
+        assert!(message.contains("Tip: type /"));
+    }
+
+    #[test]
+    fn new_topic_welcome_message_includes_command_hint() {
+        let binding = TelegramTopicBinding {
+            thread_id: 42,
+            project_dir: "/tmp/project".to_string(),
+            preferred_env: Some("official".to_string()),
+            preferred_perm_mode: Some("dev".to_string()),
+            active_runtime_id: None,
+            last_claude_session_id: None,
+            created_at: Utc::now(),
+        };
+
+        let message = format_new_topic_welcome_message(&binding);
+        assert!(message.contains("This topic is ready"));
+        assert!(message.contains("Topic commands:"));
+        assert!(message.contains("/resume [prompt]"));
+    }
+
+    #[test]
     fn interactive_monitor_tracking_is_idempotent_per_scope() {
         let manager = TelegramBridgeManager::default();
         assert!(manager.ensure_interactive_monitor_for_scope(1, Some(2), "runtime-1"));
         assert!(!manager.ensure_interactive_monitor_for_scope(1, Some(2), "runtime-1"));
         assert!(manager.ensure_interactive_monitor_for_scope(1, Some(2), "runtime-2"));
+    }
+
+    #[test]
+    fn clear_last_error_marks_bridge_running_again() {
+        let manager = TelegramBridgeManager::default();
+        manager.set_last_error("temporary getUpdates failure");
+        assert!(!manager.status().running);
+
+        manager.clear_last_error();
+        let status = manager.status();
+        assert!(status.running);
+        assert_eq!(status.last_error, None);
     }
 
     #[test]

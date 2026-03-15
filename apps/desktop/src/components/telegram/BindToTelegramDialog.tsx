@@ -74,7 +74,12 @@ export function BindToTelegramDialog({
     permissionMode: state.permissionMode,
     defaultWorkingDir: state.defaultWorkingDir,
   }));
-  const { openDirectoryPicker, getTelegramForumTopics, bindTelegramTopic } = useTauriCommands();
+  const {
+    openDirectoryPicker,
+    getTelegramForumTopics,
+    bindTelegramTopic,
+    getTelegramSettings,
+  } = useTauriCommands();
 
   const [projectDir, setProjectDir] = useState('');
   const [envName, setEnvName] = useState<string | null>(null);
@@ -84,12 +89,16 @@ export function BindToTelegramDialog({
   const [knownTopics, setKnownTopics] = useState<TelegramForumTopic[]>([]);
   const [topicsError, setTopicsError] = useState<string | null>(null);
   const [isLoadingTopics, setIsLoadingTopics] = useState(false);
+  const [bindPrereqError, setBindPrereqError] = useState<string | null>(null);
+  const [isCheckingPrereqs, setIsCheckingPrereqs] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (!open) {
       return;
     }
+
+    let cancelled = false;
 
     setProjectDir(initialProjectDir ?? defaultWorkingDir ?? '');
     setEnvName(initialEnvName ?? currentEnv ?? null);
@@ -102,21 +111,65 @@ export function BindToTelegramDialog({
     setManualThreadId('');
     setKnownTopics([]);
     setTopicsError(null);
+    setBindPrereqError(null);
     setIsLoadingTopics(true);
+    setIsCheckingPrereqs(true);
 
     void getTelegramForumTopics()
       .then((topics) => {
+        if (cancelled) {
+          return;
+        }
         setKnownTopics(topics);
         if (topics.length > 0) {
           setTopicSelection(topicOptionValue(topics[0].threadId));
         }
       })
       .catch((error) => {
+        if (cancelled) {
+          return;
+        }
         setTopicsError(String(error));
       })
       .finally(() => {
-        setIsLoadingTopics(false);
+        if (!cancelled) {
+          setIsLoadingTopics(false);
+        }
       });
+
+    void getTelegramSettings()
+      .then((settings) => {
+        if (cancelled) {
+          return;
+        }
+        const hasBotToken = Boolean(settings.botToken?.trim());
+        if (!hasBotToken) {
+          setBindPrereqError(t('telegram.bindRequiresBotToken'));
+          return;
+        }
+        if (settings.allowedChatId == null) {
+          setBindPrereqError(t('telegram.bindRequiresAllowedChatId'));
+          return;
+        }
+        setBindPrereqError(null);
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        setBindPrereqError(
+          t('telegram.bindSettingsLoadFailed').replace('{error}', String(error))
+        );
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsCheckingPrereqs(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     open,
     initialProjectDir,
@@ -126,6 +179,8 @@ export function BindToTelegramDialog({
     currentEnv,
     permissionMode,
     getTelegramForumTopics,
+    getTelegramSettings,
+    t,
   ]);
 
   const selectedThreadId =
@@ -134,6 +189,8 @@ export function BindToTelegramDialog({
       : parseTopicSelection(topicSelection);
   const shouldCreateNewTopic = topicSelection === CREATE_NEW_TOPIC_VALUE;
   const canSubmit =
+    !bindPrereqError &&
+    !isCheckingPrereqs &&
     projectDir.trim().length > 0 &&
     (shouldCreateNewTopic ||
       (topicSelection === MANUAL_TOPIC_VALUE
@@ -301,6 +358,11 @@ export function BindToTelegramDialog({
                 t('telegram.bindTopicsHint')
               )}
             </p>
+            {bindPrereqError ? (
+              <p className="text-xs text-destructive">
+                {bindPrereqError}
+              </p>
+            ) : null}
           </div>
         </div>
 
