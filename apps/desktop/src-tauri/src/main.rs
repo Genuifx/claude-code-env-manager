@@ -98,6 +98,13 @@ fn greet(name: &str) -> String {
 }
 
 #[tauri::command]
+fn get_system_username() -> String {
+    std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_else(|_| "developer".to_string())
+}
+
+#[tauri::command]
 async fn get_environments() -> Result<HashMap<String, EnvConfig>, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let start = std::time::Instant::now();
@@ -1936,6 +1943,103 @@ async fn save_file_dialog(
     }
 }
 
+#[tauri::command]
+async fn save_image_dialog(
+    app: tauri::AppHandle,
+    base64_png: String,
+    default_name: String,
+) -> Result<bool, String> {
+    use base64::Engine as _;
+    use std::path::PathBuf;
+    use tauri_plugin_dialog::DialogExt;
+
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    app.dialog()
+        .file()
+        .set_file_name(&default_name)
+        .add_filter("PNG Image", &["png"])
+        .save_file(move |path| {
+            let _ = tx.send(path.map(|p| p.to_string()));
+        });
+
+    match rx.recv().map_err(|e| format!("Dialog error: {}", e))? {
+        Some(path) => {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(base64_png)
+                .map_err(|e| format!("Failed to decode image data: {}", e))?;
+            let path_buf = PathBuf::from(path);
+            let target_path = if path_buf.extension().is_some() {
+                path_buf
+            } else {
+                path_buf.with_extension("png")
+            };
+
+            fs::write(&target_path, bytes)
+                .map_err(|e| format!("Failed to write image file: {}", e))?;
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn copy_png_to_clipboard_native(app: &tauri::AppHandle, png_bytes: Vec<u8>) -> Result<(), String> {
+    use objc2::ClassType;
+    use objc2::runtime::ProtocolObject;
+    use objc2_app_kit::{NSImage, NSPasteboard};
+    use objc2_foundation::{NSArray, NSData};
+
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    app.run_on_main_thread(move || {
+        let result = (|| -> Result<(), String> {
+            let data = NSData::with_bytes(&png_bytes);
+            let image = NSImage::initWithData(NSImage::alloc(), &data)
+                .ok_or_else(|| "Failed to decode PNG image".to_string())?;
+            let pasteboard = unsafe { NSPasteboard::generalPasteboard() };
+            let writer = ProtocolObject::from_retained(image);
+            let writers = NSArray::from_vec(vec![writer]);
+
+            unsafe {
+                pasteboard.clearContents();
+            }
+
+            let wrote = unsafe { pasteboard.writeObjects(&writers) };
+            if !wrote {
+                return Err("Failed to write image to clipboard".to_string());
+            }
+
+            Ok(())
+        })();
+
+        let _ = tx.send(result);
+    })
+    .map_err(|e| format!("Failed to schedule clipboard copy: {}", e))?;
+
+    rx.recv()
+        .map_err(|e| format!("Clipboard copy channel error: {}", e))?
+}
+
+#[cfg(not(target_os = "macos"))]
+fn copy_png_to_clipboard_native(_app: &tauri::AppHandle, _png_bytes: Vec<u8>) -> Result<(), String> {
+    Err("Native image clipboard copy is not implemented on this platform".to_string())
+}
+
+#[tauri::command]
+async fn copy_image_to_clipboard(
+    app: tauri::AppHandle,
+    base64_png: String,
+) -> Result<(), String> {
+    use base64::Engine as _;
+
+    let png_bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64_png)
+        .map_err(|e| format!("Failed to decode image data: {}", e))?;
+
+    copy_png_to_clipboard_native(&app, png_bytes)
+}
+
 /// Force-quit the app, bypassing closeToTray.
 /// Called from frontend Cmd+Q handler.
 #[tauri::command]
@@ -1992,6 +2096,7 @@ fn main() {
         .manage(proxy_debug_manager.clone())
         .invoke_handler(tauri::generate_handler![
             greet,
+            get_system_username,
             get_environments,
             get_current_env,
             set_current_env,
@@ -2099,6 +2204,8 @@ fn main() {
             clear_proxy_traffic,
             open_text_in_vscode,
             save_file_dialog,
+            save_image_dialog,
+            copy_image_to_clipboard,
             quit_app
         ])
         .on_window_event(|window, event| {
