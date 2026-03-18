@@ -78,6 +78,18 @@ impl EventDispatcher {
             .collect()
     }
 
+    pub fn has_connected_channel(&self, runtime_id: &str, channel_kind: &ChannelKind) -> bool {
+        let Ok(channels) = self.channels_by_runtime.lock() else {
+            return false;
+        };
+
+        channels
+            .get(runtime_id)
+            .into_iter()
+            .flat_map(|entry| entry.iter())
+            .any(|channel| channel.is_connected() && channel.channel_kind() == *channel_kind)
+    }
+
     fn dispatch_to_channels<F>(&self, runtime_id: &str, send: F)
     where
         F: Fn(&Arc<dyn OutputChannel>) -> Result<(), String>,

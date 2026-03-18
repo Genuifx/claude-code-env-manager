@@ -14,6 +14,8 @@ import type {
   TelegramForumTopic,
   TelegramSettings,
   TelegramTopicBinding,
+  TmuxAttachTerminalInfo,
+  TmuxAttachTerminalType,
   UnifiedSessionDebugComparison,
   UnifiedSessionInfo,
 } from '@/lib/tauri-ipc';
@@ -284,6 +286,13 @@ export function useTauriCommands() {
     }
   }, [loadEnvironments, setLoading, setError]);
 
+  const syncInteractiveSessions = useCallback(async (): Promise<Session[]> => {
+    const tauriSessions = await invoke<TauriSession[]>('list_interactive_sessions');
+    const sessions = tauriSessions.map(toFrontendSession);
+    setSessions(sessions);
+    return sessions;
+  }, [setSessions]);
+
   const createInteractiveSession = useCallback(async (options: {
     envName?: string;
     permMode?: string;
@@ -312,6 +321,20 @@ export function useTauriCommands() {
       }
 
       setError(null);
+
+      if (session.terminalType === 'embedded') {
+        try {
+          await invoke('open_interactive_session_in_terminal', {
+            sessionId: session.id,
+            terminalType: null,
+          });
+          await syncInteractiveSessions();
+        } catch (openErr) {
+          console.error('Interactive session created but failed to open terminal:', openErr);
+          toast.error(`Session created, but failed to open terminal: ${openErr}`);
+        }
+      }
+
       return session;
     } catch (err) {
       const clientLabel = options.client === 'codex' ? 'Codex' : 'Claude Code';
@@ -320,7 +343,15 @@ export function useTauriCommands() {
     } finally {
       setLoading(false);
     }
-  }, [currentEnv, permissionMode, selectedWorkingDir, addSession, setLoading, setError]);
+  }, [
+    currentEnv,
+    permissionMode,
+    selectedWorkingDir,
+    addSession,
+    setLoading,
+    setError,
+    syncInteractiveSessions,
+  ]);
 
   const launchClaudeCode = useCallback(async (
     workingDir?: string,
@@ -335,11 +366,8 @@ export function useTauriCommands() {
   }, [createInteractiveSession]);
 
   const listInteractiveSessions = useCallback(async (): Promise<Session[]> => {
-    const tauriSessions = await invoke<TauriSession[]>('list_interactive_sessions');
-    const sessions = tauriSessions.map(toFrontendSession);
-    setSessions(sessions);
-    return sessions;
-  }, [setSessions]);
+    return syncInteractiveSessions();
+  }, [syncInteractiveSessions]);
 
   const listRuntimeRecoveryCandidates = useCallback(async (): Promise<RuntimeRecoveryCandidate[]> => {
     return invoke<RuntimeRecoveryCandidate[]>('list_runtime_recovery_candidates');
@@ -463,14 +491,25 @@ export function useTauriCommands() {
     }
   }, []);
 
-  const openInteractiveSessionInTerminal = useCallback(async (sessionId: string) => {
+  const listTmuxAttachTerminals = useCallback(async (): Promise<TmuxAttachTerminalInfo[]> => {
+    return invoke<TmuxAttachTerminalInfo[]>('list_tmux_attach_terminals');
+  }, []);
+
+  const openInteractiveSessionInTerminal = useCallback(async (
+    sessionId: string,
+    terminalType?: TmuxAttachTerminalType,
+  ) => {
     try {
-      await invoke('open_interactive_session_in_terminal', { sessionId });
+      await invoke('open_interactive_session_in_terminal', {
+        sessionId,
+        terminalType: terminalType ?? null,
+      });
+      await syncInteractiveSessions();
     } catch (err) {
       toast.error(`Failed to open session in terminal: ${err}`);
       throw err;
     }
-  }, []);
+  }, [syncInteractiveSessions]);
 
   const closeSession = useCallback(async (sessionId: string) => {
     try {
@@ -918,6 +957,7 @@ export function useTauriCommands() {
     resizeInteractiveSession,
     deleteSession,
     focusSession,
+    listTmuxAttachTerminals,
     openInteractiveSessionInTerminal,
     closeSession,
     minimizeSession,

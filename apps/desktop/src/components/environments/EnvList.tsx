@@ -1,9 +1,10 @@
-import { Globe, Check, Circle, Edit2, Trash2 } from 'lucide-react';
+import { Globe, Edit2, Trash2 } from 'lucide-react';
 import { useAppStore, type Environment } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
+import { ModelIcon } from '@/components/history/ModelIcon';
 
 function maskAuthToken(token?: string, notSet?: string): string {
   if (!token) return notSet || 'Not set';
@@ -103,18 +104,18 @@ function EnvCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardPro
       onClick={onSelect}
     >
       <div className="flex items-start gap-4">
-        {/* Icon */}
+        {/* Icon — vendor brand */}
         <div className={cn(
           'w-12 h-12 rounded-lg flex items-center justify-center shrink-0',
           isActive
-            ? 'bg-primary/15 text-primary'
-            : 'glass-icon-container text-muted-foreground'
+            ? 'bg-primary/15'
+            : 'glass-icon-container'
         )}
           style={isActive ? {
             boxShadow: '0 0 16px hsl(var(--primary) / 0.15), 0 0 4px hsl(var(--primary) / 0.2)',
           } : undefined}
         >
-          {isActive ? <Check className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
+          <ModelIcon model={defaultOpusModel} size={24} />
         </div>
 
         {/* Content */}
@@ -161,7 +162,7 @@ function EnvCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardPro
           </div>
         </div>
 
-        {/* Actions — always visible row with badge + buttons */}
+        {/* Right-top: status badge + switch */}
         <div className="flex items-center gap-1 shrink-0">
           {isActive && (
             <span className="flex items-center gap-1.5 text-xs font-medium text-primary mr-1">
@@ -185,35 +186,41 @@ function EnvCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardPro
               {t('environments.switchTo')}
             </Button>
           )}
+        </div>
+      </div>
+
+      {/* Bottom-right: edit / delete */}
+      <div className="absolute bottom-3 right-4 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-muted-foreground hover:text-foreground"
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit();
+          }}
+        >
+          <Edit2 className="w-3.5 h-3.5 mr-1" />
+          {t('common.edit')}
+        </Button>
+        {name === 'official' ? (
+          <span className="h-7 px-2 inline-flex items-center text-xs font-medium text-muted-foreground glass-badge rounded-md cursor-not-allowed">
+            {t('common.protected')}
+          </span>
+        ) : (
           <Button
             variant="ghost"
             size="sm"
-            className="h-8 px-3 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+            className="h-7 px-2 text-destructive hover:text-destructive hover:bg-destructive/10"
             onClick={(e) => {
               e.stopPropagation();
-              onEdit();
+              onDelete();
             }}
           >
-            {t('common.edit')}
+            <Trash2 className="w-3.5 h-3.5 mr-1" />
+            {t('common.delete')}
           </Button>
-          {name === 'official' ? (
-            <span className="h-8 px-3 inline-flex items-center text-xs font-medium text-muted-foreground glass-badge rounded-md cursor-not-allowed">
-              {t('common.protected')}
-            </span>
-          ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-3 text-destructive hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete();
-              }}
-            >
-              {t('common.delete')}
-            </Button>
-          )}
-        </div>
+        )}
       </div>
     </div>
   );
@@ -239,10 +246,10 @@ function EnvCompactCard({ name, env, isActive, onSelect, onEdit, onDelete }: Env
         <div className={cn(
           'w-8 h-8 rounded-md flex items-center justify-center shrink-0',
           isActive
-            ? 'bg-primary/15 text-primary'
-            : 'glass-icon-container text-muted-foreground'
+            ? 'bg-primary/15'
+            : 'glass-icon-container'
         )}>
-          {isActive ? <Check className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
+          <ModelIcon model={defaultOpusModel} size={18} />
         </div>
         <h4 className="font-semibold text-sm truncate flex-1">{name}</h4>
         {isActive && (
@@ -267,7 +274,7 @@ function EnvCompactCard({ name, env, isActive, onSelect, onEdit, onDelete }: Env
       </p>
 
       {/* 悬停操作层 */}
-      <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+      <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
         <button
           type="button"
           className="w-7 h-7 rounded-md flex items-center justify-center glass-subtle hover:bg-surface-raised text-muted-foreground hover:text-foreground transition-colors"

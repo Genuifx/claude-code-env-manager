@@ -41,6 +41,23 @@ pub struct TerminalInfo {
     pub installed: bool,
 }
 
+/// Terminal targets available for opening an existing tmux-backed session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TmuxAttachTerminalType {
+    TerminalApp,
+    ITerm2,
+    Ghostty,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TmuxAttachTerminalInfo {
+    pub terminal_type: TmuxAttachTerminalType,
+    pub name: String,
+    pub installed: bool,
+    pub preferred: bool,
+}
+
 /// Get the path to the terminal preferences file
 fn get_terminal_prefs_path() -> PathBuf {
     let home = dirs::home_dir().expect("Could not find home directory");
@@ -113,6 +130,40 @@ pub fn detect_terminals() -> Vec<TerminalInfo> {
         terminal_type: TerminalType::ITerm2,
         name: "iTerm2".to_string(),
         installed: iterm_installed,
+    });
+
+    terminals
+}
+
+/// Detect which terminals can open an existing tmux-backed session.
+pub fn detect_tmux_attach_terminals() -> Vec<TmuxAttachTerminalInfo> {
+    let preferred = match get_preferred_terminal() {
+        TerminalType::TerminalApp => Some(TmuxAttachTerminalType::TerminalApp),
+        TerminalType::ITerm2 => Some(TmuxAttachTerminalType::ITerm2),
+    };
+
+    let mut terminals = detect_terminals()
+        .into_iter()
+        .map(|info| {
+            let terminal_type = match info.terminal_type {
+                TerminalType::TerminalApp => TmuxAttachTerminalType::TerminalApp,
+                TerminalType::ITerm2 => TmuxAttachTerminalType::ITerm2,
+            };
+
+            TmuxAttachTerminalInfo {
+                terminal_type,
+                name: info.name,
+                installed: info.installed,
+                preferred: preferred == Some(terminal_type),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    terminals.push(TmuxAttachTerminalInfo {
+        terminal_type: TmuxAttachTerminalType::Ghostty,
+        name: "Ghostty".to_string(),
+        installed: resolve_ghostty_path().is_some(),
+        preferred: false,
     });
 
     terminals
@@ -355,6 +406,21 @@ pub fn resolve_tmux_path() -> Option<String> {
     resolve_binary_path("tmux", &candidates)
 }
 
+/// Resolve the full path to the `ghostty` binary or app bundle executable.
+pub fn resolve_ghostty_path() -> Option<String> {
+    let home = dirs::home_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let candidates = vec![
+        format!("{}/.local/bin/ghostty", home),
+        "/usr/local/bin/ghostty".to_string(),
+        "/opt/homebrew/bin/ghostty".to_string(),
+        "/Applications/Ghostty.app/Contents/MacOS/ghostty".to_string(),
+        format!("{}/Applications/Ghostty.app/Contents/MacOS/ghostty", home),
+    ];
+    resolve_binary_path("ghostty", &candidates)
+}
+
 /// Returns whether ccem is installed.
 pub fn is_ccem_installed() -> bool {
     *CCEM_INSTALLED.get_or_init(|| resolve_ccem_path().is_some())
@@ -514,7 +580,20 @@ fn terminal_app_script(shell_command: &str) -> String {
         r#"tell application "Terminal"
     set theTab to do script "{}"
     activate
-    return id of window of theTab as string
+    return (id of window of theTab) as text
+end tell"#,
+        escaped
+    )
+}
+
+/// Generate AppleScript for Terminal.app and return the created window ID.
+fn terminal_app_attach_script(shell_command: &str) -> String {
+    let escaped = shell_command.replace("\\", "\\\\").replace("\"", "\\\"");
+    format!(
+        r#"tell application "Terminal"
+    set theTab to do script "{}"
+    activate
+    return (id of window of theTab) as text
 end tell"#,
         escaped
     )
@@ -630,13 +709,14 @@ pub fn launch_in_terminal(
 }
 
 /// Launch a new terminal window and attach it to an existing tmux target.
+/// Returns `(window_id, iterm_session_id)` when available.
 pub fn open_tmux_target_in_terminal(
     terminal: TerminalType,
     target: &str,
 ) -> Result<(Option<String>, Option<String>), String> {
     let shell_command = build_tmux_attach_command(target);
     let script = match terminal {
-        TerminalType::TerminalApp => terminal_app_script(&shell_command),
+        TerminalType::TerminalApp => terminal_app_attach_script(&shell_command),
         TerminalType::ITerm2 => iterm2_script(&shell_command),
     };
 
@@ -656,6 +736,8 @@ pub fn open_tmux_target_in_terminal(
             let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if let Some((window_id, session_id)) = raw.split_once('|') {
                 Ok((Some(window_id.to_string()), Some(session_id.to_string())))
+            } else if raw.is_empty() {
+                Err("iTerm2 did not return a window identifier".to_string())
             } else {
                 Ok((Some(raw), None))
             }
@@ -668,6 +750,38 @@ pub fn open_tmux_target_in_terminal(
                 Ok((Some(raw), None))
             }
         }
+    }
+}
+
+fn open_tmux_target_in_ghostty(target: &str) -> Result<(Option<String>, Option<String>), String> {
+    let ghostty = resolve_ghostty_path().ok_or_else(|| "Ghostty is not installed".to_string())?;
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let shell_command = build_tmux_attach_command(target);
+    let mut child = Command::new(&ghostty)
+        .args(["-e", &shell, "-lc", &shell_command])
+        .spawn()
+        .map_err(|e| format!("Failed to launch Ghostty: {}", e))?;
+
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+
+    Ok((None, None))
+}
+
+/// Launch a new terminal window and attach it to an existing tmux target.
+pub fn open_tmux_target_in_attach_terminal(
+    terminal: TmuxAttachTerminalType,
+    target: &str,
+) -> Result<(Option<String>, Option<String>), String> {
+    match terminal {
+        TmuxAttachTerminalType::TerminalApp => {
+            open_tmux_target_in_terminal(TerminalType::TerminalApp, target)
+        }
+        TmuxAttachTerminalType::ITerm2 => {
+            open_tmux_target_in_terminal(TerminalType::ITerm2, target)
+        }
+        TmuxAttachTerminalType::Ghostty => open_tmux_target_in_ghostty(target),
     }
 }
 
@@ -976,6 +1090,55 @@ end tell"#;
 ///   vertical: false = horizontal split line = stacked (top/bottom)
 ///   before: false   = session placed right-of/below destination
 ///   before: true    = session placed left-of/above destination
+fn build_iterm_arrange_script(
+    steps: &str,
+    anchor_session_id: &str,
+    source_window_ids: &[String],
+) -> String {
+    let source_window_list = if source_window_ids.is_empty() {
+        "{}".to_string()
+    } else {
+        format!(
+            "{{{}}}",
+            source_window_ids
+                .iter()
+                .map(|window_id| format!("\"{}\"", window_id))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+
+    format!(
+        r#"tell application "iTerm"
+{}    set arrangedWindowId to ""
+    repeat with aWindow in windows
+        repeat with aTab in tabs of aWindow
+            repeat with aSession in sessions of aTab
+                if unique id of aSession is "{}" then
+                    set arrangedWindowId to id of aWindow as string
+                end if
+            end repeat
+        end repeat
+    end repeat
+    if arrangedWindowId is "" then
+        return "not_found"
+    end if
+    repeat with sourceWindowId in {}
+        if sourceWindowId is not arrangedWindowId then
+            repeat with aWindow in windows
+                if (id of aWindow as string) is sourceWindowId then
+                    close aWindow
+                    exit repeat
+                end if
+            end repeat
+        end if
+    end repeat
+    return arrangedWindowId
+end tell"#,
+        steps, anchor_session_id, source_window_list
+    )
+}
+
 pub fn arrange_iterm_sessions(
     sessions: &[ArrangeSessionInfo],
     layout: &ArrangeLayout,
@@ -994,53 +1157,39 @@ pub fn arrange_iterm_sessions(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
+    let mut source_window_ids: Vec<String> = Vec::new();
+    for session in sessions {
+        if !source_window_ids.contains(&session.window_id) {
+            source_window_ids.push(session.window_id.clone());
+        }
+    }
+
     let script = match layout {
         ArrangeLayout::Horizontal2 => {
             if session_ids.len() < 2 {
                 return Err("Need at least 2 sessions for side-by-side layout".to_string());
             }
             // Move B right of A: vertical=true, before=false
-            format!(
-                r#"tell application "iTerm"
-    invoke API expression "iterm2.move_session(session: \"{}\", destination: \"{}\", vertical: true, before: false)"
+            let steps = format!(
+                r#"    invoke API expression "iterm2.move_session(session: \"{}\", destination: \"{}\", vertical: true, before: false)"
     delay 0.8
-    -- Find the window containing session A
-    repeat with aWindow in windows
-        repeat with aTab in tabs of aWindow
-            repeat with aSession in sessions of aTab
-                if unique id of aSession is "{}" then
-                    return id of aWindow as string
-                end if
-            end repeat
-        end repeat
-    end repeat
-    return "not_found"
-end tell"#,
-                session_ids[1], session_ids[0], session_ids[0]
-            )
+"#,
+                session_ids[1], session_ids[0]
+            );
+            build_iterm_arrange_script(&steps, session_ids[0], &source_window_ids)
         }
         ArrangeLayout::Vertical2 => {
             if session_ids.len() < 2 {
                 return Err("Need at least 2 sessions for stacked layout".to_string());
             }
             // Move B below A: vertical=false, before=true
-            format!(
-                r#"tell application "iTerm"
-    invoke API expression "iterm2.move_session(session: \"{}\", destination: \"{}\", vertical: false, before: true)"
+            let steps = format!(
+                r#"    invoke API expression "iterm2.move_session(session: \"{}\", destination: \"{}\", vertical: false, before: true)"
     delay 0.8
-    repeat with aWindow in windows
-        repeat with aTab in tabs of aWindow
-            repeat with aSession in sessions of aTab
-                if unique id of aSession is "{}" then
-                    return id of aWindow as string
-                end if
-            end repeat
-        end repeat
-    end repeat
-    return "not_found"
-end tell"#,
-                session_ids[1], session_ids[0], session_ids[0]
-            )
+"#,
+                session_ids[1], session_ids[0]
+            );
+            build_iterm_arrange_script(&steps, session_ids[0], &source_window_ids)
         }
         ArrangeLayout::Grid4 => {
             if session_ids.len() < 2 {
@@ -1078,22 +1227,7 @@ end tell"#,
                 ));
             }
 
-            format!(
-                r#"tell application "iTerm"
-{}    -- Find the window containing session A
-    repeat with aWindow in windows
-        repeat with aTab in tabs of aWindow
-            repeat with aSession in sessions of aTab
-                if unique id of aSession is "{}" then
-                    return id of aWindow as string
-                end if
-            end repeat
-        end repeat
-    end repeat
-    return "not_found"
-end tell"#,
-                steps, session_ids[0]
-            )
+            build_iterm_arrange_script(&steps, session_ids[0], &source_window_ids)
         }
         ArrangeLayout::LeftMain3 => {
             if session_ids.len() < 2 {
@@ -1120,21 +1254,7 @@ end tell"#,
                 ));
             }
 
-            format!(
-                r#"tell application "iTerm"
-{}    repeat with aWindow in windows
-        repeat with aTab in tabs of aWindow
-            repeat with aSession in sessions of aTab
-                if unique id of aSession is "{}" then
-                    return id of aWindow as string
-                end if
-            end repeat
-        end repeat
-    end repeat
-    return "not_found"
-end tell"#,
-                steps, session_ids[0]
-            )
+            build_iterm_arrange_script(&steps, session_ids[0], &source_window_ids)
         }
     };
 
@@ -1288,5 +1408,25 @@ mod tests {
     fn test_build_tmux_attach_command() {
         let cmd = build_tmux_attach_command("ccem:ccem-1234abcd");
         assert!(cmd.ends_with("attach-session -t 'ccem:ccem-1234abcd'"));
+    }
+
+    #[test]
+    fn test_terminal_app_attach_script_reads_window_id() {
+        let script = terminal_app_attach_script("tmux attach-session -t test");
+        assert!(script.contains("do script"));
+        assert!(script.contains("id of window"));
+    }
+
+    #[test]
+    fn test_iterm_arrange_script_closes_old_windows() {
+        let script = build_iterm_arrange_script(
+            "    delay 0.8\n",
+            "session-a",
+            &["101".to_string(), "202".to_string()],
+        );
+        assert!(script.contains("repeat with sourceWindowId"));
+        assert!(script.contains("close aWindow"));
+        assert!(script.contains("\"101\""));
+        assert!(script.contains("\"202\""));
     }
 }

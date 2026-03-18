@@ -8,7 +8,8 @@
     "retry": "重试",
     "loading": "加载中...",
     "protected": "受保护",
-    "local": "本地"
+    "local": "本地",
+    "default": "默认"
   },
   "dashboard": {
     "subtitle": "Claude Code 工作区总览",
@@ -129,6 +130,9 @@
     "closeAll": "全部关闭",
     "focus": "聚焦",
     "openInTerminal": "在终端打开",
+    "chooseTerminal": "选择终端",
+    "notInstalled": "未安装",
+    "selectInEmbeddedTerminal": "点击切换下方 Embedded Terminal",
     "quickLaunch": "快速启动",
     "browseDir": "浏览...",
     "selectDirs": "已选 ({count})",
@@ -332,12 +336,19 @@
     "shareTotalCost": "累计费用",
     "shareStreak": "连续天数",
     "shareWeekTokens": "本周 Tokens",
-    "shareCopyImage": "复制分享图",
+    "shareDayTokens": "今日 Tokens",
+    "shareMonthTokens": "本月 Tokens",
+    "share24hTokens": "24 小时 Token 消耗",
+    "shareMonthTokensLabel": "本月 Token 消耗",
+    "timeRangeDay": "日",
+    "timeRangeWeek": "周",
+    "timeRangeMonth": "月",
+    "shareCopyImage": "复制",
     "shareCopying": "复制中...",
     "shareCopied": "分享图已复制",
     "shareCopyFailed": "复制分享图失败：{error}",
     "shareCopyUnsupported": "当前环境暂不支持复制图片到剪贴板",
-    "shareSaveImage": "保存图片",
+    "shareSaveImage": "保存",
     "shareSaving": "生成中...",
     "shareSaved": "海报已保存",
     "shareSaveFailed": "保存分享图失败：{error}",
@@ -485,7 +496,7 @@
   },
   "telegram": {
     "copyBindCommand": "复制 Telegram /bind 命令",
-    "copyBindShort": "复制 /bind",
+    "copyBindShort": "复制命令",
     "bindCopiedShort": "已复制",
     "bindCommandCopied": "已复制 Telegram 绑定命令",
     "bindCommandCopyFailed": "复制 Telegram 绑定命令失败：{error}",
@@ -574,8 +585,23 @@
     "analytics": "分析",
     "proxyDebug": "Proxy 调试",
     "settings": "设置",
+    "chatApp": "聊天集成",
     "groupWorkspace": "工作区",
     "groupInsights": "洞察"
+  },
+  "chat": {
+    "bindToChannel": "绑定到聊天频道",
+    "bindToTopic": "绑定到 Topic",
+    "bindDialogTitle": "绑定到聊天频道",
+    "bindDialogDesc": "选择聊天平台并配置绑定",
+    "selectPlatform": "选择平台",
+    "bindSubmit": "绑定频道"
+  },
+  "chatApp": {
+    "subtitle": "将聊天平台接入 Claude 会话",
+    "telegram": "Telegram",
+    "feishu": "飞书",
+    "feishuComingSoon": "飞书集成即将推出"
   },
   "proxyDebug": {
     "subtitle": "透明反代、SSE 流与请求日志调试",

@@ -27,6 +27,7 @@ interface SharePosterDialogProps {
 }
 
 type PosterTheme = 'dark' | 'light';
+type TimeRange = 'day' | 'week' | 'month';
 
 interface ThemeColors {
   bg: string;
@@ -59,9 +60,10 @@ interface PosterCardProps {
   streakDays: number;
   totalTokens: number;
   theme: PosterTheme;
+  timeRange: TimeRange;
   usageStats: UsageStats;
   username: string;
-  weeklyTokens: number;
+  rangeTokens: number;
 }
 
 /* ── Constants ── */
@@ -134,23 +136,64 @@ function sumTokens(usage: TokenUsage): number {
   return usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
 }
 
-function buildPosterFileName() {
-  return `ccem-weekly-${new Date().toISOString().slice(0, 10)}.png`;
+function buildPosterFileName(timeRange: TimeRange) {
+  const rangeLabel = { day: 'daily', week: 'weekly', month: 'monthly' }[timeRange];
+  return `ccem-${rangeLabel}-${new Date().toISOString().slice(0, 10)}.png`;
 }
 
-function formatPosterRange(dailyActivities: DailyActivity[]): string {
-  const last7 = dailyActivities.slice(-7);
+function formatPosterRange(dailyActivities: DailyActivity[], timeRange: TimeRange): string {
   const formatDate = (value: string) => {
     const date = new Date(value);
     return `${date.getMonth() + 1}.${date.getDate()}`;
   };
-  if (last7.length > 0) {
-    return `${formatDate(last7[0].date)} – ${formatDate(last7[last7.length - 1].date)}`;
+
+  // 日本月：从本月1号到今天
+  if (timeRange === 'month') {
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const rangeData = dailyActivities.filter(a => new Date(a.date) >= startOfMonth);
+    if (rangeData.length > 0) {
+      return `${formatDate(rangeData[0].date)} – ${formatDate(rangeData[rangeData.length - 1].date)}`;
+    }
+    return `${startOfMonth.getMonth() + 1}.1 – ${now.getMonth() + 1}.${now.getDate()}`;
+  }
+
+  // 日：今天
+  if (timeRange === 'day') {
+    const today = new Date().toISOString().slice(0, 10);
+    const todayActivity = dailyActivities.find(a => a.date === today);
+    if (todayActivity) {
+      return formatDate(todayActivity.date);
+    }
+    const now = new Date();
+    return `${now.getMonth() + 1}.${now.getDate()}`;
+  }
+
+  // 周：最近7天
+  const rangeData = dailyActivities.slice(-7);
+  if (rangeData.length > 0) {
+    return `${formatDate(rangeData[0].date)} – ${formatDate(rangeData[rangeData.length - 1].date)}`;
   }
   const end = new Date();
   const start = new Date();
   start.setDate(start.getDate() - 6);
   return `${start.getMonth() + 1}.${start.getDate()} – ${end.getMonth() + 1}.${end.getDate()}`;
+}
+
+function getRangeTokens(usageStats: UsageStats, timeRange: TimeRange): number {
+  if (timeRange === 'day') {
+    return sumTokens(usageStats.today);
+  } else if (timeRange === 'week') {
+    return sumTokens(usageStats.week);
+  } else {
+    return sumTokens(usageStats.month);
+  }
+}
+
+function getRangeLabelTokensKey(timeRange: TimeRange): string {
+  if (timeRange === 'day') return 'analytics.shareDayTokens';
+  if (timeRange === 'month') return 'analytics.shareMonthTokens';
+  return 'analytics.shareWeekTokens';
 }
 
 async function dataUrlToBlob(dataUrl: string) {
@@ -248,14 +291,92 @@ function PosterWaveform({ activities, theme }: { activities: DailyActivity[]; th
   return <canvas ref={canvasRef} style={{ width: totalW, height: totalH, display: 'block' }} />;
 }
 
-/* ── Sparkline ── */
+/* ── Hourly Sparkline (for Day view) ── */
 
-function PosterSparkline({ activities, idPrefix, theme }: { activities: DailyActivity[]; idPrefix: string; theme: PosterTheme }) {
-  const last7 = activities.slice(-7);
-  if (last7.length === 0) return null;
+function PosterHourlySparkline({ hourlyHistory, idPrefix, theme }: { hourlyHistory: UsageStats['hourlyHistory']; idPrefix: string; theme: PosterTheme }) {
+  const tc = THEMES[theme];
+
+  // 获取今天的小时数据 (YYYY-MM-DDTHH 格式)
+  const today = new Date().toISOString().slice(0, 10);
+  const hourlyData: { hour: number; tokens: number }[] = [];
+
+  for (let h = 0; h < 24; h++) {
+    const key = `${today}T${h.toString().padStart(2, '0')}`;
+    const usage = hourlyHistory[key];
+    hourlyData.push({
+      hour: h,
+      tokens: usage ? sumTokens(usage) : 0,
+    });
+  }
+
+  // 只显示有数据的小时段
+  const nonZeroData = hourlyData.filter(d => d.tokens > 0);
+  if (nonZeroData.length === 0) return null;
+
+  const maxTokens = Math.max(...hourlyData.map(d => d.tokens), 1);
+  const w = 384;
+  const h = 76;
+  const padY = 4;
+  const chartH = h - padY * 2;
+  const gradId = `${idPrefix}-hourly-spark-grad`;
+  const glowId = `${idPrefix}-hourly-spark-glow`;
+
+  // 使用24小时数据点
+  const points = hourlyData.map((d, i) => ({
+    x: (i / 23) * w,
+    y: padY + chartH - (d.tokens / maxTokens) * chartH,
+  }));
+
+  const bezier = points.reduce((acc, pt, i, arr) => {
+    if (i === 0) return `M${pt.x},${pt.y}`;
+    const prev = arr[i - 1];
+    const cpx1 = prev.x + (pt.x - prev.x) * 0.4;
+    const cpx2 = pt.x - (pt.x - prev.x) * 0.4;
+    return `${acc} C${cpx1},${prev.y} ${cpx2},${pt.y} ${pt.x},${pt.y}`;
+  }, '');
+
+  const area = `${bezier} L${points[points.length - 1].x},${h} L${points[0].x},${h} Z`;
+
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
+      <defs>
+        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={tc.sparkFillFrom} stopOpacity={0.28} />
+          <stop offset="100%" stopColor={tc.sparkFillFrom} stopOpacity={0.02} />
+        </linearGradient>
+        <filter id={glowId}>
+          <feGaussianBlur stdDeviation="2.5" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </defs>
+      <path d={area} fill={`url(#${gradId})`} />
+      <path d={bezier} fill="none" stroke={tc.sparkStroke} strokeWidth={2} filter={`url(#${glowId})`} />
+    </svg>
+  );
+}
+
+/* ── Sparkline (for Week/Month view) ── */
+
+function PosterSparkline({ activities, idPrefix, theme, timeRange }: { activities: DailyActivity[]; idPrefix: string; theme: PosterTheme; timeRange: TimeRange }) {
+  // 周：最近7天，月：本月数据（从1号到今天）
+  let rangeData: DailyActivity[] = [];
+
+  if (timeRange === 'month') {
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    rangeData = activities.filter(a => new Date(a.date) >= startOfMonth);
+  } else {
+    // week
+    rangeData = activities.slice(-7);
+  }
+
+  if (rangeData.length === 0) return null;
 
   const tc = THEMES[theme];
-  const maxTokens = Math.max(...last7.map((a) => a.tokens), 1);
+  const maxTokens = Math.max(...rangeData.map((a) => a.tokens), 1);
   const w = 384;
   const h = 76;
   const padY = 4;
@@ -263,8 +384,8 @@ function PosterSparkline({ activities, idPrefix, theme }: { activities: DailyAct
   const gradId = `${idPrefix}-spark-grad`;
   const glowId = `${idPrefix}-spark-glow`;
 
-  const points = last7.map((a, i) => ({
-    x: (i / Math.max(last7.length - 1, 1)) * w,
+  const points = rangeData.map((a, i) => ({
+    x: (i / Math.max(rangeData.length - 1, 1)) * w,
     y: padY + chartH - (a.tokens / maxTokens) * chartH,
   }));
 
@@ -383,9 +504,10 @@ function PosterCard({
   streakDays,
   totalTokens,
   theme,
+  timeRange,
   usageStats,
   username,
-  weeklyTokens,
+  rangeTokens,
 }: PosterCardProps) {
   const { t } = useLocale();
   const tc = THEMES[theme];
@@ -525,7 +647,7 @@ function PosterCard({
               lineHeight: 1.1,
             }}
           >
-            {formatLargeNumber(weeklyTokens)}
+            {formatLargeNumber(rangeTokens)}
           </div>
           <div
             style={{
@@ -536,7 +658,7 @@ function PosterCard({
               letterSpacing: '0.08em',
             }}
           >
-            tokens this week
+            {t(getRangeLabelTokensKey(timeRange))}
           </div>
         </div>
 
@@ -596,9 +718,15 @@ function PosterCard({
         </div>
 
         {/* ── Sparkline ── */}
-        <div style={{ marginBottom: 18 }}>
-          <div style={sectionLabel}>{t('analytics.share7dTokens')}</div>
-          <PosterSparkline activities={dailyActivities} idPrefix={chartIdPrefix} theme={theme} />
+        <div style={{ marginBottom: 22 }}>
+          <div style={sectionLabel}>
+            {timeRange === 'day' ? t('analytics.share24hTokens') : timeRange === 'month' ? t('analytics.shareMonthTokensLabel') : t('analytics.share7dTokens')}
+          </div>
+          {timeRange === 'day' ? (
+            <PosterHourlySparkline hourlyHistory={usageStats.hourlyHistory} idPrefix={chartIdPrefix} theme={theme} />
+          ) : (
+            <PosterSparkline activities={dailyActivities} idPrefix={chartIdPrefix} theme={theme} timeRange={timeRange} />
+          )}
         </div>
 
         {/* ── Model Bar ── */}
@@ -669,12 +797,13 @@ export function SharePosterDialog({
   const [posterTheme, setPosterTheme] = useState<PosterTheme>(() =>
     document.documentElement.classList.contains('light') ? 'light' : 'dark',
   );
+  const [timeRange, setTimeRange] = useState<TimeRange>('week');
   const previewId = useId().replace(/:/g, '');
   const exportId = useId().replace(/:/g, '');
 
   const totalTokens = sumTokens(usageStats.total);
-  const weeklyTokens = sumTokens(usageStats.week);
-  const dateRange = formatPosterRange(dailyActivities);
+  const rangeTokens = getRangeTokens(usageStats, timeRange);
+  const dateRange = formatPosterRange(dailyActivities, timeRange);
 
   useEffect(() => {
     if (!open) return;
@@ -719,7 +848,7 @@ export function SharePosterDialog({
       const dataUrl = await buildPosterDataUrl();
       const saved = await invoke<boolean>('save_image_dialog', {
         base64Png: dataUrl.split(',')[1],
-        defaultName: buildPosterFileName(),
+        defaultName: buildPosterFileName(timeRange),
       });
       if (saved) toast.success(t('analytics.shareSaved'));
     } catch (error) {
@@ -758,9 +887,10 @@ export function SharePosterDialog({
     streakDays,
     totalTokens,
     theme: posterTheme,
+    timeRange,
     usageStats,
     username,
-    weeklyTokens,
+    rangeTokens,
   };
 
   return (
@@ -802,32 +932,51 @@ export function SharePosterDialog({
             {posterTheme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </Button>
 
-          <Button
-            type="button"
-            variant="outline"
-            className="gap-2 rounded-full border-white/10 bg-white/5 text-white/80 backdrop-blur-sm hover:bg-white/10"
-            disabled={isBusy}
-            onClick={() => void handleCopy()}
-          >
-            {pendingAction === 'copy' ? (
-              <><Loader2 className="h-4 w-4 animate-spin" />{t('analytics.shareCopying')}</>
-            ) : (
-              <><Copy className="h-4 w-4" />{t('analytics.shareCopyImage')}</>
-            )}
-          </Button>
+          {/* Time Range Toggle */}
+          <div className="flex items-center rounded-full border border-white/10 bg-white/5 p-0.5 backdrop-blur-sm">
+            {(['day', 'week', 'month'] as TimeRange[]).map((range) => (
+              <button
+                key={range}
+                type="button"
+                onClick={() => setTimeRange(range)}
+                className={`h-7 rounded-full px-3 text-xs font-medium transition-all ${
+                  timeRange === range
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-white/60 hover:text-white/80'
+                }`}
+              >
+                {range === 'day' ? t('analytics.timeRangeDay') : range === 'week' ? t('analytics.timeRangeWeek') : t('analytics.timeRangeMonth')}
+              </button>
+            ))}
+          </div>
 
-          <Button
-            type="button"
-            className="gap-2 rounded-full"
-            disabled={isBusy}
-            onClick={() => void handleSave()}
-          >
-            {pendingAction === 'save' ? (
-              <><Loader2 className="h-4 w-4 animate-spin" />{t('analytics.shareSaving')}</>
-            ) : (
-              <><Download className="h-4 w-4" />{t('analytics.shareSaveImage')}</>
-            )}
-          </Button>
+          {/* Copy & Save Button Group */}
+          <div className="flex items-center overflow-hidden rounded-full border border-white/10 bg-white/5 backdrop-blur-sm">
+            <button
+              type="button"
+              onClick={() => void handleCopy()}
+              disabled={isBusy}
+              className="flex h-9 items-center gap-1.5 border-r border-white/10 px-3 text-xs font-medium text-white/80 transition-colors hover:bg-white/10 disabled:opacity-50"
+            >
+              {pendingAction === 'copy' ? (
+                <><Loader2 className="h-3.5 w-3.5 animate-spin" />{t('analytics.shareCopying')}</>
+              ) : (
+                <><Copy className="h-3.5 w-3.5" />{t('analytics.shareCopyImage')}</>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSave()}
+              disabled={isBusy}
+              className="flex h-9 items-center gap-1.5 px-3 text-xs font-medium text-white/80 transition-colors hover:bg-white/10 disabled:opacity-50"
+            >
+              {pendingAction === 'save' ? (
+                <><Loader2 className="h-3.5 w-3.5 animate-spin" />{t('analytics.shareSaving')}</>
+              ) : (
+                <><Download className="h-3.5 w-3.5" />{t('analytics.shareSaveImage')}</>
+              )}
+            </button>
+          </div>
         </div>
 
         <div aria-hidden="true" className="pointer-events-none fixed left-[-10000px] top-0">

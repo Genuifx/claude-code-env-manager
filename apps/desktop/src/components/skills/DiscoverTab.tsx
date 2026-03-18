@@ -11,6 +11,7 @@ import { useLocale } from '@/locales';
 import { useAppStore } from '@/store';
 import { toast } from 'sonner';
 import { Search, Sparkles, Loader2, Bot, Wrench, AlertTriangle, Settings } from 'lucide-react';
+import { LaunchButton } from '@/components/ui/LaunchButton';
 
 interface StreamMessage {
   type: 'thinking' | 'tool' | 'result' | 'error';
@@ -222,18 +223,14 @@ export function DiscoverTab() {
             disabled={isSearching}
           />
         </div>
-        <Button
+        <LaunchButton
           onClick={handleSearch}
           disabled={!query.trim() || isSearching}
-          className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/25 border border-[hsl(var(--glass-border-light)/0.15)]"
+          size="sm"
+          icon={isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
         >
-          {isSearching ? (
-            <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
-          ) : (
-            <Search className="w-4 h-4 mr-1.5" />
-          )}
           {isSearching ? t('skills.searching') : t('skills.search')}
-        </Button>
+        </LaunchButton>
       </div>
 
       <p className="text-xs text-muted-foreground">{t('skills.searchHint')}</p>

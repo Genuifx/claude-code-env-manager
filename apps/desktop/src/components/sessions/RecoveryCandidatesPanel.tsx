@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, useTransition } from 'react';
 import { History, RefreshCw, RotateCcw, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { LaunchButton } from '@/components/ui/LaunchButton';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
@@ -37,6 +38,25 @@ function sourceLabel(candidate: RuntimeRecoveryCandidate) {
   }
 }
 
+function candidatesEqual(left: RuntimeRecoveryCandidate[], right: RuntimeRecoveryCandidate[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((candidate, index) => {
+    const other = right[index];
+    return other
+      && other.runtime_id === candidate.runtime_id
+      && other.runtime_kind === candidate.runtime_kind
+      && other.claude_session_id === candidate.claude_session_id
+      && other.project_dir === candidate.project_dir
+      && other.env_name === candidate.env_name
+      && other.perm_mode === candidate.perm_mode
+      && other.saved_at === candidate.saved_at
+      && JSON.stringify(other.source) === JSON.stringify(candidate.source);
+  });
+}
+
 export function RecoveryCandidatesPanel() {
   const { t } = useLocale();
   const [candidates, setCandidates] = useState<RuntimeRecoveryCandidate[]>([]);
@@ -51,7 +71,7 @@ export function RecoveryCandidatesPanel() {
 
   const refreshCandidates = useCallback(async () => {
     const next = await listRuntimeRecoveryCandidates();
-    setCandidates(next);
+    setCandidates((current) => (candidatesEqual(current, next) ? current : next));
     return next;
   }, [listRuntimeRecoveryCandidates]);
 
@@ -193,14 +213,15 @@ export function RecoveryCandidatesPanel() {
                   <X className="w-4 h-4" />
                   {t('sessions.recoveryDismiss')}
                 </Button>
-                <Button
-                  size="sm"
-                  disabled={isBusy}
+                {/* Resume button */}
+                <LaunchButton
                   onClick={() => void handleResume(candidate)}
+                  disabled={isBusy}
+                  size="sm"
+                  icon={<RotateCcw className="w-3.5 h-3.5" />}
                 >
-                  <RotateCcw className="w-4 h-4" />
-                  {isInteractive ? t('sessions.recoveryResumeInteractive') : t('sessions.recoveryResumeHeadless')}
-                </Button>
+                  {isInteractive ? t("sessions.recoveryResumeInteractive") : t("sessions.recoveryResumeHeadless")}
+                </LaunchButton>
               </div>
             </div>
           );

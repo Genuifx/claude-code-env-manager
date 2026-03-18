@@ -11,6 +11,7 @@ use std::time::Duration;
 static USER_PATH: OnceLock<String> = OnceLock::new();
 
 const DEFAULT_TMUX_SESSION: &str = "ccem";
+const DEFAULT_TMUX_WINDOW: &str = "main";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TmuxWindowInfo {
@@ -32,67 +33,37 @@ pub enum ClaudeTerminalState {
 
 #[derive(Debug, Clone)]
 pub struct TmuxManager {
-    session_name: String,
+    session_prefix: String,
 }
 
 impl Default for TmuxManager {
     fn default() -> Self {
         Self {
-            session_name: DEFAULT_TMUX_SESSION.to_string(),
+            session_prefix: DEFAULT_TMUX_SESSION.to_string(),
         }
     }
 }
 
 impl TmuxManager {
     pub fn session_name(&self) -> &str {
-        &self.session_name
+        &self.session_prefix
     }
 
     pub fn ensure_server(&self) -> Result<(), String> {
-        Self::check_tmux_installed()?;
-        if self.has_session()? {
-            return Ok(());
-        }
-
-        let status = Command::new("tmux")
-            .args([
-                "new-session",
-                "-d",
-                "-s",
-                &self.session_name,
-                "-n",
-                "bootstrap",
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map_err(|error| {
-                format!(
-                    "Failed to create tmux session '{}': {}",
-                    self.session_name, error
-                )
-            })?;
-
-        if status.success() {
-            Ok(())
-        } else {
-            Err(format!(
-                "tmux new-session exited with status {} while creating '{}'",
-                status, self.session_name
-            ))
-        }
+        Self::check_tmux_installed()
     }
 
     pub fn create_session(
         &self,
         runtime_id: &str,
+        env_name: &str,
         claude_args: &[String],
         env_vars: &HashMap<String, String>,
         working_dir: &Path,
     ) -> Result<TmuxWindowInfo, String> {
         Self::check_tmux_installed()?;
-        let window_name = window_name_for_runtime(runtime_id);
+        let session_name = session_name_for_runtime(runtime_id, &self.session_prefix);
+        let window_name = DEFAULT_TMUX_WINDOW.to_string();
         let working_dir_str = working_dir.to_str().ok_or_else(|| {
             format!(
                 "Working directory is not valid UTF-8: {}",
@@ -100,110 +71,193 @@ impl TmuxManager {
             )
         })?;
         let launch_command = build_tmux_launch_command(claude_args, env_vars);
+        let target = format!("{}:{}", session_name, window_name);
 
-        let output = if self.has_session()? {
-            Command::new("tmux")
-                .args([
-                    "new-window",
-                    "-P",
-                    "-F",
-                    "#{window_index}",
-                    "-t",
-                    &self.session_name,
-                    "-n",
-                    &window_name,
-                    "-c",
-                    working_dir_str,
-                    &launch_command,
-                ])
-                .output()
-        } else {
-            Command::new("tmux")
-                .args([
-                    "new-session",
-                    "-d",
-                    "-P",
-                    "-F",
-                    "#{window_index}",
-                    "-s",
-                    &self.session_name,
-                    "-n",
-                    &window_name,
-                    "-c",
-                    working_dir_str,
-                    &launch_command,
-                ])
-                .output()
+        let window_index = match self.run_create_command(
+            &session_name,
+            &[
+                "new-session",
+                "-d",
+                "-P",
+                "-F",
+                "#{window_index}",
+                "-s",
+                &session_name,
+                "-n",
+                &window_name,
+                "-c",
+                working_dir_str,
+                &launch_command,
+            ],
+        ) {
+            Ok(index) => index,
+            Err(error) if is_tmux_session_create_race_error(&error) => {
+                self.inspect_target(&target)?.window_index
+            }
+            Err(error) => return Err(error),
+        };
+
+        let window = match self.inspect_target(&target) {
+            Ok(window) => window,
+            Err(_) => TmuxWindowInfo {
+                session_name,
+                window_name: window_name.clone(),
+                window_index,
+                pane_pid: None,
+                target,
+            },
+        };
+
+        if let Err(error) =
+            self.configure_session_status(&window.session_name, env_name, env_vars)
+        {
+            eprintln!(
+                "Failed to configure tmux status for {}: {}",
+                window.session_name, error
+            );
         }
-        .map_err(|error| format!("Failed to create tmux window '{}': {}", window_name, error))?;
+
+        Ok(window)
+    }
+
+    pub fn configure_session_status(
+        &self,
+        session_name: &str,
+        env_name: &str,
+        env_vars: &HashMap<String, String>,
+    ) -> Result<(), String> {
+        let model_full = derive_runtime_model_label(env_vars);
+        let model_compact = compact_model_label(&model_full);
+
+        let options = [
+            ("status", "on".to_string()),
+            ("status-interval", "2".to_string()),
+            ("status-left-length", "80".to_string()),
+            ("status-right-length", "140".to_string()),
+            ("window-status-format", String::new()),
+            ("window-status-current-format", String::new()),
+            ("window-status-separator", String::new()),
+            ("@ccem_env", env_name.to_string()),
+            ("@ccem_model", model_full),
+            ("@ccem_model_short", model_compact),
+            ("status-left", build_status_left_format()),
+            ("status-right", build_status_right_format()),
+        ];
+
+        for (option, value) in options {
+            let status = Command::new("tmux")
+                .args(["set-option", "-t", session_name, option, &value])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map_err(|error| {
+                    format!(
+                        "Failed to set tmux option '{}' for session '{}': {}",
+                        option, session_name, error
+                    )
+                })?;
+
+            if !status.success() {
+                return Err(format!(
+                    "tmux set-option {} failed for session {}",
+                    option, session_name
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn run_create_command(&self, target_name: &str, args: &[&str]) -> Result<u32, String> {
+        let output = Command::new("tmux").args(args).output().map_err(|error| {
+            format!("Failed to create tmux window '{}': {}", target_name, error)
+        })?;
 
         if !output.status.success() {
             return Err(format!(
                 "tmux failed to create window '{}': {}",
-                window_name,
+                target_name,
                 String::from_utf8_lossy(&output.stderr).trim()
             ));
         }
 
-        let window_index = String::from_utf8_lossy(&output.stdout)
+        String::from_utf8_lossy(&output.stdout)
             .trim()
             .parse::<u32>()
             .map_err(|error| {
                 format!(
                     "Failed to parse tmux window index for '{}': {}",
-                    window_name, error
+                    target_name, error
                 )
-            })?;
-
-        self.get_window_info(runtime_id).or_else(|_| {
-            Ok(TmuxWindowInfo {
-                session_name: self.session_name.clone(),
-                window_name: window_name.clone(),
-                window_index,
-                pane_pid: None,
-                target: format!("{}:{}", self.session_name, window_name),
             })
-        })
     }
 
     pub fn list_sessions(&self) -> Result<Vec<TmuxWindowInfo>, String> {
         Self::check_tmux_installed()?;
-        if !self.has_session()? {
-            return Ok(Vec::new());
-        }
-
         let output = Command::new("tmux")
-            .args([
-                "list-windows",
-                "-t",
-                &self.session_name,
-                "-F",
-                "#{window_index}\t#{window_name}\t#{pane_pid}",
-            ])
+            .args(["list-sessions", "-F", "#{session_name}"])
             .output()
-            .map_err(|error| format!("Failed to list tmux windows: {}", error))?;
+            .map_err(|error| format!("Failed to list tmux sessions: {}", error))?;
 
         if !output.status.success() {
-            return Err(format!(
-                "tmux list-windows failed: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            ));
+            let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            if is_missing_tmux_session_error(&error) {
+                return Ok(Vec::new());
+            }
+            return Err(format!("tmux list-sessions failed: {}", error));
         }
 
-        let windows = String::from_utf8_lossy(&output.stdout)
+        let mut windows = Vec::new();
+        for session_name in String::from_utf8_lossy(&output.stdout)
             .lines()
-            .filter_map(|line| parse_window_line(&self.session_name, line))
-            .filter(|info| info.window_name != "bootstrap")
-            .collect();
+            .map(str::trim)
+            .filter(|name| is_managed_session_name(name, &self.session_prefix))
+        {
+            let output = Command::new("tmux")
+                .args([
+                    "list-windows",
+                    "-t",
+                    session_name,
+                    "-F",
+                    "#{window_index}\t#{window_name}\t#{pane_pid}",
+                ])
+                .output()
+                .map_err(|error| {
+                    format!(
+                        "Failed to list tmux windows for session '{}': {}",
+                        session_name, error
+                    )
+                })?;
+
+            if !output.status.success() {
+                let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                if is_missing_tmux_session_error(&error) {
+                    continue;
+                }
+                return Err(format!(
+                    "tmux list-windows failed for session '{}': {}",
+                    session_name, error
+                ));
+            }
+
+            windows.extend(
+                String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .filter_map(|line| parse_window_line(session_name, line))
+                    .filter(|info| info.window_name != "bootstrap"),
+            );
+        }
         Ok(windows)
     }
 
     pub fn get_window_info(&self, runtime_id: &str) -> Result<TmuxWindowInfo, String> {
-        let target_names = window_name_candidates_for_runtime(runtime_id);
-        self.list_sessions()?
-            .into_iter()
-            .find(|window| target_names.iter().any(|name| window.window_name == *name))
-            .ok_or_else(|| format!("tmux window not found for runtime {}", runtime_id))
+        for target in target_candidates_for_runtime(runtime_id, &self.session_prefix) {
+            if let Ok(info) = self.inspect_target(&target) {
+                return Ok(info);
+            }
+        }
+        Err(format!("tmux window not found for runtime {}", runtime_id))
     }
 
     pub fn get_attach_target(&self, runtime_id: &str) -> Result<String, String> {
@@ -320,20 +374,44 @@ impl TmuxManager {
         }
     }
 
-    fn has_session(&self) -> Result<bool, String> {
+    fn has_session(&self, session_name: &str) -> Result<bool, String> {
         let status = Command::new("tmux")
-            .args(["has-session", "-t", &self.session_name])
+            .args(["has-session", "-t", session_name])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
             .map_err(|error| {
-                format!(
-                    "Failed to check tmux session '{}': {}",
-                    self.session_name, error
-                )
+                format!("Failed to check tmux session '{}': {}", session_name, error)
             })?;
         Ok(status.success())
+    }
+
+    fn inspect_target(&self, target: &str) -> Result<TmuxWindowInfo, String> {
+        let output = Command::new("tmux")
+            .args([
+                "display-message",
+                "-p",
+                "-t",
+                target,
+                "#{session_name}\t#{window_name}\t#{window_index}\t#{pane_pid}",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .map_err(|error| format!("Failed to inspect tmux target {}: {}", target, error))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "tmux target lookup failed for {}: {}",
+                target,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+
+        parse_target_line(&String::from_utf8_lossy(&output.stdout), target)
+            .ok_or_else(|| format!("Failed to parse tmux target metadata for {}", target))
     }
 
     fn target_exists(&self, target: &str) -> Result<bool, String> {
@@ -438,6 +516,67 @@ impl TmuxManager {
     }
 }
 
+fn session_name_for_runtime(runtime_id: &str, session_prefix: &str) -> String {
+    format!("{}-{}", session_prefix, sanitize_runtime_id(runtime_id))
+}
+
+fn derive_runtime_model_label(env_vars: &HashMap<String, String>) -> String {
+    env_vars
+        .get("ANTHROPIC_MODEL")
+        .or_else(|| env_vars.get("ANTHROPIC_DEFAULT_OPUS_MODEL"))
+        .cloned()
+        .unwrap_or_else(|| "default".to_string())
+}
+
+fn compact_model_label(model: &str) -> String {
+    let lower = model.to_ascii_lowercase();
+    if lower.contains("opus") {
+        "opus".to_string()
+    } else if lower.contains("sonnet") {
+        "sonnet".to_string()
+    } else if lower.contains("haiku") {
+        "haiku".to_string()
+    } else if lower.contains("gpt-5") {
+        "gpt-5".to_string()
+    } else {
+        model.to_string()
+    }
+}
+
+const WIDTH_GE_56_PATTERN: &str = "^(5[6-9]|[6-9][0-9]|[1-9][0-9][0-9].*)$";
+const WIDTH_GE_72_PATTERN: &str = "^(7[2-9]|[89][0-9]|[1-9][0-9][0-9].*)$";
+const WIDTH_GE_96_PATTERN: &str = "^(9[6-9]|[1-9][0-9][0-9].*)$";
+const WIDTH_GE_110_PATTERN: &str = "^(11[0-9]|1[2-9][0-9]|[2-9][0-9][0-9].*)$";
+const WIDTH_GE_132_PATTERN: &str = "^(13[2-9]|1[4-9][0-9]|[2-9][0-9][0-9].*)$";
+
+fn width_at_least(pattern: &str) -> String {
+    format!("#{{m|r:{pattern},#{{window_width}}}}")
+}
+
+fn build_status_left_format() -> String {
+    format!(
+        "#{{?{},#{{pane_current_path}},#{{b:pane_current_path}}}}",
+        width_at_least(WIDTH_GE_110_PATTERN)
+    )
+}
+
+fn build_status_right_format() -> String {
+    let full = "#{@ccem_env} | #{@ccem_model} | ccem";
+    let compact = "#{@ccem_env} | #{@ccem_model_short} | ccem";
+    let short = "#{@ccem_model_short} | ccem";
+
+    format!(
+        "#{{?{ge_132},{full},#{{?{ge_96},{compact},#{{?{ge_72},{short},#{{?{ge_56},ccem,}}}}}}}}",
+        ge_132 = width_at_least(WIDTH_GE_132_PATTERN),
+        ge_96 = width_at_least(WIDTH_GE_96_PATTERN),
+        ge_72 = width_at_least(WIDTH_GE_72_PATTERN),
+        ge_56 = width_at_least(WIDTH_GE_56_PATTERN),
+        full = full,
+        compact = compact,
+        short = short,
+    )
+}
+
 pub fn window_name_for_runtime(runtime_id: &str) -> String {
     let sanitized = sanitize_runtime_id(runtime_id);
     let short = if sanitized.len() > 8 {
@@ -456,6 +595,20 @@ fn window_name_candidates_for_runtime(runtime_id: &str) -> Vec<String> {
     } else {
         vec![primary, legacy]
     }
+}
+
+fn target_candidates_for_runtime(runtime_id: &str, session_prefix: &str) -> Vec<String> {
+    let mut targets = vec![format!(
+        "{}:{}",
+        session_name_for_runtime(runtime_id, session_prefix),
+        DEFAULT_TMUX_WINDOW
+    )];
+    targets.extend(
+        window_name_candidates_for_runtime(runtime_id)
+            .into_iter()
+            .map(|window_name| format!("{}:{}", session_prefix, window_name)),
+    );
+    targets
 }
 
 pub fn detect_state_from_capture(captured: &str) -> ClaudeTerminalState {
@@ -512,6 +665,21 @@ fn parse_window_line(session_name: &str, line: &str) -> Option<TmuxWindowInfo> {
         window_name,
         window_index,
         pane_pid,
+    })
+}
+
+fn parse_target_line(line: &str, fallback_target: &str) -> Option<TmuxWindowInfo> {
+    let mut parts = line.trim().split('\t');
+    let session_name = parts.next()?.to_string();
+    let window_name = parts.next()?.to_string();
+    let window_index = parts.next()?.parse::<u32>().ok()?;
+    let pane_pid = parts.next().and_then(|value| value.parse::<u32>().ok());
+    Some(TmuxWindowInfo {
+        session_name,
+        window_name,
+        window_index,
+        pane_pid,
+        target: fallback_target.to_string(),
     })
 }
 
@@ -581,10 +749,25 @@ fn sanitize_runtime_id(runtime_id: &str) -> String {
         .collect::<String>()
 }
 
+fn is_managed_session_name(session_name: &str, session_prefix: &str) -> bool {
+    session_name == session_prefix || session_name.starts_with(&format!("{}-", session_prefix))
+}
+
+fn is_missing_tmux_session_error(error: &str) -> bool {
+    error.contains("can't find session") || error.contains("no server running")
+}
+
+fn is_tmux_session_create_race_error(error: &str) -> bool {
+    error.contains("duplicate session") || error.contains("index 0 in use")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        build_tmux_launch_command, detect_state_from_capture, window_name_for_runtime,
+        build_status_left_format, build_status_right_format, build_tmux_launch_command,
+        compact_model_label, detect_state_from_capture, is_managed_session_name,
+        is_missing_tmux_session_error, is_tmux_session_create_race_error,
+        session_name_for_runtime, target_candidates_for_runtime, window_name_for_runtime,
         ClaudeTerminalState,
     };
     use std::collections::HashMap;
@@ -639,9 +822,85 @@ mod tests {
     }
 
     #[test]
+    fn session_name_uses_full_runtime_id() {
+        assert_eq!(
+            session_name_for_runtime("session-1772984434305", "ccem"),
+            "ccem-session1772984434305"
+        );
+    }
+
+    #[test]
+    fn target_candidates_prefer_dedicated_tmux_session() {
+        assert_eq!(
+            target_candidates_for_runtime("session-1772984434305", "ccem"),
+            vec![
+                "ccem-session1772984434305:main".to_string(),
+                "ccem:ccem-84434305".to_string(),
+                "ccem:ccem-session-".to_string(),
+            ]
+        );
+    }
+
+    #[test]
     fn launch_command_does_not_override_term_inside_tmux() {
         let command = build_tmux_launch_command(&["--print".to_string()], &HashMap::new());
         assert!(!command.contains("export TERM="));
         assert!(command.contains("unset CLAUDECODE"));
+    }
+
+    #[test]
+    fn missing_tmux_session_errors_are_detected() {
+        assert!(is_missing_tmux_session_error(
+            "tmux failed to create window 'ccem-1234': can't find session: ccem"
+        ));
+        assert!(is_missing_tmux_session_error(
+            "tmux failed to create window 'ccem-1234': no server running on /tmp/tmux-501/default"
+        ));
+    }
+
+    #[test]
+    fn tmux_session_create_races_are_detected() {
+        assert!(is_tmux_session_create_race_error(
+            "tmux failed to create window 'ccem-1234': duplicate session: ccem"
+        ));
+        assert!(is_tmux_session_create_race_error(
+            "tmux failed to create window 'ccem-1234': create window failed: index 0 in use"
+        ));
+    }
+
+    #[test]
+    fn managed_session_name_accepts_legacy_and_dedicated_sessions() {
+        assert!(is_managed_session_name("ccem", "ccem"));
+        assert!(is_managed_session_name("ccem-session1772984434305", "ccem"));
+        assert!(!is_managed_session_name("work", "ccem"));
+    }
+
+    #[test]
+    fn compact_model_label_collapses_known_families() {
+        assert_eq!(
+            compact_model_label("claude-opus-4-1-20250805"),
+            "opus".to_string()
+        );
+        assert_eq!(
+            compact_model_label("claude-sonnet-4-5-20250929"),
+            "sonnet".to_string()
+        );
+        assert_eq!(compact_model_label("glm-5"), "glm-5".to_string());
+    }
+
+    #[test]
+    fn status_formats_use_window_width_conditions() {
+        let left = build_status_left_format();
+        let right = build_status_right_format();
+        assert!(left.contains("window_width"));
+        assert!(left.contains("pane_current_path"));
+        assert!(left.contains("b:pane_current_path"));
+        assert!(right.contains("window_width"));
+        assert!(right.contains("@ccem_env"));
+        assert!(right.contains("@ccem_model"));
+        assert!(right.contains("@ccem_model_short"));
+        assert!(right.contains("ccem"));
+        assert!(!right.contains("#("));
+        assert!(!right.contains("@ccem_subagent"));
     }
 }

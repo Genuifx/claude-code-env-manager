@@ -2,13 +2,13 @@ import { useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { Monitor, SquareArrowOutUpRight, SquareTerminal } from 'lucide-react';
+import { Monitor, SquareTerminal } from 'lucide-react';
 import type { Session } from '@/store';
+import type { ChannelKind, TmuxAttachTerminalInfo, TmuxAttachTerminalType } from '@/lib/tauri-ipc';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
-import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import '@xterm/xterm/css/xterm.css';
-import { useLocale } from '../../locales';
+import { OpenInTerminalPopoverButton } from './OpenInTerminalPopoverButton';
 
 interface InteractiveOutputChunk {
   session_id: string;
@@ -20,32 +20,55 @@ interface InteractiveOutputChunk {
 interface EmbeddedTerminalPanelProps {
   sessions: Session[];
   activeSessionId: string | null;
+  terminalOptions?: TmuxAttachTerminalInfo[];
   onSelect: (sessionId: string) => void;
-  onOpenInTerminal: (sessionId: string) => void;
+  onOpenInTerminal: (sessionId: string, terminalType?: TmuxAttachTerminalType) => void;
 }
 
 function sessionLabel(session: Session) {
   return session.workingDir.split('/').pop() || session.workingDir;
 }
 
+const DESKTOP_UI_CHANNEL: ChannelKind = { kind: 'desktop_ui' };
+
 export function EmbeddedTerminalPanel({
   sessions,
   activeSessionId,
+  terminalOptions,
   onSelect,
   onOpenInTerminal,
 }: EmbeddedTerminalPanelProps) {
-  const { t } = useLocale();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const activeSessionIdRef = useRef<string | null>(activeSessionId);
   const lastSeqRef = useRef<number | null>(null);
-  const { getInteractiveSessionOutput, resizeInteractiveSession, writeInteractiveInput } = useTauriCommands();
+  const {
+    attachChannel,
+    detachChannel,
+    getInteractiveSessionOutput,
+    resizeInteractiveSession,
+    writeInteractiveInput,
+  } = useTauriCommands();
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
 
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      return;
+    }
+
+    void attachChannel(activeSessionId, DESKTOP_UI_CHANNEL).catch((error) => {
+      console.error('Failed to attach desktop channel for embedded terminal:', error);
+    });
+
+    return () => {
+      void detachChannel(activeSessionId, DESKTOP_UI_CHANNEL).catch(() => {});
+    };
+  }, [activeSessionId, attachChannel, detachChannel]);
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -219,16 +242,13 @@ export function EmbeddedTerminalPanel({
               );
             })}
           </div>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => activeSession && onOpenInTerminal(activeSession.id)}
+          <OpenInTerminalPopoverButton
+            sessionId={activeSession?.id ?? null}
+            terminals={terminalOptions}
             disabled={!activeSession || activeSession.status !== 'running'}
             className="glass-btn-outline border-white/10 text-slate-200 hover:bg-white/10"
-          >
-            <SquareArrowOutUpRight className="mr-1 h-4 w-4" />
-            {t('sessions.openInTerminal')}
-          </Button>
+            onOpenInTerminal={onOpenInTerminal}
+          />
         </div>
       </div>
 

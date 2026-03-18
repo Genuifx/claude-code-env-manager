@@ -33,6 +33,9 @@ const CronTasksPage = lazy(async () =>
 const ProxyDebugPage = lazy(async () =>
   import('@/pages/ProxyDebug').then((m) => ({ default: m.ProxyDebug }))
 );
+const ChatAppPage = lazy(async () =>
+  import('@/pages/ChatApp').then((m) => ({ default: m.ChatApp }))
+);
 
 function App() {
   const FOCUS_SYNC_INTERVAL_MS = 5000;
@@ -308,9 +311,9 @@ function App() {
     'meta+4': () => navigateToTab('skills'),
     'meta+5': () => navigateToTab('history'),
     'meta+6': () => navigateToTab('cron'),
-    'meta+7': () => navigateToTab('analytics'),
-    'meta+8': () => navigateToTab('proxy-debug'),
-    'meta+9': () => navigateToTab('settings'),
+    'meta+7': () => navigateToTab('chat-app'),
+    'meta+8': () => navigateToTab('analytics'),
+    'meta+9': () => navigateToTab('proxy-debug'),
     'meta+enter': () => handleLaunch(),
     'meta+n': () => handleLaunch(),
     'meta+,': () => navigateToTab('settings'),
@@ -408,6 +411,8 @@ function App() {
         return <HistoryPage />;
       case 'cron':
         return <CronTasksPage />;
+      case 'chat-app':
+        return <ChatAppPage />;
       case 'proxy-debug':
         return <ProxyDebugPage />;
       case 'settings':

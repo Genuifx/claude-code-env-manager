@@ -1,6 +1,7 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LayoutGrid, List, Minimize2, Plus, Terminal, X, FolderOpen, Check } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { LayoutGrid, List, Minimize2, Plus, Terminal, X, FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { LaunchButton } from '@/components/ui/LaunchButton';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import {
@@ -17,14 +18,13 @@ import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { SessionsSkeleton } from '@/components/ui/skeleton-states';
 import { toast } from 'sonner';
 import { shallow } from 'zustand/shallow';
-import type { UnifiedSessionInfo, ManagedSessionSource, AttachedChannelInfo } from '@/lib/tauri-ipc';
-
-const EmbeddedTerminalPanel = lazy(async () =>
-  import('@/components/sessions/EmbeddedTerminalPanel').then((m) => ({ default: m.EmbeddedTerminalPanel }))
-);
-const InteractiveToolEventsPanel = lazy(async () =>
-  import('@/components/sessions/InteractiveToolEventsPanel').then((m) => ({ default: m.InteractiveToolEventsPanel }))
-);
+import type {
+  UnifiedSessionInfo,
+  ManagedSessionSource,
+  AttachedChannelInfo,
+  TmuxAttachTerminalInfo,
+  TmuxAttachTerminalType,
+} from '@/lib/tauri-ipc';
 
 // --- Helper: map snake_case UnifiedSessionInfo → camelCase UnifiedSession ---
 function mapSourceToString(source: ManagedSessionSource): UnifiedSession['source'] {
@@ -65,9 +65,52 @@ function toUnifiedSession(info: UnifiedSessionInfo): UnifiedSession {
   };
 }
 
+function areChannelListsEqual(
+  left: UnifiedSession['channels'],
+  right: UnifiedSession['channels'],
+) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((channel, index) => {
+    const candidate = right[index];
+    return candidate
+      && candidate.kind === channel.kind
+      && candidate.connectedAt === channel.connectedAt
+      && candidate.label === channel.label;
+  });
+}
+
+function areUnifiedSessionsEqual(left: UnifiedSession[], right: UnifiedSession[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((session, index) => {
+    const candidate = right[index];
+    return candidate
+      && candidate.id === session.id
+      && candidate.runtimeKind === session.runtimeKind
+      && candidate.source === session.source
+      && candidate.status === session.status
+      && candidate.projectDir === session.projectDir
+      && candidate.envName === session.envName
+      && candidate.permMode === session.permMode
+      && candidate.createdAt === session.createdAt
+      && candidate.isActive === session.isActive
+      && candidate.pid === session.pid
+      && candidate.claudeSessionId === session.claudeSessionId
+      && candidate.tmuxTarget === session.tmuxTarget
+      && candidate.client === session.client
+      && areChannelListsEqual(session.channels, candidate.channels);
+  });
+}
+
 // --- Helper: create a placeholder legacy Session from a UnifiedSession ---
 function unifiedToLegacySession(u: UnifiedSession): Session {
   const statusMap: Record<string, Session['status']> = {
+    running: 'running',
     ready: 'running',
     processing: 'running',
     waiting_permission: 'running',
@@ -103,7 +146,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   const [launcherOpen, setLauncherOpen] = useState(false);
   const [isMultiLaunching, setIsMultiLaunching] = useState(false);
   const [launched, setLaunched] = useState(false);
-  const [selectedEmbeddedSessionId, setSelectedEmbeddedSessionId] = useState<string | null>(null);
+  const [tmuxAttachTerminals, setTmuxAttachTerminals] = useState<TmuxAttachTerminalInfo[]>([]);
   const launchedTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const {
     sessions,
@@ -135,6 +178,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   );
   const {
     focusSession,
+    listTmuxAttachTerminals,
     openInteractiveSessionInTerminal,
     minimizeSession,
     closeSession,
@@ -150,19 +194,33 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   // --- Load unified sessions ---
   useEffect(() => {
     let cancelled = false;
+    let isFirstLoad = true;
+
     const load = async () => {
-      setLoadingUnifiedSessions(true);
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        return;
+      }
+
+      if (isFirstLoad) {
+        setLoadingUnifiedSessions(true);
+      }
+
       try {
         const infos = await listUnifiedSessions();
         if (!cancelled) {
-          setUnifiedSessions(infos.map(toUnifiedSession));
+          const nextSessions = infos.map(toUnifiedSession);
+          const currentSessions = useAppStore.getState().unifiedSessions;
+          if (!areUnifiedSessionsEqual(currentSessions, nextSessions)) {
+            setUnifiedSessions(nextSessions);
+          }
         }
       } catch (err) {
         console.error('Failed to load unified sessions:', err);
       } finally {
-        if (!cancelled) {
+        if (!cancelled && isFirstLoad) {
           setLoadingUnifiedSessions(false);
         }
+        isFirstLoad = false;
       }
     };
     load();
@@ -173,6 +231,27 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
       clearInterval(interval);
     };
   }, [listUnifiedSessions, setUnifiedSessions, setLoadingUnifiedSessions]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadTerminals = async () => {
+      try {
+        const terminals = await listTmuxAttachTerminals();
+        if (!cancelled) {
+          setTmuxAttachTerminals(terminals);
+        }
+      } catch (err) {
+        console.error('Failed to load tmux attach terminals:', err);
+      }
+    };
+
+    void loadTerminals();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [listTmuxAttachTerminals]);
 
   // --- Merge sessions: legacy (external terminal) + unified, dedup by id ---
   type DisplayItem = { session: Session; unifiedSession?: UnifiedSession };
@@ -240,27 +319,9 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   const effectiveViewMode = hasUnifiedOnlyInView ? 'card' : viewMode;
 
   const runningSessions = sessions.filter(s => s.status === 'running');
-  const embeddedSessions = useMemo(
-    () => sessions.filter((session) => session.terminalType === 'embedded'),
-    [sessions]
-  );
   const externalRunningSessions = runningSessions.filter((session) => session.terminalType !== 'embedded');
   const runningCount = runningSessions.length;
   const externalRunningCount = externalRunningSessions.length;
-
-  useEffect(() => {
-    if (embeddedSessions.length === 0) {
-      setSelectedEmbeddedSessionId(null);
-      return;
-    }
-
-    setSelectedEmbeddedSessionId((current) => {
-      if (current && embeddedSessions.some((session) => session.id === current)) {
-        return current;
-      }
-      return embeddedSessions[0]?.id ?? null;
-    });
-  }, [embeddedSessions]);
 
   // Truncate directory path for display (same logic as Dashboard)
   const launchDirDisplay = selectedWorkingDir
@@ -415,10 +476,6 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
       // Unified-only interactive: still try — the interactive runtime manager may know it
       // even though SessionManager doesn't
     }
-    const target = sessions.find((session) => session.id === id);
-    if (target?.terminalType === 'embedded') {
-      setSelectedEmbeddedSessionId(id);
-    }
     try {
       await focusSession(id);
     } catch (err) {
@@ -440,9 +497,9 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
     }
   };
 
-  const handleOpenInTerminal = async (id: string) => {
+  const handleOpenInTerminal = async (id: string, terminalType?: TmuxAttachTerminalType) => {
     try {
-      await openInteractiveSessionInTerminal(id);
+      await openInteractiveSessionInTerminal(id, terminalType);
     } catch (err) {
       console.error('Failed to open interactive session in terminal:', err);
     }
@@ -629,19 +686,15 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
               )}
             </Button>
 
-            {/* New Session — single click launch with success feedback */}
-            <Button
-              size="sm"
+            {/* New Session — 3D launch button */}
+            <LaunchButton
               onClick={handleLaunchClick}
-              className={`gap-2 px-4 font-semibold rounded-lg transition-all duration-150 ${
-                launched
-                  ? 'bg-success hover:bg-success'
-                  : 'shadow-primary-glow hover:-translate-y-0.5 active:scale-95'
-              }`}
+              launched={launched}
+              size="md"
+              icon={<Plus className="w-4 h-4" />}
             >
-              {launched ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-              {launched ? t('dashboard.launchBtnDone') : t('sessions.newSession')}
-            </Button>
+              {t('sessions.newSession')}
+            </LaunchButton>
 
             {/* Multi-Launch — opens popover */}
             <SessionLauncherPopover
@@ -712,6 +765,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
                       key={item.session.id}
                       session={item.session}
                       unifiedSession={item.unifiedSession}
+                      terminalOptions={tmuxAttachTerminals}
                       onFocus={handleFocus}
                       onOpenInTerminal={handleOpenInTerminal}
                       onMinimize={handleMinimize}
@@ -728,6 +782,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
               ) : (
                 <SessionList
                   sessions={filteredSessions.map(item => item.session)}
+                  terminalOptions={tmuxAttachTerminals}
                   onFocus={handleFocus}
                   onOpenInTerminal={handleOpenInTerminal}
                   onMinimize={handleMinimize}
@@ -762,33 +817,6 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
                 );
               })()}
             </Card>
-            {embeddedSessions.length > 0 && (
-              <>
-                <Suspense
-                  fallback={(
-                    <Card className="p-4">
-                      <div className="h-[520px] animate-pulse rounded-xl bg-black/[0.04] dark:bg-white/[0.06]" />
-                    </Card>
-                  )}
-                >
-                  <EmbeddedTerminalPanel
-                    sessions={embeddedSessions}
-                    activeSessionId={selectedEmbeddedSessionId}
-                    onSelect={setSelectedEmbeddedSessionId}
-                    onOpenInTerminal={handleOpenInTerminal}
-                  />
-                </Suspense>
-                <Suspense
-                  fallback={(
-                    <Card className="p-4">
-                      <div className="h-[240px] animate-pulse rounded-xl bg-black/[0.04] dark:bg-white/[0.06]" />
-                    </Card>
-                  )}
-                >
-                  <InteractiveToolEventsPanel sessionId={selectedEmbeddedSessionId} />
-                </Suspense>
-              </>
-            )}
           </>
         )}
         {/* HeadlessSessionsPanel removed - unified view */}
