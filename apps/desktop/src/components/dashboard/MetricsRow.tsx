@@ -13,9 +13,9 @@ export function MetricsRow({ onNavigate }: MetricsRowProps) {
   const { sessions, usageStats, continuousUsageDays, cronTasks } = useAppStore();
 
   const activeSessions = sessions.filter(s => s.status === 'running').length;
-  const todayTokens = (usageStats?.today.inputTokens ?? 0) + (usageStats?.today.outputTokens ?? 0);
+  const todayTokens = (usageStats?.today.inputTokens ?? 0) + (usageStats?.today.outputTokens ?? 0) + (usageStats?.today.cacheReadTokens ?? 0) + (usageStats?.today.cacheCreationTokens ?? 0);
   const todayCost = usageStats?.today.cost ?? 0;
-  const weekTokens = (usageStats?.week.inputTokens ?? 0) + (usageStats?.week.outputTokens ?? 0);
+  const weekTokens = (usageStats?.week.inputTokens ?? 0) + (usageStats?.week.outputTokens ?? 0) + (usageStats?.week.cacheReadTokens ?? 0) + (usageStats?.week.cacheCreationTokens ?? 0);
   const weekCost = usageStats?.week.cost ?? 0;
 
   const enabledTasks = cronTasks.filter(t => t.enabled);
@@ -28,7 +28,7 @@ export function MetricsRow({ onNavigate }: MetricsRowProps) {
         icon={Activity}
         label={t('dashboard.todayTokens')}
         value={todayTokens}
-        formatValue={(v) => v >= 1000 ? `${(v / 1000).toFixed(1)}K` : String(v)}
+        formatValue={(v) => v >= 1000000 ? `${(v / 1000000).toFixed(1)}M` : v >= 1000 ? `${(v / 1000).toFixed(1)}K` : String(v)}
         sublabel={`${t('dashboard.todayCost')}: $${todayCost.toFixed(2)}`}
         trend={weekTokens > 0 ? `${(todayTokens / (weekTokens / 7) * 100 - 100).toFixed(0)}% vs avg` : undefined}
         onClick={() => onNavigate('analytics')}
@@ -70,7 +70,7 @@ export function MetricsRow({ onNavigate }: MetricsRowProps) {
           label={t('dashboard.weekTotal')}
           value={Math.round(weekCost * 100)}
           formatValue={(v) => `$${(v / 100).toFixed(2)}`}
-          sublabel={weekTokens > 0 ? `${(weekTokens / 1000).toFixed(0)}K tokens` : undefined}
+          sublabel={weekTokens > 0 ? `${weekTokens >= 1000000 ? `${(weekTokens / 1000000).toFixed(1)}M` : `${(weekTokens / 1000).toFixed(0)}K`} tokens` : undefined}
           onClick={() => onNavigate('analytics')}
         />
       </div>

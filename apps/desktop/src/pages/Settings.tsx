@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { Moon, Sun, MonitorSmartphone, Lightbulb, Terminal, CheckCircle2, XCircle, Copy, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search, FolderOpen, X } from 'lucide-react';
+import { Moon, Sun, MonitorSmartphone, Lightbulb, Terminal, CheckCircle2, XCircle, Copy, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search, FolderOpen, X, Sparkles, Clock, Image } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { useAppStore } from '@/store';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
@@ -40,7 +41,7 @@ interface InstallStatusState {
 }
 
 export function Settings() {
-  const { defaultMode, setDefaultMode, isLoadingSettings, defaultWorkingDir } = useAppStore();
+  const { defaultMode, setDefaultMode, isLoadingSettings, defaultWorkingDir, environments } = useAppStore();
   const { t, lang, setLang } = useLocale();
   const {
     openDirectoryPicker,
@@ -56,6 +57,8 @@ export function Settings() {
     codex: null,
     tmux: null,
   });
+  const [aiEnhanced, setAiEnhanced] = useState(false);
+  const [aiEnvName, setAiEnvName] = useState<string | null>(null);
   const [webkitVersion, setWebkitVersion] = useState<string | null>(null);
   const loaded = useRef(false);
 
@@ -100,11 +103,13 @@ export function Settings() {
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const settings = await invoke<{ theme: string; autoStart: boolean; startMinimized: boolean; closeToTray: boolean; defaultMode: string | null }>('get_settings');
+        const settings = await invoke<{ theme: string; autoStart: boolean; startMinimized: boolean; closeToTray: boolean; defaultMode: string | null; aiEnhanced: boolean; aiEnvName: string | null }>('get_settings');
         setTheme(settings.theme as 'light' | 'dark' | 'system');
         setAutoStart(settings.autoStart);
         setStartMinimized(settings.startMinimized);
         setCloseToTray(settings.closeToTray);
+        setAiEnhanced(settings.aiEnhanced ?? false);
+        setAiEnvName(settings.aiEnvName ?? null);
         if (settings.defaultMode) {
           setDefaultMode(settings.defaultMode as PermissionModeName);
         }
@@ -150,7 +155,7 @@ export function Settings() {
   // Auto-save whenever settings change (skip initial load)
   useEffect(() => {
     if (!loaded.current) return;
-    const settings = { theme, autoStart, startMinimized, closeToTray, defaultMode };
+    const settings = { theme, autoStart, startMinimized, closeToTray, defaultMode, aiEnhanced, aiEnvName };
     (async () => {
       try {
         await invoke('save_settings', { settings });
@@ -160,7 +165,7 @@ export function Settings() {
         toast.error(t('settings.saveFailed'));
       }
     })();
-  }, [theme, autoStart, startMinimized, closeToTray, defaultMode]);
+  }, [theme, autoStart, startMinimized, closeToTray, defaultMode, aiEnhanced, aiEnvName]);
 
   // Delayed skeleton -- only shows if settings load takes >200ms
   if (isLoadingSettings) {
@@ -260,55 +265,111 @@ export function Settings() {
               title={t('settings.closeToTray')}
               description={t('settings.closeToTrayDesc')}
             />
+          </div>
+        </Card>
+      </div>
 
-            {/* Default Working Directory */}
-            <div className="pt-2 border-t glass-divider">
-              <div className="mb-2">
-                <div className="text-sm font-medium text-foreground">{t('settings.defaultWorkingDir')}</div>
-                <div className="text-xs text-muted-foreground mt-0.5">{t('settings.defaultWorkingDirDesc')}</div>
-              </div>
-              {defaultWorkingDir ? (
-                <div className="flex items-center gap-2">
-                  <FolderOpen className="w-3.5 h-3.5 text-primary shrink-0" />
-                  <span className="text-sm font-mono text-foreground truncate flex-1">{defaultWorkingDir}</span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="glass-btn-outline h-7 text-xs"
-                    onClick={async () => {
-                      const path = await openDirectoryPicker();
-                      if (path) await saveDefaultWorkingDir(path);
-                    }}
-                  >
-                    {t('dashboard.changeDir')}
-                  </Button>
-                  <button
-                    onClick={() => saveDefaultWorkingDir(null)}
-                    className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/[0.06] transition-colors"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ) : (
+      {/* Row 2: AI Enhancement */}
+      <Card className="p-5">
+        <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-primary" />
+          {t('settings.aiEnhancement')}
+        </h3>
+        <div className="space-y-4">
+          {/* Default Working Directory */}
+          <div>
+            <div className="mb-2">
+              <div className="text-sm font-medium text-foreground">{t('settings.defaultWorkingDir')}</div>
+              <div className="text-xs text-muted-foreground mt-0.5">{t('settings.defaultWorkingDirDesc')}</div>
+            </div>
+            {defaultWorkingDir ? (
+              <div className="flex items-center gap-2">
+                <FolderOpen className="w-3.5 h-3.5 text-primary shrink-0" />
+                <span className="text-sm font-mono text-foreground truncate flex-1">{defaultWorkingDir}</span>
                 <Button
                   variant="outline"
                   size="sm"
-                  className="glass-btn-outline"
+                  className="glass-btn-outline h-7 text-xs"
                   onClick={async () => {
                     const path = await openDirectoryPicker();
                     if (path) await saveDefaultWorkingDir(path);
                   }}
                 >
-                  <FolderOpen className="w-3.5 h-3.5 mr-1.5" />
-                  {t('settings.selectDir')}
+                  {t('dashboard.changeDir')}
                 </Button>
-              )}
+                <button
+                  onClick={() => saveDefaultWorkingDir(null)}
+                  className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/[0.06] transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                className="glass-btn-outline"
+                onClick={async () => {
+                  const path = await openDirectoryPicker();
+                  if (path) await saveDefaultWorkingDir(path);
+                }}
+              >
+                <FolderOpen className="w-3.5 h-3.5 mr-1.5" />
+                {t('settings.selectDir')}
+              </Button>
+            )}
+          </div>
+
+          <div className="pt-2 border-t glass-divider">
+            <ToggleSetting
+              checked={aiEnhanced}
+              onChange={setAiEnhanced}
+              title={t('settings.aiEnhancementToggle')}
+              description={t('settings.aiEnhancementToggleDesc')}
+            />
+          </div>
+
+          <div className={`space-y-3 transition-opacity duration-150 ${aiEnhanced ? '' : 'opacity-50 pointer-events-none'}`}>
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                {t('settings.aiEnhancementEnv')}
+              </label>
+              <p className="text-xs text-muted-foreground/80 mb-2">{t('settings.aiEnhancementEnvDesc')}</p>
+              <Select value={aiEnvName ?? '__default__'} onValueChange={(v) => setAiEnvName(v === '__default__' ? null : v)}>
+                <SelectTrigger className="w-full h-auto px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm">
+                  <SelectValue placeholder={t('settings.aiEnhancementEnvPlaceholder')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__default__">{t('settings.aiEnhancementEnvPlaceholder')}</SelectItem>
+                  {environments.map((env) => (
+                    <SelectItem key={env.name} value={env.name}>{env.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="pt-2 border-t glass-divider">
+              <p className="text-xs text-muted-foreground mb-2">{t('settings.aiEnhancementFeatures')}</p>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Search className="w-3.5 h-3.5 text-primary shrink-0" />
+                  {t('settings.aiEnhancementFeatureSkill')}
+                </div>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Clock className="w-3.5 h-3.5 text-primary shrink-0" />
+                  {t('settings.aiEnhancementFeatureCron')}
+                </div>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Image className="w-3.5 h-3.5 text-primary shrink-0" />
+                  {t('settings.aiEnhancementFeaturePoster')}
+                </div>
+              </div>
             </div>
           </div>
-        </Card>
-      </div>
+        </div>
+      </Card>
 
-      {/* Row 2: Default Permission — full width card grid */}
+      {/* Row 3: Default Permission — full width card grid */}
       <Card className="p-5">
         <div className="flex items-baseline justify-between mb-4">
           <h3 className="text-sm font-semibold text-foreground">
@@ -357,7 +418,7 @@ export function Settings() {
         </div>
       </Card>
 
-      {/* Row 3: About */}
+      {/* Row 4: About */}
       <Card className="p-5">
         <h3 className="text-sm font-semibold text-foreground mb-4">
           {t('settings.about')}

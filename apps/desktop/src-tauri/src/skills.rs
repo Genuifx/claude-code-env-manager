@@ -171,18 +171,8 @@ pub fn search_skills_stream(app: AppHandle, query: String) {
             cmd.current_dir(home);
         }
 
-        // Inject current environment's API config
-        if let Ok(cfg) = config::read_config() {
-            if let Some(env_name) = &cfg.current {
-                if let Some(env) = cfg.registries.get(env_name) {
-                    let decrypted = config::get_env_with_decrypted_key(env);
-                    config::clear_managed_claude_env(&mut cmd);
-                    for (key, value) in config::build_claude_env_vars(&decrypted) {
-                        cmd.env(key, value);
-                    }
-                }
-            }
-        }
+        // Inject AI environment's API config (respects ai_enhanced setting)
+        config::inject_ai_env(&mut cmd);
 
         let child = cmd.spawn();
 

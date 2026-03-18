@@ -14,7 +14,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { useLocale } from '@/locales';
 import { formatTokens } from '@/lib/utils';
-import type { DailyActivity, TokenUsage, UsageStats } from '@/types/analytics';
+import type { DailyActivity, ModelBreakdownHistory, TokenUsage, TokenUsageWithCost, UsageStats } from '@/types/analytics';
 
 /* ── Types ── */
 
@@ -64,6 +64,7 @@ interface PosterCardProps {
   usageStats: UsageStats;
   username: string;
   rangeTokens: number;
+  rangeModelData: Record<string, TokenUsageWithCost>;
 }
 
 /* ── Constants ── */
@@ -125,10 +126,127 @@ const ACCENT_COLORS = {
   light: ['#0284c7', '#7c3aed', '#059669', '#ea580c', '#db2777'],
 };
 
-const MODEL_LEGEND_COLORS = {
-  dark: 'rgba(148,163,184,0.75)',
-  light: 'rgba(71,85,105,0.7)',
+/* ── Color Temperature ── */
+
+type ColorTemp = 'frost' | 'nebula' | 'blaze';
+
+interface TempColors {
+  accent: string;
+  accentLight: string;
+  waveBase: [number, number, number];
+  glowA: string;
+  glowB: string;
+  heroGlow: string;
+  heroGradient: string;
+  avatarGradient: string;
+  divider: string;
+}
+
+const COLOR_TEMPS: Record<ColorTemp, Record<PosterTheme, TempColors>> = {
+  frost: {
+    dark: {
+      accent: '#38bdf8',
+      accentLight: '#7dd3fc',
+      waveBase: [56, 189, 248],
+      glowA: 'rgba(56,189,248,0.10)',
+      glowB: 'rgba(167,139,250,0.08)',
+      heroGlow: 'rgba(56,189,248,0.12)',
+      heroGradient: 'linear-gradient(135deg, #f8fafc 10%, #38bdf8 55%, #a78bfa 100%)',
+      avatarGradient: 'linear-gradient(135deg, #38bdf8, #a78bfa)',
+      divider: 'linear-gradient(90deg, transparent, rgba(56,189,248,0.25) 20%, rgba(167,139,250,0.25) 80%, transparent)',
+    },
+    light: {
+      accent: '#0284c7',
+      accentLight: '#38bdf8',
+      waveBase: [14, 165, 233],
+      glowA: 'rgba(56,189,248,0.12)',
+      glowB: 'rgba(167,139,250,0.10)',
+      heroGlow: 'rgba(56,189,248,0.08)',
+      heroGradient: 'linear-gradient(135deg, #0f172a 10%, #0284c7 55%, #7c3aed 100%)',
+      avatarGradient: 'linear-gradient(135deg, #0ea5e9, #7c3aed)',
+      divider: 'linear-gradient(90deg, transparent, rgba(56,189,248,0.2) 20%, rgba(167,139,250,0.2) 80%, transparent)',
+    },
+  },
+  nebula: {
+    dark: {
+      accent: '#a78bfa',
+      accentLight: '#c4b5fd',
+      waveBase: [167, 139, 250],
+      glowA: 'rgba(167,139,250,0.12)',
+      glowB: 'rgba(236,72,153,0.08)',
+      heroGlow: 'rgba(167,139,250,0.14)',
+      heroGradient: 'linear-gradient(135deg, #f8fafc 10%, #a78bfa 55%, #ec4899 100%)',
+      avatarGradient: 'linear-gradient(135deg, #a78bfa, #ec4899)',
+      divider: 'linear-gradient(90deg, transparent, rgba(167,139,250,0.25) 20%, rgba(236,72,153,0.25) 80%, transparent)',
+    },
+    light: {
+      accent: '#7c3aed',
+      accentLight: '#a78bfa',
+      waveBase: [124, 58, 237],
+      glowA: 'rgba(124,58,237,0.12)',
+      glowB: 'rgba(219,39,119,0.10)',
+      heroGlow: 'rgba(124,58,237,0.10)',
+      heroGradient: 'linear-gradient(135deg, #0f172a 10%, #7c3aed 55%, #db2777 100%)',
+      avatarGradient: 'linear-gradient(135deg, #7c3aed, #db2777)',
+      divider: 'linear-gradient(90deg, transparent, rgba(124,58,237,0.2) 20%, rgba(219,39,119,0.2) 80%, transparent)',
+    },
+  },
+  blaze: {
+    dark: {
+      accent: '#f97316',
+      accentLight: '#fdba74',
+      waveBase: [249, 115, 22],
+      glowA: 'rgba(249,115,22,0.12)',
+      glowB: 'rgba(239,68,68,0.08)',
+      heroGlow: 'rgba(249,115,22,0.14)',
+      heroGradient: 'linear-gradient(135deg, #f8fafc 10%, #f97316 55%, #ef4444 100%)',
+      avatarGradient: 'linear-gradient(135deg, #f97316, #ef4444)',
+      divider: 'linear-gradient(90deg, transparent, rgba(249,115,22,0.25) 20%, rgba(239,68,68,0.25) 80%, transparent)',
+    },
+    light: {
+      accent: '#ea580c',
+      accentLight: '#f97316',
+      waveBase: [234, 88, 12],
+      glowA: 'rgba(234,88,12,0.12)',
+      glowB: 'rgba(220,38,38,0.10)',
+      heroGlow: 'rgba(234,88,12,0.10)',
+      heroGradient: 'linear-gradient(135deg, #0f172a 10%, #ea580c 55%, #dc2626 100%)',
+      avatarGradient: 'linear-gradient(135deg, #ea580c, #dc2626)',
+      divider: 'linear-gradient(90deg, transparent, rgba(234,88,12,0.2) 20%, rgba(220,38,38,0.2) 80%, transparent)',
+    },
+  },
 };
+
+const TEMP_THRESHOLDS: Record<TimeRange, { nebula: number; blaze: number }> = {
+  day:   { nebula: 30_000_000,  blaze: 200_000_000 },
+  week:  { nebula: 210_000_000, blaze: 1_400_000_000 },
+  month: { nebula: 900_000_000, blaze: 6_000_000_000 },
+};
+
+function getColorTemp(rangeTokens: number, timeRange: TimeRange): ColorTemp {
+  const t = TEMP_THRESHOLDS[timeRange];
+  if (rangeTokens >= t.blaze) return 'blaze';
+  if (rangeTokens >= t.nebula) return 'nebula';
+  return 'frost';
+}
+
+/* ── Rank Badge ── */
+
+interface RankInfo {
+  key: string;
+  labelKey: string;
+  color: string;
+  gradient?: string;
+}
+
+function getRank(streakDays: number): RankInfo | null {
+  if (streakDays <= 0) return null;
+  if (streakDays <= 3) return { key: 'bronze', labelKey: 'analytics.posterRankBronze', color: '#cd7f32' };
+  if (streakDays <= 7) return { key: 'silver', labelKey: 'analytics.posterRankSilver', color: '#94a3b8' };
+  if (streakDays <= 14) return { key: 'gold', labelKey: 'analytics.posterRankGold', color: '#eab308' };
+  if (streakDays <= 30) return { key: 'diamond', labelKey: 'analytics.posterRankDiamond', color: '#22d3ee' };
+  return { key: 'legendary', labelKey: 'analytics.posterRankLegendary', color: '#d946ef', gradient: 'linear-gradient(90deg, #f472b6, #a78bfa, #38bdf8)' };
+}
 
 /* ── Helpers ── */
 
@@ -227,9 +345,94 @@ function shortenModel(name: string) {
     .replace('-20250', '');
 }
 
+/* ── Model Breakdown Helpers ── */
+
+function createEmptyUsage(): TokenUsageWithCost {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    cost: 0,
+  };
+}
+
+function addUsage(a: TokenUsageWithCost, b: TokenUsageWithCost): void {
+  a.inputTokens += b.inputTokens;
+  a.outputTokens += b.outputTokens;
+  a.cacheReadTokens += b.cacheReadTokens;
+  a.cacheCreationTokens += b.cacheCreationTokens;
+  a.cost += b.cost;
+}
+
+function aggregateTodayData(breakdown: ModelBreakdownHistory): Record<string, TokenUsageWithCost> {
+  const today = new Date().toISOString().slice(0, 10);
+  const result: Record<string, TokenUsageWithCost> = {};
+
+  Object.entries(breakdown).forEach(([key, usage]) => {
+    if (key.startsWith(today)) {
+      Object.entries(usage).forEach(([model, tokens]) => {
+        if (!result[model]) result[model] = createEmptyUsage();
+        addUsage(result[model], tokens);
+      });
+    }
+  });
+
+  return result;
+}
+
+function aggregateRecentDays(
+  breakdown: ModelBreakdownHistory,
+  days: number,
+): Record<string, TokenUsageWithCost> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days + 1);
+  cutoff.setHours(0, 0, 0, 0);
+
+  const result: Record<string, TokenUsageWithCost> = {};
+
+  Object.entries(breakdown).forEach(([key, usage]) => {
+    // Only aggregate day-granularity keys (YYYY-MM-DD format)
+    if (!key.match(/^\d{4}-\d{2}-\d{2}$/)) return;
+
+    const keyDate = new Date(key);
+    if (keyDate >= cutoff) {
+      Object.entries(usage).forEach(([model, tokens]) => {
+        if (!result[model]) result[model] = createEmptyUsage();
+        addUsage(result[model], tokens);
+      });
+    }
+  });
+
+  return result;
+}
+
+function aggregateMonthDays(
+  breakdown: ModelBreakdownHistory,
+  now: Date,
+): Record<string, TokenUsageWithCost> {
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const result: Record<string, TokenUsageWithCost> = {};
+
+  Object.entries(breakdown).forEach(([key, usage]) => {
+    // Only aggregate day-granularity keys (YYYY-MM-DD format)
+    if (!key.match(/^\d{4}-\d{2}-\d{2}$/)) return;
+
+    const keyDate = new Date(key);
+    if (keyDate >= startOfMonth && keyDate <= now) {
+      Object.entries(usage).forEach(([model, tokens]) => {
+        if (!result[model]) result[model] = createEmptyUsage();
+        addUsage(result[model], tokens);
+      });
+    }
+  });
+
+  return result;
+}
+
 /* ── Activity Waveform (Canvas) ── */
 
-function PosterWaveform({ activities, theme }: { activities: DailyActivity[]; theme: PosterTheme }) {
+function PosterWaveform({ activities, colors }: { activities: DailyActivity[]; colors: ThemeColors }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const last30 = activities.slice(-30);
   const bars = last30.length > 0 ? last30 : Array.from({ length: 30 }, () => ({ level: 0 as const }));
@@ -240,8 +443,7 @@ function PosterWaveform({ activities, theme }: { activities: DailyActivity[]; th
   const totalH = 54;
   const dpr = 3;
   const heights = [5, 14, 24, 38, 50];
-  const tc = THEMES[theme];
-  const [r, g, b] = tc.waveBase;
+  const [r, g, b] = colors.waveBase;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -276,7 +478,7 @@ function PosterWaveform({ activities, theme }: { activities: DailyActivity[]; th
 
       if (isHigh) {
         const grad = ctx.createLinearGradient(x, y, x, y + h);
-        grad.addColorStop(0, tc.waveHighGradTop);
+        grad.addColorStop(0, colors.waveHighGradTop);
         grad.addColorStop(1, `rgba(${r},${g},${b},${alphas[level]})`);
         ctx.fillStyle = grad;
       } else {
@@ -286,15 +488,14 @@ function PosterWaveform({ activities, theme }: { activities: DailyActivity[]; th
       roundRect(ctx, x, y, barW, h, rad);
       ctx.fill();
     });
-  }, [bars, theme]);
+  }, [bars, colors]);
 
   return <canvas ref={canvasRef} style={{ width: totalW, height: totalH, display: 'block' }} />;
 }
 
 /* ── Hourly Sparkline (for Day view) ── */
 
-function PosterHourlySparkline({ hourlyHistory, idPrefix, theme }: { hourlyHistory: UsageStats['hourlyHistory']; idPrefix: string; theme: PosterTheme }) {
-  const tc = THEMES[theme];
+function PosterHourlySparkline({ hourlyHistory, idPrefix, colors }: { hourlyHistory: UsageStats['hourlyHistory']; idPrefix: string; colors: ThemeColors }) {
 
   // 获取今天的小时数据 (YYYY-MM-DDTHH 格式)
   const today = new Date().toISOString().slice(0, 10);
@@ -341,8 +542,8 @@ function PosterHourlySparkline({ hourlyHistory, idPrefix, theme }: { hourlyHisto
     <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
       <defs>
         <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={tc.sparkFillFrom} stopOpacity={0.28} />
-          <stop offset="100%" stopColor={tc.sparkFillFrom} stopOpacity={0.02} />
+          <stop offset="0%" stopColor={colors.sparkFillFrom} stopOpacity={0.28} />
+          <stop offset="100%" stopColor={colors.sparkFillFrom} stopOpacity={0.02} />
         </linearGradient>
         <filter id={glowId}>
           <feGaussianBlur stdDeviation="2.5" result="blur" />
@@ -353,14 +554,14 @@ function PosterHourlySparkline({ hourlyHistory, idPrefix, theme }: { hourlyHisto
         </filter>
       </defs>
       <path d={area} fill={`url(#${gradId})`} />
-      <path d={bezier} fill="none" stroke={tc.sparkStroke} strokeWidth={2} filter={`url(#${glowId})`} />
+      <path d={bezier} fill="none" stroke={colors.sparkStroke} strokeWidth={2} filter={`url(#${glowId})`} />
     </svg>
   );
 }
 
 /* ── Sparkline (for Week/Month view) ── */
 
-function PosterSparkline({ activities, idPrefix, theme, timeRange }: { activities: DailyActivity[]; idPrefix: string; theme: PosterTheme; timeRange: TimeRange }) {
+function PosterSparkline({ activities, idPrefix, colors, timeRange }: { activities: DailyActivity[]; idPrefix: string; colors: ThemeColors; timeRange: TimeRange }) {
   // 周：最近7天，月：本月数据（从1号到今天）
   let rangeData: DailyActivity[] = [];
 
@@ -375,7 +576,6 @@ function PosterSparkline({ activities, idPrefix, theme, timeRange }: { activitie
 
   if (rangeData.length === 0) return null;
 
-  const tc = THEMES[theme];
   const maxTokens = Math.max(...rangeData.map((a) => a.tokens), 1);
   const w = 384;
   const h = 76;
@@ -403,8 +603,8 @@ function PosterSparkline({ activities, idPrefix, theme, timeRange }: { activitie
     <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
       <defs>
         <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={tc.sparkFillFrom} stopOpacity={0.28} />
-          <stop offset="100%" stopColor={tc.sparkFillFrom} stopOpacity={0.02} />
+          <stop offset="0%" stopColor={colors.sparkFillFrom} stopOpacity={0.28} />
+          <stop offset="100%" stopColor={colors.sparkFillFrom} stopOpacity={0.02} />
         </linearGradient>
         <filter id={glowId}>
           <feGaussianBlur stdDeviation="2.5" result="blur" />
@@ -415,14 +615,14 @@ function PosterSparkline({ activities, idPrefix, theme, timeRange }: { activitie
         </filter>
       </defs>
       <path d={area} fill={`url(#${gradId})`} />
-      <path d={bezier} fill="none" stroke={tc.sparkStroke} strokeWidth={2} filter={`url(#${glowId})`} />
+      <path d={bezier} fill="none" stroke={colors.sparkStroke} strokeWidth={2} filter={`url(#${glowId})`} />
     </svg>
   );
 }
 
 /* ── Segmented Model Bar ── */
 
-function PosterModelBar({ byModel, theme }: { byModel: UsageStats['byModel']; theme: PosterTheme }) {
+function PosterModelBar({ byModel, colors, accents }: { byModel: UsageStats['byModel']; colors: ThemeColors; accents: string[] }) {
   const { t } = useLocale();
   const models = Object.entries(byModel)
     .map(([name, usage]) => ({ name, tokens: sumTokens(usage) }))
@@ -430,14 +630,13 @@ function PosterModelBar({ byModel, theme }: { byModel: UsageStats['byModel']; th
 
   if (models.length === 0) {
     return (
-      <div style={{ fontSize: 11, color: THEMES[theme].textMuted, fontFamily: "'JetBrains Mono', monospace" }}>
+      <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: "'JetBrains Mono', monospace" }}>
         {t('analytics.shareNoModelData')}
       </div>
     );
   }
 
   const total = models.reduce((sum, m) => sum + m.tokens, 0);
-  const colors = ACCENT_COLORS[theme];
   const topModels = models.slice(0, 4);
   const otherTokens = models.slice(4).reduce((sum, m) => sum + m.tokens, 0);
   const segments = otherTokens > 0 ? [...topModels, { name: `+${models.length - 4}`, tokens: otherTokens }] : topModels;
@@ -447,7 +646,7 @@ function PosterModelBar({ byModel, theme }: { byModel: UsageStats['byModel']; th
       <div style={{ display: 'flex', height: 14, borderRadius: 7, overflow: 'hidden', gap: 2 }}>
         {segments.map((seg, i) => {
           const pct = (seg.tokens / total) * 100;
-          const color = colors[i % colors.length];
+          const color = accents[i % accents.length];
           return (
             <div
               key={seg.name}
@@ -461,16 +660,16 @@ function PosterModelBar({ byModel, theme }: { byModel: UsageStats['byModel']; th
           );
         })}
       </div>
-      <div style={{ display: 'flex', flexWrap: 'nowrap', gap: 12, marginTop: 8, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
         {segments.map((seg, i) => {
-          const color = colors[i % colors.length];
+          const color = accents[i % accents.length];
           const pct = Math.round((seg.tokens / total) * 100);
           return (
-            <div key={seg.name} style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+            <div key={seg.name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <div
                 style={{
-                  width: 6,
-                  height: 6,
+                  width: 8,
+                  height: 8,
                   borderRadius: '50%',
                   background: color,
                   flexShrink: 0,
@@ -478,13 +677,28 @@ function PosterModelBar({ byModel, theme }: { byModel: UsageStats['byModel']; th
               />
               <span
                 style={{
-                  fontSize: 10,
+                  fontSize: 11,
                   fontFamily: "'JetBrains Mono', monospace",
-                  color: MODEL_LEGEND_COLORS[theme],
+                  color: colors.textMuted,
                   whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  flex: 1,
+                  minWidth: 0,
                 }}
               >
-                {shortenModel(seg.name)} <span style={{ color }}>{pct}%</span>
+                {shortenModel(seg.name)}
+              </span>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontFamily: "'JetBrains Mono', monospace",
+                  color,
+                  marginLeft: 'auto',
+                  flexShrink: 0,
+                }}
+              >
+                {pct}%
               </span>
             </div>
           );
@@ -508,10 +722,33 @@ function PosterCard({
   usageStats,
   username,
   rangeTokens,
+  rangeModelData,
 }: PosterCardProps) {
   const { t } = useLocale();
-  const tc = THEMES[theme];
-  const accents = ACCENT_COLORS[theme];
+  const baseTc = THEMES[theme];
+
+  // Color temperature & rank
+  const temp = getColorTemp(rangeTokens, timeRange);
+  const tempColors = COLOR_TEMPS[temp][theme];
+  const rank = getRank(streakDays);
+
+  // Merge base theme with color temp overrides
+  const tc: ThemeColors = {
+    ...baseTc,
+    glowA: tempColors.glowA,
+    glowB: tempColors.glowB,
+    heroGlow: tempColors.heroGlow,
+    divider: tempColors.divider,
+    accentBrand: tempColors.accent,
+    sparkStroke: tempColors.accent,
+    sparkFillFrom: tempColors.accent,
+    waveBase: tempColors.waveBase,
+    waveHighGradTop: tempColors.accentLight,
+  };
+
+  // Replace first accent color with temp accent
+  const baseAccents = ACCENT_COLORS[theme];
+  const accents = [tempColors.accent, ...baseAccents.slice(1)];
 
   const sectionLabel = {
     fontSize: 10,
@@ -522,10 +759,6 @@ function PosterCard({
     fontFamily: "'JetBrains Mono', monospace",
     marginBottom: 10,
   };
-
-  const heroGradient = theme === 'dark'
-    ? 'linear-gradient(135deg, #f8fafc 10%, #38bdf8 55%, #a78bfa 100%)'
-    : 'linear-gradient(135deg, #0f172a 10%, #0284c7 55%, #7c3aed 100%)';
 
   return (
     <div
@@ -539,7 +772,7 @@ function PosterCard({
         color: tc.textSub,
       }}
     >
-      {/* Background glows */}
+     {/* Background glows */}
       <div
         style={{
           position: 'absolute',
@@ -568,7 +801,7 @@ function PosterCard({
                 height: 32,
                 flexShrink: 0,
                 borderRadius: '50%',
-                background: 'linear-gradient(135deg, #38bdf8, #a78bfa)',
+                background: tempColors.avatarGradient,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -580,16 +813,42 @@ function PosterCard({
               {(username || 'D')[0].toUpperCase()}
             </div>
             <div>
-              <div
-                style={{
-                  fontSize: 14,
-                  fontWeight: 600,
-                  fontFamily: "'JetBrains Mono', monospace",
-                  color: tc.text,
-                  letterSpacing: '0.02em',
-                }}
-              >
-                {username || 'developer'}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 600,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    color: tc.text,
+                    letterSpacing: '0.02em',
+                  }}
+                >
+                  {username || 'developer'}
+                </span>
+                {rank && (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      padding: '1px 6px',
+                      borderRadius: 8,
+                      fontSize: 9,
+                      fontWeight: 600,
+                      fontFamily: "'JetBrains Mono', monospace",
+                      letterSpacing: '0.02em',
+                      color: rank.gradient ? '#f8fafc' : rank.color,
+                      background: rank.gradient
+                        ? rank.gradient
+                        : `${rank.color}18`,
+                      border: rank.gradient
+                        ? 'none'
+                        : `1px solid ${rank.color}40`,
+                      lineHeight: '16px',
+                    }}
+                  >
+                    {t(rank.labelKey)}
+                  </span>
+                )}
               </div>
               <div
                 style={{
@@ -641,7 +900,7 @@ function PosterCard({
               fontWeight: 700,
               fontFamily: "'JetBrains Mono', monospace",
               letterSpacing: '-0.02em',
-              background: heroGradient,
+              background: tempColors.heroGradient,
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
               lineHeight: 1.1,
@@ -665,7 +924,7 @@ function PosterCard({
         {/* ── Activity Waveform ── */}
         <div style={{ marginBottom: 22 }}>
           <div style={sectionLabel}>{t('analytics.share30dActivity')}</div>
-          <PosterWaveform activities={dailyActivities} theme={theme} />
+          <PosterWaveform activities={dailyActivities} colors={tc} />
         </div>
 
         {/* ── Three Stat Cards ── */}
@@ -723,16 +982,16 @@ function PosterCard({
             {timeRange === 'day' ? t('analytics.share24hTokens') : timeRange === 'month' ? t('analytics.shareMonthTokensLabel') : t('analytics.share7dTokens')}
           </div>
           {timeRange === 'day' ? (
-            <PosterHourlySparkline hourlyHistory={usageStats.hourlyHistory} idPrefix={chartIdPrefix} theme={theme} />
+            <PosterHourlySparkline hourlyHistory={usageStats.hourlyHistory} idPrefix={chartIdPrefix} colors={tc} />
           ) : (
-            <PosterSparkline activities={dailyActivities} idPrefix={chartIdPrefix} theme={theme} timeRange={timeRange} />
+            <PosterSparkline activities={dailyActivities} idPrefix={chartIdPrefix} colors={tc} timeRange={timeRange} />
           )}
         </div>
 
         {/* ── Model Bar ── */}
         <div style={{ marginBottom: 'auto' }}>
           <div style={sectionLabel}>{t('analytics.shareTopModels')}</div>
-          <PosterModelBar byModel={usageStats.byModel} theme={theme} />
+          <PosterModelBar byModel={rangeModelData} colors={tc} accents={accents} />
         </div>
 
         {/* ── Footer ── */}
@@ -751,7 +1010,7 @@ function PosterCard({
               style={{
                 fontSize: 11,
                 fontWeight: 600,
-                color: theme === 'dark' ? 'rgba(56,189,248,0.75)' : tc.accentBrand,
+                color: theme === 'dark' ? `${tempColors.accent}bf` : tc.accentBrand,
                 fontFamily: "'JetBrains Mono', monospace",
                 letterSpacing: '0.06em',
               }}
@@ -798,12 +1057,44 @@ export function SharePosterDialog({
     document.documentElement.classList.contains('light') ? 'light' : 'dark',
   );
   const [timeRange, setTimeRange] = useState<TimeRange>('week');
+  const [modelBreakdown, setModelBreakdown] = useState<ModelBreakdownHistory | null>(null);
   const previewId = useId().replace(/:/g, '');
   const exportId = useId().replace(/:/g, '');
 
   const totalTokens = sumTokens(usageStats.total);
   const rangeTokens = getRangeTokens(usageStats, timeRange);
   const dateRange = formatPosterRange(dailyActivities, timeRange);
+
+  // Fetch model breakdown data when timeRange changes
+  useEffect(() => {
+    if (!open) return;
+
+    const granularity = timeRange === 'day' ? 'hour' : 'day';
+    invoke<ModelBreakdownHistory>('get_usage_model_breakdown', {
+      granularity,
+      source: null,
+    }).then(setModelBreakdown).catch(() => setModelBreakdown(null));
+  }, [open, timeRange]);
+
+  // Compute model data for the selected time range
+  const getRangeModelData = (): Record<string, TokenUsageWithCost> => {
+    if (!modelBreakdown) return usageStats.byModel;
+
+    const now = new Date();
+
+    if (timeRange === 'day') {
+      // Today's data (hour granularity, aggregate to day)
+      return aggregateTodayData(modelBreakdown);
+    } else if (timeRange === 'week') {
+      // Last 7 days (day granularity)
+      return aggregateRecentDays(modelBreakdown, 7);
+    } else {
+      // This month (day granularity, filter to current month)
+      return aggregateMonthDays(modelBreakdown, now);
+    }
+  };
+
+  const rangeModelData = getRangeModelData();
 
   useEffect(() => {
     if (!open) return;
@@ -891,6 +1182,7 @@ export function SharePosterDialog({
     usageStats,
     username,
     rangeTokens,
+    rangeModelData,
   };
 
   return (
