@@ -106,7 +106,10 @@ export interface TauriCommands {
   dismiss_runtime_recovery_candidate: [{ runtimeId: string }, void];
   stop_interactive_session: [{ sessionId: string }, void];
   focus_interactive_session: [{ sessionId: string }, void];
-  open_interactive_session_in_terminal: [{ sessionId: string }, void];
+  open_interactive_session_in_terminal: [
+    { sessionId: string; terminalType?: TmuxAttachTerminalType | null },
+    void
+  ];
   close_interactive_session: [{ sessionId: string }, void];
   minimize_interactive_session: [{ sessionId: string }, void];
   write_interactive_input: [{ sessionId: string; data: string }, void];
@@ -291,6 +294,7 @@ export interface TauriCommands {
 
   // 终端
   detect_terminals: [void, TerminalInfo[]];
+  list_tmux_attach_terminals: [void, TmuxAttachTerminalInfo[]];
   get_preferred_terminal: [void, string | null];
   set_preferred_terminal: [{ terminalType: string }, void];
 
@@ -723,6 +727,15 @@ export interface TerminalInfo {
   terminalType: string;
   displayName: string;
   available: boolean;
+}
+
+export type TmuxAttachTerminalType = 'terminalapp' | 'iterm2' | 'ghostty';
+
+export interface TmuxAttachTerminalInfo {
+  terminal_type: TmuxAttachTerminalType;
+  name: string;
+  installed: boolean;
+  preferred: boolean;
 }
 
 export interface LoadResult {

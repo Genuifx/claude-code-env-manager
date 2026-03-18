@@ -67,7 +67,10 @@ use unified_session::{RuntimeInput, UnifiedSessionDebugComparison, UnifiedSessio
 /// Global flag: when true, CloseRequested should NOT be intercepted.
 static FORCE_QUIT: AtomicBool = AtomicBool::new(false);
 use tauri::{Manager, RunEvent, State, WindowEvent};
-use terminal::{ArrangeLayout, ArrangeSessionInfo, TerminalInfo, TerminalType};
+use terminal::{
+    ArrangeLayout, ArrangeSessionInfo, TerminalInfo, TerminalType, TmuxAttachTerminalInfo,
+    TmuxAttachTerminalType,
+};
 use tray::create_tray;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
@@ -301,6 +304,11 @@ fn detect_terminals() -> Vec<TerminalInfo> {
 }
 
 #[tauri::command]
+fn list_tmux_attach_terminals() -> Vec<TmuxAttachTerminalInfo> {
+    terminal::detect_tmux_attach_terminals()
+}
+
+#[tauri::command]
 fn get_preferred_terminal() -> TerminalType {
     terminal::get_preferred_terminal()
 }
@@ -453,6 +461,7 @@ async fn launch_claude_code(
         terminal_type: Some(terminal_type_str.to_string()),
         window_id,        // Store window ID for later operations
         iterm_session_id, // Store iTerm2 session unique ID for arrange
+        tmux_target: None,
     };
 
     state.add_session(session.clone());
@@ -805,6 +814,22 @@ fn list_interactive_sessions(state: State<'_, Arc<SessionManager>>) -> Vec<Sessi
     list_sessions(state)
 }
 
+fn session_terminal_window_type(session: &Session) -> Option<TerminalType> {
+    match session.terminal_type.as_deref() {
+        Some("iterm2") => Some(TerminalType::ITerm2),
+        Some("terminalapp") => Some(TerminalType::TerminalApp),
+        _ => None,
+    }
+}
+
+fn session_has_window_control(session: &Session) -> bool {
+    session_terminal_window_type(session).is_some()
+        && session
+            .window_id
+            .as_ref()
+            .is_some_and(|value| !value.trim().is_empty())
+}
+
 #[tauri::command]
 fn stop_interactive_session(
     state: State<'_, Arc<SessionManager>>,
@@ -814,7 +839,7 @@ fn stop_interactive_session(
 ) -> Result<(), String> {
     if state
         .get_session(&session_id)
-        .is_some_and(|session| session.terminal_type.as_deref() == Some("embedded"))
+        .is_some_and(|session| session.is_tmux_backed())
     {
         interactive_state.stop_session(&session_id)?;
         state.update_session_status(&session_id, "stopped");
@@ -830,11 +855,13 @@ fn focus_interactive_session(
     state: State<'_, Arc<SessionManager>>,
     session_id: String,
 ) -> Result<(), String> {
-    if state
-        .get_session(&session_id)
-        .is_some_and(|session| session.terminal_type.as_deref() == Some("embedded"))
-    {
-        return Ok(());
+    if let Some(session) = state.get_session(&session_id) {
+        if session.is_tmux_backed() {
+            if session_has_window_control(&session) {
+                return focus_session(state, session_id);
+            }
+            return Ok(());
+        }
     }
 
     focus_session(state, session_id)
@@ -844,24 +871,48 @@ fn focus_interactive_session(
 fn open_interactive_session_in_terminal(
     state: State<'_, Arc<SessionManager>>,
     session_id: String,
+    terminal_type: Option<TmuxAttachTerminalType>,
 ) -> Result<(), String> {
     let session = state
         .get_session(&session_id)
         .ok_or_else(|| format!("Session {} not found", session_id))?;
 
-    if session.terminal_type.as_deref() != Some("embedded") {
+    if !session.is_tmux_backed() {
         return Err(
-            "Only tmux-backed embedded sessions can be opened in a new terminal".to_string(),
+            "Only tmux-backed interactive sessions can be opened in a new terminal".to_string(),
         );
     }
 
     let target = session
-        .window_id
+        .resolved_tmux_target()
+        .map(str::to_string)
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| format!("Session {} does not have a tmux target", session_id))?;
 
-    let preferred_terminal = terminal::get_preferred_terminal();
-    terminal::open_tmux_target_in_terminal(preferred_terminal, &target)?;
+    let attach_terminal =
+        terminal_type.unwrap_or_else(|| match terminal::get_preferred_terminal() {
+            TerminalType::TerminalApp => TmuxAttachTerminalType::TerminalApp,
+            TerminalType::ITerm2 => TmuxAttachTerminalType::ITerm2,
+        });
+
+    let (window_id, iterm_session_id) =
+        terminal::open_tmux_target_in_attach_terminal(attach_terminal, &target)?;
+
+    match attach_terminal {
+        TmuxAttachTerminalType::TerminalApp => {
+            state.attach_tmux_terminal(&session_id, "terminalapp", window_id.as_deref(), None);
+        }
+        TmuxAttachTerminalType::ITerm2 => {
+            state.attach_tmux_terminal(
+                &session_id,
+                "iterm2",
+                window_id.as_deref(),
+                iterm_session_id.as_deref(),
+            );
+        }
+        TmuxAttachTerminalType::Ghostty => {}
+    }
+
     Ok(())
 }
 
@@ -872,15 +923,24 @@ fn close_interactive_session(
     proxy_state: State<'_, Arc<ProxyDebugManager>>,
     session_id: String,
 ) -> Result<(), String> {
-    if state
-        .get_session(&session_id)
-        .is_some_and(|session| session.terminal_type.as_deref() == Some("embedded"))
-    {
-        let _ = interactive_state.stop_session(&session_id);
-        interactive_state.remove_session(&session_id);
-        state.remove_session(&session_id);
-        proxy_state.remove_session_routes(&session_id);
-        return Ok(());
+    if let Some(session) = state.get_session(&session_id) {
+        if session.is_tmux_backed() {
+            if session_has_window_control(&session) {
+                if let (Some(term_type), Some(window_id)) = (
+                    session_terminal_window_type(&session),
+                    session.window_id.as_deref(),
+                ) {
+                    let _ = terminal::close_terminal_session(term_type, window_id);
+                }
+            }
+
+            let _ = interactive_state.stop_session(&session_id);
+            interactive_state.remove_session(&session_id);
+            cleanup_exit_file(&session_id);
+            state.remove_session(&session_id);
+            proxy_state.remove_session_routes(&session_id);
+            return Ok(());
+        }
     }
 
     close_session(state, proxy_state, session_id)
@@ -891,11 +951,13 @@ fn minimize_interactive_session(
     state: State<'_, Arc<SessionManager>>,
     session_id: String,
 ) -> Result<(), String> {
-    if state
-        .get_session(&session_id)
-        .is_some_and(|session| session.terminal_type.as_deref() == Some("embedded"))
-    {
-        return Ok(());
+    if let Some(session) = state.get_session(&session_id) {
+        if session.is_tmux_backed() {
+            if session_has_window_control(&session) {
+                return minimize_session(state, session_id);
+            }
+            return Ok(());
+        }
     }
 
     minimize_session(state, session_id)
@@ -1015,7 +1077,7 @@ fn remove_session(
 ) {
     if state
         .get_session(&session_id)
-        .is_some_and(|session| session.terminal_type.as_deref() == Some("embedded"))
+        .is_some_and(|session| session.is_tmux_backed())
     {
         interactive_state.remove_session(&session_id);
     }
@@ -1985,8 +2047,8 @@ async fn save_image_dialog(
 
 #[cfg(target_os = "macos")]
 fn copy_png_to_clipboard_native(app: &tauri::AppHandle, png_bytes: Vec<u8>) -> Result<(), String> {
-    use objc2::ClassType;
     use objc2::runtime::ProtocolObject;
+    use objc2::ClassType;
     use objc2_app_kit::{NSImage, NSPasteboard};
     use objc2_foundation::{NSArray, NSData};
 
@@ -2022,15 +2084,15 @@ fn copy_png_to_clipboard_native(app: &tauri::AppHandle, png_bytes: Vec<u8>) -> R
 }
 
 #[cfg(not(target_os = "macos"))]
-fn copy_png_to_clipboard_native(_app: &tauri::AppHandle, _png_bytes: Vec<u8>) -> Result<(), String> {
+fn copy_png_to_clipboard_native(
+    _app: &tauri::AppHandle,
+    _png_bytes: Vec<u8>,
+) -> Result<(), String> {
     Err("Native image clipboard copy is not implemented on this platform".to_string())
 }
 
 #[tauri::command]
-async fn copy_image_to_clipboard(
-    app: tauri::AppHandle,
-    base64_png: String,
-) -> Result<(), String> {
+async fn copy_image_to_clipboard(app: tauri::AppHandle, base64_png: String) -> Result<(), String> {
     use base64::Engine as _;
 
     let png_bytes = base64::engine::general_purpose::STANDARD
@@ -2108,6 +2170,7 @@ fn main() {
             remove_favorite,
             add_recent,
             detect_terminals,
+            list_tmux_attach_terminals,
             get_preferred_terminal,
             set_preferred_terminal,
             launch_claude_code,

@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
-import { Home, Terminal, Globe, BarChart3, Sparkles, Settings, MessageSquare, Clock, Bug } from 'lucide-react';
+import { Home, Terminal, Globe, BarChart3, Sparkles, Settings, MessageSquare, MessageCircleMore, Clock, Bug } from 'lucide-react';
 
 interface SideRailProps {
   activeTab: string;
@@ -35,19 +35,20 @@ const navGroupDefs: NavGroupDef[] = [
       { id: 'skills', labelKey: 'sideRail.skills', icon: Sparkles, shortcut: '4' },
       { id: 'history', labelKey: 'sideRail.history', icon: MessageSquare, shortcut: '5' },
       { id: 'cron', labelKey: 'sideRail.cron', icon: Clock, shortcut: '6' },
+      { id: 'chat-app', labelKey: 'sideRail.chatApp', icon: MessageCircleMore, shortcut: '7' },
     ],
   },
   {
     titleKey: 'sideRail.groupInsights',
     items: [
-      { id: 'analytics', labelKey: 'sideRail.analytics', icon: BarChart3, shortcut: '7' },
-      { id: 'proxy-debug', labelKey: 'sideRail.proxyDebug', icon: Bug, shortcut: '8' },
+      { id: 'analytics', labelKey: 'sideRail.analytics', icon: BarChart3, shortcut: '8' },
+      { id: 'proxy-debug', labelKey: 'sideRail.proxyDebug', icon: Bug, shortcut: '9' },
     ],
   },
 ];
 
 const bottomItemDefs: NavItemDef[] = [
-  { id: 'settings', labelKey: 'sideRail.settings', icon: Settings, shortcut: '9' },
+  { id: 'settings', labelKey: 'sideRail.settings', icon: Settings, shortcut: ',' },
 ];
 
 function NavButton({

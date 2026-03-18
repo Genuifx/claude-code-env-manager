@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { LaunchButton } from '@/components/ui/LaunchButton';
 
 function formatDuration(ms?: number | null) {
   if (!ms) return '-';
@@ -301,7 +302,9 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-black/[0.06] dark:border-white/[0.06]">
             <button className="px-4 py-2 text-sm rounded-xl border border-black/[0.08] dark:border-white/[0.08] text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors" onClick={onClose}>{t('common.cancel')}</button>
-            <button className="px-4 py-2 text-sm rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm transition-colors disabled:opacity-50" onClick={doSave} disabled={saving || !name.trim() || !prompt.trim() || !workDir.trim()}>{saving ? t('common.loading') : t('common.save')}</button>
+            <LaunchButton size="sm" onClick={doSave} disabled={saving || !name.trim() || !prompt.trim() || !workDir.trim()}>
+              {saving ? t('common.loading') : t('common.save')}
+            </LaunchButton>
           </div>
         </div>
       </div>
@@ -523,10 +526,9 @@ export function CronTasks() {
           <Sparkles className="w-4 h-4" />
           {t('cron.aiCreate')}
         </button>
-        <button onClick={handleAdd} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-sm hover:bg-primary/90 transition-colors">
-          <Plus className="w-4 h-4" />
+        <LaunchButton onClick={handleAdd} size="sm" icon={<Plus className="w-4 h-4" />}>
           {t('cron.addTask')}
-        </button>
+        </LaunchButton>
       </div>
       {showAiPanel && (
         <AiCronPanel

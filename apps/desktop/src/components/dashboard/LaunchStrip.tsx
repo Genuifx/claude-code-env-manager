@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FolderOpen, ChevronDown, Globe, Shield, Check, Clock, Copy, Rocket, TerminalSquare } from 'lucide-react';
+import { FolderOpen, ChevronDown, Globe, Shield, Clock, Copy, Rocket, TerminalSquare } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -9,10 +9,10 @@ import {
 } from '@/components/ui/select';
 import * as Popover from '@radix-ui/react-popover';
 import { useLocale } from '@/locales';
-import { getProjectName } from '@/lib/utils';
+import { getProjectName, cn } from '@/lib/utils';
 import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
-import { cn } from '@/lib/utils';
+import { LaunchButton } from '@/components/ui/LaunchButton';
 import type { LaunchClient } from '@/store';
 
 interface LaunchStripProps {
@@ -99,36 +99,16 @@ export function LaunchStrip({
         <img src="/logo.png" alt="" aria-hidden="true" className="dashboard-brand-mark mb-8" />
 
         {/* Launch button — hero CTA */}
-        <button
+        <LaunchButton
           onClick={onLaunch}
-          title={t('dashboard.launchShortcut')}
-          className={cn(
-            'w-full max-w-[320px] h-12 rounded-2xl flex items-center justify-center gap-3',
-            'font-bold text-[15px] tracking-wide',
-            'transition-all duration-300 cursor-pointer',
-            'relative overflow-hidden',
-            launched
-              ? 'bg-success text-success-foreground shadow-[0_0_24px_hsl(var(--success)/0.3)] ripple-success'
-              : 'bg-primary text-primary-foreground launch-hero-btn hover:scale-[1.02] active:scale-[0.98]'
-          )}
+          launched={launched}
+          size="lg"
+          icon={<Rocket className="w-[18px] h-[18px]" />}
+          shortcut="⌘↵"
+          className="w-full max-w-[320px]"
         >
-          {/* Inner shimmer on hover */}
-          {!launched && (
-            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/[0.08] to-transparent translate-x-[-200%] hover-shimmer" />
-          )}
-          {launched ? (
-            <>
-              <Check className="w-5 h-5" />
-              {t('dashboard.launchBtnDone')}
-            </>
-          ) : (
-            <>
-              <Rocket className="w-[18px] h-[18px]" />
-              {t('dashboard.launchBtn')}
-              <kbd className="ml-1.5 text-2xs opacity-50 font-mono bg-white/[0.15] px-2 py-0.5 rounded-md">⌘↵</kbd>
-            </>
-          )}
-        </button>
+          {launched ? t('dashboard.launchBtnDone') : t('dashboard.launchBtn')}
+        </LaunchButton>
 
         {/* Config selectors — secondary row */}
         <div className="flex items-center justify-center gap-2 mt-4 flex-wrap">

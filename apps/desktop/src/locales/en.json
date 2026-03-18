@@ -8,7 +8,8 @@
     "retry": "Retry",
     "loading": "Loading...",
     "protected": "Protected",
-    "local": "Local"
+    "local": "Local",
+    "default": "Default"
   },
   "dashboard": {
     "subtitle": "Overview of your Claude Code workspace",
@@ -129,6 +130,9 @@
     "closeAll": "Close All",
     "focus": "Focus",
     "openInTerminal": "Open in Terminal",
+    "chooseTerminal": "Choose Terminal",
+    "notInstalled": "Not Installed",
+    "selectInEmbeddedTerminal": "Click to switch the embedded terminal below",
     "quickLaunch": "Quick Launch",
     "browseDir": "Browse...",
     "selectDirs": "Selected ({count})",
@@ -332,12 +336,19 @@
     "shareTotalCost": "Total Cost",
     "shareStreak": "Streak",
     "shareWeekTokens": "Weekly Tokens",
-    "shareCopyImage": "Copy Image",
+    "shareDayTokens": "Today's Tokens",
+    "shareMonthTokens": "Monthly Tokens",
+    "share24hTokens": "24h Token Usage",
+    "shareMonthTokensLabel": "Monthly Token Usage",
+    "timeRangeDay": "Day",
+    "timeRangeWeek": "Week",
+    "timeRangeMonth": "Month",
+    "shareCopyImage": "Copy",
     "shareCopying": "Copying...",
     "shareCopied": "Image copied",
     "shareCopyFailed": "Failed to copy image: {error}",
     "shareCopyUnsupported": "Image clipboard is not available in this environment",
-    "shareSaveImage": "Save Image",
+    "shareSaveImage": "Save",
     "shareSaving": "Generating...",
     "shareSaved": "Poster saved",
     "shareSaveFailed": "Failed to save image: {error}",
@@ -485,7 +496,7 @@
   },
   "telegram": {
     "copyBindCommand": "Copy Telegram /bind command",
-    "copyBindShort": "Copy /bind",
+    "copyBindShort": "Copy command",
     "bindCopiedShort": "Copied",
     "bindCommandCopied": "Telegram bind command copied",
     "bindCommandCopyFailed": "Failed to copy Telegram bind command: {error}",
@@ -574,8 +585,23 @@
     "analytics": "Analytics",
     "proxyDebug": "Proxy Debug",
     "settings": "Settings",
+    "chatApp": "Chat Apps",
     "groupWorkspace": "Workspace",
     "groupInsights": "Insights"
+  },
+  "chat": {
+    "bindToChannel": "Bind to Chat Channel",
+    "bindToTopic": "Bind to Topic",
+    "bindDialogTitle": "Bind to Chat Channel",
+    "bindDialogDesc": "Select chat platform and configure binding",
+    "selectPlatform": "Select Platform",
+    "bindSubmit": "Bind Channel"
+  },
+  "chatApp": {
+    "subtitle": "Connect chat platforms to Claude sessions",
+    "telegram": "Telegram",
+    "feishu": "Feishu / Lark",
+    "feishuComingSoon": "Feishu integration coming soon"
   },
   "proxyDebug": {
     "subtitle": "Transparent reverse proxy, SSE stream, and request log debugging",

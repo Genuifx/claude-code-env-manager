@@ -30,6 +30,15 @@ const INITIAL_SNAPSHOT: RuntimeSnapshot = {
   telegramRestricted: false,
 };
 
+function snapshotsEqual(left: RuntimeSnapshot, right: RuntimeSnapshot) {
+  return left.headlessCount === right.headlessCount
+    && left.recoveryCount === right.recoveryCount
+    && left.tmuxInstalled === right.tmuxInstalled
+    && left.telegramRunning === right.telegramRunning
+    && left.telegramConfigured === right.telegramConfigured
+    && left.telegramRestricted === right.telegramRestricted;
+}
+
 export function RuntimeOverviewCard({ onNavigate }: RuntimeOverviewCardProps) {
   const { t } = useLocale();
   const { sessions } = useAppStore(
@@ -48,28 +57,45 @@ export function RuntimeOverviewCard({ onNavigate }: RuntimeOverviewCardProps) {
   useEffect(() => {
     let cancelled = false;
 
-    const loadSnapshot = async () => {
+    const loadSnapshot = async (mode: 'full' | 'runtime' = 'full') => {
       try {
-        const [headlessSessions, recoveryCandidates, telegramStatus, telegramSettings, tmuxInstalled] = await Promise.all([
+        if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+          return;
+        }
+
+        const [headlessSessions, recoveryCandidates, telegramStatus] = await Promise.all([
           listHeadlessSessions(),
           listRuntimeRecoveryCandidates(),
           getTelegramBridgeStatus(),
-          getTelegramSettings(),
-          checkTmuxInstalled(),
         ]);
 
         if (cancelled) {
           return;
         }
 
-        setSnapshot({
+        const nextSnapshot: RuntimeSnapshot = {
           headlessCount: headlessSessions.length,
           recoveryCount: recoveryCandidates.length,
-          tmuxInstalled,
           telegramRunning: telegramStatus.running,
           telegramConfigured: telegramStatus.configured,
-          telegramRestricted: (telegramSettings.allowedUserIds?.length ?? 0) > 0,
-        });
+          tmuxInstalled: snapshot.tmuxInstalled,
+          telegramRestricted: snapshot.telegramRestricted,
+        };
+
+        if (mode === 'full') {
+          const [telegramSettings, tmuxInstalled] = await Promise.all([
+            getTelegramSettings(),
+            checkTmuxInstalled(),
+          ]);
+          if (cancelled) {
+            return;
+          }
+
+          nextSnapshot.tmuxInstalled = tmuxInstalled;
+          nextSnapshot.telegramRestricted = (telegramSettings.allowedUserIds?.length ?? 0) > 0;
+        }
+
+        setSnapshot((current) => (snapshotsEqual(current, nextSnapshot) ? current : nextSnapshot));
       } catch (error) {
         if (!cancelled) {
           console.error('Failed to load runtime overview:', error);
@@ -77,16 +103,16 @@ export function RuntimeOverviewCard({ onNavigate }: RuntimeOverviewCardProps) {
       }
     };
 
-    void loadSnapshot();
+    void loadSnapshot('full');
     const intervalId = window.setInterval(() => {
-      void loadSnapshot();
+      void loadSnapshot('runtime');
     }, 5000);
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [checkTmuxInstalled, getTelegramBridgeStatus, getTelegramSettings, listHeadlessSessions, listRuntimeRecoveryCandidates]);
+  }, [checkTmuxInstalled, getTelegramBridgeStatus, getTelegramSettings, listHeadlessSessions, listRuntimeRecoveryCandidates, snapshot.telegramRestricted, snapshot.tmuxInstalled]);
 
   const interactiveCount = sessions.filter((session) => session.status === 'running').length;
   const needsAttention = !snapshot.tmuxInstalled
@@ -165,7 +191,7 @@ export function RuntimeOverviewCard({ onNavigate }: RuntimeOverviewCardProps) {
         <Button variant="outline" className="glass-btn-outline" size="sm" onClick={() => onNavigate('cron')}>
           {t('dashboard.runtimeOpenCron')}
         </Button>
-        <Button variant="outline" className="glass-btn-outline" size="sm" onClick={() => onNavigate('settings')}>
+        <Button variant="outline" className="glass-btn-outline" size="sm" onClick={() => onNavigate('chat-app')}>
           {t('dashboard.runtimeOpenTelegram')}
         </Button>
       </div>
