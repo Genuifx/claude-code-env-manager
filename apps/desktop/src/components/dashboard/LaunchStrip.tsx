@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/select';
 import * as Popover from '@radix-ui/react-popover';
 import { useLocale } from '@/locales';
-import { getProjectName, cn } from '@/lib/utils';
+import { getProjectName, cn, getEnvColorVar } from '@/lib/utils';
 import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { LaunchButton } from '@/components/ui/LaunchButton';
@@ -32,16 +32,6 @@ interface LaunchStripProps {
   onPickRecentDir: (dir: string) => void;
   onLaunch: () => void;
   onCopyBind: () => void;
-}
-
-function getEnvColorVar(envName: string): string {
-  const lower = envName.toLowerCase();
-  if (lower === 'official') return 'var(--chart-1)';
-  if (lower.includes('glm')) return 'var(--chart-2)';
-  if (lower.includes('deepseek')) return 'var(--chart-3)';
-  if (lower.includes('kimi')) return 'var(--chart-4)';
-  if (lower.includes('minimax')) return 'var(--chart-5)';
-  return 'var(--primary)';
 }
 
 export function LaunchStrip({

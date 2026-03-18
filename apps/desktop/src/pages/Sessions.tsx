@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LayoutGrid, List, Minimize2, Plus, Terminal, X, FolderOpen } from 'lucide-react';
+import { LayoutGrid, List, Minimize2, Plus, Terminal, X, FolderOpen, Globe, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { LaunchButton } from '@/components/ui/LaunchButton';
 import { Card } from '@/components/ui/card';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { EmptyState } from '@/components/ui/EmptyState';
 import {
   SessionCard,
@@ -12,6 +19,9 @@ import {
   RecoveryCandidatesPanel,
 } from '@/components/sessions';
 import { useAppStore, type ArrangeLayout, type Session, type UnifiedSession } from '@/store';
+import { PERMISSION_PRESETS } from '@ccem/core/browser';
+import type { PermissionModeName } from '@ccem/core/browser';
+import { getEnvColorVar } from '@/lib/utils';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useLocale } from '../locales';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
@@ -156,10 +166,12 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
     selectedWorkingDir,
     setSelectedWorkingDir,
     unifiedSessions,
-    sessionFilter,
-    setSessionFilter,
     setUnifiedSessions,
     setLoadingUnifiedSessions,
+    currentEnv,
+    environments,
+    permissionMode,
+    setPermissionMode,
   } = useAppStore(
     (state) => ({
       sessions: state.sessions,
@@ -169,10 +181,12 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
       selectedWorkingDir: state.selectedWorkingDir,
       setSelectedWorkingDir: state.setSelectedWorkingDir,
       unifiedSessions: state.unifiedSessions,
-      sessionFilter: state.sessionFilter,
-      setSessionFilter: state.setSessionFilter,
       setUnifiedSessions: state.setUnifiedSessions,
       setLoadingUnifiedSessions: state.setLoadingUnifiedSessions,
+      currentEnv: state.currentEnv,
+      environments: state.environments,
+      permissionMode: state.permissionMode,
+      setPermissionMode: state.setPermissionMode,
     }),
     shallow
   );
@@ -189,6 +203,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
     stopUnifiedSession,
     removeHeadlessSession,
     detachChannel,
+    switchEnvironment,
   } = useTauriCommands();
 
   // --- Load unified sessions ---
@@ -282,35 +297,13 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   }, [sessions, unifiedSessions]);
 
   // --- Apply filter + counts (memoized) ---
-  const { filteredSessions, filterCounts } = useMemo(() => {
-    const filtered = mergedSessions.filter(item => {
-      if (sessionFilter === 'all') return true;
-      if (sessionFilter === 'interactive') {
-        return !item.unifiedSession || item.unifiedSession.runtimeKind === 'interactive';
-      }
-      if (sessionFilter === 'headless') {
-        return item.unifiedSession?.runtimeKind === 'headless';
-      }
-      return true;
-    });
-
-    const countAll = mergedSessions.length;
-    const countInteractive = mergedSessions.filter(item =>
-      !item.unifiedSession || item.unifiedSession.runtimeKind === 'interactive'
-    ).length;
-    const countHeadless = mergedSessions.filter(item =>
-      item.unifiedSession?.runtimeKind === 'headless'
-    ).length;
-
+  const { filteredSessions, totalCount } = useMemo(() => {
+    // 显示全部会话（已移除 tab 过滤）
     return {
-      filteredSessions: filtered,
-      filterCounts: {
-        all: countAll,
-        interactive: countInteractive,
-        headless: countHeadless,
-      } as Record<string, number>,
+      filteredSessions: mergedSessions,
+      totalCount: mergedSessions.length,
     };
-  }, [mergedSessions, sessionFilter]);
+  }, [mergedSessions]);
 
   // Force card view when any unified-only sessions are visible (list view lacks unified data)
   const hasUnifiedOnlyInView = filteredSessions.some(
@@ -320,7 +313,6 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
 
   const runningSessions = sessions.filter(s => s.status === 'running');
   const externalRunningSessions = runningSessions.filter((session) => session.terminalType !== 'embedded');
-  const runningCount = runningSessions.length;
   const externalRunningCount = externalRunningSessions.length;
 
   // Truncate directory path for display (same logic as Dashboard)
@@ -605,7 +597,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   };
 
   // Total count for display (merged)
-  const totalDisplayCount = filteredSessions.length;
+  const totalDisplayCount = totalCount;
 
   // Show skeleton when sessions are loading
   if (isLoadingSessions && !sessions.length && !unifiedSessions.length) {
@@ -615,35 +607,10 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   return (
     <div className="page-transition-enter space-y-6">
       {/* Hero Card */}
-      <div className="stat-card glass-noise p-5">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm text-muted-foreground">
-              {t('sessions.runningCount').replace('{count}', String(runningCount))}
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {/* Session Filter (segmented control) */}
-            <div className="flex items-center gap-0.5 p-0.5 rounded-lg glass-subtle">
-              {(['all', 'interactive', 'headless'] as const).map(filter => (
-                <button
-                  key={filter}
-                  type="button"
-                  onClick={() => setSessionFilter(filter)}
-                  className={`px-3 h-7 rounded-md text-xs font-medium transition-all duration-150 ${
-                    sessionFilter === filter
-                      ? 'seg-active text-foreground'
-                      : 'text-muted-foreground seg-hover hover:text-foreground'
-                  }`}
-                >
-                  {t(`sessions.filter_${filter}`)} ({filterCounts[filter]})
-                </button>
-              ))}
-            </div>
-
-            {/* View Mode Toggle */}
-            <div className="flex items-center gap-0.5 p-0.5 rounded-lg glass-subtle">
+      <div className="stat-card glass-noise p-4 sm:p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:justify-between">
+          {/* View Mode Toggle - Left side */}
+          <div className="flex items-center gap-0.5 p-0.5 rounded-lg glass-subtle w-fit">
               <button
                 type="button"
                 onClick={() => setViewMode('card')}
@@ -671,6 +638,8 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
               </button>
             </div>
 
+          {/* Right side toolbar */}
+          <div className="flex items-center flex-wrap gap-2">
             {/* Directory selector */}
             <Button
               variant="ghost"
@@ -679,12 +648,39 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
               className="glass-btn-outline"
             >
               <FolderOpen className="w-4 h-4" />
-              {launchDirDisplay ? (
-                <span className="font-mono text-xs max-w-[140px] truncate">{launchDirDisplay}</span>
-              ) : (
-                <span>{t('dashboard.selectDir')}</span>
-              )}
+              <span className="hidden sm:inline font-mono text-xs max-w-[140px] truncate">
+                {launchDirDisplay || t('dashboard.selectDir')}
+              </span>
             </Button>
+
+            {/* Env + Perm selectors */}
+            <span className="hidden sm:inline text-muted-foreground/20 text-xs select-none">·</span>
+
+            <Select value={currentEnv} onValueChange={switchEnvironment}>
+              <SelectTrigger variant="badge" badgeColor={getEnvColorVar(currentEnv)} className="hover:bg-white/[0.08]">
+                <Globe className="w-3.5 h-3.5" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {environments.map(env => (
+                  <SelectItem key={env.name} value={env.name}>{env.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <span className="hidden sm:inline text-muted-foreground/20 text-xs select-none">·</span>
+
+            <Select value={permissionMode} onValueChange={(v) => setPermissionMode(v as PermissionModeName)}>
+              <SelectTrigger variant="badge" badgeColor="var(--chart-4)" className="hover:bg-white/[0.08]">
+                <Shield className="w-3.5 h-3.5" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.keys(PERMISSION_PRESETS).map((mode) => (
+                  <SelectItem key={mode} value={mode}>{mode}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
             {/* New Session — 3D launch button */}
             <LaunchButton

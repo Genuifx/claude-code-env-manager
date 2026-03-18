@@ -640,6 +640,10 @@ pub struct DesktopSettings {
         default = "default_proxy_debug_record_mode"
     )]
     pub proxy_debug_record_mode: String,
+    #[serde(rename = "aiEnhanced", default)]
+    pub ai_enhanced: bool,
+    #[serde(rename = "aiEnvName", default)]
+    pub ai_env_name: Option<String>,
 }
 
 fn default_theme() -> String {
@@ -670,6 +674,8 @@ impl Default for DesktopSettings {
             proxy_debug_codex_upstream_base_url: default_proxy_debug_codex_upstream_base_url(),
             proxy_debug_log_max_bytes: default_proxy_debug_log_max_bytes(),
             proxy_debug_record_mode: default_proxy_debug_record_mode(),
+            ai_enhanced: false,
+            ai_env_name: None,
         }
     }
 }
@@ -693,6 +699,34 @@ pub fn write_settings(settings: &DesktopSettings) -> Result<(), String> {
     let content = serde_json::to_string_pretty(settings)
         .map_err(|e| format!("Failed to serialize settings: {}", e))?;
     fs::write(get_settings_path(), content).map_err(|e| format!("Failed to write settings: {}", e))
+}
+
+/// Inject the appropriate AI environment variables into a Command.
+/// When `ai_enhanced` is true in settings, uses the configured `ai_env_name`;
+/// otherwise falls back to the current active environment.
+pub fn inject_ai_env(cmd: &mut std::process::Command) {
+    let settings = read_settings().unwrap_or_default();
+    let cfg = match read_config() {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let env_name = if settings.ai_enhanced {
+        settings
+            .ai_env_name
+            .as_deref()
+            .or(cfg.current.as_deref())
+    } else {
+        cfg.current.as_deref()
+    };
+    if let Some(name) = env_name {
+        if let Some(env) = cfg.registries.get(name) {
+            let decrypted = get_env_with_decrypted_key(env);
+            clear_managed_claude_env(cmd);
+            for (key, value) in build_claude_env_vars(&decrypted) {
+                cmd.env(key, value);
+            }
+        }
+    }
 }
 
 /// Create environment config with encrypted auth token

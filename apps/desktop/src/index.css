@@ -1648,3 +1648,121 @@
   opacity: 0;
   mix-blend-mode: normal;
 }
+
+/* === Window Focus Stability (macOS transparent window activation) === */
+:root[data-window-state="inactive"],
+:root[data-window-state="activating"] {
+  --glass-blur: 18px;
+  --glass-sidebar-blur: 24px;
+  --glass-saturate: 140%;
+  --glass-sidebar-saturate: 150%;
+  --glass-noise-opacity: 0;
+  --ambient-opacity: 0.06;
+  --chat-assistant-blur: 10px;
+  --chat-user-blur: 4px;
+}
+
+:root.light[data-window-state="inactive"],
+:root.light[data-window-state="activating"] {
+  --ambient-opacity: 0.16;
+}
+
+:root[data-window-state="inactive"] .ambient-bg,
+:root[data-window-state="activating"] .ambient-bg {
+  opacity: 0.35;
+}
+
+:root[data-window-state="inactive"] .ambient-bg::before,
+:root[data-window-state="inactive"] .ambient-bg::after,
+:root[data-window-state="inactive"] .ambient-orb-3,
+:root[data-window-state="inactive"] .ambient-orb-4,
+:root[data-window-state="inactive"] .glass-shimmer::after,
+:root[data-window-state="inactive"] .status-running,
+:root[data-window-state="inactive"] .status-error,
+:root[data-window-state="activating"] .ambient-bg::before,
+:root[data-window-state="activating"] .ambient-bg::after,
+:root[data-window-state="activating"] .ambient-orb-3,
+:root[data-window-state="activating"] .ambient-orb-4,
+:root[data-window-state="activating"] .glass-shimmer::after,
+:root[data-window-state="activating"] .status-running,
+:root[data-window-state="activating"] .status-error {
+  animation-play-state: paused !important;
+}
+
+:root[data-window-state="inactive"] .glass-sidebar-panel,
+:root[data-window-state="inactive"] .glass-sidebar-inset,
+:root[data-window-state="inactive"] .glass-card,
+:root[data-window-state="inactive"] .glass-subtle,
+:root[data-window-state="inactive"] .stat-card,
+:root[data-window-state="inactive"] .glass-env-card,
+:root[data-window-state="inactive"] .glass-list-item,
+:root[data-window-state="inactive"] .glass-mode-card,
+:root[data-window-state="inactive"] .glass-select,
+:root[data-window-state="inactive"] .glass-chat-assistant,
+:root[data-window-state="inactive"] .glass-chat-user,
+:root[data-window-state="inactive"] .glass-dropdown,
+:root[data-window-state="inactive"] .glass-header,
+:root[data-window-state="inactive"] .frosted-panel,
+:root[data-window-state="inactive"] .hero-gradient,
+:root[data-window-state="inactive"] .liquid-launch-btn,
+:root[data-window-state="activating"] .glass-sidebar-panel,
+:root[data-window-state="activating"] .glass-sidebar-inset,
+:root[data-window-state="activating"] .glass-card,
+:root[data-window-state="activating"] .glass-subtle,
+:root[data-window-state="activating"] .stat-card,
+:root[data-window-state="activating"] .glass-env-card,
+:root[data-window-state="activating"] .glass-list-item,
+:root[data-window-state="activating"] .glass-mode-card,
+:root[data-window-state="activating"] .glass-select,
+:root[data-window-state="activating"] .glass-chat-assistant,
+:root[data-window-state="activating"] .glass-chat-user,
+:root[data-window-state="activating"] .glass-dropdown,
+:root[data-window-state="activating"] .glass-header,
+:root[data-window-state="activating"] .frosted-panel,
+:root[data-window-state="activating"] .hero-gradient,
+:root[data-window-state="activating"] .liquid-launch-btn {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+:root[data-window-state="inactive"] .glass-card,
+:root[data-window-state="inactive"] .stat-card,
+:root[data-window-state="inactive"] .glass-env-card,
+:root[data-window-state="inactive"] .glass-header,
+:root[data-window-state="inactive"] .hero-gradient,
+:root[data-window-state="activating"] .glass-card,
+:root[data-window-state="activating"] .stat-card,
+:root[data-window-state="activating"] .glass-env-card,
+:root[data-window-state="activating"] .glass-header,
+:root[data-window-state="activating"] .hero-gradient {
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) + 0.16)) !important;
+}
+
+:root[data-window-state="inactive"] .glass-subtle,
+:root[data-window-state="inactive"] .glass-list-item,
+:root[data-window-state="inactive"] .glass-mode-card,
+:root[data-window-state="inactive"] .glass-select,
+:root[data-window-state="inactive"] .glass-chat-assistant,
+:root[data-window-state="inactive"] .glass-chat-user,
+:root[data-window-state="inactive"] .glass-sidebar-panel,
+:root[data-window-state="inactive"] .glass-sidebar-inset,
+:root[data-window-state="inactive"] .glass-dropdown,
+:root[data-window-state="inactive"] .frosted-panel,
+:root[data-window-state="activating"] .glass-subtle,
+:root[data-window-state="activating"] .glass-list-item,
+:root[data-window-state="activating"] .glass-mode-card,
+:root[data-window-state="activating"] .glass-select,
+:root[data-window-state="activating"] .glass-chat-assistant,
+:root[data-window-state="activating"] .glass-chat-user,
+:root[data-window-state="activating"] .glass-sidebar-panel,
+:root[data-window-state="activating"] .glass-sidebar-inset,
+:root[data-window-state="activating"] .glass-dropdown,
+:root[data-window-state="activating"] .frosted-panel {
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.9)) !important;
+}
+
+:root[data-window-state="inactive"] .glass-noise::before,
+:root[data-window-state="activating"] .glass-noise::before {
+  opacity: 0 !important;
+  mix-blend-mode: normal;
+}

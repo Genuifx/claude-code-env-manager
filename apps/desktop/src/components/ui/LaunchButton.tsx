@@ -14,8 +14,8 @@ interface LaunchButtonProps {
 }
 
 const sizeClasses = {
-  sm: 'h-8 px-3 text-xs rounded-lg',
-  md: 'h-9 px-4 text-sm rounded-xl',
+  sm: 'h-8 px-3 text-xs rounded-md',
+  md: 'h-9 px-4 text-sm rounded-lg',
   lg: 'h-14 px-6 text-[15px] rounded-2xl',
 };
 
