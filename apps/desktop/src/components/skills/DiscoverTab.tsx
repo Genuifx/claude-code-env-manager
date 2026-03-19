@@ -1,7 +1,6 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
-import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorBanner } from '@/components/ui/EmptyState';
@@ -10,7 +9,7 @@ import { useTauriEvent } from '@/hooks/useTauriEvents';
 import { useLocale } from '@/locales';
 import { useAppStore } from '@/store';
 import { toast } from 'sonner';
-import { Search, Sparkles, Loader2, Bot, Wrench, AlertTriangle, Settings } from 'lucide-react';
+import { Search, Sparkles, Loader2, Bot, Wrench, AlertTriangle, Settings, Shield, TrendingUp, Users } from 'lucide-react';
 import { LaunchButton } from '@/components/ui/LaunchButton';
 
 interface StreamMessage {
@@ -18,9 +17,24 @@ interface StreamMessage {
   content: string;
 }
 
+interface CuratedSkill {
+  name: string;
+  package_id: string;
+  skill_name: string;
+  description: string;
+  category: string;
+  install_type: string;
+}
+
+const categoryConfig: Record<string, { icon: typeof Shield; labelKey: string }> = {
+  official: { icon: Shield, labelKey: 'skills.categoryOfficial' },
+  popular: { icon: TrendingUp, labelKey: 'skills.categoryPopular' },
+  community: { icon: Users, labelKey: 'skills.categoryCommunity' },
+};
+
 export function DiscoverTab() {
   const { t } = useLocale();
-  const { defaultWorkingDir } = useAppStore();
+  const { defaultWorkingDir, installedSkills } = useAppStore();
   const [query, setQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const isSearchingRef = useRef(false);
@@ -29,7 +43,29 @@ export function DiscoverTab() {
   const [error, setError] = useState<string | null>(null);
   const [installingIds, setInstallingIds] = useState<Set<string>>(new Set());
   const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
+  const [curatedSkills, setCuratedSkills] = useState<CuratedSkill[]>([]);
   const streamEndRef = useRef<HTMLDivElement>(null);
+
+  // Load curated skills on mount
+  useEffect(() => {
+    invoke<CuratedSkill[]>('get_curated_skills')
+      .then(setCuratedSkills)
+      .catch((err) => console.error('Failed to load curated skills:', err));
+  }, []);
+
+  // Check if a curated skill is installed by matching name
+  const isSkillInstalled = useCallback(
+    (skill: CuratedSkill | DiscoverSkillInfo) => {
+      const name = 'skill_name' in skill ? skill.skill_name : skill.name;
+      const displayName = 'name' in skill ? skill.name : '';
+      return installedSkills.some(
+        (s) =>
+          s.name.toLowerCase() === (name || '').toLowerCase() ||
+          s.name.toLowerCase() === displayName.toLowerCase()
+      );
+    },
+    [installedSkills]
+  );
 
   const scrollToBottom = useCallback(() => {
     streamEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -65,7 +101,6 @@ export function DiscoverTab() {
       if (data.type === 'assistant' && data.message?.content) {
         for (const block of data.message.content) {
           if (block.type === 'text' && block.text) {
-            // If text contains a JSON array, parse as results instead of showing raw text
             const jsonMatch = block.text.match(/\[[\s\S]*\]/);
             if (jsonMatch) {
               tryParseResults(jsonMatch[0]);
@@ -96,11 +131,9 @@ export function DiscoverTab() {
           tryParseResults(resultText);
         }
       } else if (data.type === 'system' && data.subtype === 'init') {
-        // Replace the initial "starting" message once CLI is connected
         setStreamMessages([{ type: 'thinking', content: t('skills.searchConnected') }]);
       }
     } catch {
-      // Non-JSON line — try to extract results from raw text
       if (line.trim().startsWith('[')) {
         tryParseResults(line.trim());
       }
@@ -157,7 +190,6 @@ export function DiscoverTab() {
           useAppStore.getState().setInstalledSkills(skills);
         } catch { /* ignore refresh error */ }
       } else {
-        // Strip ANSI escape codes from error message
         const msg = String(data.message || '');
         const clean = msg
           .replace(/\x1b\[[0-9;]*[a-zA-Z]|\[\?25[hl]|\[999D|\[J/g, '')
@@ -176,13 +208,15 @@ export function DiscoverTab() {
     }
   });
 
-  const handleInstall = (packageId: string) => {
+  const handleInstall = (packageId: string, skillName?: string, agents?: string[]) => {
     setInstallingIds(prev => new Set(prev).add(packageId));
-    const skill = results.find(s => s.package_id === packageId);
-    const displayName = skill?.name || packageId;
-    toast.info(t('skills.installStarted').replace('{name}', displayName), { duration: 4000 });
     // Fire-and-forget — result comes via "skill-install-done" event
-    invoke('install_skill', { packageId, global: true }).catch(() => {});
+    invoke('install_skill', {
+      packageId,
+      skillName: skillName || null,
+      global: true,
+      agents: agents && agents.length > 0 ? agents : null,
+    }).catch(() => {});
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -191,6 +225,14 @@ export function DiscoverTab() {
       handleSearch();
     }
   };
+
+  const hasSearchContent = isSearching || results.length > 0 || streamMessages.length > 0 || error;
+
+  // Group curated skills by category
+  const groupedCurated = ['official', 'popular', 'community'].map((cat) => ({
+    category: cat,
+    skills: curatedSkills.filter((s) => s.category === cat),
+  })).filter((g) => g.skills.length > 0);
 
   return (
     <div className="space-y-4">
@@ -275,7 +317,7 @@ export function DiscoverTab() {
         </Card>
       )}
 
-      {/* Results */}
+      {/* Search results */}
       {results.length > 0 && (
         <div className="space-y-3">
           {results.map((skill) => (
@@ -283,7 +325,7 @@ export function DiscoverTab() {
               key={skill.package_id}
               variant="discover"
               skill={skill}
-              isInstalled={installedIds.has(skill.package_id)}
+              isInstalled={installedIds.has(skill.package_id) || isSkillInstalled(skill)}
               isInstalling={installingIds.has(skill.package_id)}
               onInstall={handleInstall}
             />
@@ -291,8 +333,51 @@ export function DiscoverTab() {
         </div>
       )}
 
-      {/* Empty state — only when not searching and no results */}
-      {!isSearching && results.length === 0 && streamMessages.length === 0 && !error && (
+      {/* Curated grid — show when not searching */}
+      {!hasSearchContent && groupedCurated.length > 0 && (
+        <div className="space-y-6 pt-2">
+          {groupedCurated.map(({ category, skills }) => {
+            const config = categoryConfig[category];
+            if (!config) return null;
+            const Icon = config.icon;
+            return (
+              <div key={category} className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Icon className="w-4 h-4 text-muted-foreground" />
+                  <h3 className="text-sm font-semibold text-foreground">
+                    {t(config.labelKey)}
+                  </h3>
+                  <span className="text-xs text-muted-foreground/60">({skills.length})</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  {skills.map((skill) => {
+                    const discoverInfo: DiscoverSkillInfo = {
+                      name: skill.name,
+                      package_id: skill.package_id,
+                      skill_name: skill.skill_name,
+                      description: skill.description,
+                      install_type: skill.install_type,
+                    };
+                    return (
+                      <SkillCard
+                        key={`${skill.package_id}-${skill.skill_name}`}
+                        variant="discover"
+                        skill={discoverInfo}
+                        isInstalled={isSkillInstalled(skill)}
+                        isInstalling={installingIds.has(skill.package_id)}
+                        onInstall={handleInstall}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Empty state — only when not searching, no results, and no curated */}
+      {!hasSearchContent && groupedCurated.length === 0 && (
         <EmptyState
           icon={Sparkles}
           message={t('skills.noResults')}

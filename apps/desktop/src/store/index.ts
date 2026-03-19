@@ -55,7 +55,10 @@ export interface InstalledSkill {
   name: string;
   description: string;
   path: string;
-  scope: 'project' | 'global';
+  scope: 'project' | 'global' | 'plugin';
+  agents: string[];
+  source?: string;
+  version?: string;
 }
 
 export interface CronTask {

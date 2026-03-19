@@ -399,7 +399,18 @@
     "scopeProject": "Project",
     "from": "from",
     "needWorkingDir": "Please set a default working directory in Settings first",
-    "goToSettings": "Go to Settings"
+    "goToSettings": "Go to Settings",
+    "categoryOfficial": "Official Skills",
+    "categoryPopular": "Popular Skill Packs",
+    "categoryCommunity": "Community Picks",
+    "selectAgents": "Select agents to install for",
+    "installDialogTitle": "Install Skill",
+    "confirmInstall": "Confirm Install",
+    "agentClaudeCode": "Claude Code",
+    "agentCodex": "Codex",
+    "scopePlugin": "Plugin",
+    "installGlobally": "Install globally",
+    "curatedLoadError": "Failed to load curated skills"
   },
   "settings": {
     "subtitle": "App configuration and preferences",
