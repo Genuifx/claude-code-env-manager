@@ -399,7 +399,18 @@
     "scopeProject": "项目",
     "from": "来自",
     "needWorkingDir": "请先在设置中配置默认工作目录",
-    "goToSettings": "前往设置"
+    "goToSettings": "前往设置",
+    "categoryOfficial": "官方技能",
+    "categoryPopular": "热门技能包",
+    "categoryCommunity": "社区精选",
+    "selectAgents": "选择安装代理",
+    "installDialogTitle": "安装技能",
+    "confirmInstall": "确认安装",
+    "agentClaudeCode": "Claude Code",
+    "agentCodex": "Codex",
+    "scopePlugin": "插件",
+    "installGlobally": "全局安装",
+    "curatedLoadError": "加载精选技能失败"
   },
   "settings": {
     "subtitle": "应用配置和偏好设置",

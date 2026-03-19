@@ -6,7 +6,7 @@ import { useTauriEvent } from '@/hooks/useTauriEvents';
 import { useLocale } from '@/locales';
 import { useAppStore } from '@/store';
 import { toast } from 'sonner';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, Plug, Globe, FolderOpen } from 'lucide-react';
 
 export function InstalledTab() {
   const { t } = useLocale();
@@ -70,17 +70,42 @@ export function InstalledTab() {
     );
   }
 
+  // Group by scope
+  const pluginSkills = installedSkills.filter(s => s.scope === 'plugin');
+  const globalSkills = installedSkills.filter(s => s.scope === 'global');
+  const projectSkills = installedSkills.filter(s => s.scope === 'project');
+
+  const renderGroup = (
+    label: string,
+    icon: React.ReactNode,
+    skills: typeof installedSkills,
+  ) => {
+    if (skills.length === 0) return null;
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+          {icon}
+          <span>{label}</span>
+          <span className="text-xs text-muted-foreground/60">({skills.length})</span>
+        </div>
+        {skills.map((skill) => (
+          <SkillCard
+            key={skill.path}
+            variant="installed"
+            skill={skill}
+            isUninstalling={uninstallingNames.has(skill.name)}
+            onUninstall={handleUninstall}
+          />
+        ))}
+      </div>
+    );
+  };
+
   return (
-    <div className="space-y-3">
-      {installedSkills.map((skill) => (
-        <SkillCard
-          key={skill.path}
-          variant="installed"
-          skill={skill}
-          isUninstalling={uninstallingNames.has(skill.name)}
-          onUninstall={handleUninstall}
-        />
-      ))}
+    <div className="space-y-6">
+      {renderGroup(t('skills.scopePlugin'), <Plug className="w-4 h-4" />, pluginSkills)}
+      {renderGroup(t('skills.scopeGlobal'), <Globe className="w-4 h-4" />, globalSkills)}
+      {renderGroup(t('skills.scopeProject'), <FolderOpen className="w-4 h-4" />, projectSkills)}
     </div>
   );
 }

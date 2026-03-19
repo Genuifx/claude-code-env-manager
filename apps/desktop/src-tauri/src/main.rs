@@ -2237,6 +2237,7 @@ fn main() {
             get_conversation_segments,
             skills::search_skills_stream,
             skills::list_installed_skills,
+            skills::get_curated_skills,
             skills::install_skill,
             skills::uninstall_skill,
             cron::list_cron_tasks,
