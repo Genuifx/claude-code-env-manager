@@ -29,12 +29,13 @@ export function LiveSessions({ onNavigate: _onNavigate }: LiveSessionsProps) {
   const { focusSession, closeSession, arrangeSessions } = useTauriCommands();
 
   const runningSessions = sessions.filter(s => s.status === 'running');
+  const arrangableSessions = runningSessions.filter((session) => session.terminalType !== 'embedded');
 
   if (runningSessions.length === 0) return null;
 
   const handleArrange = async () => {
-    const ids = runningSessions.map(s => s.id);
-    const layout = runningSessions.length <= 2 ? 'horizontal2' : runningSessions.length === 3 ? 'left_main3' : 'grid4';
+    const ids = arrangableSessions.map(s => s.id);
+    const layout = arrangableSessions.length <= 2 ? 'horizontal2' : arrangableSessions.length === 3 ? 'left_main3' : 'grid4';
     await arrangeSessions(ids, layout);
   };
 
@@ -51,7 +52,7 @@ export function LiveSessions({ onNavigate: _onNavigate }: LiveSessionsProps) {
             {runningSessions.length}
           </span>
         </div>
-        {runningSessions.length >= 2 && (
+        {arrangableSessions.length >= 2 && (
           <Button
             variant="ghost"
             size="sm"
@@ -88,6 +89,11 @@ export function LiveSessions({ onNavigate: _onNavigate }: LiveSessionsProps) {
                         <span className="inline-flex items-center text-[9px] uppercase tracking-wide text-muted-foreground/80 rounded-md bg-white/[0.04] px-1.5 py-0.5">
                           {session.client === 'codex' ? 'Codex' : 'Claude'}
                         </span>
+                        {session.terminalType === 'embedded' && (
+                          <span className="inline-flex items-center text-[9px] uppercase tracking-wide text-cyan-300/80 rounded-md bg-cyan-300/[0.08] px-1.5 py-0.5">
+                            embedded
+                          </span>
+                        )}
                       </span>
                     </div>
                     <div className="text-2xs text-muted-foreground/50 truncate flex items-center gap-1.5">

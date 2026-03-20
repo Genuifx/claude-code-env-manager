@@ -64,6 +64,16 @@ export function formatTokenAxisValue(n: number): string {
   return formatCompactTokens(n, { thousandDecimals: 0 });
 }
 
+export function getEnvColorVar(envName: string): string {
+  const lower = envName.toLowerCase();
+  if (lower === 'official') return 'var(--chart-1)';
+  if (lower.includes('glm')) return 'var(--chart-2)';
+  if (lower.includes('deepseek')) return 'var(--chart-3)';
+  if (lower.includes('kimi')) return 'var(--chart-4)';
+  if (lower.includes('minimax')) return 'var(--chart-5)';
+  return 'var(--primary)';
+}
+
 export function getYAxisWidth(values: number[], formatter: (value: number) => string, minWidth = 56): number {
   const maxLabelLength = values.reduce(
     (widest, value) => Math.max(widest, formatter(value).length),

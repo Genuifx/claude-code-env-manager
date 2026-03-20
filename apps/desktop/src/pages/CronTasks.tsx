@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { LaunchButton } from '@/components/ui/LaunchButton';
 
 function formatDuration(ms?: number | null) {
   if (!ms) return '-';
@@ -29,6 +30,19 @@ function formatTime(iso?: string | null) {
   } catch {
     return iso;
   }
+}
+
+function parseToolListInput(input: string) {
+  return Array.from(new Set(
+    input
+      .split(/[\n,]+/)
+      .map((value) => value.trim())
+      .filter(Boolean),
+  ));
+}
+
+function formatToolListInput(values?: string[] | null) {
+  return (values ?? []).join(', ');
 }
 
 const TEMPLATE_ICONS: Record<string, typeof Clock> = {
@@ -75,7 +89,18 @@ const INPUT_CLS = 'w-full px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.
 function TaskDialog({ open, onClose, onSave, editTask, environments }: {
   open: boolean;
   onClose: () => void;
-  onSave: (d: { name: string; cronExpression: string; prompt: string; workingDir: string; envName?: string; timeoutSecs?: number }) => Promise<void>;
+  onSave: (d: {
+    name: string;
+    cronExpression: string;
+    prompt: string;
+    workingDir: string;
+    envName?: string;
+    executionProfile: CronTask['executionProfile'];
+    maxBudgetUsd?: number | null;
+    allowedTools?: string[];
+    disallowedTools?: string[];
+    timeoutSecs?: number;
+  }) => Promise<void>;
   editTask?: CronTask;
   environments: { name: string }[];
 }) {
@@ -86,6 +111,10 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
   const [prompt, setPrompt] = useState('');
   const [workDir, setWorkDir] = useState('');
   const [envName, setEnvName] = useState('');
+  const [executionProfile, setExecutionProfile] = useState<CronTask['executionProfile']>('conservative');
+  const [maxBudgetUsdInput, setMaxBudgetUsdInput] = useState('');
+  const [allowedToolsInput, setAllowedToolsInput] = useState('');
+  const [disallowedToolsInput, setDisallowedToolsInput] = useState('');
   const [timeoutSecs, setTimeoutSecs] = useState(300);
   const [saving, setSaving] = useState(false);
 
@@ -96,6 +125,10 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
       setPrompt(editTask.prompt);
       setWorkDir(editTask.workingDir);
       setEnvName(editTask.envName || '');
+      setExecutionProfile(editTask.executionProfile || 'conservative');
+      setMaxBudgetUsdInput(editTask.maxBudgetUsd != null ? String(editTask.maxBudgetUsd) : '');
+      setAllowedToolsInput(formatToolListInput(editTask.allowedTools));
+      setDisallowedToolsInput(formatToolListInput(editTask.disallowedTools));
       setTimeoutSecs(editTask.timeoutSecs);
     } else {
       setName('');
@@ -103,6 +136,10 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
       setPrompt('');
       setWorkDir('');
       setEnvName('');
+      setExecutionProfile('conservative');
+      setMaxBudgetUsdInput('');
+      setAllowedToolsInput('');
+      setDisallowedToolsInput('');
       setTimeoutSecs(300);
     }
   }, [editTask, open]);
@@ -111,9 +148,25 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
 
   const doSave = async () => {
     if (!name.trim() || !cronExpr.trim() || !prompt.trim() || !workDir.trim()) return;
+    const parsedBudget = maxBudgetUsdInput.trim() ? Number(maxBudgetUsdInput.trim()) : null;
+    if (maxBudgetUsdInput.trim() && (!Number.isFinite(parsedBudget) || Number(parsedBudget) <= 0)) {
+      toast.error(t('cron.invalidBudget'));
+      return;
+    }
     setSaving(true);
     try {
-      await onSave({ name: name.trim(), cronExpression: cronExpr.trim(), prompt: prompt.trim(), workingDir: workDir.trim(), envName: envName || undefined, timeoutSecs });
+      await onSave({
+        name: name.trim(),
+        cronExpression: cronExpr.trim(),
+        prompt: prompt.trim(),
+        workingDir: workDir.trim(),
+        envName: envName || undefined,
+        executionProfile,
+        maxBudgetUsd: parsedBudget,
+        allowedTools: parseToolListInput(allowedToolsInput),
+        disallowedTools: parseToolListInput(disallowedToolsInput),
+        timeoutSecs,
+      });
       onClose();
     } finally {
       setSaving(false);
@@ -166,7 +219,7 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
               </button>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">{t('cron.environment')}</label>
               <Select value={envName || '__default__'} onValueChange={(v) => setEnvName(v === '__default__' ? '' : v)}>
@@ -186,10 +239,72 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
                 <span className="text-2xs text-muted-foreground shrink-0">{t('cron.timeoutUnit')}</span>
               </div>
             </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">{t('cron.executionProfile')}</label>
+              <Select value={executionProfile} onValueChange={(value) => setExecutionProfile(value as CronTask['executionProfile'])}>
+                <SelectTrigger className="w-full h-auto px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="conservative">{t('cron.profileConservative')}</SelectItem>
+                  <SelectItem value="standard">{t('cron.profileStandard')}</SelectItem>
+                  <SelectItem value="autonomous">{t('cron.profileAutonomous')}</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-2xs text-muted-foreground">
+                {executionProfile === 'conservative'
+                  ? t('cron.profileConservativeDesc')
+                  : executionProfile === 'standard'
+                    ? t('cron.profileStandardDesc')
+                    : t('cron.profileAutonomousDesc')}
+              </p>
+            </div>
+          </div>
+          <div className="rounded-xl border border-black/[0.08] dark:border-white/[0.08] bg-black/[0.02] dark:bg-white/[0.03] p-3 space-y-3">
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-foreground">{t('cron.customToolPolicy')}</p>
+              <p className="text-2xs text-muted-foreground">{t('cron.customToolPolicyDesc')}</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">{t('cron.profileBudget')}</label>
+                <input
+                  type="number"
+                  min={0.01}
+                  step={0.01}
+                  className={INPUT_CLS}
+                  value={maxBudgetUsdInput}
+                  onChange={(e) => setMaxBudgetUsdInput(e.target.value)}
+                  placeholder={t('cron.profileBudgetPlaceholder')}
+                />
+              </div>
+              <div className="space-y-1.5 md:col-span-2">
+                <label className="text-xs font-medium text-muted-foreground">{t('cron.allowedTools')}</label>
+                <textarea
+                  className={cn(INPUT_CLS, 'min-h-[72px] resize-y')}
+                  value={allowedToolsInput}
+                  onChange={(e) => setAllowedToolsInput(e.target.value)}
+                  placeholder={t('cron.toolListPlaceholder')}
+                  rows={3}
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">{t('cron.disallowedTools')}</label>
+              <textarea
+                className={cn(INPUT_CLS, 'min-h-[72px] resize-y')}
+                value={disallowedToolsInput}
+                onChange={(e) => setDisallowedToolsInput(e.target.value)}
+                placeholder={t('cron.toolListPlaceholder')}
+                rows={3}
+              />
+            </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-black/[0.06] dark:border-white/[0.06]">
             <button className="px-4 py-2 text-sm rounded-xl border border-black/[0.08] dark:border-white/[0.08] text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors" onClick={onClose}>{t('common.cancel')}</button>
-            <button className="px-4 py-2 text-sm rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm transition-colors disabled:opacity-50" onClick={doSave} disabled={saving || !name.trim() || !prompt.trim() || !workDir.trim()}>{saving ? t('common.loading') : t('common.save')}</button>
+            <LaunchButton size="sm" onClick={doSave} disabled={saving || !name.trim() || !prompt.trim() || !workDir.trim()}>
+              {saving ? t('common.loading') : t('common.save')}
+            </LaunchButton>
           </div>
         </div>
       </div>
@@ -266,6 +381,20 @@ function RunHistoryPanel({ taskId }: { taskId: string }) {
                           <span className="text-2xs font-mono text-foreground">{run.exitCode}</span>
                         </div>
                       )}
+                      {run.runtimeKind && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xs text-muted-foreground">{t('cron.runtimeKind')}:</span>
+                          <span className="text-2xs font-medium text-foreground">
+                            {run.runtimeKind === 'headless' ? t('cron.runtimeHeadless') : run.runtimeKind}
+                          </span>
+                        </div>
+                      )}
+                      {run.runtimeId && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xs text-muted-foreground">{t('cron.runtimeId')}:</span>
+                          <span className="text-2xs font-mono text-foreground break-all">{run.runtimeId}</span>
+                        </div>
+                      )}
                       {run.stdout && (
                         <div className="space-y-1">
                           <span className="text-2xs text-muted-foreground">{t('cron.stdout')}</span>
@@ -336,6 +465,10 @@ export function CronTasks() {
       prompt: task.prompt,
       workingDir: task.workingDir,
       envName: null,
+      executionProfile: 'conservative',
+      maxBudgetUsd: null,
+      allowedTools: [],
+      disallowedTools: [],
       enabled: true,
       timeoutSecs: 300,
       templateId: null,
@@ -352,7 +485,7 @@ export function CronTasks() {
     try {
       const task = await addCronTask({
         name: tpl.name, cronExpression: tpl.cronExpression,
-        prompt: tpl.prompt, workingDir: '~', templateId: tpl.id,
+        prompt: tpl.prompt, workingDir: '~', templateId: tpl.id, executionProfile: 'conservative', maxBudgetUsd: null, allowedTools: [], disallowedTools: [],
       });
       toast.success(t('cron.taskCreated'));
       setSelectedTaskId(task.id);
@@ -365,7 +498,7 @@ export function CronTasks() {
 
   const handleSave = useCallback(async (data: {
     name: string; cronExpression: string; prompt: string;
-    workingDir: string; envName?: string; timeoutSecs?: number;
+    workingDir: string; envName?: string; executionProfile: CronTask['executionProfile']; maxBudgetUsd?: number | null; allowedTools?: string[]; disallowedTools?: string[]; timeoutSecs?: number;
   }) => {
     if (editingTask) {
       await updateCronTask({ id: editingTask.id, ...data });
@@ -393,10 +526,9 @@ export function CronTasks() {
           <Sparkles className="w-4 h-4" />
           {t('cron.aiCreate')}
         </button>
-        <button onClick={handleAdd} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-sm hover:bg-primary/90 transition-colors">
-          <Plus className="w-4 h-4" />
+        <LaunchButton onClick={handleAdd} size="sm" icon={<Plus className="w-4 h-4" />}>
           {t('cron.addTask')}
-        </button>
+        </LaunchButton>
       </div>
       {showAiPanel && (
         <AiCronPanel
@@ -486,6 +618,29 @@ export function CronTasks() {
                 <div className="space-y-3">
                   <h3 className="text-sm font-medium text-foreground">{t('cron.taskConfig')}</h3>
                   <div className="glass-subtle glass-noise rounded-lg p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xs text-muted-foreground">{t('cron.runtimeKind')}</span>
+                      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-2xs font-medium bg-primary/10 text-primary">
+                        {t('cron.runtimeHeadless')}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xs text-muted-foreground">{t('cron.executionProfile')}</span>
+                      <span className={cn(
+                        'inline-flex items-center rounded-full px-2 py-0.5 text-2xs font-medium',
+                        selectedTask.executionProfile === 'autonomous'
+                          ? 'bg-warning/15 text-warning'
+                          : selectedTask.executionProfile === 'standard'
+                            ? 'bg-success/10 text-success'
+                            : 'bg-white/[0.06] text-foreground/80'
+                      )}>
+                        {selectedTask.executionProfile === 'conservative'
+                          ? t('cron.profileConservative')
+                          : selectedTask.executionProfile === 'standard'
+                            ? t('cron.profileStandard')
+                            : t('cron.profileAutonomous')}
+                      </span>
+                    </div>
                     <div>
                       <span className="text-2xs text-muted-foreground">{t('cron.prompt')}</span>
                       <p className="text-xs text-foreground/80 mt-0.5 whitespace-pre-wrap">{selectedTask.prompt}</p>
@@ -503,7 +658,35 @@ export function CronTasks() {
                         <span className="text-2xs text-muted-foreground">{t('cron.timeout')}</span>
                         <p className="text-xs text-foreground/80 mt-0.5">{selectedTask.timeoutSecs}{t('cron.timeoutUnit')}</p>
                       </div>
+                      <div>
+                        <span className="text-2xs text-muted-foreground">{t('cron.profileBudget')}</span>
+                        <p className="text-xs text-foreground/80 mt-0.5">
+                          {selectedTask.maxBudgetUsd != null
+                            ? `$${selectedTask.maxBudgetUsd.toFixed(2)}`
+                            : selectedTask.executionProfile === 'autonomous'
+                              ? '$5.00'
+                              : selectedTask.executionProfile === 'standard'
+                                ? '$2.00'
+                                : '$0.50'}
+                        </p>
+                      </div>
                     </div>
+                    {(selectedTask.allowedTools?.length || selectedTask.disallowedTools?.length) ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                        <div>
+                          <span className="text-2xs text-muted-foreground">{t('cron.allowedTools')}</span>
+                          <p className="text-xs text-foreground/80 mt-0.5 break-words">
+                            {(selectedTask.allowedTools ?? []).join(', ')}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-2xs text-muted-foreground">{t('cron.disallowedTools')}</span>
+                          <p className="text-xs text-foreground/80 mt-0.5 break-words">
+                            {(selectedTask.disallowedTools ?? []).join(', ')}
+                          </p>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
                 <RunHistoryPanel taskId={selectedTask.id} />

@@ -1,9 +1,12 @@
 import { useState } from 'react';
-import { Play, Star, X, RefreshCw, Plus, Code2 } from 'lucide-react';
+import { Check, Copy, Link2, Play, Star, X, RefreshCw, Plus, Code2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { BindToTelegramDialog } from '@/components/telegram/BindToTelegramDialog';
 import { useAppStore } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useLocale } from '@/locales';
+import { copyBindCommand } from '@/lib/telegram-utils';
 import { getProjectName, truncatePath, formatRelativeTime } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 
@@ -18,7 +21,14 @@ type Tab = 'favorites' | 'recent' | 'vscode' | 'jetbrains';
 export function AllProjectsModal({ open, onOpenChange, onLaunch }: AllProjectsModalProps) {
   const { t } = useLocale();
   const [activeTab, setActiveTab] = useState<Tab>('favorites');
-  const { favorites, recent, vscodeProjects, jetbrainsProjects } = useAppStore();
+  const {
+    favorites,
+    recent,
+    vscodeProjects,
+    jetbrainsProjects,
+    currentEnv,
+    permissionMode,
+  } = useAppStore();
   const {
     addFavoriteProject,
     removeFavoriteProject,
@@ -133,14 +143,26 @@ export function AllProjectsModal({ open, onOpenChange, onLaunch }: AllProjectsMo
                 path={project.path}
                 onLaunch={() => { onLaunch(project.path); onOpenChange(false); }}
                 trailing={
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="w-7 h-7 text-muted-foreground/40 hover:text-destructive hover:bg-destructive/[0.08]"
-                    onClick={() => removeFavoriteProject(project.path)}
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </Button>
+                  <>
+                    <CopyBindActionButton
+                      path={project.path}
+                      envName={currentEnv}
+                      permMode={permissionMode}
+                    />
+                    <BindProjectButton
+                      path={project.path}
+                      envName={currentEnv}
+                      permMode={permissionMode}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="w-7 h-7 text-muted-foreground/40 hover:text-destructive hover:bg-destructive/[0.08]"
+                      onClick={() => removeFavoriteProject(project.path)}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </Button>
+                  </>
                 }
               />
             ))}
@@ -152,16 +174,30 @@ export function AllProjectsModal({ open, onOpenChange, onLaunch }: AllProjectsMo
                 path={project.path}
                 subtitle={formatRelativeTime(project.lastUsed)}
                 onLaunch={() => { onLaunch(project.path); onOpenChange(false); }}
-                trailing={!isFavorite(project.path) ? (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="w-7 h-7 text-muted-foreground/40 hover:text-primary hover:bg-primary/[0.08]"
-                    onClick={() => addFavoriteProject(project.path, getProjectName(project.path))}
-                  >
-                    <Star className="w-3.5 h-3.5" />
-                  </Button>
-                ) : undefined}
+                trailing={
+                  <>
+                    <CopyBindActionButton
+                      path={project.path}
+                      envName={currentEnv}
+                      permMode={permissionMode}
+                    />
+                    <BindProjectButton
+                      path={project.path}
+                      envName={currentEnv}
+                      permMode={permissionMode}
+                    />
+                    {!isFavorite(project.path) ? (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="w-7 h-7 text-muted-foreground/40 hover:text-primary hover:bg-primary/[0.08]"
+                        onClick={() => addFavoriteProject(project.path, getProjectName(project.path))}
+                      >
+                        <Star className="w-3.5 h-3.5" />
+                      </Button>
+                    ) : null}
+                  </>
+                }
               />
             ))}
 
@@ -171,16 +207,30 @@ export function AllProjectsModal({ open, onOpenChange, onLaunch }: AllProjectsMo
                 name={getProjectName(project.path)}
                 path={project.path}
                 onLaunch={() => { onLaunch(project.path); onOpenChange(false); }}
-                trailing={!isFavorite(project.path) ? (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="w-7 h-7 text-muted-foreground/40 hover:text-primary hover:bg-primary/[0.08]"
-                    onClick={() => addFavoriteProject(project.path, getProjectName(project.path))}
-                  >
-                    <Star className="w-3.5 h-3.5" />
-                  </Button>
-                ) : undefined}
+                trailing={
+                  <>
+                    <CopyBindActionButton
+                      path={project.path}
+                      envName={currentEnv}
+                      permMode={permissionMode}
+                    />
+                    <BindProjectButton
+                      path={project.path}
+                      envName={currentEnv}
+                      permMode={permissionMode}
+                    />
+                    {!isFavorite(project.path) ? (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="w-7 h-7 text-muted-foreground/40 hover:text-primary hover:bg-primary/[0.08]"
+                        onClick={() => addFavoriteProject(project.path, getProjectName(project.path))}
+                      >
+                        <Star className="w-3.5 h-3.5" />
+                      </Button>
+                    ) : null}
+                  </>
+                }
               />
             ))}
 
@@ -191,22 +241,106 @@ export function AllProjectsModal({ open, onOpenChange, onLaunch }: AllProjectsMo
                 path={project.path}
                 subtitle={project.ide}
                 onLaunch={() => { onLaunch(project.path); onOpenChange(false); }}
-                trailing={!isFavorite(project.path) ? (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="w-7 h-7 text-muted-foreground/40 hover:text-primary hover:bg-primary/[0.08]"
-                    onClick={() => addFavoriteProject(project.path, getProjectName(project.path))}
-                  >
-                    <Star className="w-3.5 h-3.5" />
-                  </Button>
-                ) : undefined}
+                trailing={
+                  <>
+                    <CopyBindActionButton
+                      path={project.path}
+                      envName={currentEnv}
+                      permMode={permissionMode}
+                    />
+                    <BindProjectButton
+                      path={project.path}
+                      envName={currentEnv}
+                      permMode={permissionMode}
+                    />
+                    {!isFavorite(project.path) ? (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="w-7 h-7 text-muted-foreground/40 hover:text-primary hover:bg-primary/[0.08]"
+                        onClick={() => addFavoriteProject(project.path, getProjectName(project.path))}
+                      >
+                        <Star className="w-3.5 h-3.5" />
+                      </Button>
+                    ) : null}
+                  </>
+                }
               />
             ))}
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function CopyBindActionButton({
+  path,
+  envName,
+  permMode,
+}: {
+  path: string;
+  envName?: string | null;
+  permMode?: string | null;
+}) {
+  const { t } = useLocale();
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await copyBindCommand(path, envName, permMode);
+      setCopied(true);
+      toast.success(t('telegram.bindCommandCopied'));
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch (error) {
+      toast.error(t('telegram.bindCommandCopyFailed').replace('{error}', String(error)));
+    }
+  };
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="w-7 h-7 text-muted-foreground/40 hover:text-foreground hover:bg-white/[0.08]"
+      onClick={handleCopy}
+      title={t('telegram.copyBindCommand')}
+    >
+      {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+    </Button>
+  );
+}
+
+function BindProjectButton({
+  path,
+  envName,
+  permMode,
+}: {
+  path: string;
+  envName?: string | null;
+  permMode?: string | null;
+}) {
+  const { t } = useLocale();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="w-7 h-7 text-muted-foreground/40 hover:text-primary hover:bg-primary/[0.08]"
+        onClick={() => setOpen(true)}
+        title={t('telegram.bindToTopic')}
+      >
+        <Link2 className="w-3.5 h-3.5" />
+      </Button>
+      <BindToTelegramDialog
+        open={open}
+        onOpenChange={setOpen}
+        initialProjectDir={path}
+        initialEnvName={envName}
+        initialPermMode={permMode}
+      />
+    </>
   );
 }
 

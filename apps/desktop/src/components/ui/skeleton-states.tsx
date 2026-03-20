@@ -250,22 +250,93 @@ export function SkillsSkeleton() {
       {/* Search bar */}
       <Bone className="h-10 w-full rounded-lg" />
 
-      {/* Skill cards */}
-      <div className="space-y-3">
-        {[1, 2, 3].map((i) => (
+      {/* Category header */}
+      <div className="flex items-center gap-2">
+        <Bone className="w-4 h-4 rounded" />
+        <Bone className="h-4 w-24" />
+      </div>
+
+      {/* Curated grid */}
+      <div className="grid grid-cols-2 gap-3">
+        {[1, 2, 3, 4].map((i) => (
           <Card key={i} className="p-4">
             <div className="flex items-start gap-3">
               <Bone className="h-10 w-10 rounded-lg shrink-0" />
               <div className="flex-1 space-y-2">
-                <Bone className="h-5 w-36" />
+                <Bone className="h-5 w-28" />
                 <Bone className="h-4 w-full" />
-                <Bone className="h-3 w-48" />
               </div>
-              <Bone className="h-8 w-20 shrink-0" />
+              <Bone className="h-8 w-16 shrink-0" />
             </div>
           </Card>
         ))}
       </div>
+
+      {/* Second category */}
+      <div className="flex items-center gap-2">
+        <Bone className="w-4 h-4 rounded" />
+        <Bone className="h-4 w-28" />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        {[1, 2].map((i) => (
+          <Card key={i} className="p-4">
+            <div className="flex items-start gap-3">
+              <Bone className="h-10 w-10 rounded-lg shrink-0" />
+              <div className="flex-1 space-y-2">
+                <Bone className="h-5 w-32" />
+                <Bone className="h-4 w-full" />
+              </div>
+              <Bone className="h-8 w-16 shrink-0" />
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ─── ChatApp ─────────────────────────────────────────────────────── */
+
+export function ChatAppSkeleton() {
+  return (
+    <div className="animate-pulse space-y-5">
+      {/* Tab bar */}
+      <div className="flex gap-2">
+        <Bone className="h-9 w-24 rounded-md" />
+        <Bone className="h-9 w-24 rounded-md" />
+      </div>
+
+      {/* Main card */}
+      <Card className="p-5">
+        <div className="flex items-start justify-between mb-4">
+          <div className="space-y-2">
+            <Bone className="h-5 w-40" />
+            <Bone className="h-3 w-64" />
+          </div>
+          <Bone className="h-5 w-20 rounded-full" />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <Bone className="h-4 w-4 rounded" />
+              <div>
+                <Bone className="h-4 w-36 mb-1" />
+                <Bone className="h-3 w-52" />
+              </div>
+            </div>
+            <Bone className="h-10 w-full rounded-xl" />
+            <Bone className="h-10 w-full rounded-xl" />
+          </div>
+        </div>
+        <div className="mt-4 pt-4 border-t glass-divider flex items-center justify-between">
+          <Bone className="h-3 w-40" />
+          <div className="flex gap-2">
+            <Bone className="h-9 w-28 rounded-lg" />
+            <Bone className="h-9 w-28 rounded-lg" />
+          </div>
+        </div>
+      </Card>
     </div>
   );
 }

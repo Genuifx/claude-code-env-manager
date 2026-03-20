@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { FolderOpen, Star, Clock, Check, Loader2, Columns2, LayoutGrid } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { LaunchButton } from '@/components/ui/LaunchButton';
 import { useLocale } from '@/locales';
 import { useAppStore, type ArrangeLayout } from '@/store';
-import { Button } from '@/components/ui/button';
 
 interface LauncherQuickSectionProps {
   onLaunchMulti: (dirs: string[], layout: ArrangeLayout) => void;
@@ -155,24 +156,25 @@ export function LauncherQuickSection({ onLaunchMulti, onBrowse, isLaunching }: L
                 {t('sessions.launchCount').replace('{count}', String(count))}
               </p>
               <div className="flex gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
+                {/* Horizontal 2 button */}
+                <LaunchButton
                   onClick={() => handleLayoutLaunch('horizontal2')}
-                  className="flex-1 glass-btn-outline gap-1.5"
-                >
-                  <Columns2 className="w-3.5 h-3.5" />
-                  {t('sessions.layoutHorizontal2')}
-                </Button>
-                <Button
-                  variant="ghost"
                   size="sm"
-                  onClick={() => handleLayoutLaunch('grid4')}
-                  className="flex-1 glass-btn-outline gap-1.5"
+                  className="flex-1"
+                  icon={<Columns2 className="w-3.5 h-3.5" />}
                 >
-                  <LayoutGrid className="w-3.5 h-3.5" />
+                  {t('sessions.layoutHorizontal2')}
+                </LaunchButton>
+
+                {/* Grid 4 button */}
+                <LaunchButton
+                  onClick={() => handleLayoutLaunch('grid4')}
+                  size="sm"
+                  className="flex-1"
+                  icon={<LayoutGrid className="w-3.5 h-3.5" />}
+                >
                   {t('sessions.layoutGrid4')}
-                </Button>
+                </LaunchButton>
               </div>
             </div>
           )}

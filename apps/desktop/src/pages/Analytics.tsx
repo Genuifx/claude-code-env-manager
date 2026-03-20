@@ -1,7 +1,7 @@
 // apps/desktop/src/pages/Analytics.tsx
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Flame, TrendingDown, TrendingUp } from 'lucide-react';
+import { Flame, Share2, TrendingDown, TrendingUp } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { ErrorBanner } from '@/components/ui/EmptyState';
 import { cn } from '@/lib/utils';
@@ -109,6 +109,10 @@ const LazyAnalyticsInsights = lazy(async () =>
   import('@/components/analytics/AnalyticsInsights').then((module) => ({ default: module.AnalyticsInsights }))
 );
 
+const LazySharePosterDialog = lazy(async () =>
+  import('@/components/analytics/SharePosterDialog').then((module) => ({ default: module.SharePosterDialog }))
+);
+
 function AnalyticsInsightsFallback() {
   return (
     <div className="space-y-4">
@@ -168,6 +172,7 @@ export function Analytics() {
   const [loadError, setLoadError] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [usageSource, setUsageSource] = useState<UsageSourceFilter>('all');
+  const [showSharePoster, setShowSharePoster] = useState(false);
   const requestSeqRef = useRef(0);
   const [, startTransition] = useTransition();
 
@@ -402,7 +407,7 @@ export function Analytics() {
       )}
 
       <div className="stat-card glass-noise px-5 py-4">
-        <div className="mb-3 flex justify-start">
+        <div className="mb-3 flex items-center justify-between">
           <div className="glass-subtle flex items-center gap-0.5 rounded-lg p-0.5">
             {(['all', 'claude', 'codex'] as UsageSourceFilter[]).map((source) => (
               <button
@@ -422,6 +427,14 @@ export function Analytics() {
               </button>
             ))}
           </div>
+          <button
+            type="button"
+            onClick={() => setShowSharePoster(true)}
+            className="seg-hover flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            title={t('analytics.sharePoster')}
+          >
+            <Share2 className="h-3.5 w-3.5" />
+          </button>
         </div>
 
         <div className="mb-3 flex items-baseline gap-3">
@@ -509,6 +522,18 @@ export function Analytics() {
           onRefresh={handleRefresh}
         />
       </Suspense>
+
+      {showSharePoster && (
+        <Suspense fallback={null}>
+          <LazySharePosterDialog
+            open={showSharePoster}
+            onOpenChange={setShowSharePoster}
+            usageStats={usageStats}
+            dailyActivities={dailyActivities}
+            streakDays={streakDays}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

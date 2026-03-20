@@ -1,12 +1,16 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { toast } from 'sonner';
 import { LaunchStrip } from '@/components/dashboard/LaunchStrip';
 import { MetricsRow } from '@/components/dashboard/MetricsRow';
 import { QuickLaunchGrid } from '@/components/dashboard/QuickLaunchGrid';
 import { LiveSessions } from '@/components/dashboard/LiveSessions';
+import { RuntimeOverviewCard } from '@/components/dashboard/RuntimeOverviewCard';
 import { useAppStore } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { DashboardSkeleton } from '@/components/ui/skeleton-states';
+import { copyBindCommand } from '@/lib/telegram-utils';
+import { useLocale } from '@/locales';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { shallow } from 'zustand/shallow';
 
@@ -17,6 +21,7 @@ interface DashboardProps {
 }
 
 export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardProps) {
+  const { t } = useLocale();
   const {
     launchClient,
     setLaunchClient,
@@ -52,10 +57,13 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
   // Launch feedback
   const [launched, setLaunched] = useState(false);
   const launchedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [bindCopied, setBindCopied] = useState(false);
+  const bindCopiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     return () => {
       if (launchedTimerRef.current) clearTimeout(launchedTimerRef.current);
+      if (bindCopiedTimerRef.current) clearTimeout(bindCopiedTimerRef.current);
     };
   }, []);
 
@@ -109,6 +117,24 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
     }, 1200);
   }, [selectedWorkingDir, onLaunch, onLaunchWithDir]);
 
+  const handleCopyBind = useCallback(async () => {
+    if (!selectedWorkingDir) {
+      return;
+    }
+    try {
+      await copyBindCommand(selectedWorkingDir, currentEnv, permissionMode);
+      toast.success(t('telegram.bindCommandCopied'));
+      setBindCopied(true);
+      if (bindCopiedTimerRef.current) clearTimeout(bindCopiedTimerRef.current);
+      bindCopiedTimerRef.current = setTimeout(() => {
+        setBindCopied(false);
+        bindCopiedTimerRef.current = null;
+      }, 1500);
+    } catch (error) {
+      toast.error(t('telegram.bindCommandCopyFailed').replace('{error}', String(error)));
+    }
+  }, [selectedWorkingDir, currentEnv, permissionMode, t]);
+
   const dashboardShortcuts = useMemo(() => ({
     'meta+o': () => handleSelectDirectory(),
   }), [handleSelectDirectory]);
@@ -139,12 +165,14 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
         selectedWorkingDir={selectedWorkingDir}
         recentDirs={recentDirs}
         launched={launched}
+        bindCopied={bindCopied}
         onSetLaunchClient={setLaunchClient}
         onSwitchEnv={switchEnvironment}
         onSetPermMode={setPermissionMode}
         onSelectDir={handleSelectDirectory}
         onPickRecentDir={handlePickRecentDir}
         onLaunch={handleLaunchClick}
+        onCopyBind={handleCopyBind}
       />
 
       {/* Zone 2: Bento Grid — Metrics left + Projects right */}
@@ -152,6 +180,8 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
         <MetricsRow onNavigate={onNavigate} />
         <QuickLaunchGrid onLaunch={onLaunchWithDir} />
       </div>
+
+      <RuntimeOverviewCard onNavigate={onNavigate} />
 
       {/* Zone 3: Live Sessions — full width, only when active */}
       <LiveSessions onNavigate={onNavigate} />

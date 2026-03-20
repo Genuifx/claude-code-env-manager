@@ -2,6 +2,23 @@ import { invoke } from '@tauri-apps/api/core';
 import { useAppStore, type Environment, type Session, type ArrangeLayout, type InstalledSkill, type CronTask, type CronTaskRun, type CronTemplate, type LaunchClient } from '@/store';
 import { useCallback } from 'react';
 import { toast } from 'sonner';
+import type {
+  ChannelKind,
+  HeadlessSessionSummary,
+  InteractiveReplayBatch,
+  ManagedSessionSummary,
+  ReplayBatch,
+  RuntimeInput,
+  RuntimeRecoveryCandidate,
+  TelegramBridgeStatus,
+  TelegramForumTopic,
+  TelegramSettings,
+  TelegramTopicBinding,
+  TmuxAttachTerminalInfo,
+  TmuxAttachTerminalType,
+  UnifiedSessionDebugComparison,
+  UnifiedSessionInfo,
+} from '@/lib/tauri-ipc';
 
 interface TauriEnvConfig {
   ANTHROPIC_BASE_URL?: string;
@@ -117,6 +134,22 @@ interface ProxyTrafficDetail {
 
 function normalizeLaunchClient(client?: string): LaunchClient {
   return client?.toLowerCase() === 'codex' ? 'codex' : 'claude';
+}
+
+function toFrontendSession(tauriSession: TauriSession): Session {
+  return {
+    id: tauriSession.id,
+    client: normalizeLaunchClient(tauriSession.client),
+    envName: tauriSession.env_name,
+    workingDir: tauriSession.working_dir,
+    pid: tauriSession.pid,
+    startedAt: new Date(tauriSession.start_time),
+    status: tauriSession.status as Session['status'],
+    permMode: tauriSession.perm_mode,
+    terminalType: tauriSession.terminal_type,
+    windowId: tauriSession.window_id,
+    itermSessionId: tauriSession.iterm_session_id,
+  };
 }
 
 export function useTauriCommands() {
@@ -253,36 +286,31 @@ export function useTauriCommands() {
     }
   }, [loadEnvironments, setLoading, setError]);
 
-  const launchClaudeCode = useCallback(async (
-    workingDir?: string,
-    resumeSessionId?: string,
-    client: LaunchClient = 'claude',
-  ) => {
+  const syncInteractiveSessions = useCallback(async (): Promise<Session[]> => {
+    const tauriSessions = await invoke<TauriSession[]>('list_interactive_sessions');
+    const sessions = tauriSessions.map(toFrontendSession);
+    setSessions(sessions);
+    return sessions;
+  }, [setSessions]);
+
+  const createInteractiveSession = useCallback(async (options: {
+    envName?: string;
+    permMode?: string;
+    workingDir?: string | null;
+    resumeSessionId?: string | null;
+    client?: LaunchClient;
+  } = {}): Promise<Session> => {
     setLoading(true);
     try {
-      const workDir = workingDir || selectedWorkingDir || null;
-      const tauriSession = await invoke<TauriSession>('launch_claude_code', {
-        envName: currentEnv,
-        permMode: permissionMode,
+      const workDir = options.workingDir ?? selectedWorkingDir ?? null;
+      const tauriSession = await invoke<TauriSession>('create_interactive_session', {
+        envName: options.envName ?? currentEnv,
+        permMode: options.permMode ?? permissionMode,
         workingDir: workDir,
-        resumeSessionId: resumeSessionId || null,
-        client,
+        resumeSessionId: options.resumeSessionId ?? null,
+        client: options.client ?? 'claude',
       });
-
-      // Convert Tauri session to frontend session
-      const session: Session = {
-        id: tauriSession.id,
-        client: normalizeLaunchClient(tauriSession.client),
-        envName: tauriSession.env_name,
-        workingDir: tauriSession.working_dir,
-        pid: tauriSession.pid,
-        startedAt: new Date(tauriSession.start_time),
-        status: tauriSession.status as Session['status'],
-        permMode: tauriSession.perm_mode,
-        terminalType: tauriSession.terminal_type,
-        windowId: tauriSession.window_id,
-        itermSessionId: tauriSession.iterm_session_id,
-      };
+      const session = toFrontendSession(tauriSession);
 
       addSession(session);
 
@@ -293,44 +321,157 @@ export function useTauriCommands() {
       }
 
       setError(null);
+
+      if (session.terminalType === 'embedded') {
+        try {
+          await invoke('open_interactive_session_in_terminal', {
+            sessionId: session.id,
+            terminalType: null,
+          });
+          await syncInteractiveSessions();
+        } catch (openErr) {
+          console.error('Interactive session created but failed to open terminal:', openErr);
+          toast.error(`Session created, but failed to open terminal: ${openErr}`);
+        }
+      }
+
+      return session;
     } catch (err) {
-      const clientLabel = client === 'codex' ? 'Codex' : 'Claude Code';
+      const clientLabel = options.client === 'codex' ? 'Codex' : 'Claude Code';
       setError(`Failed to launch ${clientLabel}: ${err}`);
+      throw err;
     } finally {
       setLoading(false);
     }
-  }, [currentEnv, permissionMode, selectedWorkingDir, addSession, setLoading, setError]);
+  }, [
+    currentEnv,
+    permissionMode,
+    selectedWorkingDir,
+    addSession,
+    setLoading,
+    setError,
+    syncInteractiveSessions,
+  ]);
+
+  const launchClaudeCode = useCallback(async (
+    workingDir?: string,
+    resumeSessionId?: string,
+    client: LaunchClient = 'claude',
+  ) => {
+    await createInteractiveSession({
+      workingDir: workingDir ?? null,
+      resumeSessionId: resumeSessionId ?? null,
+      client,
+    });
+  }, [createInteractiveSession]);
+
+  const listInteractiveSessions = useCallback(async (): Promise<Session[]> => {
+    return syncInteractiveSessions();
+  }, [syncInteractiveSessions]);
+
+  const listRuntimeRecoveryCandidates = useCallback(async (): Promise<RuntimeRecoveryCandidate[]> => {
+    return invoke<RuntimeRecoveryCandidate[]>('list_runtime_recovery_candidates');
+  }, []);
+
+  const dismissRuntimeRecoveryCandidate = useCallback(async (runtimeId: string): Promise<void> => {
+    await invoke('dismiss_runtime_recovery_candidate', { runtimeId });
+  }, []);
 
   const loadSessions = useCallback(async () => {
     try {
-      const tauriSessions = await invoke<TauriSession[]>('list_sessions');
-      const sessions: Session[] = tauriSessions.map((s) => ({
-        id: s.id,
-        client: normalizeLaunchClient(s.client),
-        envName: s.env_name,
-        workingDir: s.working_dir,
-        pid: s.pid,
-        startedAt: new Date(s.start_time),
-        status: s.status as Session['status'],
-        permMode: s.perm_mode,
-        terminalType: s.terminal_type,
-        windowId: s.window_id,
-        itermSessionId: s.iterm_session_id,
-      }));
-      setSessions(sessions);
+      await listInteractiveSessions();
     } catch (err) {
       console.error('Failed to load sessions:', err);
     }
-  }, [setSessions]);
+  }, [listInteractiveSessions]);
 
-  const stopSession = useCallback(async (sessionId: string) => {
+  const stopInteractiveSession = useCallback(async (sessionId: string) => {
     try {
-      await invoke('stop_session', { sessionId });
+      await invoke('stop_interactive_session', { sessionId });
       updateSessionStatus(sessionId, 'stopped');
     } catch (err) {
       setError(`Failed to stop session: ${err}`);
     }
   }, [updateSessionStatus, setError]);
+
+  const stopSession = useCallback(async (sessionId: string) => {
+    await stopInteractiveSession(sessionId);
+  }, [stopInteractiveSession]);
+
+  const writeInteractiveInput = useCallback(async (sessionId: string, data: string): Promise<void> => {
+    await invoke('write_interactive_input', { sessionId, data });
+  }, []);
+
+  const getInteractiveSessionOutput = useCallback(async (
+    sessionId: string,
+    sinceSeq?: number | null,
+  ): Promise<InteractiveReplayBatch> => {
+    return invoke<InteractiveReplayBatch>('get_interactive_session_output', {
+      sessionId,
+      sinceSeq: sinceSeq ?? null,
+    });
+  }, []);
+
+  const getInteractiveSessionEvents = useCallback(async (
+    sessionId: string,
+    sinceSeq?: number | null,
+  ): Promise<ReplayBatch> => {
+    return invoke<ReplayBatch>('get_interactive_session_events', {
+      sessionId,
+      sinceSeq: sinceSeq ?? null,
+    });
+  }, []);
+
+  const listUnifiedSessions = useCallback(async (): Promise<UnifiedSessionInfo[]> => {
+    return invoke<UnifiedSessionInfo[]>('list_unified_sessions');
+  }, []);
+
+  const getSessionEvents = useCallback(async (
+    runtimeId: string,
+    sinceSeq?: number | null,
+  ): Promise<ReplayBatch> => {
+    return invoke<ReplayBatch>('get_session_events', {
+      runtimeId,
+      sinceSeq: sinceSeq ?? null,
+    });
+  }, []);
+
+  const sendSessionInput = useCallback(async (
+    runtimeId: string,
+    input: RuntimeInput,
+  ): Promise<void> => {
+    await invoke('send_session_input', { runtimeId, input });
+  }, []);
+
+  const stopUnifiedSession = useCallback(async (runtimeId: string): Promise<void> => {
+    await invoke('stop_unified_session', { runtimeId });
+  }, []);
+
+  const attachChannel = useCallback(async (
+    runtimeId: string,
+    channel: ChannelKind,
+  ): Promise<void> => {
+    await invoke('attach_channel', { runtimeId, channel });
+  }, []);
+
+  const detachChannel = useCallback(async (
+    runtimeId: string,
+    channel: ChannelKind,
+  ): Promise<void> => {
+    await invoke('detach_channel', { runtimeId, channel });
+  }, []);
+
+  const debugCompareSessions = useCallback(async (): Promise<UnifiedSessionDebugComparison> => {
+    return invoke<UnifiedSessionDebugComparison>('debug_compare_sessions');
+  }, []);
+
+  const resizeInteractiveSession = useCallback(async (
+    sessionId: string,
+    cols: number,
+    rows: number,
+  ): Promise<void> => {
+    await invoke('resize_interactive_session', { sessionId, cols, rows });
+  }, []);
 
   const deleteSession = useCallback(async (sessionId: string) => {
     try {
@@ -343,16 +484,36 @@ export function useTauriCommands() {
 
   const focusSession = useCallback(async (sessionId: string) => {
     try {
-      await invoke('focus_session', { sessionId });
+      await invoke('focus_interactive_session', { sessionId });
       toast.success('Session focused successfully');
     } catch (err) {
       toast.error(`Failed to focus session: ${err}`);
     }
   }, []);
 
+  const listTmuxAttachTerminals = useCallback(async (): Promise<TmuxAttachTerminalInfo[]> => {
+    return invoke<TmuxAttachTerminalInfo[]>('list_tmux_attach_terminals');
+  }, []);
+
+  const openInteractiveSessionInTerminal = useCallback(async (
+    sessionId: string,
+    terminalType?: TmuxAttachTerminalType,
+  ) => {
+    try {
+      await invoke('open_interactive_session_in_terminal', {
+        sessionId,
+        terminalType: terminalType ?? null,
+      });
+      await syncInteractiveSessions();
+    } catch (err) {
+      toast.error(`Failed to open session in terminal: ${err}`);
+      throw err;
+    }
+  }, [syncInteractiveSessions]);
+
   const closeSession = useCallback(async (sessionId: string) => {
     try {
-      await invoke('close_session', { sessionId });
+      await invoke('close_interactive_session', { sessionId });
       removeSession(sessionId);
       toast.success('Session closed successfully');
     } catch (err) {
@@ -360,9 +521,100 @@ export function useTauriCommands() {
     }
   }, [removeSession]);
 
+  const createHeadlessSession = useCallback(async (
+    options: {
+      envName?: string;
+      permMode?: string;
+      workingDir?: string | null;
+      resumeSessionId?: string | null;
+      initialPrompt?: string | null;
+    } = {},
+  ): Promise<HeadlessSessionSummary> => {
+    return invoke<HeadlessSessionSummary>('create_headless_session', {
+      envName: options.envName ?? currentEnv,
+      permMode: options.permMode ?? permissionMode,
+      workingDir: options.workingDir ?? selectedWorkingDir ?? null,
+      resumeSessionId: options.resumeSessionId ?? null,
+      initialPrompt: options.initialPrompt ?? null,
+    });
+  }, [currentEnv, permissionMode, selectedWorkingDir]);
+
+  const createManagedSession = useCallback(async (
+    options: {
+      envName?: string;
+      permMode?: string;
+      workingDir?: string | null;
+      resumeSessionId?: string | null;
+      initialPrompt?: string | null;
+    } = {},
+  ): Promise<ManagedSessionSummary> => {
+    return createHeadlessSession(options);
+  }, [createHeadlessSession]);
+
+  const listHeadlessSessions = useCallback(async (): Promise<HeadlessSessionSummary[]> => {
+    return invoke<HeadlessSessionSummary[]>('list_headless_sessions');
+  }, []);
+
+  const listManagedSessions = useCallback(async (): Promise<ManagedSessionSummary[]> => {
+    return listHeadlessSessions();
+  }, [listHeadlessSessions]);
+
+  const sendToHeadlessSession = useCallback(async (runtimeId: string, text: string): Promise<void> => {
+    await invoke('send_to_headless_session', { runtimeId, text });
+  }, []);
+
+  const sendToManagedSession = useCallback(async (runtimeId: string, text: string): Promise<void> => {
+    await sendToHeadlessSession(runtimeId, text);
+  }, [sendToHeadlessSession]);
+
+  const getHeadlessSessionEvents = useCallback(async (
+    runtimeId: string,
+    sinceSeq?: number | null,
+  ): Promise<ReplayBatch> => {
+    return invoke<ReplayBatch>('get_headless_session_events', {
+      runtimeId,
+      sinceSeq: sinceSeq ?? null,
+    });
+  }, []);
+
+  const getManagedSessionEvents = useCallback(async (
+    runtimeId: string,
+    sinceSeq?: number | null,
+  ): Promise<ReplayBatch> => {
+    return getHeadlessSessionEvents(runtimeId, sinceSeq);
+  }, [getHeadlessSessionEvents]);
+
+  const stopHeadlessSession = useCallback(async (runtimeId: string): Promise<void> => {
+    await invoke('stop_headless_session', { runtimeId });
+  }, []);
+
+  const stopManagedSession = useCallback(async (runtimeId: string): Promise<void> => {
+    await stopHeadlessSession(runtimeId);
+  }, [stopHeadlessSession]);
+
+  const respondHeadlessPermission = useCallback(async (
+    requestId: string,
+    approved: boolean,
+    responder = 'desktop',
+  ): Promise<void> => {
+    await invoke('respond_headless_permission', {
+      requestId,
+      approved,
+      responder,
+    });
+  }, []);
+
+  const removeHeadlessSession = useCallback(async (runtimeId: string): Promise<void> => {
+    await invoke('remove_headless_session', { runtimeId });
+  }, []);
+
+  const removeManagedSession = useCallback(async (runtimeId: string): Promise<void> => {
+    await removeHeadlessSession(runtimeId);
+  }, [removeHeadlessSession]);
+
   const minimizeSession = useCallback(async (sessionId: string) => {
     try {
-      await invoke('minimize_session', { sessionId });
+      await invoke('minimize_interactive_session', { sessionId });
       toast.success('Session minimized successfully');
     } catch (err) {
       toast.error(`Failed to minimize session: ${err}`);
@@ -471,6 +723,14 @@ export function useTauriCommands() {
     }
   }, []);
 
+  const checkTmuxInstalled = useCallback(async (): Promise<boolean> => {
+    try {
+      return await invoke<boolean>('check_tmux_installed');
+    } catch {
+      return false;
+    }
+  }, []);
+
   const loadInstalledSkills = useCallback(async () => {
     try {
       const skills = await invoke<InstalledSkill[]>('list_installed_skills');
@@ -497,6 +757,10 @@ export function useTauriCommands() {
     prompt: string;
     workingDir: string;
     envName?: string;
+    executionProfile?: 'conservative' | 'standard' | 'autonomous';
+    maxBudgetUsd?: number | null;
+    allowedTools?: string[];
+    disallowedTools?: string[];
     timeoutSecs?: number;
     templateId?: string;
   }) => {
@@ -506,6 +770,10 @@ export function useTauriCommands() {
       prompt: data.prompt,
       workingDir: data.workingDir,
       envName: data.envName || null,
+      executionProfile: data.executionProfile || 'conservative',
+      maxBudgetUsd: data.maxBudgetUsd ?? null,
+      allowedTools: data.allowedTools ?? [],
+      disallowedTools: data.disallowedTools ?? [],
       timeoutSecs: data.timeoutSecs || 300,
       templateId: data.templateId || null,
     });
@@ -521,6 +789,10 @@ export function useTauriCommands() {
     prompt?: string;
     workingDir?: string;
     envName?: string;
+    executionProfile?: 'conservative' | 'standard' | 'autonomous';
+    maxBudgetUsd?: number | null;
+    allowedTools?: string[];
+    disallowedTools?: string[];
     timeoutSecs?: number;
   }) => {
     const task = await invoke<CronTask>('update_cron_task', data);
@@ -575,6 +847,46 @@ export function useTauriCommands() {
     return invoke<ProxyDebugState>('get_proxy_debug_state');
   }, []);
 
+  const getTelegramSettings = useCallback(async (): Promise<TelegramSettings> => {
+    return invoke<TelegramSettings>('get_telegram_settings');
+  }, []);
+
+  const saveTelegramSettings = useCallback(async (settings: TelegramSettings): Promise<void> => {
+    await invoke('save_telegram_settings', { settings });
+  }, []);
+
+  const getTelegramBridgeStatus = useCallback(async (): Promise<TelegramBridgeStatus> => {
+    return invoke<TelegramBridgeStatus>('get_telegram_bridge_status');
+  }, []);
+
+  const startTelegramBridge = useCallback(async (): Promise<TelegramBridgeStatus> => {
+    return invoke<TelegramBridgeStatus>('start_telegram_bridge');
+  }, []);
+
+  const stopTelegramBridge = useCallback(async (): Promise<TelegramBridgeStatus> => {
+    return invoke<TelegramBridgeStatus>('stop_telegram_bridge');
+  }, []);
+
+  const getTelegramForumTopics = useCallback(async (): Promise<TelegramForumTopic[]> => {
+    return invoke<TelegramForumTopic[]>('get_telegram_forum_topics');
+  }, []);
+
+  const bindTelegramTopic = useCallback(async (options: {
+    projectDir: string;
+    envName?: string | null;
+    permMode?: string | null;
+    threadId?: number | null;
+    createNewTopic: boolean;
+  }): Promise<TelegramTopicBinding> => {
+    return invoke<TelegramTopicBinding>('bind_telegram_topic', {
+      projectDir: options.projectDir,
+      envName: options.envName ?? null,
+      permMode: options.permMode ?? null,
+      threadId: options.threadId ?? null,
+      createNewTopic: options.createNewTopic,
+    });
+  }, []);
+
   const setProxyDebugEnabled = useCallback(async (enabled: boolean): Promise<ProxyDebugState> => {
     return invoke<ProxyDebugState>('set_proxy_debug_enabled', { enabled });
   }, []);
@@ -625,12 +937,43 @@ export function useTauriCommands() {
     updateEnvironment,
     deleteEnvironment,
     launchClaudeCode,
+    createInteractiveSession,
     loadSessions,
+    listInteractiveSessions,
+    listRuntimeRecoveryCandidates,
+    dismissRuntimeRecoveryCandidate,
     stopSession,
+    stopInteractiveSession,
+    writeInteractiveInput,
+    getInteractiveSessionOutput,
+    getInteractiveSessionEvents,
+    listUnifiedSessions,
+    getSessionEvents,
+    sendSessionInput,
+    stopUnifiedSession,
+    attachChannel,
+    detachChannel,
+    debugCompareSessions,
+    resizeInteractiveSession,
     deleteSession,
     focusSession,
+    listTmuxAttachTerminals,
+    openInteractiveSessionInTerminal,
     closeSession,
     minimizeSession,
+    createHeadlessSession,
+    createManagedSession,
+    listHeadlessSessions,
+    listManagedSessions,
+    sendToHeadlessSession,
+    sendToManagedSession,
+    getHeadlessSessionEvents,
+    getManagedSessionEvents,
+    stopHeadlessSession,
+    stopManagedSession,
+    respondHeadlessPermission,
+    removeHeadlessSession,
+    removeManagedSession,
     loadAppConfig,
     addFavoriteProject,
     removeFavoriteProject,
@@ -641,6 +984,7 @@ export function useTauriCommands() {
     arrangeSessions,
     checkArrangeSupport,
     checkCodexInstalled,
+    checkTmuxInstalled,
     loadInstalledSkills,
     loadCronTasks,
     addCronTask,
@@ -653,6 +997,13 @@ export function useTauriCommands() {
     listCronTemplates,
     generateCronTaskStream,
     saveDefaultWorkingDir,
+    getTelegramSettings,
+    saveTelegramSettings,
+    getTelegramBridgeStatus,
+    startTelegramBridge,
+    stopTelegramBridge,
+    getTelegramForumTopics,
+    bindTelegramTopic,
     getProxyDebugState,
     setProxyDebugEnabled,
     updateProxyDebugConfig,

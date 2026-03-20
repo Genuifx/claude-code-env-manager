@@ -24,6 +24,7 @@ export function AppLayout({
   const isDashboard = activeTab === 'dashboard';
   const titleKeyMap: Record<string, string> = {
     'proxy-debug': 'sideRail.proxyDebug',
+    'chat-app': 'sideRail.chatApp',
   };
   const pageTitleKey = titleKeyMap[activeTab] || `sideRail.${activeTab}`;
   const pageTitle = isDashboard ? undefined : (t(pageTitleKey) || t('sideRail.dashboard'));
@@ -36,6 +37,7 @@ export function AppLayout({
     history: 'history.subtitle',
     analytics: 'analytics.subtitle',
     cron: 'cron.subtitle',
+    'chat-app': 'chatApp.subtitle',
     'proxy-debug': 'proxyDebug.subtitle',
     settings: 'settings.subtitle',
   };
