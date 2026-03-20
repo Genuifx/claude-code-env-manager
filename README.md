@@ -19,7 +19,7 @@
 [![license](https://img.shields.io/npm/l/ccem.svg)](https://github.com/Genuifx/claude-code-env-manager/blob/main/LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/Genuifx/claude-code-env-manager/pulls)
 
-![Shot](./screenshots/shots.png)
+![Shot](./screenshots/shots.webp)
 
 ---
 
@@ -85,7 +85,7 @@ ccem usage        # View token usage and costs
 ccem skill add    # Interactive skill installer
 ```
 
-![Demo](./screenshots/cli-index.png)
+![Demo](./screenshots/cli-index.webp)
 
 ![CLI Demo](./demo.png)
 
@@ -287,7 +287,7 @@ Download `.dmg` from [GitHub Releases](https://github.com/genuifx/claude-code-en
 ## Claude Code + Codex Dual Engine
 
 <!-- TODO: screenshot of History page showing Claude/Codex conversations -->
-![History](./screenshots/history.png)
+![History](./screenshots/history.webp)
 
 This might be the feature you didn't know you wanted.
 
@@ -320,7 +320,7 @@ Each Topic can have its own environment and permission mode. Need Claude to run 
 ## Session Management — Multiple Models, Simultaneously
 
 <!-- TODO: screenshot of Sessions page -->
-![Sessions](./screenshots/sessions.png)
+![Sessions](./screenshots/sessions.webp)
 
 This is where ccem differs from tools like [ccswitch](https://github.com/yibie/ccswitch). ccswitch switches your global environment — one model at a time. ccem lets you run multiple sessions with different models at the same time.
 
@@ -335,7 +335,7 @@ Window A running Opus for architecture work. Window B running Gemini writing fro
 ## Environment Management
 
 <!-- TODO: screenshot of Environments page -->
-![Environments](./screenshots/environments.png)
+![Environments](./screenshots/environments.webp)
 
 Shares config with CLI, visual interface:
 
@@ -347,7 +347,7 @@ Shares config with CLI, visual interface:
 ## Cron Tasks — Scheduled Automation with Push Notifications
 
 <!-- TODO: screenshot of Cron Tasks page -->
-![Cron Tasks](./screenshots/cron.png)
+![Cron Tasks](./screenshots/cron.webp)
 
 Write a cron expression and a prompt, ccem runs Claude Code on schedule — and pushes the results straight to your Telegram.
 
@@ -365,7 +365,7 @@ Think of it as your own self-hosted [OpenClaw](https://openclaw.com) — schedul
 ## Analytics — Claude Code & Codex in One View
 
 <!-- TODO: screenshot of Analytics page with heatmap -->
-![Analytics](./screenshots/analytics.png)
+![Analytics](./screenshots/analytics.webp)
 
 GitHub-style usage statistics for both Claude Code and Codex, unified in a single dashboard.
 
