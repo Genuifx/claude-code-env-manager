@@ -319,6 +319,20 @@ Desktop 同时支持 **Claude Code** 和 **OpenAI Codex CLI** 两个运行时。
 
 出门在外突然想让 Claude 跑个任务，掏出手机就行。
 
+<details>
+<summary><b>怎么创建 Telegram Bot</b></summary>
+
+1. 打开 Telegram，搜索 **@BotFather**
+2. 发送 `/newbot`，按提示给 Bot 起个名字和用户名
+3. BotFather 会回复一个 **Bot Token**（长这样 `123456:ABC-DEF...`）——复制下来
+4. 创建一个 Telegram 群组，进群设置，打开 **Topics**（这样群组就变成 Forum 模式了）
+5. 把 Bot 拉进群，设为 **管理员**（不然它没法在 Topic 里收发消息）
+6. 获取 **Chat ID** —— 在群里发条消息，然后访问 `https://api.telegram.org/bot<你的TOKEN>/getUpdates`，找到 `"chat":{"id":-100xxxxxxxxxx}` 那个数字
+7. 获取 **User ID** —— 给 @userinfobot 发条消息，或者在上面 getUpdates 的返回里找 `"from":{"id":...}`
+8. 把 Bot Token、Chat ID、User ID 填到 ccem 的 ChatApp → Telegram 设置里就行了
+
+</details>
+
 > 飞书集成正在开发中。
 
 ## 会话管理 — 多模型同时跑
