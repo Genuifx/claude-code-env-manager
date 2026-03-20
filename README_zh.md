@@ -302,18 +302,22 @@ Desktop 同时支持 **Claude Code** 和 **OpenAI Codex CLI** 两个运行时。
 ## Telegram 远程控制
 
 <!-- TODO: ChatApp / Telegram 面板截图 -->
-![Telegram](./screenshots/telegram.png)
+![Telegram](./screenshots/telegram.webp)
 
 在手机上控制你电脑里跑着的 Claude Code 会话。
 
-这个功能的逻辑是这样的：
+和官方 Claude 移动端不同——官方只支持 Anthropic 订阅账号，ccem 用的是你自己配置的 API Key。你在 ccem 里配了什么环境，Telegram 里就能用什么环境。自己的 Key、第三方供应商的 Key，都行。
+
+核心机制是 Telegram 的 Forum Topic。每个 Topic 绑定你电脑上的一个项目目录——一个 Topic，一个项目，一个持久会话。"后端" Topic 连你的后端仓库，"前端" Topic 连你的前端仓库。互不干扰，干干净净。
+
+具体流程：
 
 1. **配置 Bot**：在 ChatApp 页面填入你的 Telegram Bot Token 和允许的用户 ID
-2. **绑定项目**：把 Telegram 群组里的 Topic（话题）和本地项目目录绑定——每个 Topic 对应一个项目
+2. **绑定项目**：把每个 Forum Topic 映射到本地项目目录，各自设置环境和权限模式
 3. **发消息就是发指令**：在手机上给对应 Topic 发消息，ccem 会在本地启动（或复用）一个 Claude Code 会话，把你的消息转发过去
 4. **结果回传**：Claude 的回复实时推送回 Telegram，可以选择是否显示 tool calls
 
-你可以给每个 Topic 绑定不同的环境和权限模式。出门在外突然想让 Claude 跑个任务，掏出手机就行。
+出门在外突然想让 Claude 跑个任务，掏出手机就行。
 
 > 飞书集成正在开发中。
 
