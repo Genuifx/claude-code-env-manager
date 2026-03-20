@@ -1,0 +1,12 @@
+{
+  "mode": "pre",
+  "tag": "beta",
+  "initialVersions": {
+    "ccem": "2.0.0-beta.3",
+    "@ccem/desktop": "2.0.0-beta.3",
+    "@ccem/core": "2.0.0-beta.3"
+  },
+  "changesets": [
+    "hip-moments-brush"
+  ]
+}
