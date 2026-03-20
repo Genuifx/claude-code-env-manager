@@ -25,6 +25,16 @@ const tauriConfig = JSON.parse(readFileSync(tauriConfigPath, 'utf-8'));
 tauriConfig.version = version;
 writeFileSync(tauriConfigPath, JSON.stringify(tauriConfig, null, 2) + '\n');
 
+// 更新 Cargo.toml 版本
+const cargoTomlPath = join(rootDir, 'apps/desktop/src-tauri/Cargo.toml');
+let cargoToml = readFileSync(cargoTomlPath, 'utf-8');
+cargoToml = cargoToml.replace(
+  /^version\s*=\s*"[^"]*"/m,
+  `version = "${version}"`
+);
+writeFileSync(cargoTomlPath, cargoToml);
+
 console.log(`✅ Synced version to ${version}`);
 console.log(`   - apps/desktop/package.json`);
 console.log(`   - apps/desktop/src-tauri/tauri.conf.json`);
+console.log(`   - apps/desktop/src-tauri/Cargo.toml`);

@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Plus, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search, LayoutGrid, List } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { ErrorBanner } from '@/components/ui/EmptyState';
 import { EnvList } from '@/components/environments';
 import { PERMISSION_PRESETS } from '@ccem/core/browser';
