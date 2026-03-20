@@ -319,6 +319,20 @@ Here's how it works:
 
 Need Claude to run something while you're out? Just grab your phone.
 
+<details>
+<summary><b>How to create a Telegram Bot</b></summary>
+
+1. Open Telegram and search for **@BotFather**
+2. Send `/newbot` and follow the prompts — give it a name and a username
+3. BotFather will reply with a **Bot Token** (looks like `123456:ABC-DEF...`) — copy it
+4. Create a Telegram group, go to group settings, enable **Topics** (this turns it into a Forum group)
+5. Add your bot to the group and make it an **admin** (so it can read and send messages in Topics)
+6. Get your **Chat ID** — send a message in the group, then visit `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates` and look for `"chat":{"id":-100xxxxxxxxxx}`
+7. Get your **User ID** — send a message to @userinfobot or check the `"from":{"id":...}` field in the same getUpdates response
+8. Paste the Bot Token, Chat ID, and your User ID into ccem's ChatApp → Telegram settings
+
+</details>
+
 > Feishu (Lark) integration is in development.
 
 ## Session Management — Multiple Models, Simultaneously
