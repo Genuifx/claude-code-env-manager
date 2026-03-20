@@ -56,11 +56,6 @@ jobs:
           fi
           echo "Publishing with tag: $(cat $GITHUB_OUTPUT | grep tag | cut -d= -f2)"
 
-      - name: Publish @ccem/core
-        run: pnpm --filter @ccem/core publish --no-git-checks --tag ${{ steps.npm-tag.outputs.tag }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
       - name: Publish ccem (CLI)
         run: pnpm --filter ccem publish --no-git-checks --tag ${{ steps.npm-tag.outputs.tag }}
         env:
