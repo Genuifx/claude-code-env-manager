@@ -302,18 +302,22 @@ In short, ccem Desktop isn't just a Claude Code manager — it's a control cente
 ## Telegram Remote Control
 
 <!-- TODO: screenshot of ChatApp / Telegram panel -->
-![Telegram](./screenshots/telegram.png)
+![Telegram](./screenshots/telegram.webp)
 
 Control Claude Code sessions running on your computer from your phone.
+
+Unlike the official Claude mobile app which requires an Anthropic subscription, ccem works with any API key you've configured — your own key, a third-party provider, whatever. If it works in your ccem environment, it works from Telegram.
+
+The magic is in Telegram's Forum Topics. Each Topic maps to a project directory on your machine — one Topic, one project, one persistent session. Your "backend" Topic talks to your backend repo, your "frontend" Topic talks to your frontend repo. Clean separation, no cross-talk.
 
 Here's how it works:
 
 1. **Configure your bot** — Enter your Telegram Bot Token and allowed user IDs in the ChatApp page
-2. **Bind projects** — Map Telegram group Topics to local project directories — each Topic corresponds to one project
-3. **Send messages as commands** — Text the relevant Topic from your phone, ccem will spawn (or reuse) a Claude Code session locally and forward your message
+2. **Bind projects** — Map each Forum Topic to a local project directory, with its own environment and permission mode
+3. **Send messages as commands** — Text the relevant Topic from your phone, ccem spawns (or reuses) a Claude Code session locally and forwards your message
 4. **Results stream back** — Claude's responses are pushed to Telegram in real time, with optional tool call visibility
 
-Each Topic can have its own environment and permission mode. Need Claude to run something while you're out? Just grab your phone.
+Need Claude to run something while you're out? Just grab your phone.
 
 > Feishu (Lark) integration is in development.
 
