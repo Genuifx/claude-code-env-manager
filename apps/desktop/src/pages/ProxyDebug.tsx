@@ -16,6 +16,7 @@ import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useTauriEvent } from '@/hooks/useTauriEvents';
 import type { ProxyDebugState, ProxyTrafficDetail, ProxyTrafficItem } from '@/lib/tauri-ipc';
 import { cn } from '@/lib/utils';
+import { LaunchButton } from '@/components/ui/LaunchButton';
 
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
@@ -318,9 +319,9 @@ export function ProxyDebug() {
             >
               {t('proxyDebug.clearLogs')}
             </Button>
-            <Button size="sm" onClick={handleToggle}>
+            <LaunchButton size="sm" onClick={handleToggle}>
               {state?.enabled ? t('proxyDebug.disable') : t('proxyDebug.enable')}
-            </Button>
+            </LaunchButton>
           </div>
         </div>
 
@@ -567,7 +568,7 @@ export function ProxyDebug() {
             </div>
 
             <div className="flex items-center gap-2">
-              <Button size="sm" onClick={handleSaveConfig}>{t('proxyDebug.saveConfig')}</Button>
+              <LaunchButton size="sm" onClick={handleSaveConfig}>{t('proxyDebug.saveConfig')}</LaunchButton>
               <Button variant="outline" size="sm" className="glass-btn-outline" onClick={handleClearLogs}>
                 {t('proxyDebug.clearLogs')}
               </Button>

@@ -33,9 +33,14 @@ const CronTasksPage = lazy(async () =>
 const ProxyDebugPage = lazy(async () =>
   import('@/pages/ProxyDebug').then((m) => ({ default: m.ProxyDebug }))
 );
+const ChatAppPage = lazy(async () =>
+  import('@/pages/ChatApp').then((m) => ({ default: m.ChatApp }))
+);
 
 function App() {
   const FOCUS_SYNC_INTERVAL_MS = 5000;
+  const FOCUS_SYNC_DELAY_MS = 180;
+  const WINDOW_EFFECT_RESTORE_MS = 320;
   const [activeTab, setActiveTab] = useState('dashboard');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<'add' | 'edit'>('add');
@@ -266,36 +271,158 @@ function App() {
     };
   }, [preloadAnalyticsPage, preloadHistoryPage]);
 
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+
+    const root = document.documentElement;
+    const isMacLike = /mac/i.test(navigator.platform) || /mac os/i.test(navigator.userAgent);
+    if (!isMacLike) {
+      root.dataset.windowState = 'active';
+      return;
+    }
+
+    let restoreTimerId: number | null = null;
+
+    const clearRestoreTimer = () => {
+      if (restoreTimerId !== null) {
+        clearTimeout(restoreTimerId);
+        restoreTimerId = null;
+      }
+    };
+
+    const setWindowState = (state: 'inactive' | 'activating' | 'active') => {
+      root.dataset.windowState = state;
+    };
+
+    const promoteToActive = () => {
+      clearRestoreTimer();
+      restoreTimerId = window.setTimeout(() => {
+        restoreTimerId = null;
+        setWindowState('active');
+      }, WINDOW_EFFECT_RESTORE_MS);
+    };
+
+    const handleFocusState = () => {
+      setWindowState('activating');
+      promoteToActive();
+    };
+
+    const handleBlurState = () => {
+      clearRestoreTimer();
+      setWindowState('inactive');
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && document.hasFocus()) {
+        handleFocusState();
+        return;
+      }
+
+      handleBlurState();
+    };
+
+    if (document.visibilityState === 'visible' && document.hasFocus()) {
+      handleFocusState();
+    } else {
+      handleBlurState();
+    }
+
+    window.addEventListener('focus', handleFocusState);
+    window.addEventListener('blur', handleBlurState);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearRestoreTimer();
+      window.removeEventListener('focus', handleFocusState);
+      window.removeEventListener('blur', handleBlurState);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      delete root.dataset.windowState;
+    };
+  }, []);
+
   // Re-sync with CLI config when window regains focus
   // This ensures desktop stays in sync when user modifies env via `ccem add/del/use` in terminal
   // Skip environment reload when a dialog is open to avoid resetting in-progress edits
   useEffect(() => {
+    let timeoutId: number | null = null;
+    let idleId: number | null = null;
+    const requestIdle = window.requestIdleCallback?.bind(window);
+    const cancelIdle = window.cancelIdleCallback?.bind(window);
+
+    const runFocusSync = () => {
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+
+      loadCurrentEnv().catch(() => {});
+
+      if (!dialogOpen) {
+        loadEnvironments({ silent: true }).catch(() => {});
+      }
+
+      if (activeTab === 'dashboard' || activeTab === 'sessions') {
+        loadSessions().catch(() => {});
+      }
+    };
+
+    const scheduleFocusSync = () => {
+      if (idleId !== null && cancelIdle) {
+        cancelIdle(idleId);
+        idleId = null;
+      }
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+
+      timeoutId = window.setTimeout(() => {
+        timeoutId = null;
+        if (requestIdle) {
+          idleId = requestIdle(() => {
+            idleId = null;
+            runFocusSync();
+          }, { timeout: 800 });
+          return;
+        }
+
+        runFocusSync();
+      }, FOCUS_SYNC_DELAY_MS);
+    };
+
     const handleFocus = () => {
       const now = Date.now();
       if (now - lastFocusSyncAtRef.current < FOCUS_SYNC_INTERVAL_MS) {
         return;
       }
       lastFocusSyncAtRef.current = now;
-
-      if (!dialogOpen) {
-        loadEnvironments({ silent: true }).catch(() => {});
-      }
-      loadCurrentEnv().catch(() => {});
-      loadSessions().catch(() => {});
+      scheduleFocusSync();
     };
 
     window.addEventListener('focus', handleFocus);
-    return () => window.removeEventListener('focus', handleFocus);
-  }, [loadEnvironments, loadCurrentEnv, loadSessions, dialogOpen]);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      if (idleId !== null && cancelIdle) {
+        cancelIdle(idleId);
+      }
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [activeTab, loadEnvironments, loadCurrentEnv, loadSessions, dialogOpen]);
 
   // Handle launch
   const handleLaunch = useCallback(async () => {
     try {
       await launchClaudeCode(undefined, undefined, launchClient);
+      if (launchClient === 'claude') {
+        navigateToTab('sessions');
+      }
     } catch (err) {
       console.error('Launch failed:', err);
     }
-  }, [launchClaudeCode, launchClient]);
+  }, [launchClaudeCode, launchClient, navigateToTab]);
 
   // Global keyboard shortcuts (Cmd+1..9 for tabs, Cmd+Enter/N for launch, Cmd+, for settings)
   const globalShortcuts = useMemo(() => ({
@@ -305,9 +432,9 @@ function App() {
     'meta+4': () => navigateToTab('skills'),
     'meta+5': () => navigateToTab('history'),
     'meta+6': () => navigateToTab('cron'),
-    'meta+7': () => navigateToTab('analytics'),
-    'meta+8': () => navigateToTab('proxy-debug'),
-    'meta+9': () => navigateToTab('settings'),
+    'meta+7': () => navigateToTab('chat-app'),
+    'meta+8': () => navigateToTab('analytics'),
+    'meta+9': () => navigateToTab('proxy-debug'),
     'meta+enter': () => handleLaunch(),
     'meta+n': () => handleLaunch(),
     'meta+,': () => navigateToTab('settings'),
@@ -320,6 +447,9 @@ function App() {
   const handleLaunchWithDir = async (workingDir: string) => {
     try {
       await launchClaudeCode(workingDir, undefined, launchClient);
+      if (launchClient === 'claude') {
+        navigateToTab('sessions');
+      }
     } catch (err) {
       console.error('Launch failed:', err);
     }
@@ -402,6 +532,8 @@ function App() {
         return <HistoryPage />;
       case 'cron':
         return <CronTasksPage />;
+      case 'chat-app':
+        return <ChatAppPage />;
       case 'proxy-debug':
         return <ProxyDebugPage />;
       case 'settings':

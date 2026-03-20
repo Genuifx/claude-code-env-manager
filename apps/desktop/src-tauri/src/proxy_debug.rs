@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -26,6 +26,8 @@ const HEADER_READ_LIMIT: usize = 8 * 1024 * 1024;
 const BODY_READ_LIMIT: usize = 64 * 1024 * 1024;
 const LIST_LIMIT_MAX: usize = 200;
 const LOG_SAMPLE_LIMIT_BYTES: usize = 2 * 1024 * 1024;
+const SOCKET_IO_TIMEOUT: Duration = Duration::from_secs(30);
+const SOCKET_RETRY_SLEEP: Duration = Duration::from_millis(10);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -623,8 +625,9 @@ impl ProxyDebugManager {
     }
 
     fn handle_connection(self: Arc<Self>, mut stream: TcpStream) {
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
-        let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
+        let _ = stream.set_nonblocking(false);
+        let _ = stream.set_read_timeout(Some(SOCKET_IO_TIMEOUT));
+        let _ = stream.set_write_timeout(Some(SOCKET_IO_TIMEOUT));
 
         {
             let mut metrics = self.metrics.lock().unwrap();
@@ -1200,15 +1203,14 @@ fn status_reason(status: u16) -> &'static str {
     }
 }
 
-fn read_http_request(stream: &mut TcpStream) -> Result<ParsedRequest, String> {
+fn read_http_request<R: Read>(stream: &mut R) -> Result<ParsedRequest, String> {
+    let started_at = Instant::now();
     let mut raw = Vec::<u8>::new();
     let mut buf = [0u8; 8192];
     let header_end;
 
     loop {
-        let n = stream
-            .read(&mut buf)
-            .map_err(|e| format!("Failed reading request bytes: {}", e))?;
+        let n = read_stream_with_retry(stream, &mut buf, started_at, "request bytes")?;
         if n == 0 {
             return Err("Client closed before full headers".to_string());
         }
@@ -1270,9 +1272,7 @@ fn read_http_request(stream: &mut TcpStream) -> Result<ParsedRequest, String> {
         }
 
         while body_rest.len() < content_length {
-            let n = stream
-                .read(&mut buf)
-                .map_err(|e| format!("Failed reading request body bytes: {}", e))?;
+            let n = read_stream_with_retry(stream, &mut buf, started_at, "request body bytes")?;
             if n == 0 {
                 return Err("Client closed before full request body".to_string());
             }
@@ -1293,22 +1293,23 @@ fn read_http_request(stream: &mut TcpStream) -> Result<ParsedRequest, String> {
     })
 }
 
-fn read_chunked_body(stream: &mut TcpStream, remain: &mut Vec<u8>) -> Result<Vec<u8>, String> {
+fn read_chunked_body<R: Read>(stream: &mut R, remain: &mut Vec<u8>) -> Result<Vec<u8>, String> {
+    let started_at = Instant::now();
     let mut out = Vec::new();
 
     loop {
-        let size_line = read_line_from_buffer_or_stream(stream, remain)?;
+        let size_line = read_line_from_buffer_or_stream(stream, remain, started_at)?;
         let size_hex = size_line.split(';').next().unwrap_or("").trim();
         let size = usize::from_str_radix(size_hex, 16)
             .map_err(|e| format!("Invalid chunk size '{}': {}", size_hex, e))?;
 
         if size == 0 {
             // Consume trailing CRLF and optional trailer headers.
-            let _ = read_line_from_buffer_or_stream(stream, remain)?;
+            let _ = read_line_from_buffer_or_stream(stream, remain, started_at)?;
             break;
         }
 
-        let chunk_with_crlf = read_exact_bytes(stream, remain, size + 2)?;
+        let chunk_with_crlf = read_exact_bytes(stream, remain, size + 2, started_at)?;
         out.extend_from_slice(&chunk_with_crlf[..size]);
 
         if out.len() > BODY_READ_LIMIT {
@@ -1319,9 +1320,10 @@ fn read_chunked_body(stream: &mut TcpStream, remain: &mut Vec<u8>) -> Result<Vec
     Ok(out)
 }
 
-fn read_line_from_buffer_or_stream(
-    stream: &mut TcpStream,
+fn read_line_from_buffer_or_stream<R: Read>(
+    stream: &mut R,
     remain: &mut Vec<u8>,
+    started_at: Instant,
 ) -> Result<String, String> {
     loop {
         if let Some(pos) = find_crlf(remain) {
@@ -1332,9 +1334,7 @@ fn read_line_from_buffer_or_stream(
         }
 
         let mut buf = [0u8; 4096];
-        let n = stream
-            .read(&mut buf)
-            .map_err(|e| format!("Failed reading chunked line: {}", e))?;
+        let n = read_stream_with_retry(stream, &mut buf, started_at, "chunked line")?;
         if n == 0 {
             return Err("Unexpected EOF while reading chunked line".to_string());
         }
@@ -1342,16 +1342,15 @@ fn read_line_from_buffer_or_stream(
     }
 }
 
-fn read_exact_bytes(
-    stream: &mut TcpStream,
+fn read_exact_bytes<R: Read>(
+    stream: &mut R,
     remain: &mut Vec<u8>,
     len: usize,
+    started_at: Instant,
 ) -> Result<Vec<u8>, String> {
     while remain.len() < len {
         let mut buf = [0u8; 4096];
-        let n = stream
-            .read(&mut buf)
-            .map_err(|e| format!("Failed reading chunked body: {}", e))?;
+        let n = read_stream_with_retry(stream, &mut buf, started_at, "chunked body")?;
         if n == 0 {
             return Err("Unexpected EOF while reading chunked body".to_string());
         }
@@ -1360,6 +1359,29 @@ fn read_exact_bytes(
 
     let out: Vec<u8> = remain.drain(..len).collect();
     Ok(out)
+}
+
+fn read_stream_with_retry<R: Read>(
+    stream: &mut R,
+    buf: &mut [u8],
+    started_at: Instant,
+    context: &str,
+) -> Result<usize, String> {
+    loop {
+        match stream.read(buf) {
+            Ok(n) => return Ok(n),
+            Err(err) if err.kind() == ErrorKind::Interrupted => continue,
+            Err(err)
+                if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::TimedOut =>
+            {
+                if started_at.elapsed() >= SOCKET_IO_TIMEOUT {
+                    return Err(format!("Failed reading {}: {}", context, err));
+                }
+                thread::sleep(SOCKET_RETRY_SLEEP);
+            }
+            Err(err) => return Err(format!("Failed reading {}: {}", context, err)),
+        }
+    }
 }
 
 fn split_target(target: &str) -> (&str, Option<&str>) {
@@ -2083,10 +2105,11 @@ fn generate_request_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_sse_reduced, compose_upstream_url, parse_proxy_path, recompute_reduced_detail,
-        validate_upstream_url, ReducedStreamLog, TrafficRecord,
+        build_sse_reduced, compose_upstream_url, parse_proxy_path, read_http_request,
+        recompute_reduced_detail, validate_upstream_url, ReducedStreamLog, TrafficRecord,
     };
-    use std::collections::HashMap;
+    use std::collections::{HashMap, VecDeque};
+    use std::io::{self, ErrorKind, Read};
 
     #[test]
     fn parse_proxy_path_extracts_components() {
@@ -2094,6 +2117,49 @@ mod tests {
         assert_eq!(parsed.client, "claude");
         assert_eq!(parsed.route_id, "route-1");
         assert_eq!(parsed.upstream_path, "/v1/messages");
+    }
+
+    #[test]
+    fn read_http_request_retries_nonblocking_body_reads() {
+        enum Step {
+            Data(&'static [u8]),
+            WouldBlock,
+        }
+
+        struct ScriptedReader {
+            steps: VecDeque<Step>,
+        }
+
+        impl Read for ScriptedReader {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                match self.steps.pop_front() {
+                    Some(Step::Data(bytes)) => {
+                        buf[..bytes.len()].copy_from_slice(bytes);
+                        Ok(bytes.len())
+                    }
+                    Some(Step::WouldBlock) => Err(io::Error::new(
+                        ErrorKind::WouldBlock,
+                        "resource temporarily unavailable",
+                    )),
+                    None => Ok(0),
+                }
+            }
+        }
+
+        let mut reader = ScriptedReader {
+            steps: VecDeque::from([
+                Step::Data(
+                    b"POST /proxy/claude/route-1/v1/messages HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 5\r\n\r\nhe",
+                ),
+                Step::WouldBlock,
+                Step::Data(b"llo"),
+            ]),
+        };
+
+        let parsed = read_http_request(&mut reader).unwrap();
+        assert_eq!(parsed.method, "POST");
+        assert_eq!(parsed.target, "/proxy/claude/route-1/v1/messages");
+        assert_eq!(parsed.body, b"hello");
     }
 
     #[test]

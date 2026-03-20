@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { HistoryList, type HistorySessionItem, type HistorySource } from '@/components/history/HistoryList';
 import type { ConversationMessageData } from '@/components/history/MessageBubble';
 import type { HistorySegment } from '@/components/history/HistoryDetail';
+import { getHistorySessionDisplay } from '@/components/history/historySession';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
@@ -194,40 +195,43 @@ export function History() {
       setTimeout(() => setLaunched(false), 1200);
     } catch (err) {
       console.error('Failed to resume session:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(`${t('history.resumeFailed')}: ${message}`);
     }
   }, [selectedSession, launchClaudeCode, t]);
 
-  const handleExport = useCallback(() => {
+  const handleExport = useCallback(async () => {
     if (!selectedSession) return;
 
     try {
+      const sessionTitle = getHistorySessionDisplay(selectedSession, t('history.untitledSession'));
       const payload = {
         schemaVersion: 1,
         exportedAt: new Date().toISOString(),
-        session: selectedSession,
+        session: {
+          ...selectedSession,
+          display: sessionTitle,
+        },
         segments,
         messages,
       };
 
-      const blob = new Blob([JSON.stringify(payload, null, 2)], {
-        type: 'application/json;charset=utf-8',
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-
-      const safeTitle = (selectedSession.display || 'conversation')
+      const safeTitle = sessionTitle
         .replace(/[^\w\-.]+/g, '-')
         .replace(/-+/g, '-')
         .replace(/^-|-$/g, '')
         .slice(0, 60) || selectedSession.id;
       const date = new Date(selectedSession.timestamp).toISOString().slice(0, 10);
-      a.download = `${date}-${safeTitle}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      toast.success(t('history.exported'));
+      const defaultName = `${date}-${safeTitle}.json`;
+
+      const saved = await invoke<boolean>('save_file_dialog', {
+        content: JSON.stringify(payload, null, 2),
+        defaultName,
+      });
+
+      if (saved) {
+        toast.success(t('history.exported'));
+      }
     } catch (err) {
       console.error('Failed to export conversation:', err);
       toast.error(t('history.exportFailed'));

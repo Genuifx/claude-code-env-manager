@@ -1,102 +1,127 @@
-# Claude Code Env Manager
+<p align="center">
+  <img src="./logo.png" alt="CCEM Logo" width="160" />
+</p>
 
-优雅的使用 Claude Code 🍷
+<h1 align="center">CCEM</h1>
+<p align="center">Claude Code & Codex Environment Manager</p>
 
-切换 API 服务商、配置权限模式、查看用量统计、安装 Skills。
+<p align="center">
+  Use Claude Code & Codex like a pro.
+</p>
+
+<p align="center">
+  <a href="./README.md">English</a> | <a href="./README_zh.md">中文</a>
+</p>
 
 [![npm version](https://img.shields.io/npm/v/ccem.svg)](https://www.npmjs.com/package/ccem)
-[![license](https://img.shields.io/npm/l/ccem.svg)](https://github.com/genuifx/claude-code-env-manager/blob/main/LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/Genuifx/claude-code-env-manager)](https://github.com/Genuifx/claude-code-env-manager)
+[![GitHub release](https://img.shields.io/github/v/release/Genuifx/claude-code-env-manager)](https://github.com/Genuifx/claude-code-env-manager/releases)
+[![license](https://img.shields.io/npm/l/ccem.svg)](https://github.com/Genuifx/claude-code-env-manager/blob/main/LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/Genuifx/claude-code-env-manager/pulls)
 
-![Demo](./index.png)
-
-## 这工具干嘛的
-
-用 Claude Code 的人可能会遇到几个烦心事：
-
-- 想用国产模型（GLM、KIMI、DeepSeek、MiniMax）但每次都要手动设置环境变量
-- 每次执行命令都要点"允许"，烦死了，但又不想用 `--dangerously-skip-permissions`
-- 想知道这个月花了多少钱，但 Claude 没有用量统计界面
-- 团队想共享 API 配置，但不想把密钥明文传来传去
-- 想快速安装官方和社区的 Skills，但手动 clone 太麻烦
-
-ccem 就是解决这些问题的。
-
-## 功能特性
-
-- 🔄 **环境切换** - 一键切换 API 服务商（官方/GLM/KIMI/DeepSeek/MiniMax）
-- 🔐 **权限管理** - 6 种预设权限模式，在安全和便捷之间找平衡
-- 📊 **用量统计** - 日历热力图 + 按模型统计 + 费用计算
-- 🛠️ **Skill 管理** - 从官方/GitHub/Plugin Marketplace 安装 Skills
-- 🌐 **远程配置** - 团队共享 API 配置，加密传输
-- ⚡ **性能优化** - 增量缓存、流式解析、后台更新
-
-## 安装
-
-```bash
-npm install -g ccem
-# 或
-pnpm add -g ccem
-# 或直接跑
-npx ccem
-```
-
-## 快速上手
-
-```bash
-ccem              # 进入交互菜单
-ccem add kimi     # 添加 KIMI 环境，自动填好 URL 和模型
-ccem use kimi     # 切换到 KIMI
-ccem dev          # 用开发模式启动 Claude Code（临时）
-ccem --mode       # 查看当前权限模式
-```
-
-![Demo](./demo.png)
+![Shot](./screenshots/shots.png)
 
 ---
 
-## 环境管理
+## Why This Exists
 
-### 交互菜单
+Honestly, after using Claude Code for a while, some things just get really annoying.
 
-运行 `ccem` 会看到一个菜单：
+You want KIMI for frontend, Opus for architecture, DeepSeek for scripts. But every time you switch models you're manually `export`-ing a bunch of env vars, forgetting which terminal is connected to which model, ending up with eight tabs open and no idea what's going on.
 
-| 选项 | 干嘛用 |
-|------|--------|
-| Start Claude Code | 启动，如果设了默认权限模式会自动带上 |
-| Switch Environment | 切换 API 环境 |
-| Permission Mode | 选个权限模式再启动 |
-| View Usage | 看用量和花费（带日历热力图） |
-| Set Default Mode | 设置默认权限模式 |
+Permissions too. Approving every single command gets old fast. But `--dangerously-skip-permissions` is a bit too yolo — what if it nukes your `.env`?
 
-### 命令
+Then you want to check how much you've spent this month. Claude Code won't tell you. Codex won't tell you. The combined bill across both? No idea.
+
+And here's the real kicker — you're out grabbing coffee, and you need Claude to fix something. Your computer's at home running. You're just... stuck.
+
+Or maybe you want Claude to automatically run tests every night, review your PRs, and push the results to your phone. That's not a crazy ask, right? But nothing out there does this.
+
+So I built ccem.
+
+Environment switching, permission management, multi-model parallel sessions, usage analytics, cron tasks, remote control from your phone — one tool, all covered.
+
+Two flavors — pick whichever you like:
+
+| | CLI | Desktop App |
+|--|-----|-------------|
+| Best for | Terminal lovers, scripting | GUI fans, power features |
+| Environment management | ✅ | ✅ |
+| Permission modes | ✅ | ✅ |
+| Usage analytics | ✅ | ✅ Heatmap + trends |
+| Skill management | ✅ | ✅ Streaming search |
+| Claude Code + Codex dual engine | — | ✅ |
+| Telegram remote control | — | ✅ |
+| Cron tasks | — | ✅ |
+| Conversation history | — | ✅ |
+| API request debugging | — | ✅ |
+
+Both share the same config file (`~/.ccem/config.json`). Change an environment in Desktop and the CLI picks it up instantly, and vice versa.
+
+---
+
+# CLI
+
+Environment switching, permission management, usage stats, and skill installation — all from your terminal.
+
+## Install
 
 ```bash
-ccem ls              # 列出所有环境
-ccem use <name>      # 切换环境
-ccem add <name>      # 添加环境
-ccem del <name>      # 删除环境（official 删不掉）
-ccem current         # 当前用的哪个环境
-ccem env             # 输出 export 命令，配合 eval 用
-ccem env --json      # 输出 JSON
-ccem run <command>   # 带着环境变量跑命令
+npm install -g ccem
+# or
+pnpm add -g ccem
+# or just run it
+npx ccem
 ```
 
-### 内置预设
+## Quick Start
 
-添加环境时可以选预设，省得自己填 URL：
+```bash
+ccem              # Interactive menu
+ccem add kimi     # Add KIMI env with pre-filled URL and models
+ccem use kimi     # Switch to KIMI
+ccem dev          # Launch Claude Code in dev permission mode
+ccem usage        # View token usage and costs
+ccem skill add    # Interactive skill installer
+```
 
-| 预设 | Base URL | 主模型 | 快速模型 |
-|------|----------|--------|----------|
-| GLM（智谱） | `https://open.bigmodel.cn/api/anthropic` | glm-4.6 | glm-4.5-air |
-| KIMI（月之暗面） | `https://api.moonshot.cn/anthropic` | kimi-k2-thinking-turbo | kimi-k2-turbo-preview |
+![Demo](./screenshots/cli-index.png)
+
+![CLI Demo](./demo.png)
+
+## Environment Management
+
+### Built-in Presets
+
+When adding an environment, choose a preset to auto-fill the URL and models:
+
+| Preset | Base URL | Main Model | Fast Model |
+|--------|----------|------------|------------|
+| GLM (Zhipu) | `https://open.bigmodel.cn/api/anthropic` | glm-4.6 | glm-4.5-air |
+| KIMI (Moonshot) | `https://api.moonshot.cn/anthropic` | kimi-k2-thinking-turbo | kimi-k2-turbo-preview |
 | MiniMax | `https://api.minimaxi.com/anthropic` | MiniMax-M2 | MiniMax-M2 |
 | DeepSeek | `https://api.deepseek.com/anthropic` | deepseek-chat | deepseek-chat |
 
-> 💡 **官方环境**：默认使用 `claude-sonnet-4-5-20250929` 和 `claude-haiku-4-5-20251001`
+> Official environment defaults to `claude-sonnet-4-5-20250929` + `claude-haiku-4-5-20251001`
 
-### Shell 集成
+### Commands
 
-`ccem use` 切换环境后，当前终端的环境变量不会自动更新。加这段到 `~/.zshrc` 或 `~/.bashrc`：
+```bash
+ccem ls              # List all environments
+ccem use <name>      # Switch environment
+ccem add <name>      # Add environment
+ccem del <name>      # Delete (can't delete "official")
+ccem rename <a> <b>  # Rename
+ccem cp <src> <dst>  # Copy
+ccem current         # Show current environment
+ccem env             # Output export commands (pipe-friendly)
+ccem env --json      # JSON format
+ccem run <cmd>       # Run command with env vars injected
+```
+
+### Shell Integration
+
+After `ccem use`, the current shell's env vars won't update automatically. Add this to `~/.zshrc`:
 
 ```bash
 ccem() {
@@ -111,431 +136,326 @@ ccem() {
 }
 ```
 
-加完跑一下 `source ~/.zshrc`。
+Then run `source ~/.zshrc`.
 
----
+## Permission Modes
 
-## 权限模式
+6 presets that sit between "approve everything" and "approve nothing."
 
-Claude Code 默认每个操作都要确认。用 `--dangerously-skip-permissions` 又太放飞。ccem 提供 6 种预设，在"什么都要确认"和"什么都不管"之间找个平衡。
+| Mode | Description | When to use |
+|------|-------------|-------------|
+| yolo | Allow everything | Your own project, full trust |
+| dev | Dev permissions, block sensitive files | Daily development |
+| readonly | Read-only access | Code review, learning |
+| safe | Restrict network and writes | Unfamiliar codebases |
+| ci | CI/CD suitable | Automation pipelines |
+| audit | Read + search only | Security audits |
 
-### 6 种模式
-
-| 模式 | 图标 | 说明 | 什么时候用 |
-|------|------|------|------------|
-| yolo | 🔓 | 全部放开 | 自己的项目，完全信任 |
-| dev | 💻 | 开发常用权限，屏蔽敏感文件 | 日常开发 |
-| readonly | 👀 | 只能读不能改 | 看代码、学习 |
-| safe | 🛡️ | 限制网络和修改 | 不熟悉的代码库 |
-| ci | 🔧 | CI/CD 用 | 自动化流程 |
-| audit | 🔍 | 只读 + 搜索 | 安全审计 |
-
-### 临时模式
-
-退出就还原，不改配置文件：
+### Temporary (reverts on exit)
 
 ```bash
-ccem yolo      # 放飞
-ccem dev       # 开发
-ccem readonly  # 只读
-ccem safe      # 安全
-ccem ci        # CI
-ccem audit     # 审计
+ccem yolo / dev / readonly / safe / ci / audit
 ```
 
-实现方式是通过 `--permission-mode`、`--allowedTools` 和 `--disallowedTools` 参数传给 Claude Code。
-
-### 永久模式
-
-写到 `.claude/settings.json`，下次启动还生效：
+### Permanent (writes to config)
 
 ```bash
-ccem setup perms --yolo
-ccem setup perms --dev
-ccem setup perms --readonly
-ccem setup perms --safe
-ccem setup perms --ci
-ccem setup perms --audit
-ccem setup perms --reset     # 恢复默认
+ccem setup perms --dev        # Apply permanently
+ccem setup perms --reset      # Reset
+ccem setup default-mode --dev # Set default mode
 ```
 
-### 默认模式
-
-设了默认模式后，交互菜单里点 "Start Claude Code" 会自动用这个模式：
+### View
 
 ```bash
-ccem setup default-mode --dev    # 默认用开发模式
-ccem setup default-mode --reset  # 清掉默认设置
-ccem setup default-mode          # 看当前默认是啥
+ccem --mode        # Current mode
+ccem --list-modes  # All modes
 ```
-
-### 查看当前权限
-
-```bash
-ccem --mode        # 当前用的什么模式
-ccem --list-modes  # 列出所有模式
-```
-
-### 权限细节
 
 <details>
-<summary><b>dev 模式具体允许/禁止什么</b></summary>
+<summary><b>What dev mode allows / blocks</b></summary>
 
-**允许：**
-- 文件：Read、Edit、Write、Glob、Grep、LSP、NotebookEdit
-- 开发工具：npm、pnpm、yarn、bun、node、npx、git、tsc、tsx
-- 质量工具：eslint、prettier、jest、vitest
-- 其他：cargo、python、pip、go、make、cmake
-- 常用命令：ls、cat、head、tail、find、wc、mkdir、cp、mv、touch
-- WebSearch
+**Allowed:** Read, Edit, Write, Glob, Grep, LSP, NotebookEdit, npm/pnpm/yarn/bun/node/npx/git/tsc/tsx, eslint/prettier/jest/vitest, cargo/python/go/make, ls/cat/head/tail/find/wc/mkdir/cp/mv/touch, WebSearch
 
-**禁止：**
-- 敏感文件：.env、.env.*、secrets/、*.pem、*.key、*credential*
-- 危险命令：rm -rf、sudo、chmod、chown
+**Blocked:** .env/.env.*/secrets/*.pem/*.key/*credential*, rm -rf/sudo/chmod/chown
 
 </details>
 
 <details>
-<summary><b>safe 模式具体允许/禁止什么</b></summary>
+<summary><b>What safe mode allows / blocks</b></summary>
 
-**允许：**
-- 只读：Read、Glob、Grep、LSP
-- Git 查看：git status、git log、git diff
-- 文件查看：ls、cat、head、tail、find、wc
+**Allowed:** Read, Glob, Grep, LSP, git status/log/diff, ls/cat/head/tail/find/wc
 
-**禁止：**
-- 敏感文件：.env、secrets/、*.pem、*.key、*credential*、*password*
-- 修改：Edit、Write、NotebookEdit
-- 网络：curl、wget、ssh、scp、WebFetch
-- 文件操作：rm、mv
+**Blocked:** .env/secrets/*.pem/*.key/*credential*/*password*, Edit/Write/NotebookEdit, curl/wget/ssh/scp/WebFetch, rm/mv
 
 </details>
 
----
-
-## 用量统计
-
-ccem 会读 Claude Code 的日志（在 `~/.claude/projects/` 下面的 JSONL 文件），统计 token 用量和费用。
-
-价格数据从 LiteLLM 的 GitHub 仓库拉取，会缓存到本地。如果网络不可用，会依次尝试：
-1. 本地缓存（`~/.ccem/model-prices.json`）
-2. 内置价格文件（随 ccem 安装）
-3. 默认价格（Claude Opus/Sonnet/Haiku）
-
-交互菜单里选 "View Usage" 可以看详细统计，包括**日历热力图**：
-
-```
-  Token Usage Statistics
-────────────────────────────────────────────────────────
-     Oct     Nov     Dec     Jan
-Mon  ·  ░  ▒  ▓  █  ░  ·  ▒  ...
-Tue  ░  ▒  ·  █  ▓  ░  ▒  ·  ...
-Wed  ▒  ▓  █  ░  ·  ▒  ▓  █  ...
-...
-
-     Less · ░ ▒ ▓ █  More
-
-────────────────────────────────────────────────────────
-  Period      Input    Output   Cache Read   Cost
-  Today       12.5K    8.2K     45.3K        $0.15
-  This Week   89.2K    52.1K    312.4K       $1.23
-  All Time    1.2M     823.5K   4.5M         $15.67
-
-────────────────────────────────────────────────────────
-  By Model
-  claude-sonnet-4-5    823.5K    $12.34
-  claude-haiku-4-5     412.3K    $3.33
-```
-
-### 性能优化
-
-- **增量缓存**：日志解析结果缓存到 `~/.ccem/usage-cache.json`，只解析新增/修改的文件
-- **后台更新**：打开菜单时先显示缓存数据，后台异步更新
-- **流式解析**：大文件使用流式读取（readline），避免内存占用过高
-- **并发控制**：限制并发解析数量（5 个），避免阻塞事件循环
-- **缓存版本**：缓存结构变更时自动失效重建
-
----
-
-## Skill 管理
-
-可以从 GitHub 或 Plugin Marketplace 安装 Claude Code 的 Skills。装完会放到当前目录的 `.claude/skills/` 下面。
+## Usage Analytics
 
 ```bash
-ccem skill add              # 交互选择（Tab 切换分组）
-ccem skill add <name>       # 装预设的
-ccem skill add <github-url> # 从 GitHub 装
-ccem skill ls               # 列出已装的
-ccem skill rm <name>        # 删掉
+ccem usage          # Interactive with calendar heatmap
+ccem usage --json   # Machine-readable
 ```
 
-### 交互式选择器
+Parses JSONL logs from `~/.claude/projects/` to calculate token usage and costs. Price data fetched from LiteLLM and cached locally.
 
-运行 `ccem skill add` 会打开分组选择界面（使用 Ink 渲染）：
-
-```
- 🏢 官方   ⭐ 精选   📦 其他 
-
-──────────────────────────────────────────────────
-❯ frontend-design - 创建高质量前端界面设计
-  skill-creator - 创建新的 Claude Code skills
-  web-artifacts-builder - 构建可交互的 Web 组件
-  ...
-  输入自定义 GitHub URL
-
-Tab 切换分组 | ↑↓ 选择 | Enter 确认 | Esc 取消
-```
-
-### 安装方式
-
-ccem 支持三种安装方式：
-
-| 类型 | 说明 | 示例 |
-|------|------|------|
-| preset | 官方预设，从 anthropics/skills 仓库安装 | `ccem skill add frontend-design` |
-| github | 从任意 GitHub 仓库/子目录安装 | `ccem skill add owner/repo` |
-| plugin | 从 Plugin Marketplace 安装（实验性） | 通过交互菜单选择 |
-
-### 预设列表
-
-#### 🏢 官方 Skills
-
-| Skill | 干嘛用 |
-|-------|--------|
-| frontend-design | 前端界面设计 |
-| skill-creator | 创建新 skill |
-| web-artifacts-builder | 做可交互的 Web 组件 |
-| canvas-design | Canvas 绘图 |
-| algorithmic-art | 算法艺术 |
-| theme-factory | 做 UI 主题 |
-| mcp-builder | 做 MCP 服务器 |
-| webapp-testing | Web 应用测试 |
-| pdf | 处理 PDF |
-| docx | 处理 Word |
-| pptx | 处理 PPT |
-| xlsx | 处理 Excel |
-| brand-guidelines | 品牌指南 |
-| doc-coauthoring | 文档协作 |
-| internal-comms | 内部通信文档 |
-| slack-gif-creator | 做 Slack GIF |
-
-#### ⭐ 精选 Skills
-
-| Skill | 干嘛用 |
-|-------|--------|
-| superpowers | Claude Code Plan 模式升级版，连续追问讨论确定开发方案 |
-| ui-ux-pro-max | 专业 UI/UX 设计 |
-| Humanizer-zh | 去除文本中 AI 生成痕迹，改写得更自然 |
-
-#### 📦 其他 Skills
-
-| Skill | 干嘛用 |
-|-------|--------|
-| skill-writer | 指导用户为 Claude Code 创建代理技能 |
-
-### 从 GitHub 装
-
-支持多种 URL 格式：
+## Skill Management
 
 ```bash
-# 完整 URL
-ccem skill add https://github.com/owner/repo
-ccem skill add https://github.com/owner/repo/tree/main/path/to/skill
-
-# 简写格式
-ccem skill add owner/repo
+ccem skill add              # Interactive picker (Tab to switch groups)
+ccem skill add <name>       # Install preset
+ccem skill add <github-url> # Install from GitHub
+ccem skill ls               # List installed
+ccem skill rm <name>        # Remove
 ```
 
-> 💡 使用 git sparse-checkout 只下载指定目录，不会 clone 整个仓库
+<details>
+<summary><b>Preset Skills</b></summary>
 
----
+**Official:** frontend-design, skill-creator, web-artifacts-builder, canvas-design, algorithmic-art, theme-factory, mcp-builder, webapp-testing, pdf/docx/pptx/xlsx, brand-guidelines, doc-coauthoring
 
-## 远程配置加载
+**Curated:** superpowers (enhanced Plan mode), ui-ux-pro-max (pro UI/UX design), Humanizer-zh (de-AI-ify Chinese text)
 
-团队可以部署一个配置服务器，成员用 `ccem load` 命令拉取共享的环境配置。
+</details>
 
-### 客户端使用
+## Remote Config
+
+Share API configurations across your team with encrypted transport:
 
 ```bash
 ccem load https://your-server.com/api/env?key=YOUR_KEY --secret YOUR_SECRET
 ```
 
-- `key`：服务器分配的访问密钥
-- `secret`：服务器启动时生成的解密密钥
+<details>
+<summary><b>Server deployment</b></summary>
 
-加载成功后，环境会自动添加到本地配置。如果名称冲突，会自动重命名（如 `kimi` → `kimi-remote`）。
+Server code lives in `server/`. Configure `keys.json` (access keys) and `environments.json` (env vars), then run `node index.js`. Features AES-256-CBC encryption, rate limiting, and hot-reload. PM2 recommended for production.
 
-### 服务端部署
+</details>
 
-服务端代码在 `server/` 目录下。
-
-#### 1. 配置文件
-
-**keys.json** - 访问密钥配置：
-```json
-{
-  "team-key-abc123": {
-    "environments": ["kimi", "glm"]
-  },
-  "personal-key-xyz": {
-    "environments": ["deepseek"]
-  }
-}
-```
-
-**environments.json** - 环境配置：
-```json
-{
-  "kimi": {
-    "ANTHROPIC_BASE_URL": "https://api.moonshot.cn/anthropic",
-    "ANTHROPIC_AUTH_TOKEN": "sk-xxx",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "kimi-k2-thinking-turbo",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "kimi-k2-thinking-turbo",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "kimi-k2-turbo-preview",
-    "ANTHROPIC_MODEL": "opus"
-  },
-  "glm": {
-    "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic",
-    "ANTHROPIC_AUTH_TOKEN": "xxx.xxx",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-4.5-air",
-    "ANTHROPIC_MODEL": "opus"
-  }
-}
-```
-
-#### 2. 启动服务
-
-```bash
-cd server
-npm install
-node index.js
-```
-
-启动后会显示 `secret`，分发给团队成员用于 `--secret` 参数。
-
-#### 3. 安全特性
-
-- **AES-256-CBC 加密**：Auth Token 在传输中加密
-- **Rate Limiting**：每分钟最多 10 次请求
-- **指数退避**：连续失败后冷却时间递增（最长 30 分钟）
-- **Helmet**：安全响应头
-- **热加载**：修改配置文件无需重启服务
-
-#### 4. 生产部署
-
-推荐使用 PM2：
-
-```bash
-pm2 start ecosystem.config.cjs
-```
-
-配合 nginx 反代，记得设置 `trust proxy`。
-
----
-
-## 初始化
-
-新装 Claude Code 后可以跑一下：
+## Setup
 
 ```bash
 ccem setup init
 ```
 
-会做三件事：
+Skips onboarding + disables telemetry + installs chrome-devtools MCP.
 
-1. 设置 `hasCompletedOnboarding: true`，跳过新手引导
-2. 禁用遥测（设置 `DISABLE_TELEMETRY=1`、`DISABLE_ERROR_REPORTING=1`、`DISABLE_BUG_COMMAND=1`）
-3. 装 `chrome-devtools` MCP 工具（用于浏览器调试）
+## CLI Command Reference
 
-配置写到：
-- `~/.claude.json`
-- `~/.claude/settings.json`
+<details>
+<summary><b>Full list</b></summary>
 
----
+| Command | Description |
+|---------|-------------|
+| `ccem` | Interactive menu |
+| `ccem ls` | List environments |
+| `ccem use <name>` | Switch |
+| `ccem add <name>` | Add |
+| `ccem del <name>` | Delete |
+| `ccem rename <a> <b>` | Rename |
+| `ccem cp <src> <dst>` | Copy |
+| `ccem current` | Current environment |
+| `ccem env [--json]` | Output env vars |
+| `ccem run <cmd>` | Run with env |
+| `ccem load <url>` | Load remote config |
+| `ccem yolo/dev/readonly/safe/ci/audit` | Temporary permission mode |
+| `ccem --mode` | Current mode |
+| `ccem --list-modes` | All modes |
+| `ccem setup perms --<mode>` | Permanent permissions |
+| `ccem setup default-mode --<mode>` | Default mode |
+| `ccem setup init` | Initialize |
+| `ccem usage [--json]` | Usage stats |
+| `ccem skill add/ls/rm` | Skill management |
 
-## 命令速查
-
-### 环境
-
-| 命令 | 说明 |
-|------|------|
-| `ccem` | 交互菜单 |
-| `ccem ls` | 列出环境 |
-| `ccem use <name>` | 切换 |
-| `ccem add <name>` | 添加 |
-| `ccem del <name>` | 删除 |
-| `ccem current` | 当前环境 |
-| `ccem env` | 输出环境变量 |
-| `ccem env --json` | JSON 格式 |
-| `ccem run <cmd>` | 带环境变量跑命令 |
-| `ccem load <url> --secret <s>` | 从远程加载配置 |
-
-### 权限（临时）
-
-| 命令 | 说明 |
-|------|------|
-| `ccem yolo` | 🔓 YOLO 模式（全部放开） |
-| `ccem dev` | 💻 开发模式 |
-| `ccem readonly` | 👀 只读模式 |
-| `ccem safe` | 🛡️ 安全模式 |
-| `ccem ci` | 🔧 CI 模式 |
-| `ccem audit` | 🔍 审计模式 |
-| `ccem --mode` | 看当前模式 |
-| `ccem --list-modes` | 列出所有模式 |
-
-### 权限（永久）
-
-| 命令 | 说明 |
-|------|------|
-| `ccem setup perms --<mode>` | 永久应用 |
-| `ccem setup perms --reset` | 重置 |
-| `ccem setup default-mode --<mode>` | 设默认模式 |
-| `ccem setup default-mode --reset` | 清默认模式 |
-| `ccem setup default-mode` | 看默认模式 |
-
-### Skill
-
-| 命令 | 说明 |
-|------|------|
-| `ccem skill add` | 交互添加（分组选择） |
-| `ccem skill add <name>` | 添加预设 |
-| `ccem skill add <url>` | 从 GitHub 添加 |
-| `ccem skill ls` | 列出已装 |
-| `ccem skill rm <name>` | 删除 |
-
-### 初始化
-
-| 命令 | 说明 |
-|------|------|
-| `ccem setup init` | 初始化配置 |
+</details>
 
 ---
 
-## 数据存哪了
+# Desktop App
 
-| 路径 | 内容 |
-|------|------|
-| `~/.ccem/config.json` | 环境配置（加密存储 Auth Token） |
-| `~/.ccem/usage-cache.json` | 用量缓存（增量解析结果） |
-| `~/.ccem/model-prices.json` | 价格缓存（从 LiteLLM 拉取） |
-| `.claude/settings.json` | 项目权限配置 |
-| `.claude/skills/` | 已装的 skills |
+A native desktop app built with Tauri 2.0. Real macOS vibrancy and glassmorphism — not an Electron wrapper.
+
+On top of everything the CLI offers, Desktop brings several exclusive capabilities: dual engine support, remote control via Telegram, cron tasks, conversation history, and API traffic debugging.
+
+## Install
+
+Download `.dmg` from [GitHub Releases](https://github.com/genuifx/claude-code-env-manager/releases) and drag to Applications.
+
+> Requires macOS 10.15 Catalina or later.
+
+## Claude Code + Codex Dual Engine
+
+<!-- TODO: screenshot of History page showing Claude/Codex conversations -->
+![History](./screenshots/history.png)
+
+This might be the feature you didn't know you wanted.
+
+Desktop supports both **Claude Code** and **OpenAI Codex CLI** as runtime engines. The Dashboard launch panel has a dropdown — pick Claude or Codex, hit launch.
+
+When Claude is selected, environment switching and permission modes work as usual. When Codex is selected, those controls hide automatically — Codex has its own config, no need for ccem's environment settings.
+
+Both session types are managed in a unified view on the Sessions page, each with proper icons and status indicators. Proxy Debug also captures API traffic from both engines.
+
+In short, ccem Desktop isn't just a Claude Code manager — it's a control center for your local AI coding assistants.
+
+## Telegram Remote Control
+
+<!-- TODO: screenshot of ChatApp / Telegram panel -->
+![Telegram](./screenshots/telegram.png)
+
+Control Claude Code sessions running on your computer from your phone.
+
+Here's how it works:
+
+1. **Configure your bot** — Enter your Telegram Bot Token and allowed user IDs in the ChatApp page
+2. **Bind projects** — Map Telegram group Topics to local project directories — each Topic corresponds to one project
+3. **Send messages as commands** — Text the relevant Topic from your phone, ccem will spawn (or reuse) a Claude Code session locally and forward your message
+4. **Results stream back** — Claude's responses are pushed to Telegram in real time, with optional tool call visibility
+
+Each Topic can have its own environment and permission mode. Need Claude to run something while you're out? Just grab your phone.
+
+> Feishu (Lark) integration is in development.
+
+## Session Management — Multiple Models, Simultaneously
+
+<!-- TODO: screenshot of Sessions page -->
+![Sessions](./screenshots/sessions.png)
+
+This is where ccem differs from tools like [ccswitch](https://github.com/yibie/ccswitch). ccswitch switches your global environment — one model at a time. ccem lets you run multiple sessions with different models at the same time.
+
+Window A running Opus for architecture work. Window B running Gemini writing frontend. Window C running DeepSeek for quick scripts. All at once, each with its own environment and permission mode.
+
+- Grid / list view toggle
+- Each session shows project dir, environment, permission mode, PID, source (Desktop / CLI / Telegram / Cron)
+- Per-session actions: focus, minimize, stop, close
+- Multi-window tiling in tmux mode
+- Orphan recovery: detect unmanaged Claude processes and take them over
+
+## Environment Management
+
+<!-- TODO: screenshot of Environments page -->
+![Environments](./screenshots/environments.png)
+
+Shares config with CLI, visual interface:
+
+- Card-based environment list with add / edit / delete
+- One-click preset filling
+- Remote config sync
+- Permission mode switching and default mode setting
+
+## Cron Tasks — Scheduled Automation with Push Notifications
+
+<!-- TODO: screenshot of Cron Tasks page -->
+![Cron Tasks](./screenshots/cron.png)
+
+Write a cron expression and a prompt, ccem runs Claude Code on schedule — and pushes the results straight to your Telegram.
+
+This is the killer combo: Cron + ChatApp. Set up a nightly PR review, a daily test run, or a weekly security audit. When it finishes, the results land in your bound Telegram Topic automatically. You wake up, check your phone, done. No need to sit in front of your computer waiting.
+
+Think of it as your own self-hosted [OpenClaw](https://openclaw.com) — scheduled AI coding tasks with real-time notifications, running entirely on your machine.
+
+- **Templates** — PR Review, Test Runner, Doc Generation, Security Audit, Changelog — pick one and tweak
+- **AI generation** — Describe what you want in natural language, get a cron expression and prompt generated automatically
+- **Auto-push to ChatApp** — Results are sent to the bound Telegram Topic when the task completes (or fails)
+- **Run history** — Status, duration, and logs for every execution
+- **Next run preview** — See when the next few runs will fire
+- **Retry on failure** — One click to re-run failed tasks
+
+## Analytics — Claude Code & Codex in One View
+
+<!-- TODO: screenshot of Analytics page with heatmap -->
+![Analytics](./screenshots/analytics.png)
+
+GitHub-style usage statistics for both Claude Code and Codex, unified in a single dashboard.
+
+Switch between Claude, Codex, or combined view with one click. Finally see your total AI coding spend across both tools without juggling separate dashboards.
+
+- Daily activity heatmap
+- Token usage / cost trends by model
+- Consecutive active days streak
+- Trend arrows (up or down vs. last week)
+- Share poster: generate your AI Coding weekly report
+
+## Conversation History — Claude Code & Codex Together
+
+Browse all past Claude Code and Codex conversations in one place. No more digging through separate log directories.
+
+- Filter by source: All / Claude / Codex
+- Grouped by project directory
+- `/compact` segmentation boundaries supported
+
+## Proxy Debug
+
+Built-in API request debugging panel:
+
+- Live traffic list: timestamp, method, URL, status code, size
+- Request/response detail viewer with JSON formatting + SSE stream detection
+- Separate upstream URL configuration for Claude and Codex
+
+## Skill Management
+
+Same functionality as CLI, different experience:
+
+- **Discover** — Streaming search, results appear as you type, one-click install
+- **Installed** — Installed list with one-click uninstall
+
+## Settings
+
+- Theme: light / dark / system
+- Language: Chinese / English
+- Default permission mode / default working directory
+- Terminal preference (iTerm2 / Terminal.app)
+- AI-enhanced mode: use a selected environment to power AI features (e.g., natural language cron task generation)
+- Dependency check: auto-detect whether ccem CLI / claude / codex / tmux are installed
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| Cmd+1~9 | Switch pages |
+| Cmd+Enter / Cmd+N | Launch Claude Code |
+| Cmd+, | Settings |
+| Cmd+Q | Quit |
 
 ---
 
-## 技术栈
+# Data Storage
 
-- **CLI 框架**: Commander.js
-- **配置存储**: Conf（加密存储敏感信息）
-- **交互界面**: Inquirer.js + Ink (React for CLI)
-- **表格渲染**: cli-table3
-- **样式**: Chalk
+| Path | Contents |
+|------|----------|
+| `~/.ccem/config.json` | Environment config (API keys encrypted) |
+| `~/.ccem/usage-cache.json` | Usage cache |
+| `~/.ccem/model-prices.json` | Price cache |
+| `.claude/settings.json` | Project permission config |
+| `.claude/skills/` | Installed skills |
+
+---
+
+# Tech Stack
+
+```
+apps/cli/          # CLI — commander + inquirer + ink
+apps/desktop/      # Desktop — Tauri 2.0 + React + Rust
+packages/core/     # Shared logic — presets, types, encryption
+server/            # Remote config server
+```
+
+pnpm workspaces monorepo.
+
+**CLI**: Commander.js, Inquirer.js, Ink (React for CLI), Conf
+
+**Desktop frontend**: React 18, TypeScript, Vite, Tailwind CSS, Zustand, shadcn/ui, Recharts
+
+**Desktop backend**: Rust + Tauri 2.0, window-vibrancy (native macOS glassmorphism)
+
+**i18n**: Chinese / English
+
+---
 
 ## Contributing
 
-欢迎提 Issue 和 PR！
+Issues and PRs are welcome!
 
 ## License
 

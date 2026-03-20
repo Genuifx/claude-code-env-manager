@@ -55,7 +55,10 @@ export interface InstalledSkill {
   name: string;
   description: string;
   path: string;
-  scope: 'project' | 'global';
+  scope: 'project' | 'global' | 'plugin';
+  agents: string[];
+  source?: string;
+  version?: string;
 }
 
 export interface CronTask {
@@ -65,6 +68,10 @@ export interface CronTask {
   prompt: string;
   workingDir: string;
   envName: string | null;
+  executionProfile: 'conservative' | 'standard' | 'autonomous';
+  maxBudgetUsd?: number | null;
+  allowedTools?: string[];
+  disallowedTools?: string[];
   enabled: boolean;
   timeoutSecs: number;
   templateId: string | null;
@@ -84,6 +91,8 @@ export interface CronTaskRun {
   stderr: string;
   durationMs: number | null;
   status: string; // "running" | "success" | "failed" | "timeout"
+  runtimeId?: string | null;
+  runtimeKind?: string | null;
 }
 
 export interface CronTemplate {
@@ -93,6 +102,31 @@ export interface CronTemplate {
   cronExpression: string;
   prompt: string;
   icon: string;
+}
+
+export interface ChannelInfo {
+  kind: string; // 'desktop_ui' | 'telegram'
+  connectedAt: string;
+  label?: string;
+  /** Raw backend ChannelKind for detach operations */
+  rawKind?: import('@/lib/tauri-ipc').ChannelKind;
+}
+
+export interface UnifiedSession {
+  id: string;
+  runtimeKind: 'interactive' | 'headless';
+  source: 'desktop' | 'telegram' | 'cron' | 'cli';
+  status: string;
+  projectDir: string;
+  envName: string;
+  permMode: string;
+  createdAt: string;
+  isActive: boolean;
+  pid?: number;
+  claudeSessionId?: string;
+  tmuxTarget?: string;
+  client?: string;
+  channels: ChannelInfo[];
 }
 
 interface AppState {
@@ -120,6 +154,14 @@ interface AppState {
   updateSessionStatus: (id: string, status: Session['status']) => void;
   arrangeLayout: ArrangeLayout | null;
   setArrangeLayout: (layout: ArrangeLayout | null) => void;
+
+  // Unified Sessions
+  unifiedSessions: UnifiedSession[];
+  isLoadingUnifiedSessions: boolean;
+  sessionFilter: 'all' | 'interactive' | 'headless';
+  setUnifiedSessions: (sessions: UnifiedSession[]) => void;
+  setLoadingUnifiedSessions: (loading: boolean) => void;
+  setSessionFilter: (filter: 'all' | 'interactive' | 'headless') => void;
 
   // Projects
   favorites: FavoriteProject[];
@@ -178,12 +220,55 @@ interface AppState {
   setLoadingSettings: (loading: boolean) => void;
 }
 
+function areEnvironmentsEqual(left: Environment[], right: Environment[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((env, index) => {
+    const candidate = right[index];
+    return candidate
+      && candidate.name === env.name
+      && candidate.baseUrl === env.baseUrl
+      && candidate.authToken === env.authToken
+      && candidate.defaultOpusModel === env.defaultOpusModel
+      && candidate.defaultSonnetModel === env.defaultSonnetModel
+      && candidate.defaultHaikuModel === env.defaultHaikuModel
+      && candidate.runtimeModel === env.runtimeModel
+      && candidate.subagentModel === env.subagentModel;
+  });
+}
+
+function areSessionsEqual(left: Session[], right: Session[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((session, index) => {
+    const candidate = right[index];
+    return candidate
+      && candidate.id === session.id
+      && candidate.client === session.client
+      && candidate.envName === session.envName
+      && candidate.workingDir === session.workingDir
+      && candidate.pid === session.pid
+      && candidate.startedAt.getTime() === session.startedAt.getTime()
+      && candidate.status === session.status
+      && candidate.permMode === session.permMode
+      && candidate.terminalType === session.terminalType
+      && candidate.windowId === session.windowId
+      && candidate.itermSessionId === session.itermSessionId;
+  });
+}
+
 export const useAppStore = create<AppState>((set) => ({
   // Environments
   environments: [],
   currentEnv: 'official',
-  setEnvironments: (envs) => set({ environments: envs }),
-  setCurrentEnv: (name) => set({ currentEnv: name }),
+  setEnvironments: (envs) =>
+    set((state) => (areEnvironmentsEqual(state.environments, envs) ? state : { environments: envs })),
+  setCurrentEnv: (name) =>
+    set((state) => (state.currentEnv === name ? state : { currentEnv: name })),
   addEnvironment: (env) =>
     set((state) => ({ environments: [...state.environments, env] })),
   removeEnvironment: (name) =>
@@ -201,7 +286,8 @@ export const useAppStore = create<AppState>((set) => ({
 
   // Sessions
   sessions: [],
-  setSessions: (sessions) => set({ sessions }),
+  setSessions: (sessions) =>
+    set((state) => (areSessionsEqual(state.sessions, sessions) ? state : { sessions })),
   addSession: (session) =>
     set((state) => ({ sessions: [...state.sessions, session] })),
   removeSession: (id) =>
@@ -216,6 +302,14 @@ export const useAppStore = create<AppState>((set) => ({
     })),
   arrangeLayout: null,
   setArrangeLayout: (layout) => set({ arrangeLayout: layout }),
+
+  // Unified Sessions
+  unifiedSessions: [],
+  isLoadingUnifiedSessions: false,
+  sessionFilter: 'all',
+  setUnifiedSessions: (sessions) => set({ unifiedSessions: sessions }),
+  setLoadingUnifiedSessions: (loading) => set({ isLoadingUnifiedSessions: loading }),
+  setSessionFilter: (filter) => set({ sessionFilter: filter }),
 
   // Projects
   favorites: [],

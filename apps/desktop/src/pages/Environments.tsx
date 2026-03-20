@@ -8,6 +8,7 @@ import type { PermissionModeName } from '@ccem/core/browser';
 import { useAppStore } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useLocale } from '../locales';
+import { LaunchButton } from '@/components/ui/LaunchButton';
 import { EnvironmentsSkeleton } from '@/components/ui/skeleton-states';
 
 interface EnvironmentsProps {
@@ -97,14 +98,13 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
                 <List className="w-3.5 h-3.5" />
               </button>
             </div>
-            <Button
+            <LaunchButton
               size="sm"
-              className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/25 border border-[hsl(var(--glass-border-light)/0.15)]"
               onClick={onAddEnv}
+              icon={<Plus className="w-3.5 h-3.5" />}
             >
-              <Plus className="w-3.5 h-3.5 mr-1" />
               {t('environments.addEnv')}
-            </Button>
+            </LaunchButton>
           </div>
         </div>
         <EnvList onEdit={onEditEnv} onDelete={onDeleteEnv} viewMode={viewMode} />

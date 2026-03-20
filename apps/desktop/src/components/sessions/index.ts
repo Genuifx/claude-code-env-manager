@@ -4,4 +4,6 @@ export { ArrangeBanner } from './ArrangeBanner';
 export { LayoutPopover } from './LayoutPopover';
 export { LayoutThumbnail } from './LayoutThumbnail';
 export { SessionLauncherPopover } from './SessionLauncherPopover';
+export { OpenInTerminalPopoverButton } from './OpenInTerminalPopoverButton';
+export { RecoveryCandidatesPanel } from './RecoveryCandidatesPanel';
 export { LauncherQuickSection } from './LauncherQuickSection';

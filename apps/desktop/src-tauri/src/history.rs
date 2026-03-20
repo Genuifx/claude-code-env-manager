@@ -7,7 +7,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const SOURCE_CLAUDE: &str = "claude";
 const SOURCE_CODEX: &str = "codex";
@@ -211,57 +211,54 @@ pub fn get_conversation_segments(
 fn load_claude_history() -> Result<Vec<HistorySession>, String> {
     let home = dirs::home_dir().ok_or("Could not find home directory")?;
     let history_path = home.join(".claude").join("history.jsonl");
+    let projects_dir = home.join(".claude").join("projects");
 
-    if !history_path.exists() {
-        return Ok(vec![]);
-    }
+    load_claude_history_from_paths(&history_path, &projects_dir)
+}
 
-    let file = fs::File::open(&history_path)
-        .map_err(|e| format!("Failed to open history.jsonl: {}", e))?;
-
-    let reader = BufReader::new(file);
+fn load_claude_history_from_paths(
+    history_path: &Path,
+    projects_dir: &Path,
+) -> Result<Vec<HistorySession>, String> {
     let mut session_map: HashMap<String, HistorySession> = HashMap::new();
 
-    for line_result in reader.lines() {
-        let line = match line_result {
-            Ok(l) => l,
-            Err(_) => continue,
-        };
-        if line.trim().is_empty() {
-            continue;
-        }
+    if history_path.exists() {
+        let file = fs::File::open(history_path)
+            .map_err(|e| format!("Failed to open history.jsonl: {}", e))?;
 
-        let parsed: HistoryLine = match serde_json::from_str(&line) {
-            Ok(p) => p,
-            Err(_) => continue,
-        };
-
-        let id = match parsed.session_id {
-            Some(id) => id,
-            None => continue,
-        };
-
-        let display = parsed.display.unwrap_or_else(|| "Untitled".to_string());
-        let timestamp = parse_timestamp_value(&parsed.timestamp);
-        let project = parsed.project.unwrap_or_default();
-        let project_name = parsed.project_name.unwrap_or_else(|| {
-            project
-                .split('/')
-                .next_back()
-                .unwrap_or("unknown")
-                .to_string()
-        });
-
-        if let Some(existing) = session_map.get_mut(&id) {
-            if timestamp > existing.timestamp {
-                existing.timestamp = timestamp;
+        let reader = BufReader::new(file);
+        for line_result in reader.lines() {
+            let line = match line_result {
+                Ok(l) => l,
+                Err(_) => continue,
+            };
+            if line.trim().is_empty() {
+                continue;
             }
-            if is_noise_display(&existing.display) && !is_noise_display(&display) {
-                existing.display = display;
-            }
-        } else {
-            session_map.insert(
-                id.clone(),
+
+            let parsed: HistoryLine = match serde_json::from_str(&line) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+
+            let id = match parsed.session_id {
+                Some(id) => id,
+                None => continue,
+            };
+
+            let display = normalize_history_display(parsed.display);
+            let timestamp = parse_timestamp_value(&parsed.timestamp);
+            let project = parsed.project.unwrap_or_default();
+            let project_name = parsed.project_name.unwrap_or_else(|| {
+                project
+                    .split('/')
+                    .next_back()
+                    .unwrap_or("unknown")
+                    .to_string()
+            });
+
+            merge_claude_history_session(
+                &mut session_map,
                 HistorySession {
                     id,
                     source: SOURCE_CLAUDE.to_string(),
@@ -274,7 +271,159 @@ fn load_claude_history() -> Result<Vec<HistorySession>, String> {
         }
     }
 
+    supplement_claude_history_from_projects(projects_dir, &mut session_map)?;
     Ok(session_map.into_values().collect())
+}
+
+fn merge_claude_history_session(
+    session_map: &mut HashMap<String, HistorySession>,
+    candidate: HistorySession,
+) {
+    if let Some(existing) = session_map.get_mut(&candidate.id) {
+        if candidate.timestamp > existing.timestamp {
+            existing.timestamp = candidate.timestamp;
+        }
+        if (existing.project.is_empty() || existing.project_name == "unknown")
+            && !candidate.project.is_empty()
+        {
+            existing.project = candidate.project.clone();
+            existing.project_name = candidate.project_name.clone();
+        }
+        if (is_noise_display(&existing.display) && !is_noise_display(&candidate.display))
+            || (candidate.timestamp >= existing.timestamp && !is_noise_display(&candidate.display))
+        {
+            existing.display = candidate.display;
+        }
+    } else {
+        session_map.insert(candidate.id.clone(), candidate);
+    }
+}
+
+fn supplement_claude_history_from_projects(
+    projects_dir: &Path,
+    session_map: &mut HashMap<String, HistorySession>,
+) -> Result<(), String> {
+    if !projects_dir.exists() {
+        return Ok(());
+    }
+
+    let projects = fs::read_dir(projects_dir)
+        .map_err(|error| format!("Failed to read Claude projects dir: {}", error))?;
+
+    for project_entry in projects.flatten() {
+        let project_path = project_entry.path();
+        if !project_path.is_dir() {
+            continue;
+        }
+
+        let entries = match fs::read_dir(&project_path) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
+                continue;
+            }
+            if let Some(candidate) = parse_claude_project_session_index(&path) {
+                merge_claude_history_session(session_map, candidate);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_claude_project_session_index(path: &Path) -> Option<HistorySession> {
+    let file = fs::File::open(path).ok()?;
+    let reader = BufReader::new(file);
+
+    let mut session_id = path.file_stem()?.to_str()?.to_string();
+    let mut display: Option<String> = None;
+    let mut timestamp = 0;
+    let mut project = String::new();
+
+    for line_result in reader.lines() {
+        let line = line_result.ok()?;
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let value: serde_json::Value = serde_json::from_str(&line).ok()?;
+        if let Some(id) = value.get("sessionId").and_then(|v| v.as_str()) {
+            session_id = id.to_string();
+        }
+
+        let line_ts = parse_timestamp_value(&value.get("timestamp").cloned());
+        if line_ts > timestamp {
+            timestamp = line_ts;
+        }
+
+        if project.is_empty() {
+            if let Some(cwd) = value.get("cwd").and_then(|v| v.as_str()) {
+                project = cwd.to_string();
+            }
+        }
+
+        if let Some(candidate) = extract_claude_project_display_candidate(&value) {
+            if !candidate.trim().is_empty()
+                && (display.is_none()
+                    || !is_noise_display(&candidate)
+                    || is_noise_display(display.as_deref().unwrap_or_default()))
+            {
+                display = Some(candidate);
+            }
+        }
+    }
+
+    let project_name = project
+        .split('/')
+        .next_back()
+        .unwrap_or("unknown")
+        .to_string();
+
+    Some(HistorySession {
+        id: session_id,
+        source: SOURCE_CLAUDE.to_string(),
+        display: normalize_history_display(display),
+        timestamp,
+        project,
+        project_name,
+    })
+}
+
+fn extract_claude_project_display_candidate(value: &serde_json::Value) -> Option<String> {
+    match value.get("type").and_then(|v| v.as_str()) {
+        Some("last-prompt") => value
+            .get("lastPrompt")
+            .and_then(|v| v.as_str())
+            .map(ToString::to_string),
+        Some("summary") => value
+            .get("summary")
+            .and_then(|v| v.as_str())
+            .or_else(|| value.get("content").and_then(|v| v.as_str()))
+            .map(ToString::to_string),
+        Some("user") => value
+            .get("message")
+            .and_then(extract_first_claude_message_text)
+            .map(ToString::to_string),
+        _ => None,
+    }
+}
+
+fn extract_first_claude_message_text(message: &serde_json::Value) -> Option<&str> {
+    message
+        .get("content")
+        .and_then(|v| v.as_array())
+        .and_then(|blocks| {
+            blocks.iter().find_map(|block| {
+                block
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .filter(|text| !text.trim().is_empty())
+            })
+        })
 }
 
 fn find_claude_session_file(projects_dir: &PathBuf, session_id: &str) -> Option<PathBuf> {
@@ -537,7 +686,7 @@ fn upsert_codex_history_session(
     };
 
     let timestamp = parse_codex_history_timestamp(&parsed.ts);
-    let display = parsed.text.unwrap_or_else(|| "Untitled".to_string());
+    let display = normalize_history_display(parsed.text);
 
     if let Some(existing) = session_map.get_mut(&id) {
         if timestamp > existing.timestamp {
@@ -1232,6 +1381,15 @@ fn normalize_unix_timestamp(ts: u64) -> u64 {
     }
 }
 
+fn normalize_history_display(display: Option<String>) -> String {
+    let trimmed = display.unwrap_or_default().trim().to_string();
+    if trimmed.is_empty() {
+        "Untitled".to_string()
+    } else {
+        trimmed
+    }
+}
+
 /// Returns true if display text is command noise, not a real topic.
 fn is_noise_display(display: &str) -> bool {
     let trimmed = display.trim();
@@ -1349,10 +1507,24 @@ fn extract_usage_fields(
 #[cfg(test)]
 mod tests {
     use super::{
-        is_noise_display, normalize_history_source, parse_codex_history_timestamp,
-        upsert_codex_history_session, CodexHistoryLine,
+        is_noise_display, load_claude_history_from_paths, normalize_history_display,
+        normalize_history_source, parse_codex_history_timestamp, upsert_codex_history_session,
+        CodexHistoryLine,
     };
     use std::collections::HashMap;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_history_dir(prefix: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("ccem-history-{prefix}-{unique}"));
+        fs::create_dir_all(&path).expect("create temp dir");
+        path
+    }
 
     #[test]
     fn test_is_noise_display_for_system_commands() {
@@ -1437,5 +1609,84 @@ mod tests {
             serde_json::Number::from(1_700_000_000u64),
         )));
         assert_eq!(ts, 1_700_000_000_000);
+    }
+
+    #[test]
+    fn test_normalize_history_display_falls_back_for_blank_values() {
+        assert_eq!(normalize_history_display(None), "Untitled");
+        assert_eq!(normalize_history_display(Some(String::new())), "Untitled");
+        assert_eq!(
+            normalize_history_display(Some("   keep title   ".to_string())),
+            "keep title"
+        );
+    }
+
+    #[test]
+    fn test_claude_history_falls_back_to_project_sessions_when_index_missing() {
+        let root = temp_history_dir("fallback");
+        let history_path = root.join("history.jsonl");
+        let projects_dir = root.join("projects");
+        let project_dir = projects_dir.join("-Users-g-cc-home");
+        fs::create_dir_all(&project_dir).expect("create project dir");
+
+        fs::write(
+            project_dir.join("session-1.jsonl"),
+            concat!(
+                "{\"type\":\"progress\",\"cwd\":\"/Users/g/cc-home\",\"sessionId\":\"session-1\",\"timestamp\":\"2026-03-11T15:43:34.800Z\"}\n",
+                "{\"type\":\"user\",\"sessionId\":\"session-1\",\"timestamp\":\"2026-03-11T15:43:34.817Z\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Say exactly ok\"}]}}\n",
+                "{\"type\":\"last-prompt\",\"sessionId\":\"session-1\",\"lastPrompt\":\"Say exactly ok\",\"timestamp\":\"2026-03-11T15:44:22.971Z\"}\n"
+            ),
+        )
+        .expect("write session file");
+
+        let sessions =
+            load_claude_history_from_paths(&history_path, &projects_dir).expect("load history");
+        let session = sessions
+            .into_iter()
+            .find(|session| session.id == "session-1")
+            .expect("session should be indexed");
+
+        assert_eq!(session.project, "/Users/g/cc-home");
+        assert_eq!(session.project_name, "cc-home");
+        assert_eq!(session.display, "Say exactly ok");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_claude_history_merges_project_metadata_into_indexed_sessions() {
+        let root = temp_history_dir("merge");
+        let history_path = root.join("history.jsonl");
+        let projects_dir = root.join("projects");
+        let project_dir = projects_dir.join("-Users-g-cc-home");
+        fs::create_dir_all(&project_dir).expect("create project dir");
+
+        fs::write(
+            &history_path,
+            "{\"display\":\"/new my-topic\",\"timestamp\":1773243810000,\"project\":\"\",\"sessionId\":\"session-2\"}\n",
+        )
+        .expect("write history index");
+
+        fs::write(
+            project_dir.join("session-2.jsonl"),
+            concat!(
+                "{\"type\":\"progress\",\"cwd\":\"/Users/g/cc-home\",\"sessionId\":\"session-2\",\"timestamp\":\"2026-03-11T15:43:34.800Z\"}\n",
+                "{\"type\":\"user\",\"sessionId\":\"session-2\",\"timestamp\":\"2026-03-11T15:43:34.817Z\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Real follow-up\"}]}}\n"
+            ),
+        )
+        .expect("write session file");
+
+        let sessions =
+            load_claude_history_from_paths(&history_path, &projects_dir).expect("load history");
+        let session = sessions
+            .into_iter()
+            .find(|session| session.id == "session-2")
+            .expect("session should be merged");
+
+        assert_eq!(session.project, "/Users/g/cc-home");
+        assert_eq!(session.project_name, "cc-home");
+        assert_eq!(session.display, "Real follow-up");
+
+        let _ = fs::remove_dir_all(root);
     }
 }

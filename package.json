@@ -12,6 +12,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "dev": "pnpm -r --parallel dev",
+    "runtime:spike": "bash scripts/runtime/claude-protocol-spike.sh",
     "test": "pnpm -r test",
     "test:run": "pnpm -r test:run",
     "test:coverage": "pnpm -r test:coverage",

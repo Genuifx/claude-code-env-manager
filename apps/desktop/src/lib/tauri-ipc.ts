@@ -53,6 +53,22 @@ export interface TauriCommands {
   remove_favorite: [{ path: string }, void];
   add_recent: [{ path: string }, void];
   save_settings: [{ settings: DesktopSettings }, void];
+  get_telegram_settings: [void, TelegramSettings];
+  save_telegram_settings: [{ settings: TelegramSettings }, void];
+  get_telegram_bridge_status: [void, TelegramBridgeStatus];
+  start_telegram_bridge: [void, TelegramBridgeStatus];
+  stop_telegram_bridge: [void, TelegramBridgeStatus];
+  get_telegram_forum_topics: [void, TelegramForumTopic[]];
+  bind_telegram_topic: [
+    {
+      projectDir: string;
+      envName?: string | null;
+      permMode?: string | null;
+      threadId?: number | null;
+      createNewTopic: boolean;
+    },
+    TelegramTopicBinding
+  ];
   get_proxy_debug_state: [void, ProxyDebugState];
   set_proxy_debug_enabled: [{ enabled: boolean }, ProxyDebugState];
   update_proxy_debug_config: [
@@ -71,8 +87,135 @@ export interface TauriCommands {
       permMode?: string;
       workingDir?: string;
       resumeSessionId?: string;
+      client?: 'claude' | 'codex' | null;
     },
     Session
+  ];
+  create_interactive_session: [
+    {
+      envName: string;
+      permMode?: string | null;
+      workingDir?: string | null;
+      resumeSessionId?: string | null;
+      client?: 'claude' | 'codex' | null;
+    },
+    Session
+  ];
+  list_interactive_sessions: [void, Session[]];
+  list_runtime_recovery_candidates: [void, RuntimeRecoveryCandidate[]];
+  dismiss_runtime_recovery_candidate: [{ runtimeId: string }, void];
+  stop_interactive_session: [{ sessionId: string }, void];
+  focus_interactive_session: [{ sessionId: string }, void];
+  open_interactive_session_in_terminal: [
+    { sessionId: string; terminalType?: TmuxAttachTerminalType | null },
+    void
+  ];
+  close_interactive_session: [{ sessionId: string }, void];
+  minimize_interactive_session: [{ sessionId: string }, void];
+  write_interactive_input: [{ sessionId: string; data: string }, void];
+  get_interactive_session_output: [
+    { sessionId: string; sinceSeq?: number | null },
+    InteractiveReplayBatch
+  ];
+  get_interactive_session_events: [
+    { sessionId: string; sinceSeq?: number | null },
+    ReplayBatch
+  ];
+  list_unified_sessions: [void, UnifiedSessionInfo[]];
+  get_session_events: [
+    { runtimeId: string; sinceSeq?: number | null },
+    ReplayBatch
+  ];
+  send_session_input: [
+    { runtimeId: string; input: RuntimeInput },
+    void
+  ];
+  stop_unified_session: [{ runtimeId: string }, void];
+  attach_channel: [{ runtimeId: string; channel: ChannelKind }, void];
+  detach_channel: [{ runtimeId: string; channel: ChannelKind }, void];
+  debug_compare_sessions: [void, UnifiedSessionDebugComparison];
+  resize_interactive_session: [{ sessionId: string; cols: number; rows: number }, void];
+  create_managed_session: [
+    {
+      envName: string;
+      permMode?: string | null;
+      workingDir?: string | null;
+      resumeSessionId?: string | null;
+      initialPrompt?: string | null;
+    },
+    ManagedSessionSummary
+  ];
+  create_headless_session: [
+    {
+      envName: string;
+      permMode?: string | null;
+      workingDir?: string | null;
+      resumeSessionId?: string | null;
+      initialPrompt?: string | null;
+    },
+    HeadlessSessionSummary
+  ];
+  list_managed_sessions: [void, ManagedSessionSummary[]];
+  list_headless_sessions: [void, HeadlessSessionSummary[]];
+  send_to_managed_session: [
+    {
+      runtimeId: string;
+      text: string;
+    },
+    void
+  ];
+  send_to_headless_session: [
+    {
+      runtimeId: string;
+      text: string;
+    },
+    void
+  ];
+  get_managed_session_events: [
+    {
+      runtimeId: string;
+      sinceSeq?: number | null;
+    },
+    ReplayBatch
+  ];
+  get_headless_session_events: [
+    {
+      runtimeId: string;
+      sinceSeq?: number | null;
+    },
+    ReplayBatch
+  ];
+  stop_managed_session: [
+    {
+      runtimeId: string;
+    },
+    void
+  ];
+  remove_managed_session: [
+    {
+      runtimeId: string;
+    },
+    void
+  ];
+  stop_headless_session: [
+    {
+      runtimeId: string;
+    },
+    void
+  ];
+  respond_headless_permission: [
+    {
+      requestId: string;
+      approved: boolean;
+      responder?: string | null;
+    },
+    void
+  ];
+  remove_headless_session: [
+    {
+      runtimeId: string;
+    },
+    void
   ];
   list_sessions: [void, Session[]];
   stop_session: [{ sessionId: string }, void];  // 修正：后端参数是 session_id
@@ -90,6 +233,7 @@ export interface TauriCommands {
   check_ccem_installed: [void, boolean];
   check_claude_installed: [void, boolean];
   check_codex_installed: [void, boolean];
+  check_tmux_installed: [void, boolean];
 
   // 历史记录
   get_conversation_history: [void, ConversationHistoryEntry[]];
@@ -110,21 +254,34 @@ export interface TauriCommands {
   add_cron_task: [
     {
       name: string;
-      schedule: string;
-      command: string;
-      enabled: boolean;
+      cronExpression: string;
+      prompt: string;
+      workingDir: string;
+      envName?: string | null;
+      executionProfile?: 'conservative' | 'standard' | 'autonomous' | null;
+      maxBudgetUsd?: number | null;
+      allowedTools?: string[] | null;
+      disallowedTools?: string[] | null;
+      timeoutSecs?: number;
+      templateId?: string | null;
     },
-    void
+    CronTask
   ];
   update_cron_task: [
     {
       id: string;
-      name: string;
-      schedule: string;
-      command: string;
-      enabled: boolean;
+      name?: string;
+      cronExpression?: string;
+      prompt?: string;
+      workingDir?: string;
+      envName?: string | null;
+      executionProfile?: 'conservative' | 'standard' | 'autonomous' | null;
+      maxBudgetUsd?: number | null;
+      allowedTools?: string[] | null;
+      disallowedTools?: string[] | null;
+      timeoutSecs?: number;
     },
-    void
+    CronTask
   ];
   delete_cron_task: [{ id: string }, void];
   toggle_cron_task: [{ id: string }, void];
@@ -137,6 +294,7 @@ export interface TauriCommands {
 
   // 终端
   detect_terminals: [void, TerminalInfo[]];
+  list_tmux_attach_terminals: [void, TmuxAttachTerminalInfo[]];
   get_preferred_terminal: [void, string | null];
   set_preferred_terminal: [{ terminalType: string }, void];
 
@@ -200,6 +358,53 @@ export interface DesktopSettings {
   proxyDebugRecordMode?: string;
 }
 
+export interface TelegramSettings {
+  enabled: boolean;
+  botToken?: string | null;
+  allowedUserIds?: number[];
+  allowedChatId?: number | null;
+  notificationsChatId?: number | null;
+  notificationsThreadId?: number | null;
+  defaultEnvName?: string | null;
+  defaultPermMode?: string | null;
+  defaultWorkingDir?: string | null;
+  topicBindings?: TelegramTopicBinding[];
+  useChannelMonitor?: boolean;
+  preferences?: TelegramBridgePreferences;
+}
+
+export interface TelegramTopicBinding {
+  threadId: number;
+  projectDir: string;
+  preferredEnv?: string | null;
+  preferredPermMode?: string | null;
+  activeRuntimeId?: string | null;
+  lastClaudeSessionId?: string | null;
+  createdAt: string;
+}
+
+export interface TelegramBridgePreferences {
+  showToolCalls: boolean;
+  showLowRiskTools: boolean;
+  flushIntervalMs: number;
+}
+
+export interface TelegramBridgeStatus {
+  configured: boolean;
+  running: boolean;
+  botUsername?: string | null;
+  lastError?: string | null;
+  allowedChatId?: number | null;
+}
+
+export interface TelegramForumTopic {
+  threadId: number;
+  name: string;
+  iconColor?: number | null;
+  isBound: boolean;
+  boundProject?: string | null;
+}
+
 export interface ProxyDebugState {
   enabled: boolean;
   running: boolean;
@@ -220,6 +425,168 @@ export interface ProxyMetrics {
   avgResponseMs: number;
   activeConnections: number;
 }
+
+export interface ManagedSessionSummary {
+  runtime_id: string;
+  claude_session_id?: string | null;
+  pid?: number | null;
+  project_dir: string;
+  env_name: string;
+  perm_mode: string;
+  source: ManagedSessionSource;
+  status: string;
+  created_at: string;
+  is_active: boolean;
+  last_event_seq?: number | null;
+}
+
+export type ManagedSessionSource =
+  | { type: 'desktop' }
+  | { type: 'telegram'; chat_id: number; thread_id: number }
+  | { type: 'cron'; task_id: string };
+
+export interface RuntimeRecoveryCandidate {
+  runtime_id: string;
+  runtime_kind: 'interactive' | 'headless';
+  claude_session_id: string;
+  project_dir: string;
+  env_name: string;
+  perm_mode: string;
+  source: ManagedSessionSource;
+  saved_at: string;
+}
+
+export interface InteractiveReplayBatch {
+  gap_detected: boolean;
+  oldest_available_seq?: number | null;
+  newest_available_seq?: number | null;
+  chunks: InteractiveOutputChunk[];
+}
+
+export interface InteractiveOutputChunk {
+  session_id: string;
+  seq: number;
+  occurred_at: string;
+  data: string;
+}
+
+export type HeadlessSessionSummary = ManagedSessionSummary;
+
+export type ChannelKind =
+  | { kind: 'desktop_ui' }
+  | { kind: 'telegram'; chat_id: number; thread_id?: number | null };
+
+export interface AttachedChannelInfo {
+  kind: ChannelKind;
+  connected_at: string;
+  label?: string | null;
+}
+
+export type RuntimeInput =
+  | { type: 'message'; text: string }
+  | { type: 'approval'; approved: boolean; responder?: string | null }
+  | { type: 'raw_terminal'; data: string };
+
+export interface UnifiedSessionInfo {
+  id: string;
+  runtime_kind: 'interactive' | 'headless';
+  source: ManagedSessionSource;
+  status: string;
+  project_dir: string;
+  env_name: string;
+  perm_mode: string;
+  created_at: string;
+  is_active: boolean;
+  pid?: number | null;
+  claude_session_id?: string | null;
+  tmux_target?: string | null;
+  client?: string | null;
+  channels: AttachedChannelInfo[];
+}
+
+export interface UnifiedSessionDebugComparison {
+  headless_count: number;
+  interactive_count: number;
+  unified_count: number;
+  matched: boolean;
+}
+
+export interface ReplayBatch {
+  gap_detected: boolean;
+  oldest_available_seq?: number | null;
+  newest_available_seq?: number | null;
+  events: SessionEventRecord[];
+}
+
+export interface SessionEventRecord {
+  runtime_id: string;
+  seq: number;
+  occurred_at: string;
+  payload: SessionEventPayload;
+}
+
+export type UserInputKind = 'question' | 'plan_entry' | 'plan_exit';
+
+export type ToolCategory =
+  | { category: 'user_input'; kind: UserInputKind; raw_name: string }
+  | { category: 'file_op'; raw_name: string }
+  | { category: 'execution'; raw_name: string }
+  | { category: 'search'; raw_name: string }
+  | { category: 'task_mgmt'; raw_name: string }
+  | { category: 'unknown'; raw_name: string };
+
+export interface ToolQuestionOption {
+  label: string;
+  description?: string | null;
+  preview?: string | null;
+}
+
+export interface ToolQuestionPrompt {
+  question: string;
+  header?: string | null;
+  multiSelect: boolean;
+  options: ToolQuestionOption[];
+}
+
+export type InteractiveToolPrompt =
+  | { prompt_type: 'ask_user_question'; questions: ToolQuestionPrompt[] }
+  | { prompt_type: 'plan_entry' }
+  | {
+      prompt_type: 'plan_exit';
+      allowed_prompts?: string[];
+      plan_summary?: string | null;
+    };
+
+export type TerminalPromptKind = 'permission';
+
+export type SessionEventPayload =
+  | { type: 'system_message'; message: string }
+  | { type: 'lifecycle'; stage: string; detail: string }
+  | { type: 'claude_json'; message_type?: string | null; raw_json: string }
+  | { type: 'stderr_line'; line: string }
+  | { type: 'assistant_chunk'; text: string }
+  | {
+      type: 'tool_use_started';
+      tool_use_id: string;
+      category: ToolCategory;
+      raw_name: string;
+      input_summary: string;
+      needs_response: boolean;
+      prompt?: InteractiveToolPrompt | null;
+    }
+  | {
+      type: 'tool_use_completed';
+      tool_use_id: string;
+      raw_name: string;
+      result_summary: string;
+      success: boolean;
+    }
+  | { type: 'permission_required'; request_id: string; tool_name: string }
+  | { type: 'permission_responded'; request_id: string; approved: boolean; responder: string }
+  | { type: 'terminal_prompt_required'; prompt_kind: TerminalPromptKind; prompt_text: string }
+  | { type: 'terminal_prompt_resolved'; prompt_kind: TerminalPromptKind; approved: boolean }
+  | { type: 'session_completed'; reason: string }
+  | { type: 'gap_notification'; last_seen_seq: number; oldest_available_seq: number };
 
 export interface ProxyTrafficPage {
   items: ProxyTrafficItem[];
@@ -308,20 +675,35 @@ export interface InstalledSkill {
 export interface CronTask {
   id: string;
   name: string;
-  schedule: string;
-  command: string;
+  cronExpression: string;
+  prompt: string;
+  workingDir: string;
+  envName?: string | null;
+  executionProfile: 'conservative' | 'standard' | 'autonomous';
+  maxBudgetUsd?: number | null;
+  allowedTools?: string[];
+  disallowedTools?: string[];
   enabled: boolean;
-  lastRun?: string;
-  nextRun?: string;
+  timeoutSecs: number;
+  templateId?: string | null;
+  triggerType: string;
+  parentTaskId?: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface CronTaskRun {
   id: string;
   taskId: string;
-  startTime: string;
-  endTime?: string;
+  startedAt: string;
+  finishedAt?: string | null;
   status: string;
-  exitCode?: number;
+  exitCode?: number | null;
+  stdout?: string;
+  stderr?: string;
+  durationMs?: number | null;
+  runtimeId?: string | null;
+  runtimeKind?: string | null;
 }
 
 export interface CronRunDetail {
@@ -345,6 +727,15 @@ export interface TerminalInfo {
   terminalType: string;
   displayName: string;
   available: boolean;
+}
+
+export type TmuxAttachTerminalType = 'terminalapp' | 'iterm2' | 'ghostty';
+
+export interface TmuxAttachTerminalInfo {
+  terminal_type: TmuxAttachTerminalType;
+  name: string;
+  installed: boolean;
+  preferred: boolean;
 }
 
 export interface LoadResult {

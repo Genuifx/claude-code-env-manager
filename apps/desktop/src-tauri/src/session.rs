@@ -41,6 +41,22 @@ pub struct Session {
     pub window_id: Option<String>, // iTerm2 window ID for operations
     #[serde(alias = "iterm_session_id")]
     pub iterm_session_id: Option<String>, // iTerm2 session unique ID for move_session API
+    #[serde(default, alias = "tmux_target")]
+    pub tmux_target: Option<String>, // tmux target for tmux-backed interactive sessions
+}
+
+impl Session {
+    pub fn is_tmux_backed(&self) -> bool {
+        self.tmux_target.is_some() || self.terminal_type.as_deref() == Some("embedded")
+    }
+
+    pub fn resolved_tmux_target(&self) -> Option<&str> {
+        self.tmux_target.as_deref().or_else(|| {
+            (self.terminal_type.as_deref() == Some("embedded"))
+                .then_some(self.window_id.as_deref())
+                .flatten()
+        })
+    }
 }
 
 pub struct SessionManager {
@@ -62,10 +78,17 @@ impl SessionManager {
         let path = get_sessions_file_path();
         let sessions = if path.exists() {
             match std::fs::read_to_string(&path) {
-                Ok(content) => serde_json::from_str::<Vec<Session>>(&content).unwrap_or_else(|e| {
-                    eprintln!("Failed to parse sessions.json: {}", e);
-                    vec![]
-                }),
+                Ok(content) => serde_json::from_str::<Vec<Session>>(&content)
+                    .map(|sessions| {
+                        sessions
+                            .into_iter()
+                            .map(Self::normalize_loaded_session)
+                            .collect()
+                    })
+                    .unwrap_or_else(|e| {
+                        eprintln!("Failed to parse sessions.json: {}", e);
+                        vec![]
+                    }),
                 Err(e) => {
                     eprintln!("Failed to read sessions.json: {}", e);
                     vec![]
@@ -77,6 +100,16 @@ impl SessionManager {
         Self {
             sessions: Mutex::new(sessions),
         }
+    }
+
+    fn normalize_loaded_session(mut session: Session) -> Session {
+        if session.tmux_target.is_none() && session.terminal_type.as_deref() == Some("embedded") {
+            session.tmux_target = session.window_id.clone();
+            session.window_id = None;
+            session.iterm_session_id = None;
+        }
+
+        session
     }
 
     /// Persist current sessions to ~/.ccem/sessions.json with atomic write.
@@ -211,13 +244,41 @@ impl SessionManager {
         self.save_to_disk();
     }
 
+    pub fn attach_tmux_terminal(
+        &self,
+        id: &str,
+        terminal_type: &str,
+        window_id: Option<&str>,
+        iterm_session_id: Option<&str>,
+    ) {
+        {
+            let mut sessions = self.sessions.lock().unwrap();
+            if let Some(session) = sessions.iter_mut().find(|s| s.id == id) {
+                session.terminal_type = Some(terminal_type.to_string());
+                session.window_id = window_id.map(str::to_string);
+                session.iterm_session_id = iterm_session_id.map(str::to_string);
+            }
+        }
+        self.save_to_disk();
+    }
+
+    pub fn update_session_pid(&self, id: &str, pid: Option<u32>) {
+        {
+            let mut sessions = self.sessions.lock().unwrap();
+            if let Some(session) = sessions.iter_mut().find(|s| s.id == id) {
+                session.pid = pid;
+            }
+        }
+        self.save_to_disk();
+    }
+
     /// Get all running sessions that have terminal metadata
     pub fn get_running_terminal_sessions(&self) -> Vec<Session> {
         self.sessions
             .lock()
             .unwrap()
             .iter()
-            .filter(|s| s.status == "running" && s.terminal_type.is_some())
+            .filter(|s| s.status == "running" && s.terminal_type.is_some() && !s.is_tmux_backed())
             .cloned()
             .collect()
     }
@@ -238,6 +299,14 @@ impl SessionManager {
 
             // Validate each remaining running session
             for session in sessions.iter_mut() {
+                if session.is_tmux_backed() {
+                    let is_alive = session.pid.is_some_and(is_process_alive);
+                    if !is_alive {
+                        session.status = "stopped".to_string();
+                    }
+                    continue;
+                }
+
                 match (&session.terminal_type, &session.window_id) {
                     (Some(term_type), Some(wid)) => {
                         let is_alive = match term_type.as_str() {
@@ -269,11 +338,14 @@ impl SessionManager {
 /// Check if a process with the given PID is still running
 #[cfg(unix)]
 fn is_process_alive(pid: u32) -> bool {
-    use std::process::Command;
+    use std::process::{Command, Stdio};
 
     // Use kill -0 to check if process exists (doesn't actually send a signal)
     Command::new("kill")
         .args(["-0", &pid.to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)

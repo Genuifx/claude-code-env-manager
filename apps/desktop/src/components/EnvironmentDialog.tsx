@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { LaunchButton } from "@/components/ui/LaunchButton";
 import { useLocale } from "@/locales";
 import { ENV_PRESETS, ENV_PRESET_METADATA } from "@ccem/core/browser";
 import {
@@ -560,14 +561,16 @@ export function EnvironmentDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {t("environmentDialog.cancel")}
           </Button>
-          <Button
+          {/* Save button */}
+          <LaunchButton
             onClick={handleSave}
             disabled={!isValid || (mode === "add" && activeTab !== "manual")}
+            size="md"
           >
             {mode === "add"
               ? t("environmentDialog.add")
               : t("environmentDialog.save")}
-          </Button>
+          </LaunchButton>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -4,6 +4,7 @@ import { Claude, Codex } from '@lobehub/icons';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { getHistorySessionDisplay } from './historySession';
 
 export type HistorySource = 'claude' | 'codex';
 
@@ -214,8 +215,8 @@ export function HistoryList({
                     <p className={cn(
                       'text-[13px] leading-snug truncate',
                       selectedKey === getSessionKey(session) ? 'text-foreground font-medium' : 'text-foreground/80'
-                    )}>
-                      {session.display}
+                    )} title={getHistorySessionDisplay(session, t('history.untitledSession'))}>
+                      {getHistorySessionDisplay(session, t('history.untitledSession'))}
                     </p>
                     <div className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground/50">
                       {sourceFilter === 'all' && (

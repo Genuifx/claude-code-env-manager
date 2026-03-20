@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { LayoutGrid, X, ChevronDown, Loader2, Check, Minimize2 } from 'lucide-react';
+// Note: useState imported for future use, dismissed state removed per design
 import { Button } from '@/components/ui/button';
 import { useLocale } from '@/locales';
 import { LayoutPopover } from './LayoutPopover';
@@ -27,27 +28,15 @@ export function ArrangeBanner({
   onCloseAll,
 }: ArrangeBannerProps) {
   const { t } = useLocale();
-  const [dismissed, setDismissed] = useState(false);
   const [popoverOpen, setPopoverOpen] = useState(false);
 
-  if (runningCount < 2 || dismissed) return null;
+  if (runningCount < 2) return null;
 
   return (
     <div
       className="glass-subtle glass-noise rounded-lg px-4 py-3 flex items-center gap-3 animate-in slide-in-from-top-2 fade-in duration-250"
     >
-      <LayoutGrid className="w-4 h-4 text-primary shrink-0" />
-
-      <div className="flex-1 min-w-0">
-        <span className="text-sm text-foreground">
-          {t('sessions.arrangeBannerText').replace('{count}', String(runningCount))}
-        </span>
-        <span className="text-xs text-muted-foreground ml-2 hidden sm:inline">
-          {t('sessions.arrangeBannerHint')}
-        </span>
-      </div>
-
-      {/* Split Button: main action + popover chevron */}
+      {/* Split Button: main action + popover chevron - Left side */}
       <div className="flex items-center shrink-0 glass-split-btn">
         <Button
           size="sm"
@@ -103,7 +92,9 @@ export function ArrangeBanner({
         />
       </div>
 
-      {/* Separator + Bulk actions */}
+      <div className="flex-1" />
+
+      {/* Separator + Bulk actions - Right side */}
       <div className="h-5 shrink-0 glass-divider-left" />
 
       <Button size="sm" variant="ghost" onClick={onMinimizeAll} className="glass-ghost-hover">
@@ -113,16 +104,6 @@ export function ArrangeBanner({
       <Button size="sm" variant="ghost" onClick={onCloseAll} className="glass-ghost-hover">
         <X className="w-3.5 h-3.5 mr-1" />
         {t('sessions.closeAll')}
-      </Button>
-
-      {/* Dismiss */}
-      <Button
-        size="sm"
-        variant="ghost"
-        onClick={() => setDismissed(true)}
-        className="text-muted-foreground hover:text-foreground glass-ghost-hover px-1"
-      >
-        <X className="w-3.5 h-3.5" />
       </Button>
     </div>
   );

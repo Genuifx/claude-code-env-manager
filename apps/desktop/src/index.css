@@ -427,6 +427,12 @@
 }
 .ripple-success { animation: success-ripple 600ms var(--ease-decelerate); }
 
+/* === Launch Button Shimmer Sweep === */
+@keyframes shimmer-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
 /* === Data Animations === */
 @keyframes draw-line {
   to { stroke-dashoffset: 0; }
@@ -1236,6 +1242,108 @@
     0 0 0 1px hsl(var(--primary) / 0.18);
 }
 
+/* --- Liquid Glass Launch Button (3D depth via translucent layers) --- */
+.liquid-launch-btn:not(:disabled):not(.launched) {
+  background: linear-gradient(
+    180deg,
+    hsl(211 100% 60% / 0.72) 0%,
+    hsl(211 100% 42% / 0.85) 100%
+  );
+  backdrop-filter: blur(40px) saturate(200%);
+  -webkit-backdrop-filter: blur(40px) saturate(200%);
+  box-shadow:
+    0 4px 16px hsl(211 100% 50% / 0.35),
+    0 10px 36px rgba(0, 0, 0, 0.22),
+    0 0 0 1px hsl(211 80% 70% / 0.20),
+    inset 0 1px 0 rgba(255, 255, 255, 0.30),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.12);
+  transition:
+    transform var(--duration-fast) var(--ease-default),
+    box-shadow var(--duration-fast) var(--ease-default),
+    backdrop-filter var(--duration-base) var(--ease-default),
+    background var(--duration-fast) var(--ease-default);
+}
+.liquid-launch-btn:not(:disabled):not(.launched):hover {
+  transform: scale(1.03);
+  backdrop-filter: blur(52px) saturate(230%);
+  -webkit-backdrop-filter: blur(52px) saturate(230%);
+  background: linear-gradient(
+    180deg,
+    hsl(211 100% 62% / 0.78) 0%,
+    hsl(211 100% 44% / 0.88) 100%
+  );
+  box-shadow:
+    0 6px 24px hsl(211 100% 50% / 0.45),
+    0 14px 44px rgba(0, 0, 0, 0.26),
+    0 0 56px hsl(211 100% 55% / 0.15),
+    0 0 0 1px hsl(211 80% 70% / 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.08);
+}
+.liquid-launch-btn:not(:disabled):not(.launched):active {
+  transform: scale(0.97);
+  backdrop-filter: blur(28px) saturate(170%);
+  -webkit-backdrop-filter: blur(28px) saturate(170%);
+  background: linear-gradient(
+    180deg,
+    hsl(211 100% 50% / 0.80) 0%,
+    hsl(211 100% 36% / 0.92) 100%
+  );
+  box-shadow:
+    inset 0 2px 10px rgba(0, 0, 0, 0.30),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    0 2px 8px hsl(211 100% 50% / 0.20);
+}
+/* Launched state — pressed into glass */
+.liquid-launch-btn.launched {
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.6));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transform: scale(0.97);
+  transition:
+    transform var(--duration-base) var(--ease-default),
+    box-shadow var(--duration-base) var(--ease-default),
+    background var(--duration-base) var(--ease-default);
+}
+/* Light mode — needs more opacity to stand out on white */
+.light .liquid-launch-btn:not(:disabled):not(.launched) {
+  background: linear-gradient(
+    180deg,
+    hsl(211 100% 54% / 0.80) 0%,
+    hsl(211 100% 40% / 0.92) 100%
+  );
+  box-shadow:
+    0 4px 16px hsl(211 100% 50% / 0.30),
+    0 10px 36px rgba(0, 0, 0, 0.12),
+    0 0 0 1px hsl(211 80% 60% / 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.40),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.06);
+}
+.light .liquid-launch-btn:not(:disabled):not(.launched):hover {
+  background: linear-gradient(
+    180deg,
+    hsl(211 100% 56% / 0.85) 0%,
+    hsl(211 100% 42% / 0.94) 100%
+  );
+  box-shadow:
+    0 6px 24px hsl(211 100% 50% / 0.40),
+    0 14px 44px rgba(0, 0, 0, 0.16),
+    0 0 56px hsl(211 100% 55% / 0.12),
+    0 0 0 1px hsl(211 80% 60% / 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.04);
+}
+.light .liquid-launch-btn:not(:disabled):not(.launched):active {
+  background: linear-gradient(
+    180deg,
+    hsl(211 100% 48% / 0.88) 0%,
+    hsl(211 100% 36% / 0.95) 100%
+  );
+}
+
 /* --- Hero Launch Button (dashboard hero CTA with prominent glow) --- */
 .launch-hero-btn {
   box-shadow:
@@ -1538,5 +1646,88 @@
 
 .scroll-glass-root[data-scrolling="true"] .glass-noise::before {
   opacity: 0;
+  mix-blend-mode: normal;
+}
+
+/* === Window Focus Stability (macOS transparent window activation) === */
+:root[data-window-state="activating"] {
+  --glass-blur: 18px;
+  --glass-sidebar-blur: 24px;
+  --glass-saturate: 140%;
+  --glass-sidebar-saturate: 150%;
+  --glass-noise-opacity: 0;
+  --ambient-opacity: 0.06;
+  --chat-assistant-blur: 10px;
+  --chat-user-blur: 4px;
+}
+
+:root.light[data-window-state="activating"] {
+  --ambient-opacity: 0.16;
+}
+
+:root[data-window-state="inactive"] .ambient-bg::before,
+:root[data-window-state="inactive"] .ambient-bg::after,
+:root[data-window-state="inactive"] .ambient-orb-3,
+:root[data-window-state="inactive"] .ambient-orb-4,
+:root[data-window-state="inactive"] .glass-shimmer::after,
+:root[data-window-state="inactive"] .status-running,
+:root[data-window-state="inactive"] .status-error,
+:root[data-window-state="activating"] .ambient-bg::before,
+:root[data-window-state="activating"] .ambient-bg::after,
+:root[data-window-state="activating"] .ambient-orb-3,
+:root[data-window-state="activating"] .ambient-orb-4,
+:root[data-window-state="activating"] .glass-shimmer::after,
+:root[data-window-state="activating"] .status-running,
+:root[data-window-state="activating"] .status-error {
+  animation-play-state: paused !important;
+}
+
+:root[data-window-state="activating"] .ambient-bg {
+  opacity: 0.35;
+}
+
+:root[data-window-state="activating"] .glass-sidebar-panel,
+:root[data-window-state="activating"] .glass-sidebar-inset,
+:root[data-window-state="activating"] .glass-card,
+:root[data-window-state="activating"] .glass-subtle,
+:root[data-window-state="activating"] .stat-card,
+:root[data-window-state="activating"] .glass-env-card,
+:root[data-window-state="activating"] .glass-list-item,
+:root[data-window-state="activating"] .glass-mode-card,
+:root[data-window-state="activating"] .glass-select,
+:root[data-window-state="activating"] .glass-chat-assistant,
+:root[data-window-state="activating"] .glass-chat-user,
+:root[data-window-state="activating"] .glass-dropdown,
+:root[data-window-state="activating"] .glass-header,
+:root[data-window-state="activating"] .frosted-panel,
+:root[data-window-state="activating"] .hero-gradient,
+:root[data-window-state="activating"] .liquid-launch-btn {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+:root[data-window-state="activating"] .glass-card,
+:root[data-window-state="activating"] .stat-card,
+:root[data-window-state="activating"] .glass-env-card,
+:root[data-window-state="activating"] .glass-header,
+:root[data-window-state="activating"] .hero-gradient {
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) + 0.16)) !important;
+}
+
+:root[data-window-state="activating"] .glass-subtle,
+:root[data-window-state="activating"] .glass-list-item,
+:root[data-window-state="activating"] .glass-mode-card,
+:root[data-window-state="activating"] .glass-select,
+:root[data-window-state="activating"] .glass-chat-assistant,
+:root[data-window-state="activating"] .glass-chat-user,
+:root[data-window-state="activating"] .glass-sidebar-panel,
+:root[data-window-state="activating"] .glass-sidebar-inset,
+:root[data-window-state="activating"] .glass-dropdown,
+:root[data-window-state="activating"] .frosted-panel {
+  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.9)) !important;
+}
+
+:root[data-window-state="activating"] .glass-noise::before {
+  opacity: 0 !important;
   mix-blend-mode: normal;
 }
