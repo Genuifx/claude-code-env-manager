@@ -4,7 +4,7 @@
   "commit": false,
   "fixed": [],
   "linked": [
-    ["@ccem/core", "@ccem/cli"]
+    ["@ccem/core", "ccem"]
   ],
   "access": "public",
   "baseBranch": "main",
