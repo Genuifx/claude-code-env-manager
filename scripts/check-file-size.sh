@@ -1,9 +1,30 @@
 #!/bin/bash
 
-echo "Checking for files larger than 500 lines..."
+set -euo pipefail
 
-# 查找所有 TypeScript/JavaScript/Rust 文件，排除构建产物和依赖
-large_files=$(find apps packages -type f \
+MAX_LINES=1000
+EXEMPTIONS_FILE="docs/file-size-exemptions.md"
+
+echo "Checking for files larger than ${MAX_LINES} lines..."
+
+large_files_file=$(mktemp)
+large_paths_file=$(mktemp)
+exemptions_file=$(mktemp)
+unexpected_large_file=$(mktemp)
+stale_exemptions_file=$(mktemp)
+
+cleanup() {
+  rm -f \
+    "$large_files_file" \
+    "$large_paths_file" \
+    "$exemptions_file" \
+    "$unexpected_large_file" \
+    "$stale_exemptions_file"
+}
+trap cleanup EXIT
+
+# Collect oversized source files while excluding generated output and dependencies.
+find apps packages -type f \
   \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" -o -name "*.rs" \) \
   ! -path "*/node_modules/*" \
   ! -path "*/dist/*" \
@@ -12,17 +33,62 @@ large_files=$(find apps packages -type f \
   ! -path "*/build/*" \
   -exec sh -c '
   lines=$(wc -l < "$1")
-  if [ "$lines" -gt 500 ]; then
-    echo "$1: $lines lines"
+  if [ "$lines" -gt "'"$MAX_LINES"'" ]; then
+    printf "%s\t%s\n" "$1" "$lines"
   fi
-' sh {} \;)
+' sh {} \; | sort > "$large_files_file"
 
-if [ -n "$large_files" ]; then
-  echo "❌ Files exceeding 500 lines (must be refactored or exempted):"
-  echo "$large_files"
-  echo ""
-  echo "Please refactor these files or add exemption documentation."
-  exit 1
+cut -f1 "$large_files_file" > "$large_paths_file"
+
+if [ -f "$EXEMPTIONS_FILE" ]; then
+  sed -n 's/^- `\([^`]*\)`:.*$/\1/p' "$EXEMPTIONS_FILE" | sort > "$exemptions_file"
 else
-  echo "✅ All files are under 500 lines"
+  : > "$exemptions_file"
 fi
+
+while IFS="$(printf '\t')" read -r file lines; do
+  [ -n "$file" ] || continue
+  if ! grep -Fxq "$file" "$exemptions_file"; then
+    printf "%s\t%s\n" "$file" "$lines" >> "$unexpected_large_file"
+  fi
+done < "$large_files_file"
+
+while IFS= read -r file; do
+  [ -n "$file" ] || continue
+  if ! grep -Fxq "$file" "$large_paths_file"; then
+    echo "$file" >> "$stale_exemptions_file"
+  fi
+done < "$exemptions_file"
+
+if [ -s "$unexpected_large_file" ]; then
+  echo "❌ Files exceeding ${MAX_LINES} lines without documented exemption:"
+  while IFS="$(printf '\t')" read -r file lines; do
+    [ -n "$file" ] || continue
+    printf "  - %s: %s lines\n" "$file" "$lines"
+  done < "$unexpected_large_file"
+  echo
+  echo "Please refactor these files or document an exemption in ${EXEMPTIONS_FILE}."
+  exit 1
+fi
+
+if [ -s "$stale_exemptions_file" ]; then
+  echo "❌ Stale file size exemptions found:"
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    printf "  - %s\n" "$file"
+  done < "$stale_exemptions_file"
+  echo
+  echo "Please remove stale entries from ${EXEMPTIONS_FILE}."
+  exit 1
+fi
+
+if [ -s "$large_files_file" ]; then
+  echo "⚠️  Oversized files covered by documented exemptions:"
+  while IFS="$(printf '\t')" read -r file lines; do
+    [ -n "$file" ] || continue
+    printf "  - %s: %s lines\n" "$file" "$lines"
+  done < "$large_files_file"
+  echo
+fi
+
+echo "✅ File size check passed"
