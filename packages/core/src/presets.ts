@@ -19,16 +19,23 @@ export const ENV_PRESETS: Record<
   },
   'KIMI': {
     ANTHROPIC_BASE_URL: 'https://api.moonshot.cn/anthropic',
-    ANTHROPIC_DEFAULT_OPUS_MODEL: 'kimi-k2-thinking-turbo',
-    ANTHROPIC_DEFAULT_SONNET_MODEL: 'kimi-k2-thinking-turbo',
-    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'kimi-k2-turbo-preview',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'kimi-k2.5',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'kimi-k2.5',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'kimi-k2.5',
+    ANTHROPIC_MODEL: 'opus'
+  },
+  'KimiCodePlan': {
+    ANTHROPIC_BASE_URL: 'https://api.kimi.com/coding/',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'kimi-for-coding',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'kimi-for-coding',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'kimi-for-coding',
     ANTHROPIC_MODEL: 'opus'
   },
   'MiniMax': {
     ANTHROPIC_BASE_URL: 'https://api.minimaxi.com/anthropic',
-    ANTHROPIC_DEFAULT_OPUS_MODEL: 'MiniMax-M2.5',
-    ANTHROPIC_DEFAULT_SONNET_MODEL: 'MiniMax-M2.5',
-    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'MiniMax-M2.5-highspeed',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'MiniMax-M2.7',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'MiniMax-M2.7',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'MiniMax-M2.7-highspeed',
     ANTHROPIC_MODEL: 'opus'
   },
   'DeepSeek': {
@@ -71,6 +78,11 @@ export const ENV_PRESET_METADATA: Record<string, EnvPresetMetadata> = {
     displayName: { zh: 'KIMI', en: 'KIMI' },
     description: { zh: '月之暗面 Kimi 对话模型', en: 'Moonshot Kimi' },
     credentialUrl: 'https://platform.moonshot.cn/console/api-keys',
+  },
+  'KimiCodePlan': {
+    displayName: { zh: 'Kimi Code Plan', en: 'Kimi Code Plan' },
+    description: { zh: 'Kimi Code 订阅套餐入口', en: 'Kimi Code Subscription Plan' },
+    credentialUrl: 'https://kimi.com/code',
   },
   'MiniMax': {
     displayName: { zh: 'MiniMax', en: 'MiniMax' },

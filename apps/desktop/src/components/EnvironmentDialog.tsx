@@ -31,7 +31,19 @@ import {
   Zap,
 } from "lucide-react";
 import { toast } from "sonner";
+import { Zhipu, Moonshot, Minimax, DeepSeek, Qwen, OpenRouter as OpenRouterIcon } from "@lobehub/icons";
 import type { Environment } from "@/store";
+
+const PRESET_ICONS: Record<string, { icon: any; color?: string; needsContrastBg?: boolean }> = {
+  GLM:            { icon: Zhipu,          color: '#3859FF' },
+  KIMI:           { icon: Moonshot,       color: '#fff', needsContrastBg: true },
+  KimiCodePlan:   { icon: Moonshot,       color: '#fff', needsContrastBg: true },
+  MiniMax:        { icon: Minimax,        color: '#F23F5D' },
+  DeepSeek:       { icon: DeepSeek,       color: '#4D6BFE' },
+  Bailian:        { icon: Qwen,           color: '#615CED' },
+  BailianCodePlan:{ icon: Qwen,           color: '#615CED' },
+  OpenRouter:     { icon: OpenRouterIcon, color: '#6467F2' },
+};
 
 interface EnvironmentDialogProps {
   open: boolean;
@@ -387,7 +399,7 @@ export function EnvironmentDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className={mode === "add" ? "sm:max-w-[560px]" : "sm:max-w-[520px]"}
+        className={`flex flex-col ${mode === "add" ? "sm:max-w-[560px]" : "sm:max-w-[520px]"}`}
       >
         <DialogHeader>
           <DialogTitle>
@@ -402,6 +414,7 @@ export function EnvironmentDialog({
           </DialogDescription>
         </DialogHeader>
 
+        <div className="flex-1 overflow-y-auto min-h-0">
         {mode === "add" ? (
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="grid w-full grid-cols-3">
@@ -437,9 +450,25 @@ export function EnvironmentDialog({
                         className="group flex flex-col items-start gap-1.5 rounded-lg border border-border bg-surface-raised p-3 text-left transition-colors hover:border-primary/50 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         <div className="flex w-full items-center justify-between">
-                          <span className="text-sm font-medium text-foreground">
-                            {metadata?.displayName[lang] ?? key}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            {(() => {
+                              const entry = PRESET_ICONS[key];
+                              if (!entry) return <Bot className="h-5 w-5 text-muted-foreground" />;
+                              const IconComp = entry.icon;
+                              const iconEl = <IconComp size={20} style={entry.color ? { color: entry.color } : undefined} />;
+                              if (entry.needsContrastBg) {
+                                return (
+                                  <span className="inline-flex items-center justify-center rounded-md bg-black/75 dark:bg-black/50 p-0.5">
+                                    {iconEl}
+                                  </span>
+                                );
+                              }
+                              return iconEl;
+                            })()}
+                            <span className="text-sm font-medium text-foreground">
+                              {metadata?.displayName[lang] ?? key}
+                            </span>
+                          </div>
                           <ArrowRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
                         </div>
                         <span className="line-clamp-1 text-xs text-muted-foreground">
@@ -556,6 +585,7 @@ export function EnvironmentDialog({
         ) : (
           formFields
         )}
+        </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
