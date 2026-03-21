@@ -1,4 +1,4 @@
-use crate::terminal::resolve_claude_path;
+use crate::terminal::{resolve_claude_path, resolve_tmux_path};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
@@ -9,6 +9,7 @@ use std::thread;
 use std::time::Duration;
 
 static USER_PATH: OnceLock<String> = OnceLock::new();
+static TMUX_BINARY: OnceLock<String> = OnceLock::new();
 
 const DEFAULT_TMUX_SESSION: &str = "ccem";
 const DEFAULT_TMUX_WINDOW: &str = "main";
@@ -145,7 +146,7 @@ impl TmuxManager {
         ];
 
         for (option, value) in options {
-            let status = Command::new("tmux")
+            let status = tmux_command()?
                 .args(["set-option", "-t", session_name, option, &value])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
@@ -170,7 +171,7 @@ impl TmuxManager {
     }
 
     fn run_create_command(&self, target_name: &str, args: &[&str]) -> Result<u32, String> {
-        let output = Command::new("tmux").args(args).output().map_err(|error| {
+        let output = tmux_command()?.args(args).output().map_err(|error| {
             format!("Failed to create tmux window '{}': {}", target_name, error)
         })?;
 
@@ -195,7 +196,7 @@ impl TmuxManager {
 
     pub fn list_sessions(&self) -> Result<Vec<TmuxWindowInfo>, String> {
         Self::check_tmux_installed()?;
-        let output = Command::new("tmux")
+        let output = tmux_command()?
             .args(["list-sessions", "-F", "#{session_name}"])
             .output()
             .map_err(|error| format!("Failed to list tmux sessions: {}", error))?;
@@ -214,7 +215,7 @@ impl TmuxManager {
             .map(str::trim)
             .filter(|name| is_managed_session_name(name, &self.session_prefix))
         {
-            let output = Command::new("tmux")
+            let output = tmux_command()?
                 .args([
                     "list-windows",
                     "-t",
@@ -291,7 +292,7 @@ impl TmuxManager {
 
     pub fn capture_pane_target(&self, target: &str, lines: u32) -> Result<String, String> {
         let start = format!("-{}", lines.max(20));
-        let output = Command::new("tmux")
+        let output = tmux_command()?
             .args(["capture-pane", "-t", target, "-p", "-S", &start])
             .output()
             .map_err(|error| format!("Failed to capture tmux pane {}: {}", target, error))?;
@@ -362,20 +363,11 @@ impl TmuxManager {
     }
 
     pub fn check_tmux_installed() -> Result<(), String> {
-        let status = Command::new("sh")
-            .args(["-c", "command -v tmux >/dev/null 2>&1"])
-            .status()
-            .map_err(|error| format!("Failed to check tmux installation: {}", error))?;
-
-        if status.success() {
-            Ok(())
-        } else {
-            Err("tmux is not installed. Install it first, e.g. `brew install tmux`.".to_string())
-        }
+        resolve_tmux_binary().map(|_| ())
     }
 
     fn has_session(&self, session_name: &str) -> Result<bool, String> {
-        let status = Command::new("tmux")
+        let status = tmux_command()?
             .args(["has-session", "-t", session_name])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -388,7 +380,7 @@ impl TmuxManager {
     }
 
     fn inspect_target(&self, target: &str) -> Result<TmuxWindowInfo, String> {
-        let output = Command::new("tmux")
+        let output = tmux_command()?
             .args([
                 "display-message",
                 "-p",
@@ -415,7 +407,7 @@ impl TmuxManager {
     }
 
     fn target_exists(&self, target: &str) -> Result<bool, String> {
-        let status = Command::new("tmux")
+        let status = tmux_command()?
             .args(["display-message", "-p", "-t", target, "#{window_name}"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -426,7 +418,7 @@ impl TmuxManager {
     }
 
     fn kill_window_target(&self, target: &str) -> Result<(), String> {
-        let status = Command::new("tmux")
+        let status = tmux_command()?
             .args(["kill-window", "-t", target])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -442,7 +434,7 @@ impl TmuxManager {
     }
 
     fn send_named_key_to_target(&self, target: &str, key: &str) -> Result<(), String> {
-        let status = Command::new("tmux")
+        let status = tmux_command()?
             .args(["send-keys", "-t", target, key])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -460,7 +452,7 @@ impl TmuxManager {
     }
 
     fn send_literal_to_target(&self, target: &str, text: &str) -> Result<(), String> {
-        let status = Command::new("tmux")
+        let status = tmux_command()?
             .args(["send-keys", "-t", target, "-l", text])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -486,7 +478,7 @@ impl TmuxManager {
         std::fs::write(&temp_path, text)
             .map_err(|error| format!("Failed to write tmux paste buffer temp file: {}", error))?;
 
-        let load_status = Command::new("tmux")
+        let load_status = tmux_command()?
             .args(["load-buffer", temp_path.to_string_lossy().as_ref()])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -499,7 +491,7 @@ impl TmuxManager {
             return Err(format!("tmux load-buffer failed for {}", target));
         }
 
-        let paste_status = Command::new("tmux")
+        let paste_status = tmux_command()?
             .args(["paste-buffer", "-d", "-t", target])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -712,6 +704,25 @@ fn should_use_paste_buffer(text: &str) -> bool {
 
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn resolve_tmux_binary() -> Result<&'static str, String> {
+    if let Some(path) = TMUX_BINARY.get() {
+        return Ok(path.as_str());
+    }
+
+    let path = resolve_tmux_path()
+        .ok_or_else(|| "tmux is not installed. Install it first, e.g. `brew install tmux`.".to_string())?;
+
+    let _ = TMUX_BINARY.set(path);
+    Ok(TMUX_BINARY
+        .get()
+        .expect("tmux binary path should be initialized")
+        .as_str())
+}
+
+fn tmux_command() -> Result<Command, String> {
+    Ok(Command::new(resolve_tmux_binary()?))
 }
 
 fn get_user_path() -> &'static str {
