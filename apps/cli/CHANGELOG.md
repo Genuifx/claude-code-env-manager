@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.7
+
+### Patch Changes
+
+- Fix Desktop tmux detection for macOS GUI launches that do not inherit the user's shell PATH.
+
 ## 2.0.0-beta.6
 
 ### Patch Changes
