@@ -933,9 +933,11 @@ setupCmd
 
 setupCmd
   .command('init')
-  .description('初始化 Claude Code 全局配置（跳过 onboarding、禁用遥测、安装 MCP 工具）')
-  .action(async () => {
-    await runSetupInit();
+  .description('初始化 Claude Code 全局配置（跳过 onboarding、禁用遥测）')
+  .option('--chrome', '同时安装 chrome-devtools MCP 工具')
+  .action(async function(this: any) {
+    const options = this.opts();
+    await runSetupInit({ chrome: !!options.chrome });
   });
 
 setupCmd

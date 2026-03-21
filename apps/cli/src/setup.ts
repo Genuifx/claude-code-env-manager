@@ -157,7 +157,7 @@ const setupMcpTool = (): Promise<boolean> => {
 /**
  * 执行完整的 setup init 流程
  */
-export const runSetupInit = async (): Promise<void> => {
+export const runSetupInit = async (options: { chrome?: boolean } = {}): Promise<void> => {
   console.log(chalk.bold('\n🔧 Claude Code 初始化设置\n'));
 
   // 步骤 1
@@ -168,9 +168,14 @@ export const runSetupInit = async (): Promise<void> => {
   console.log(chalk.cyan('\n2. 配置隐私设置'));
   const step2 = setupEnvSettings();
 
-  // 步骤 3
-  console.log(chalk.cyan('\n3. 安装 MCP 工具'));
-  const step3 = await setupMcpTool();
+  // 步骤 3（可选）
+  let step3 = true;
+  if (options.chrome) {
+    console.log(chalk.cyan('\n3. 安装 MCP 工具'));
+    step3 = await setupMcpTool();
+  } else {
+    console.log(chalk.gray('\n3. 安装 MCP 工具（已跳过，使用 --chrome 启用）'));
+  }
 
   // 总结
   console.log('');
