@@ -40,7 +40,6 @@ const ChatAppPage = lazy(async () =>
 function App() {
   const FOCUS_SYNC_INTERVAL_MS = 5000;
   const FOCUS_SYNC_DELAY_MS = 180;
-  const WINDOW_EFFECT_RESTORE_MS = 320;
   const [activeTab, setActiveTab] = useState('dashboard');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<'add' | 'edit'>('add');
@@ -271,77 +270,6 @@ function App() {
     };
   }, [preloadAnalyticsPage, preloadHistoryPage]);
 
-  useEffect(() => {
-    if (typeof document === 'undefined') {
-      return;
-    }
-
-    const root = document.documentElement;
-    const isMacLike = /mac/i.test(navigator.platform) || /mac os/i.test(navigator.userAgent);
-    if (!isMacLike) {
-      root.dataset.windowState = 'active';
-      return;
-    }
-
-    let restoreTimerId: number | null = null;
-
-    const clearRestoreTimer = () => {
-      if (restoreTimerId !== null) {
-        clearTimeout(restoreTimerId);
-        restoreTimerId = null;
-      }
-    };
-
-    const setWindowState = (state: 'inactive' | 'activating' | 'active') => {
-      root.dataset.windowState = state;
-    };
-
-    const promoteToActive = () => {
-      clearRestoreTimer();
-      restoreTimerId = window.setTimeout(() => {
-        restoreTimerId = null;
-        setWindowState('active');
-      }, WINDOW_EFFECT_RESTORE_MS);
-    };
-
-    const handleFocusState = () => {
-      setWindowState('activating');
-      promoteToActive();
-    };
-
-    const handleBlurState = () => {
-      clearRestoreTimer();
-      setWindowState('inactive');
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && document.hasFocus()) {
-        handleFocusState();
-        return;
-      }
-
-      handleBlurState();
-    };
-
-    if (document.visibilityState === 'visible' && document.hasFocus()) {
-      handleFocusState();
-    } else {
-      handleBlurState();
-    }
-
-    window.addEventListener('focus', handleFocusState);
-    window.addEventListener('blur', handleBlurState);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      clearRestoreTimer();
-      window.removeEventListener('focus', handleFocusState);
-      window.removeEventListener('blur', handleBlurState);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      delete root.dataset.windowState;
-    };
-  }, []);
-
   // Re-sync with CLI config when window regains focus
   // This ensures desktop stays in sync when user modifies env via `ccem add/del/use` in terminal
   // Skip environment reload when a dialog is open to avoid resetting in-progress edits
@@ -444,7 +372,7 @@ function App() {
   useKeyboardShortcuts(globalShortcuts);
 
   // Handle launch with specific directory
-  const handleLaunchWithDir = async (workingDir: string) => {
+  const handleLaunchWithDir = useCallback(async (workingDir: string) => {
     try {
       await launchClaudeCode(workingDir, undefined, launchClient);
       if (launchClient === 'claude') {
@@ -453,7 +381,7 @@ function App() {
     } catch (err) {
       console.error('Launch failed:', err);
     }
-  };
+  }, [launchClaudeCode, launchClient, navigateToTab]);
 
   // Environment CRUD handlers
   const handleAddEnv = () => {

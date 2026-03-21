@@ -116,92 +116,113 @@ struct CodexSessionMeta {
     cwd: Option<String>,
 }
 
+async fn run_blocking<T, F>(task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|error| format!("Blocking history task failed: {error}"))?
+}
+
 // ============================================================================
 // Tauri commands
 // ============================================================================
 
 /// Read conversation history from Claude/Codex and return a merged list.
 #[tauri::command]
-pub fn get_conversation_history(source: Option<String>) -> Result<Vec<HistorySession>, String> {
-    let source_filter = normalize_history_source(source.as_deref())?;
-    let mut sessions = Vec::new();
+pub async fn get_conversation_history(
+    source: Option<String>,
+) -> Result<Vec<HistorySession>, String> {
+    run_blocking(move || {
+        let source_filter = normalize_history_source(source.as_deref())?;
+        let mut sessions = Vec::new();
 
-    if source_filter.is_none() || source_filter == Some(SOURCE_CLAUDE) {
-        sessions.extend(load_claude_history()?);
-    }
+        if source_filter.is_none() || source_filter == Some(SOURCE_CLAUDE) {
+            sessions.extend(load_claude_history()?);
+        }
 
-    if source_filter.is_none() || source_filter == Some(SOURCE_CODEX) {
-        sessions.extend(load_codex_history()?);
-    }
+        if source_filter.is_none() || source_filter == Some(SOURCE_CODEX) {
+            sessions.extend(load_codex_history()?);
+        }
 
-    sessions.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-    Ok(sessions)
+        sessions.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        Ok(sessions)
+    })
+    .await
 }
 
 /// Find and read conversation messages for a given session ID/source.
 #[tauri::command]
-pub fn get_conversation_messages(
+pub async fn get_conversation_messages(
     session_id: String,
     source: Option<String>,
 ) -> Result<Vec<ConversationMessage>, String> {
-    let source_hint = normalize_history_source(source.as_deref())?;
-    let resolved_source = match resolve_history_source_for_session(&session_id, source_hint) {
-        Some(s) => s,
-        None => return Ok(vec![]),
-    };
+    run_blocking(move || {
+        let source_hint = normalize_history_source(source.as_deref())?;
+        let resolved_source = match resolve_history_source_for_session(&session_id, source_hint) {
+            Some(s) => s,
+            None => return Ok(vec![]),
+        };
 
-    let (messages, _) = match resolved_source {
-        SOURCE_CLAUDE => {
-            let home = dirs::home_dir().ok_or("Could not find home directory")?;
-            let projects_dir = home.join(".claude").join("projects");
-            if !projects_dir.exists() {
-                return Ok(vec![]);
+        let (messages, _) = match resolved_source {
+            SOURCE_CLAUDE => {
+                let home = dirs::home_dir().ok_or("Could not find home directory")?;
+                let projects_dir = home.join(".claude").join("projects");
+                if !projects_dir.exists() {
+                    return Ok(vec![]);
+                }
+                let path = match find_claude_session_file(&projects_dir, &session_id) {
+                    Some(p) => p,
+                    None => return Ok(vec![]),
+                };
+                parse_claude_conversation_file(&path)?
             }
-            let path = match find_claude_session_file(&projects_dir, &session_id) {
-                Some(p) => p,
-                None => return Ok(vec![]),
-            };
-            parse_claude_conversation_file(&path)?
-        }
-        SOURCE_CODEX => {
-            let path = match find_codex_session_file(&session_id) {
-                Some(p) => p,
-                None => return Ok(vec![]),
-            };
-            parse_codex_conversation_file(&path)?
-        }
-        _ => return Ok(vec![]),
-    };
+            SOURCE_CODEX => {
+                let path = match find_codex_session_file(&session_id) {
+                    Some(p) => p,
+                    None => return Ok(vec![]),
+                };
+                parse_codex_conversation_file(&path)?
+            }
+            _ => return Ok(vec![]),
+        };
 
-    Ok(messages)
+        Ok(messages)
+    })
+    .await
 }
 
 /// Return compact segment metadata for a given session/source.
 #[tauri::command]
-pub fn get_conversation_segments(
+pub async fn get_conversation_segments(
     session_id: String,
     source: Option<String>,
 ) -> Result<Vec<CompactSegment>, String> {
-    let source_hint = normalize_history_source(source.as_deref())?;
-    let resolved_source = resolve_history_source_for_session(&session_id, source_hint)
-        .ok_or("Session file not found")?;
+    run_blocking(move || {
+        let source_hint = normalize_history_source(source.as_deref())?;
+        let resolved_source = resolve_history_source_for_session(&session_id, source_hint)
+            .ok_or("Session file not found")?;
 
-    let (_, segments) = match resolved_source {
-        SOURCE_CLAUDE => {
-            let home = dirs::home_dir().ok_or("Could not find home directory")?;
-            let projects_dir = home.join(".claude").join("projects");
-            let path = find_claude_session_file(&projects_dir, &session_id)
-                .ok_or("Session file not found")?;
-            parse_claude_conversation_file(&path)?
-        }
-        SOURCE_CODEX => {
-            let path = find_codex_session_file(&session_id).ok_or("Session file not found")?;
-            parse_codex_conversation_file(&path)?
-        }
-        _ => return Err("Unsupported source".to_string()),
-    };
+        let (_, segments) = match resolved_source {
+            SOURCE_CLAUDE => {
+                let home = dirs::home_dir().ok_or("Could not find home directory")?;
+                let projects_dir = home.join(".claude").join("projects");
+                let path = find_claude_session_file(&projects_dir, &session_id)
+                    .ok_or("Session file not found")?;
+                parse_claude_conversation_file(&path)?
+            }
+            SOURCE_CODEX => {
+                let path = find_codex_session_file(&session_id).ok_or("Session file not found")?;
+                parse_codex_conversation_file(&path)?
+            }
+            _ => return Err("Unsupported source".to_string()),
+        };
 
-    Ok(segments)
+        Ok(segments)
+    })
+    .await
 }
 
 // ============================================================================

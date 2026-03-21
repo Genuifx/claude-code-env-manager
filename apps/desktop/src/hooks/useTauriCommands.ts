@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useAppStore, type Environment, type Session, type ArrangeLayout, type InstalledSkill, type CronTask, type CronTaskRun, type CronTemplate, type LaunchClient } from '@/store';
 import { useCallback } from 'react';
 import { toast } from 'sonner';
+import { shallow } from 'zustand/shallow';
 import type {
   ChannelKind,
   HeadlessSessionSummary,
@@ -162,19 +163,42 @@ export function useTauriCommands() {
     setSessions,
     removeSession,
     updateSessionStatus,
-    currentEnv,
-    permissionMode,
     setFavorites,
     setRecent,
     setVSCodeProjects,
     setJetBrainsProjects,
-    selectedWorkingDir,
     setInstalledSkills,
     setCronTasks,
     setCronRuns,
     setLoadingCron,
     setDefaultWorkingDir,
-  } = useAppStore();
+  } = useAppStore(
+    (state) => ({
+      setEnvironments: state.setEnvironments,
+      setCurrentEnv: state.setCurrentEnv,
+      setLoading: state.setLoading,
+      setError: state.setError,
+      addSession: state.addSession,
+      setSessions: state.setSessions,
+      removeSession: state.removeSession,
+      updateSessionStatus: state.updateSessionStatus,
+      setFavorites: state.setFavorites,
+      setRecent: state.setRecent,
+      setVSCodeProjects: state.setVSCodeProjects,
+      setJetBrainsProjects: state.setJetBrainsProjects,
+      setInstalledSkills: state.setInstalledSkills,
+      setCronTasks: state.setCronTasks,
+      setCronRuns: state.setCronRuns,
+      setLoadingCron: state.setLoadingCron,
+      setDefaultWorkingDir: state.setDefaultWorkingDir,
+    }),
+    shallow
+  );
+
+  const getSessionDefaults = useCallback(() => {
+    const { currentEnv, permissionMode, selectedWorkingDir } = useAppStore.getState();
+    return { currentEnv, permissionMode, selectedWorkingDir };
+  }, []);
 
   const loadEnvironments = useCallback(async (options?: { silent?: boolean }) => {
     const silent = options?.silent ?? false;
@@ -293,6 +317,25 @@ export function useTauriCommands() {
     return sessions;
   }, [setSessions]);
 
+  const loadAppConfig = useCallback(async () => {
+    try {
+      const config = await invoke<TauriAppConfig>('get_app_config');
+      setFavorites(config.favorites);
+      setRecent(config.recent);
+      setVSCodeProjects(config.vscodeProjects);
+      setJetBrainsProjects(config.jetbrainsProjects || []);
+    } catch (err) {
+      console.error('Failed to load app config:', err);
+    }
+    // Also load default working dir
+    try {
+      const dir = await invoke<string | null>('get_default_working_dir');
+      setDefaultWorkingDir(dir);
+    } catch {
+      // ignore
+    }
+  }, [setFavorites, setRecent, setVSCodeProjects, setJetBrainsProjects, setDefaultWorkingDir]);
+
   const createInteractiveSession = useCallback(async (options: {
     envName?: string;
     permMode?: string;
@@ -302,6 +345,7 @@ export function useTauriCommands() {
   } = {}): Promise<Session> => {
     setLoading(true);
     try {
+      const { currentEnv, permissionMode, selectedWorkingDir } = getSessionDefaults();
       const workDir = options.workingDir ?? selectedWorkingDir ?? null;
       const tauriSession = await invoke<TauriSession>('create_interactive_session', {
         envName: options.envName ?? currentEnv,
@@ -344,10 +388,9 @@ export function useTauriCommands() {
       setLoading(false);
     }
   }, [
-    currentEnv,
-    permissionMode,
-    selectedWorkingDir,
     addSession,
+    getSessionDefaults,
+    loadAppConfig,
     setLoading,
     setError,
     syncInteractiveSessions,
@@ -530,6 +573,7 @@ export function useTauriCommands() {
       initialPrompt?: string | null;
     } = {},
   ): Promise<HeadlessSessionSummary> => {
+    const { currentEnv, permissionMode, selectedWorkingDir } = getSessionDefaults();
     return invoke<HeadlessSessionSummary>('create_headless_session', {
       envName: options.envName ?? currentEnv,
       permMode: options.permMode ?? permissionMode,
@@ -537,7 +581,7 @@ export function useTauriCommands() {
       resumeSessionId: options.resumeSessionId ?? null,
       initialPrompt: options.initialPrompt ?? null,
     });
-  }, [currentEnv, permissionMode, selectedWorkingDir]);
+  }, [getSessionDefaults]);
 
   const createManagedSession = useCallback(async (
     options: {
@@ -620,25 +664,6 @@ export function useTauriCommands() {
       toast.error(`Failed to minimize session: ${err}`);
     }
   }, []);
-
-  const loadAppConfig = useCallback(async () => {
-    try {
-      const config = await invoke<TauriAppConfig>('get_app_config');
-      setFavorites(config.favorites);
-      setRecent(config.recent);
-      setVSCodeProjects(config.vscodeProjects);
-      setJetBrainsProjects(config.jetbrainsProjects || []);
-    } catch (err) {
-      console.error('Failed to load app config:', err);
-    }
-    // Also load default working dir
-    try {
-      const dir = await invoke<string | null>('get_default_working_dir');
-      setDefaultWorkingDir(dir);
-    } catch {
-      // ignore
-    }
-  }, [setFavorites, setRecent, setVSCodeProjects, setJetBrainsProjects, setDefaultWorkingDir]);
 
   const addFavoriteProject = useCallback(async (path: string, name: string) => {
     try {

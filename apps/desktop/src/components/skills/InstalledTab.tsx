@@ -7,10 +7,17 @@ import { useLocale } from '@/locales';
 import { useAppStore } from '@/store';
 import { toast } from 'sonner';
 import { Sparkles, Plug, Globe, FolderOpen } from 'lucide-react';
+import { shallow } from 'zustand/shallow';
 
 export function InstalledTab() {
   const { t } = useLocale();
-  const { installedSkills, setInstalledSkills } = useAppStore();
+  const { installedSkills, setInstalledSkills } = useAppStore(
+    (state) => ({
+      installedSkills: state.installedSkills,
+      setInstalledSkills: state.setInstalledSkills,
+    }),
+    shallow
+  );
   const [uninstallingNames, setUninstallingNames] = useState<Set<string>>(new Set());
 
   const loadSkills = async () => {

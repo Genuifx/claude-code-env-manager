@@ -3,6 +3,7 @@ import { MetricCard } from './MetricCard';
 import { HeroMetricCard } from './HeroMetricCard';
 import { useAppStore } from '@/store';
 import { useLocale } from '@/locales';
+import { shallow } from 'zustand/shallow';
 
 interface MetricsRowProps {
   onNavigate: (tab: string) => void;
@@ -10,7 +11,15 @@ interface MetricsRowProps {
 
 export function MetricsRow({ onNavigate }: MetricsRowProps) {
   const { t } = useLocale();
-  const { sessions, usageStats, continuousUsageDays, cronTasks } = useAppStore();
+  const { sessions, usageStats, continuousUsageDays, cronTasks } = useAppStore(
+    (state) => ({
+      sessions: state.sessions,
+      usageStats: state.usageStats,
+      continuousUsageDays: state.continuousUsageDays,
+      cronTasks: state.cronTasks,
+    }),
+    shallow
+  );
 
   const activeSessions = sessions.filter(s => s.status === 'running').length;
   const todayTokens = (usageStats?.today.inputTokens ?? 0) + (usageStats?.today.outputTokens ?? 0) + (usageStats?.today.cacheReadTokens ?? 0) + (usageStats?.today.cacheCreationTokens ?? 0);

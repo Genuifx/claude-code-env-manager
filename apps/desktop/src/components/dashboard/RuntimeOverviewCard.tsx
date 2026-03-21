@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Bot, HeartPulse, LifeBuoy, TerminalSquare, Workflow } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -53,6 +53,8 @@ export function RuntimeOverviewCard({ onNavigate }: RuntimeOverviewCardProps) {
     checkTmuxInstalled,
   } = useTauriCommands();
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot>(INITIAL_SNAPSHOT);
+  const tmuxInstalledRef = useRef(INITIAL_SNAPSHOT.tmuxInstalled);
+  const telegramRestrictedRef = useRef(INITIAL_SNAPSHOT.telegramRestricted);
 
   useEffect(() => {
     let cancelled = false;
@@ -78,8 +80,8 @@ export function RuntimeOverviewCard({ onNavigate }: RuntimeOverviewCardProps) {
           recoveryCount: recoveryCandidates.length,
           telegramRunning: telegramStatus.running,
           telegramConfigured: telegramStatus.configured,
-          tmuxInstalled: snapshot.tmuxInstalled,
-          telegramRestricted: snapshot.telegramRestricted,
+          tmuxInstalled: tmuxInstalledRef.current,
+          telegramRestricted: telegramRestrictedRef.current,
         };
 
         if (mode === 'full') {
@@ -91,8 +93,10 @@ export function RuntimeOverviewCard({ onNavigate }: RuntimeOverviewCardProps) {
             return;
           }
 
-          nextSnapshot.tmuxInstalled = tmuxInstalled;
-          nextSnapshot.telegramRestricted = (telegramSettings.allowedUserIds?.length ?? 0) > 0;
+          tmuxInstalledRef.current = tmuxInstalled;
+          telegramRestrictedRef.current = (telegramSettings.allowedUserIds?.length ?? 0) > 0;
+          nextSnapshot.tmuxInstalled = tmuxInstalledRef.current;
+          nextSnapshot.telegramRestricted = telegramRestrictedRef.current;
         }
 
         setSnapshot((current) => (snapshotsEqual(current, nextSnapshot) ? current : nextSnapshot));
@@ -106,13 +110,13 @@ export function RuntimeOverviewCard({ onNavigate }: RuntimeOverviewCardProps) {
     void loadSnapshot('full');
     const intervalId = window.setInterval(() => {
       void loadSnapshot('runtime');
-    }, 5000);
+    }, 7000);
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [checkTmuxInstalled, getTelegramBridgeStatus, getTelegramSettings, listHeadlessSessions, listRuntimeRecoveryCandidates, snapshot.telegramRestricted, snapshot.tmuxInstalled]);
+  }, [checkTmuxInstalled, getTelegramBridgeStatus, getTelegramSettings, listHeadlessSessions, listRuntimeRecoveryCandidates]);
 
   const interactiveCount = sessions.filter((session) => session.status === 'running').length;
   const needsAttention = !snapshot.tmuxInstalled

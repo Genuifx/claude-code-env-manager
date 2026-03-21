@@ -9,6 +9,7 @@ import { getProjectName, formatRelativeTime } from '@/lib/utils';
 import { AllProjectsModal } from './AllProjectsModal';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { shallow } from 'zustand/shallow';
 
 interface QuickLaunchGridProps {
   onLaunch: (dir: string) => void;
@@ -142,10 +143,16 @@ function FavoriteCard({ project, color, onLaunch, onRemove }: FavoriteCardProps)
 
 export function QuickLaunchGrid({ onLaunch }: QuickLaunchGridProps) {
   const { t } = useLocale();
-  const { favorites, recent } = useAppStore();
+  const { favorites, recent, setSelectedWorkingDir } = useAppStore(
+    (state) => ({
+      favorites: state.favorites,
+      recent: state.recent,
+      setSelectedWorkingDir: state.setSelectedWorkingDir,
+    }),
+    shallow
+  );
   const { openDirectoryPicker, addFavoriteProject, removeFavoriteProject } = useTauriCommands();
   const [modalOpen, setModalOpen] = useState(false);
-  const { setSelectedWorkingDir } = useAppStore();
 
   const handleLaunch = (path: string) => {
     setSelectedWorkingDir(path);

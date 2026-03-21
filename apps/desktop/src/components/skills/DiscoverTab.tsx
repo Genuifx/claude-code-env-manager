@@ -11,6 +11,7 @@ import { useAppStore } from '@/store';
 import { toast } from 'sonner';
 import { Search, Sparkles, Loader2, Bot, Wrench, AlertTriangle, Settings, Shield, TrendingUp, Users } from 'lucide-react';
 import { LaunchButton } from '@/components/ui/LaunchButton';
+import { shallow } from 'zustand/shallow';
 
 interface StreamMessage {
   type: 'thinking' | 'tool' | 'result' | 'error';
@@ -34,7 +35,13 @@ const categoryConfig: Record<string, { icon: typeof Shield; labelKey: string }> 
 
 export function DiscoverTab() {
   const { t } = useLocale();
-  const { defaultWorkingDir, installedSkills } = useAppStore();
+  const { defaultWorkingDir, installedSkills } = useAppStore(
+    (state) => ({
+      defaultWorkingDir: state.defaultWorkingDir,
+      installedSkills: state.installedSkills,
+    }),
+    shallow
+  );
   const [query, setQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const isSearchingRef = useRef(false);

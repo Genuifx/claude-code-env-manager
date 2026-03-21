@@ -30,7 +30,7 @@ interface AiCronPanelProps {
 
 export function AiCronPanel({ open, onClose, onTaskCreated, onEdit }: AiCronPanelProps) {
   const { t } = useLocale();
-  const { defaultWorkingDir } = useAppStore();
+  const defaultWorkingDir = useAppStore((state) => state.defaultWorkingDir);
   const { addCronTask, generateCronTaskStream } = useTauriCommands();
   const [query, setQuery] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);

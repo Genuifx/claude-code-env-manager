@@ -338,17 +338,13 @@ impl SessionManager {
 /// Check if a process with the given PID is still running
 #[cfg(unix)]
 fn is_process_alive(pid: u32) -> bool {
-    use std::process::{Command, Stdio};
+    // kill(pid, 0) checks whether the process exists without spawning a shell command.
+    let result = unsafe { libc::kill(pid as i32, 0) };
+    if result == 0 {
+        return true;
+    }
 
-    // Use kill -0 to check if process exists (doesn't actually send a signal)
-    Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 #[cfg(windows)]

@@ -1074,60 +1074,82 @@ fn calculate_streak(daily_history: &HashMap<String, TokenUsageWithCost>) -> u32 
     streak
 }
 
+async fn run_blocking<T, F>(task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|error| format!("Blocking analytics task failed: {error}"))?
+}
+
 // ============================================================================
 // Tauri commands
 // ============================================================================
 
 /// Get usage statistics (optionally filtered by source).
 #[tauri::command]
-pub fn get_usage_stats(source: Option<String>) -> Result<UsageStats, String> {
-    let source_filter = normalize_usage_source(source.as_deref())?;
-    let cache = refresh_usage_cache();
-    Ok(aggregate_cache(&cache, source_filter))
+pub async fn get_usage_stats(source: Option<String>) -> Result<UsageStats, String> {
+    run_blocking(move || {
+        let source_filter = normalize_usage_source(source.as_deref())?;
+        let cache = refresh_usage_cache();
+        Ok(aggregate_cache(&cache, source_filter))
+    })
+    .await
 }
 
 /// Get usage history with time granularity (optionally filtered by source).
 #[tauri::command]
-pub fn get_usage_history(
+pub async fn get_usage_history(
     _granularity: String,
     _start_date: Option<String>,
     _end_date: Option<String>,
     source: Option<String>,
 ) -> Result<UsageHistory, String> {
-    let source_filter = normalize_usage_source(source.as_deref())?;
-    let cache = refresh_usage_cache();
-    let stats = aggregate_cache(&cache, source_filter);
+    run_blocking(move || {
+        let source_filter = normalize_usage_source(source.as_deref())?;
+        let cache = refresh_usage_cache();
+        let stats = aggregate_cache(&cache, source_filter);
 
-    Ok(UsageHistory {
-        daily: stats.daily_history,
-        by_model: stats.by_model,
-        by_environment: stats.by_environment,
+        Ok(UsageHistory {
+            daily: stats.daily_history,
+            by_model: stats.by_model,
+            by_environment: stats.by_environment,
+        })
     })
+    .await
 }
 
 #[tauri::command]
-pub fn get_usage_model_breakdown(
+pub async fn get_usage_model_breakdown(
     granularity: String,
     source: Option<String>,
 ) -> Result<ModelBreakdownHistory, String> {
-    let source_filter = normalize_usage_source(source.as_deref())?;
-    let granularity = ModelBreakdownGranularity::parse(&granularity)?;
-    let cache = refresh_usage_cache();
-    Ok(aggregate_model_breakdown(
-        &cache,
-        source_filter,
-        granularity,
-        Local::now(),
-    ))
+    run_blocking(move || {
+        let source_filter = normalize_usage_source(source.as_deref())?;
+        let granularity = ModelBreakdownGranularity::parse(&granularity)?;
+        let cache = refresh_usage_cache();
+        Ok(aggregate_model_breakdown(
+            &cache,
+            source_filter,
+            granularity,
+            Local::now(),
+        ))
+    })
+    .await
 }
 
 /// Calculate continuous usage days (streak), optionally filtered by source.
 #[tauri::command]
-pub fn get_continuous_usage_days(source: Option<String>) -> Result<u32, String> {
-    let source_filter = normalize_usage_source(source.as_deref())?;
-    let cache = refresh_usage_cache();
-    let stats = aggregate_cache(&cache, source_filter);
-    Ok(calculate_streak(&stats.daily_history))
+pub async fn get_continuous_usage_days(source: Option<String>) -> Result<u32, String> {
+    run_blocking(move || {
+        let source_filter = normalize_usage_source(source.as_deref())?;
+        let cache = refresh_usage_cache();
+        let stats = aggregate_cache(&cache, source_filter);
+        Ok(calculate_streak(&stats.daily_history))
+    })
+    .await
 }
 
 #[cfg(test)]

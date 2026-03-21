@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { ModelIcon } from '@/components/history/ModelIcon';
+import { shallow } from 'zustand/shallow';
 
 function maskAuthToken(token?: string, notSet?: string): string {
   if (!token) return notSet || 'Not set';
@@ -29,7 +30,13 @@ interface EnvListProps {
 }
 
 export function EnvList({ onEdit, onDelete, viewMode = 'list' }: EnvListProps) {
-  const { environments, currentEnv } = useAppStore();
+  const { environments, currentEnv } = useAppStore(
+    (state) => ({
+      environments: state.environments,
+      currentEnv: state.currentEnv,
+    }),
+    shallow
+  );
   const { switchEnvironment } = useTauriCommands();
   const { t } = useLocale();
 

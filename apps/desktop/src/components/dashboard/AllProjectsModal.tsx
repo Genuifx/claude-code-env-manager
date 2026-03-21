@@ -9,6 +9,7 @@ import { useLocale } from '@/locales';
 import { copyBindCommand } from '@/lib/telegram-utils';
 import { getProjectName, truncatePath, formatRelativeTime } from '@/lib/utils';
 import { cn } from '@/lib/utils';
+import { shallow } from 'zustand/shallow';
 
 interface AllProjectsModalProps {
   open: boolean;
@@ -28,7 +29,17 @@ export function AllProjectsModal({ open, onOpenChange, onLaunch }: AllProjectsMo
     jetbrainsProjects,
     currentEnv,
     permissionMode,
-  } = useAppStore();
+  } = useAppStore(
+    (state) => ({
+      favorites: state.favorites,
+      recent: state.recent,
+      vscodeProjects: state.vscodeProjects,
+      jetbrainsProjects: state.jetbrainsProjects,
+      currentEnv: state.currentEnv,
+      permissionMode: state.permissionMode,
+    }),
+    shallow
+  );
   const {
     addFavoriteProject,
     removeFavoriteProject,

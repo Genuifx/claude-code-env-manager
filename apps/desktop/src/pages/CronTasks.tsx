@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useLocale } from '@/locales';
 import { useAppStore, type CronTask, type CronTaskRun, type CronTemplate } from '@/store';
@@ -15,6 +15,7 @@ import {
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { LaunchButton } from '@/components/ui/LaunchButton';
+import { shallow } from 'zustand/shallow';
 
 function formatDuration(ms?: number | null) {
   if (!ms) return '-';
@@ -314,16 +315,41 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
 
 function RunHistoryPanel({ taskId }: { taskId: string }) {
   const { t } = useLocale();
-  const { cronRuns } = useAppStore();
+  const runs = useAppStore((state) => state.cronRuns[taskId] ?? []);
   const { loadCronTaskRuns, retryCronTask } = useTauriCommands();
   const [expandedRun, setExpandedRun] = useState<string | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof window.setInterval> | null>(null);
+  const pollTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+
+  const clearRunPolling = useCallback(() => {
+    if (pollIntervalRef.current !== null) {
+      window.clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+    if (pollTimeoutRef.current !== null) {
+      window.clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
-    loadCronTaskRuns(taskId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId]);
+    void loadCronTaskRuns(taskId);
+  }, [loadCronTaskRuns, taskId]);
 
-  const runs = cronRuns[taskId] || [];
+  useEffect(() => clearRunPolling, [clearRunPolling]);
+
+  const startRunPolling = useCallback(() => {
+    clearRunPolling();
+    pollIntervalRef.current = window.setInterval(async () => {
+      await loadCronTaskRuns(taskId);
+      const currentRuns = useAppStore.getState().cronRuns[taskId] || [];
+      if (!currentRuns.some((run) => run.status === 'running')) {
+        clearRunPolling();
+      }
+    }, 2000);
+    pollTimeoutRef.current = window.setTimeout(clearRunPolling, 600000);
+  }, [clearRunPolling, loadCronTaskRuns, taskId]);
+
   const sortedRuns = [...runs].reverse();
 
   return (
@@ -335,15 +361,7 @@ function RunHistoryPanel({ taskId }: { taskId: string }) {
             await retryCronTask(taskId);
             // Immediately load to show "running" state, then poll for completion
             await loadCronTaskRuns(taskId);
-            const poll = setInterval(async () => {
-              const runs = await loadCronTaskRuns(taskId);
-              void runs; // consumed by store update
-              // Stop polling once no run is in "running" state
-              const store = useAppStore.getState();
-              const current = store.cronRuns[taskId] || [];
-              if (!current.some((r: { status: string }) => r.status === 'running')) clearInterval(poll);
-            }, 2000);
-            setTimeout(() => clearInterval(poll), 600000); // safety: stop after 10min
+            startRunPolling();
           }}
           className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-2xs bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
         >
@@ -421,7 +439,14 @@ function RunHistoryPanel({ taskId }: { taskId: string }) {
 
 export function CronTasks() {
   const { t } = useLocale();
-  const { cronTasks, environments, isLoadingCron } = useAppStore();
+  const { cronTasks, environments, isLoadingCron } = useAppStore(
+    (state) => ({
+      cronTasks: state.cronTasks,
+      environments: state.environments,
+      isLoadingCron: state.isLoadingCron,
+    }),
+    shallow
+  );
   const {
     loadCronTasks, addCronTask, updateCronTask,
     deleteCronTask, toggleCronTask, listCronTemplates,
