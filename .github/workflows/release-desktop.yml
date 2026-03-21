@@ -109,7 +109,7 @@ jobs:
             ```bash
             npm install -g ccem@__VERSION__
             ```
-          releaseDraft: ${{ inputs.draft || 'true' }}
+          releaseDraft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || 'false' }}
           prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
           args: ${{ matrix.args }}
 
@@ -133,7 +133,7 @@ jobs:
             ```bash
             npm install -g ccem@__VERSION__
             ```
-          releaseDraft: ${{ inputs.draft || 'true' }}
+          releaseDraft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || 'false' }}
           prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
           args: ${{ matrix.args }}
 
