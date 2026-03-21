@@ -84,7 +84,7 @@ export function RecoveryCandidatesPanel() {
       startRefreshTransition(() => {
         void refreshCandidates();
       });
-    }, 5000);
+    }, 9000);
 
     return () => window.clearInterval(intervalId);
   }, [refreshCandidates]);

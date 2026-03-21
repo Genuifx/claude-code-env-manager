@@ -1,5 +1,5 @@
 // apps/desktop/src/components/sessions/SessionCard.tsx
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ElementType } from 'react';
 import {
   Check,
   Clock,
@@ -55,6 +55,95 @@ interface SessionCardProps {
   confirmingClose?: boolean;
   onCancelClose?: () => void;
   onConfirmClose?: (id: string) => void;
+}
+
+function SessionActionIconButton({
+  icon: Icon,
+  onClick,
+  tooltip,
+  disabled,
+  variant = 'ghost',
+  className,
+}: {
+  icon: ElementType;
+  onClick?: () => void;
+  tooltip: string;
+  disabled?: boolean;
+  variant?: 'ghost' | 'destructive';
+  className?: string;
+}) {
+  return (
+    <Tooltip delayDuration={200}>
+      <TooltipTrigger asChild>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onClick}
+          disabled={disabled}
+          className={cn(
+            'h-9 w-9 p-0 rounded-lg',
+            'hover:bg-surface-raised',
+            variant === 'destructive' && 'text-destructive/70 hover:text-destructive hover:bg-destructive/10',
+            className
+          )}
+        >
+          <Icon className="w-4 h-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="top" sideOffset={4}>
+        {tooltip}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function SessionMoreActionsDropdown({
+  bindCopied,
+  copiedLabel,
+  copyLabel,
+  bindLabel,
+  onCopyBind,
+  onOpenBindDialog,
+}: {
+  bindCopied: boolean;
+  copiedLabel: string;
+  copyLabel: string;
+  bindLabel: string;
+  onCopyBind: () => void;
+  onOpenBindDialog: () => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-9 w-9 p-0 rounded-lg hover:bg-surface-raised"
+        >
+          <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuItem onClick={onCopyBind}>
+          {bindCopied ? (
+            <>
+              <Check className="w-4 h-4 mr-2 text-success" />
+              {copiedLabel}
+            </>
+          ) : (
+            <>
+              <Copy className="w-4 h-4 mr-2" />
+              {copyLabel}
+            </>
+          )}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={onOpenBindDialog}>
+          <Link2 className="w-4 h-4 mr-2" />
+          {bindLabel}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 export function SessionCard({
@@ -171,45 +260,6 @@ export function SessionCard({
     }
   };
 
-  // --- Icon button with tooltip helper ---
-  const IconButton = ({
-    icon: Icon,
-    onClick,
-    tooltip,
-    disabled,
-    variant = 'ghost',
-    className,
-  }: {
-    icon: React.ElementType;
-    onClick?: () => void;
-    tooltip: string;
-    disabled?: boolean;
-    variant?: 'ghost' | 'destructive';
-    className?: string;
-  }) => (
-    <Tooltip delayDuration={200}>
-      <TooltipTrigger asChild>
-        <Button
-          size="sm"
-          variant={variant === 'destructive' ? 'ghost' : 'ghost'}
-          onClick={onClick}
-          disabled={disabled}
-          className={cn(
-            'h-9 w-9 p-0 rounded-lg',
-            'hover:bg-surface-raised',
-            variant === 'destructive' && 'text-destructive/70 hover:text-destructive hover:bg-destructive/10',
-            className
-          )}
-        >
-          <Icon className="w-4 h-4" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="top" sideOffset={4}>
-        {tooltip}
-      </TooltipContent>
-    </Tooltip>
-  );
-
   // --- Render channel badges (subtle, combined) ---
   const renderChannelBadges = (channels: ChannelInfo[]) => {
     if (!channels || channels.length === 0) return null;
@@ -250,40 +300,6 @@ export function SessionCard({
     );
   };
 
-  // --- More actions dropdown ---
-  const MoreActionsDropdown = () => (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-9 w-9 p-0 rounded-lg hover:bg-surface-raised"
-        >
-          <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-48">
-        <DropdownMenuItem onClick={handleCopyBind}>
-          {bindCopied ? (
-            <>
-              <Check className="w-4 h-4 mr-2 text-success" />
-              {t('telegram.bindCopiedShort')}
-            </>
-          ) : (
-            <>
-              <Copy className="w-4 h-4 mr-2" />
-              {t('telegram.copyBindShort')}
-            </>
-          )}
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setBindDialogOpen(true)}>
-          <Link2 className="w-4 h-4 mr-2" />
-          {t('chat.bindToChannel')}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-
   // --- Render action buttons based on session type ---
   const renderActions = () => {
     // Confirm close state
@@ -322,9 +338,16 @@ export function SessionCard({
             )}
           </div>
           <div className="flex items-center gap-0.5">
-            <MoreActionsDropdown />
+            <SessionMoreActionsDropdown
+              bindCopied={bindCopied}
+              copiedLabel={t('telegram.bindCopiedShort')}
+              copyLabel={t('telegram.copyBindShort')}
+              bindLabel={t('chat.bindToChannel')}
+              onCopyBind={handleCopyBind}
+              onOpenBindDialog={() => setBindDialogOpen(true)}
+            />
             {onRemove && (
-              <IconButton
+              <SessionActionIconButton
                 icon={X}
                 onClick={() => onRemove(sessionId)}
                 tooltip={t('sessions.headlessRemove')}
@@ -350,8 +373,15 @@ export function SessionCard({
             />
           </div>
           <div className="flex items-center gap-0.5">
-            <MoreActionsDropdown />
-            <IconButton icon={X} onClick={() => onClose(sessionId)} tooltip={t('dashboard.close')} variant="destructive" />
+            <SessionMoreActionsDropdown
+              bindCopied={bindCopied}
+              copiedLabel={t('telegram.bindCopiedShort')}
+              copyLabel={t('telegram.copyBindShort')}
+              bindLabel={t('chat.bindToChannel')}
+              onCopyBind={handleCopyBind}
+              onOpenBindDialog={() => setBindDialogOpen(true)}
+            />
+            <SessionActionIconButton icon={X} onClick={() => onClose(sessionId)} tooltip={t('dashboard.close')} variant="destructive" />
           </div>
         </div>
       );
@@ -371,7 +401,14 @@ export function SessionCard({
           />
         </div>
         <div className="flex items-center gap-0.5">
-          <MoreActionsDropdown />
+          <SessionMoreActionsDropdown
+            bindCopied={bindCopied}
+            copiedLabel={t('telegram.bindCopiedShort')}
+            copyLabel={t('telegram.copyBindShort')}
+            bindLabel={t('chat.bindToChannel')}
+            onCopyBind={handleCopyBind}
+            onOpenBindDialog={() => setBindDialogOpen(true)}
+          />
           <Tooltip delayDuration={200}>
             <TooltipTrigger asChild>
               <Button
@@ -388,7 +425,7 @@ export function SessionCard({
               {t('sessions.minimizeAll')}
             </TooltipContent>
           </Tooltip>
-          <IconButton icon={X} onClick={() => onClose(sessionId)} tooltip={t('dashboard.close')} variant="destructive" />
+          <SessionActionIconButton icon={X} onClick={() => onClose(sessionId)} tooltip={t('dashboard.close')} variant="destructive" />
         </div>
       </div>
     );

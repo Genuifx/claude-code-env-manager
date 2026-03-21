@@ -13,6 +13,7 @@ import type { TelegramBridgeStatus, TelegramSettings } from '@/lib/tauri-ipc';
 import { TelegramTopicBindingsEditor } from './TelegramTopicBindingsEditor';
 import { TelegramStatusBadge } from './TelegramStatusBadge';
 import { BindToTelegramDialog } from '@/components/telegram/BindToTelegramDialog';
+import { shallow } from 'zustand/shallow';
 
 const MODE_DISPLAY_NAMES: Record<PermissionModeName, string> = {
   yolo: 'YOLO',
@@ -81,7 +82,13 @@ function ToggleSetting({ checked, onChange, title, description }: {
 
 export function TelegramPanel() {
   const { t } = useLocale();
-  const { defaultWorkingDir, environments } = useAppStore();
+  const { defaultWorkingDir, environments } = useAppStore(
+    (state) => ({
+      defaultWorkingDir: state.defaultWorkingDir,
+      environments: state.environments,
+    }),
+    shallow
+  );
   const {
     openDirectoryPicker,
     getTelegramSettings,

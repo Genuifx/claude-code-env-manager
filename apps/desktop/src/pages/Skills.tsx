@@ -7,7 +7,7 @@ import { InstalledTab } from '@/components/skills/InstalledTab';
 
 export function Skills() {
   const { t } = useLocale();
-  const { isLoadingSkills } = useAppStore();
+  const isLoadingSkills = useAppStore((state) => state.isLoadingSkills);
 
   if (isLoadingSkills) {
     return <SkillsSkeleton />;

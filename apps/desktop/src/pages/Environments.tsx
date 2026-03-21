@@ -9,6 +9,7 @@ import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useLocale } from '../locales';
 import { LaunchButton } from '@/components/ui/LaunchButton';
 import { EnvironmentsSkeleton } from '@/components/ui/skeleton-states';
+import { shallow } from 'zustand/shallow';
 
 interface EnvironmentsProps {
   onAddEnv?: () => void;
@@ -17,7 +18,18 @@ interface EnvironmentsProps {
 }
 
 export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsProps) {
-  const { environments, permissionMode, defaultMode, setPermissionMode, setDefaultMode, isLoadingEnvs, error } = useAppStore();
+  const { environments, permissionMode, defaultMode, setPermissionMode, setDefaultMode, isLoadingEnvs, error } = useAppStore(
+    (state) => ({
+      environments: state.environments,
+      permissionMode: state.permissionMode,
+      defaultMode: state.defaultMode,
+      setPermissionMode: state.setPermissionMode,
+      setDefaultMode: state.setDefaultMode,
+      isLoadingEnvs: state.isLoadingEnvs,
+      error: state.error,
+    }),
+    shallow
+  );
   const { t } = useLocale();
   const { loadEnvironments } = useTauriCommands();
 

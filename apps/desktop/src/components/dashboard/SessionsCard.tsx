@@ -13,7 +13,7 @@ interface SessionsCardProps {
 }
 
 export function SessionsCard({ onStopAll }: SessionsCardProps) {
-  const { sessions } = useAppStore();
+  const sessions = useAppStore((state) => state.sessions);
   const { loadSessions, deleteSession, focusSession, closeSession, minimizeSession } = useTauriCommands();
   const { t } = useLocale();
 

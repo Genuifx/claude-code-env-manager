@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { LaunchButton } from '@/components/ui/LaunchButton';
 import { useLocale } from '@/locales';
 import { useAppStore, type ArrangeLayout } from '@/store';
+import { shallow } from 'zustand/shallow';
 
 interface LauncherQuickSectionProps {
   onLaunchMulti: (dirs: string[], layout: ArrangeLayout) => void;
@@ -13,7 +14,13 @@ interface LauncherQuickSectionProps {
 
 export function LauncherQuickSection({ onLaunchMulti, onBrowse, isLaunching }: LauncherQuickSectionProps) {
   const { t } = useLocale();
-  const { favorites, recent } = useAppStore();
+  const { favorites, recent } = useAppStore(
+    (state) => ({
+      favorites: state.favorites,
+      recent: state.recent,
+    }),
+    shallow
+  );
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   // Merge favorites + recent, dedup by path, favorites first, max 6

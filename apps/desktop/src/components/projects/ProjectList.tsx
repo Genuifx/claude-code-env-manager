@@ -4,13 +4,23 @@ import { useAppStore } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useLocale } from '@/locales';
 import { getProjectName, truncatePath, formatRelativeTime } from '@/lib/utils';
+import { shallow } from 'zustand/shallow';
 
 interface ProjectListProps {
   onLaunch: (workingDir: string) => void;
 }
 
 export function ProjectList({ onLaunch }: ProjectListProps) {
-  const { favorites, recent, vscodeProjects, jetbrainsProjects, setSelectedWorkingDir } = useAppStore();
+  const { favorites, recent, vscodeProjects, jetbrainsProjects, setSelectedWorkingDir } = useAppStore(
+    (state) => ({
+      favorites: state.favorites,
+      recent: state.recent,
+      vscodeProjects: state.vscodeProjects,
+      jetbrainsProjects: state.jetbrainsProjects,
+      setSelectedWorkingDir: state.setSelectedWorkingDir,
+    }),
+    shallow
+  );
   const {
     addFavoriteProject,
     removeFavoriteProject,

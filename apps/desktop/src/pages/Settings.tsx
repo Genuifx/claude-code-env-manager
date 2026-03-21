@@ -11,6 +11,7 @@ import type { PermissionModeName } from '@ccem/core/browser';
 import { useLocale } from '../locales';
 import { SettingsSkeleton } from '@/components/ui/skeleton-states';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
+import { shallow } from 'zustand/shallow';
 
 const MODE_DISPLAY_NAMES: Record<PermissionModeName, string> = {
   yolo: 'YOLO',
@@ -41,7 +42,16 @@ interface InstallStatusState {
 }
 
 export function Settings() {
-  const { defaultMode, setDefaultMode, isLoadingSettings, defaultWorkingDir, environments } = useAppStore();
+  const { defaultMode, setDefaultMode, isLoadingSettings, defaultWorkingDir, environments } = useAppStore(
+    (state) => ({
+      defaultMode: state.defaultMode,
+      setDefaultMode: state.setDefaultMode,
+      isLoadingSettings: state.isLoadingSettings,
+      defaultWorkingDir: state.defaultWorkingDir,
+      environments: state.environments,
+    }),
+    shallow
+  );
   const { t, lang, setLang } = useLocale();
   const {
     openDirectoryPicker,
