@@ -24,6 +24,7 @@ interface OpenInTerminalPopoverButtonProps {
   disabled?: boolean;
   className?: string;
   align?: 'start' | 'center' | 'end';
+  label?: string;
   onOpenInTerminal: (sessionId: string, terminalType?: TmuxAttachTerminalType) => Promise<void> | void;
 }
 
@@ -33,6 +34,7 @@ export function OpenInTerminalPopoverButton({
   disabled,
   className,
   align = 'end',
+  label,
   onOpenInTerminal,
 }: OpenInTerminalPopoverButtonProps) {
   const { t } = useLocale();
@@ -90,7 +92,7 @@ export function OpenInTerminalPopoverButton({
           onFocus={handlePointerEnter}
         >
           <SquareArrowOutUpRight className="h-4 w-4" />
-          {t('sessions.openInTerminal')}
+          {label ?? t('sessions.openInTerminal')}
           <ChevronDown className="h-3.5 w-3.5 opacity-70" />
         </Button>
       </Popover.Trigger>

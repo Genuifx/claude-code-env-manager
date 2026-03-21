@@ -63,7 +63,7 @@ export function SessionCard({
   terminalOptions,
   selectedEmbedded,
   onSelectEmbedded,
-  onFocus,
+  onFocus: _onFocus,
   onOpenInTerminal,
   onMinimize,
   onClose,
@@ -361,23 +361,14 @@ export function SessionCard({
     return (
       <div className="flex items-center justify-between w-full py-1" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center gap-1">
-          <Tooltip delayDuration={200}>
-            <TooltipTrigger asChild>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => onFocus(sessionId)}
-                disabled={!isRunning}
-                className="h-9 px-3 rounded-lg glass-btn-outline"
-              >
-                <SquareArrowOutUpRight className="w-4 h-4 mr-1.5" />
-                {t('sessions.focus')}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top" sideOffset={4}>
-              {t('sessions.focus')}
-            </TooltipContent>
-          </Tooltip>
+          <OpenInTerminalPopoverButton
+            sessionId={sessionId}
+            terminals={terminalOptions}
+            disabled={!isRunning}
+            className="h-9 px-3 rounded-lg glass-btn-outline"
+            label={t('sessions.focus')}
+            onOpenInTerminal={onOpenInTerminal}
+          />
         </div>
         <div className="flex items-center gap-0.5">
           <MoreActionsDropdown />
