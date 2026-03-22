@@ -1155,9 +1155,10 @@ pub async fn get_continuous_usage_days(source: Option<String>) -> Result<u32, St
 #[cfg(test)]
 mod tests {
     use super::{
-        aggregate_model_breakdown, default_prices, format_week_bucket, normalize_usage_source,
-        parse_codex_jsonl_reader, CacheEntry, CacheFile, CacheFileEntry, CacheMeta, CacheStats,
-        CacheUsage, ModelBreakdownGranularity, ModelPrice, SOURCE_CLAUDE,
+        aggregate_model_breakdown, default_prices, extract_model_breakdown_bucket,
+        format_week_bucket, normalize_usage_source, parse_codex_jsonl_reader, CacheEntry,
+        CacheFile, CacheFileEntry, CacheMeta, CacheStats, CacheUsage,
+        ModelBreakdownGranularity, ModelPrice, SOURCE_CLAUDE,
     };
     use chrono::{Local, TimeZone};
     use std::collections::HashMap;
@@ -1278,6 +1279,17 @@ mod tests {
 
     #[test]
     fn test_model_breakdown_hour_window_and_source_filtering() {
+        let visible_bucket = extract_model_breakdown_bucket(
+            "2026-03-06T10:00:00+08:00",
+            ModelBreakdownGranularity::Hour,
+        )
+        .expect("visible bucket");
+        let stale_bucket = extract_model_breakdown_bucket(
+            "2026-03-05T09:00:00+08:00",
+            ModelBreakdownGranularity::Hour,
+        )
+        .expect("stale bucket");
+
         let cache = build_cache(
             vec![
                 CacheEntry {
@@ -1305,12 +1317,9 @@ mod tests {
             fixed_now(),
         );
 
-        assert!(result.contains_key("2026-03-06T10"));
-        assert!(!result.contains_key("2026-03-05T09"));
-        assert_eq!(
-            result["2026-03-06T10"]["claude-sonnet-4-5"].input_tokens,
-            120
-        );
+        assert!(result.contains_key(&visible_bucket));
+        assert!(!result.contains_key(&stale_bucket));
+        assert_eq!(result[&visible_bucket]["claude-sonnet-4-5"].input_tokens, 120);
         assert!(!result
             .values()
             .any(|models| models.contains_key("gpt-5.3-codex")));
