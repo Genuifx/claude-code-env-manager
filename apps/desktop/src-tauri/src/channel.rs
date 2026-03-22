@@ -1,4 +1,5 @@
 use crate::event_bus::SessionEventRecord;
+use crate::remote::RemotePeerRef;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
@@ -17,6 +18,25 @@ pub enum ChannelKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         thread_id: Option<i64>,
     },
+    Weixin {
+        peer_id: String,
+    },
+}
+
+impl ChannelKind {
+    pub fn remote_peer_ref(&self) -> Option<RemotePeerRef> {
+        match self {
+            Self::DesktopUi => None,
+            Self::Telegram { chat_id, thread_id } => {
+                Some(RemotePeerRef::telegram(*chat_id, *thread_id))
+            }
+            Self::Weixin { peer_id } => Some(RemotePeerRef::weixin(peer_id.clone())),
+        }
+    }
+
+    pub fn is_managed_remote(&self) -> bool {
+        self.remote_peer_ref().is_some()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

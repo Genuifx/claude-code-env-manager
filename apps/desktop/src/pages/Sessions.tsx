@@ -28,6 +28,7 @@ import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { SessionsSkeleton } from '@/components/ui/skeleton-states';
 import { toast } from 'sonner';
 import { shallow } from 'zustand/shallow';
+import { getRemotePlatformFromSource } from '@/lib/remote-platforms';
 import type {
   UnifiedSessionInfo,
   ManagedSessionSource,
@@ -38,9 +39,13 @@ import type {
 
 // --- Helper: map snake_case UnifiedSessionInfo → camelCase UnifiedSession ---
 function mapSourceToString(source: ManagedSessionSource): UnifiedSession['source'] {
+  const remotePlatform = getRemotePlatformFromSource(source);
+  if (remotePlatform) {
+    return remotePlatform;
+  }
+
   switch (source.type) {
     case 'desktop': return 'desktop';
-    case 'telegram': return 'telegram';
     case 'cron': return 'cron';
     default: return 'cli';
   }

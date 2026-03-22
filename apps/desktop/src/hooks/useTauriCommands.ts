@@ -15,6 +15,9 @@ import type {
   TelegramForumTopic,
   TelegramSettings,
   TelegramTopicBinding,
+  WeixinBridgeStatus,
+  WeixinLoginSession,
+  WeixinSettings,
   TmuxAttachTerminalInfo,
   TmuxAttachTerminalType,
   UnifiedSessionDebugComparison,
@@ -896,6 +899,34 @@ export function useTauriCommands() {
     return invoke<TelegramForumTopic[]>('get_telegram_forum_topics');
   }, []);
 
+  const getWeixinSettings = useCallback(async (): Promise<WeixinSettings> => {
+    return invoke<WeixinSettings>('get_weixin_settings');
+  }, []);
+
+  const saveWeixinSettings = useCallback(async (settings: WeixinSettings): Promise<void> => {
+    await invoke('save_weixin_settings', { settings });
+  }, []);
+
+  const getWeixinBridgeStatus = useCallback(async (): Promise<WeixinBridgeStatus> => {
+    return invoke<WeixinBridgeStatus>('get_weixin_bridge_status');
+  }, []);
+
+  const startWeixinBridge = useCallback(async (): Promise<WeixinBridgeStatus> => {
+    return invoke<WeixinBridgeStatus>('start_weixin_bridge');
+  }, []);
+
+  const stopWeixinBridge = useCallback(async (): Promise<WeixinBridgeStatus> => {
+    return invoke<WeixinBridgeStatus>('stop_weixin_bridge');
+  }, []);
+
+  const startWeixinLogin = useCallback(async (): Promise<WeixinLoginSession> => {
+    return invoke<WeixinLoginSession>('start_weixin_login');
+  }, []);
+
+  const pollWeixinLogin = useCallback(async (sessionKey: string): Promise<WeixinLoginSession> => {
+    return invoke<WeixinLoginSession>('poll_weixin_login', { sessionKey });
+  }, []);
+
   const bindTelegramTopic = useCallback(async (options: {
     projectDir: string;
     envName?: string | null;
@@ -1029,6 +1060,13 @@ export function useTauriCommands() {
     stopTelegramBridge,
     getTelegramForumTopics,
     bindTelegramTopic,
+    getWeixinSettings,
+    saveWeixinSettings,
+    getWeixinBridgeStatus,
+    startWeixinBridge,
+    stopWeixinBridge,
+    startWeixinLogin,
+    pollWeixinLogin,
     getProxyDebugState,
     setProxyDebugEnabled,
     updateProxyDebugConfig,

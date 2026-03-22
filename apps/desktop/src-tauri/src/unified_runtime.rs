@@ -327,6 +327,11 @@ impl UnifiedSessionManager {
         self.dispatcher.detach_channel(runtime_id, channel_kind)
     }
 
+    pub fn has_connected_channel(&self, runtime_id: &str, channel_kind: &ChannelKind) -> bool {
+        self.dispatcher
+            .has_connected_channel(runtime_id, channel_kind)
+    }
+
     pub fn debug_compare_sessions(&self) -> UnifiedSessionDebugComparison {
         let headless_count = self.headless_runtime_manager.list_sessions().len();
         let interactive_count = self.interactive_runtime_manager.list_sessions().len();

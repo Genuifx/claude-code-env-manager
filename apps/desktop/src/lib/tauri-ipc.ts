@@ -58,6 +58,13 @@ export interface TauriCommands {
   get_telegram_bridge_status: [void, TelegramBridgeStatus];
   start_telegram_bridge: [void, TelegramBridgeStatus];
   stop_telegram_bridge: [void, TelegramBridgeStatus];
+  get_weixin_settings: [void, WeixinSettings];
+  save_weixin_settings: [{ settings: WeixinSettings }, void];
+  get_weixin_bridge_status: [void, WeixinBridgeStatus];
+  start_weixin_bridge: [void, WeixinBridgeStatus];
+  stop_weixin_bridge: [void, WeixinBridgeStatus];
+  start_weixin_login: [void, WeixinLoginSession];
+  poll_weixin_login: [{ sessionKey: string }, WeixinLoginSession];
   get_telegram_forum_topics: [void, TelegramForumTopic[]];
   bind_telegram_topic: [
     {
@@ -405,6 +412,34 @@ export interface TelegramForumTopic {
   boundProject?: string | null;
 }
 
+export interface WeixinSettings {
+  enabled: boolean;
+  apiBaseUrl: string;
+  botToken?: string | null;
+  botAccountId?: string | null;
+  allowedPeerIds?: string[];
+  defaultEnvName?: string | null;
+  defaultPermMode?: string | null;
+  defaultWorkingDir?: string | null;
+  flushIntervalMs: number;
+}
+
+export interface WeixinBridgeStatus {
+  configured: boolean;
+  running: boolean;
+  botAccountId?: string | null;
+  lastError?: string | null;
+}
+
+export interface WeixinLoginSession {
+  sessionKey: string;
+  status: 'pending' | 'scanned' | 'confirmed' | 'expired' | 'failed' | string;
+  qrCodeUrl?: string | null;
+  message: string;
+  botAccountId?: string | null;
+  expiresAt?: string | null;
+}
+
 export interface ProxyDebugState {
   enabled: boolean;
   running: boolean;
@@ -443,6 +478,7 @@ export interface ManagedSessionSummary {
 export type ManagedSessionSource =
   | { type: 'desktop' }
   | { type: 'telegram'; chat_id: number; thread_id: number }
+  | { type: 'weixin'; peer_id: string }
   | { type: 'cron'; task_id: string };
 
 export interface RuntimeRecoveryCandidate {
@@ -474,7 +510,8 @@ export type HeadlessSessionSummary = ManagedSessionSummary;
 
 export type ChannelKind =
   | { kind: 'desktop_ui' }
-  | { kind: 'telegram'; chat_id: number; thread_id?: number | null };
+  | { kind: 'telegram'; chat_id: number; thread_id?: number | null }
+  | { kind: 'weixin'; peer_id: string };
 
 export interface AttachedChannelInfo {
   kind: ChannelKind;

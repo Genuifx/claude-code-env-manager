@@ -13,6 +13,7 @@ mod interactive_runtime;
 mod jsonl_watcher;
 mod permission;
 mod proxy_debug;
+mod remote;
 mod runtime;
 mod session;
 mod skills;
@@ -22,6 +23,7 @@ mod tmux;
 mod tray;
 mod unified_runtime;
 mod unified_session;
+mod weixin;
 
 use analytics::{
     get_continuous_usage_days, get_usage_history, get_usage_model_breakdown, get_usage_stats,
@@ -63,6 +65,7 @@ use telegram::{
 use tmux::ClaudeTerminalState;
 use unified_runtime::UnifiedSessionManager;
 use unified_session::{RuntimeInput, UnifiedSessionDebugComparison, UnifiedSessionInfo};
+use weixin::{WeixinBridgeManager, WeixinBridgeStatus, WeixinLoginSession, WeixinSettings};
 
 /// Global flag: when true, CloseRequested should NOT be intercepted.
 static FORCE_QUIT: AtomicBool = AtomicBool::new(false);
@@ -691,9 +694,16 @@ fn attach_channel(
 ) -> Result<(), String> {
     match channel {
         ChannelKind::DesktopUi => unified_state.attach_desktop_channel(&app, &runtime_id),
-        ChannelKind::Telegram { .. } => {
-            Err("Telegram channels are managed internally by the Telegram bridge".to_string())
+        channel if channel.is_managed_remote() => {
+            let platform = channel
+                .remote_peer_ref()
+                .map(|remote| remote.platform.display_name())
+                .unwrap_or("Remote");
+            Err(format!(
+                "{platform} channels are managed internally by the {platform} bridge"
+            ))
         }
+        other => Err(format!("Unsupported channel attachment for {:?}", other)),
     }
 }
 
@@ -1782,6 +1792,11 @@ fn get_telegram_settings() -> Result<TelegramSettings, String> {
 }
 
 #[tauri::command]
+fn get_weixin_settings() -> Result<WeixinSettings, String> {
+    weixin::read_weixin_settings()
+}
+
+#[tauri::command]
 async fn save_telegram_settings(
     telegram_state: State<'_, Arc<TelegramBridgeManager>>,
     settings: TelegramSettings,
@@ -1802,10 +1817,32 @@ async fn save_telegram_settings(
 }
 
 #[tauri::command]
+async fn save_weixin_settings(
+    weixin_state: State<'_, Arc<WeixinBridgeManager>>,
+    settings: WeixinSettings,
+) -> Result<(), String> {
+    let manager = weixin_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        weixin::write_weixin_settings(&settings)?;
+        manager.sync_settings(&settings);
+        Ok(())
+    })
+    .await
+    .map_err(|error| format!("Failed to join save_weixin_settings task: {}", error))?
+}
+
+#[tauri::command]
 fn get_telegram_bridge_status(
     telegram_state: State<'_, Arc<TelegramBridgeManager>>,
 ) -> TelegramBridgeStatus {
     telegram_state.status()
+}
+
+#[tauri::command]
+fn get_weixin_bridge_status(
+    weixin_state: State<'_, Arc<WeixinBridgeManager>>,
+) -> WeixinBridgeStatus {
+    weixin_state.status()
 }
 
 #[tauri::command]
@@ -1826,6 +1863,19 @@ async fn start_telegram_bridge(
 }
 
 #[tauri::command]
+async fn start_weixin_bridge(
+    app: tauri::AppHandle,
+    weixin_state: State<'_, Arc<WeixinBridgeManager>>,
+    runtime_state: State<'_, Arc<HeadlessRuntimeManager>>,
+) -> Result<WeixinBridgeStatus, String> {
+    let manager = weixin_state.inner().clone();
+    let runtime_manager = runtime_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.start(app, runtime_manager))
+        .await
+        .map_err(|error| format!("Failed to join start_weixin_bridge task: {}", error))?
+}
+
+#[tauri::command]
 async fn stop_telegram_bridge(
     telegram_state: State<'_, Arc<TelegramBridgeManager>>,
 ) -> Result<TelegramBridgeStatus, String> {
@@ -1833,6 +1883,37 @@ async fn stop_telegram_bridge(
     tauri::async_runtime::spawn_blocking(move || manager.stop())
         .await
         .map_err(|error| format!("Failed to join stop_telegram_bridge task: {}", error))
+}
+
+#[tauri::command]
+async fn stop_weixin_bridge(
+    weixin_state: State<'_, Arc<WeixinBridgeManager>>,
+) -> Result<WeixinBridgeStatus, String> {
+    let manager = weixin_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.stop())
+        .await
+        .map_err(|error| format!("Failed to join stop_weixin_bridge task: {}", error))
+}
+
+#[tauri::command]
+async fn start_weixin_login(
+    weixin_state: State<'_, Arc<WeixinBridgeManager>>,
+) -> Result<WeixinLoginSession, String> {
+    let manager = weixin_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.start_login())
+        .await
+        .map_err(|error| format!("Failed to join start_weixin_login task: {}", error))?
+}
+
+#[tauri::command]
+async fn poll_weixin_login(
+    weixin_state: State<'_, Arc<WeixinBridgeManager>>,
+    session_key: String,
+) -> Result<WeixinLoginSession, String> {
+    let manager = weixin_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.poll_login(&session_key))
+        .await
+        .map_err(|error| format!("Failed to join poll_weixin_login task: {}", error))?
 }
 
 #[tauri::command]
@@ -2126,6 +2207,7 @@ fn main() {
     let proxy_debug_manager = ProxyDebugManager::new(session_manager.clone())
         .expect("failed to initialize proxy debug manager");
     let telegram_bridge_manager = Arc::new(TelegramBridgeManager::default());
+    let weixin_bridge_manager = Arc::new(WeixinBridgeManager::default());
     let session_manager_for_setup = session_manager.clone();
     let proxy_manager_for_setup = proxy_debug_manager.clone();
     let proxy_manager_for_run = proxy_debug_manager.clone();
@@ -2134,6 +2216,8 @@ fn main() {
     let headless_manager_for_run = headless_runtime_manager.clone();
     let telegram_manager_for_setup = telegram_bridge_manager.clone();
     let telegram_manager_for_run = telegram_bridge_manager.clone();
+    let weixin_manager_for_setup = weixin_bridge_manager.clone();
+    let weixin_manager_for_run = weixin_bridge_manager.clone();
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -2157,6 +2241,7 @@ fn main() {
         .manage(event_dispatcher.clone())
         .manage(unified_session_manager.clone())
         .manage(telegram_bridge_manager.clone())
+        .manage(weixin_bridge_manager.clone())
         .manage(proxy_debug_manager.clone())
         .invoke_handler(tauri::generate_handler![
             greet,
@@ -2256,10 +2341,17 @@ fn main() {
             get_settings,
             save_settings,
             get_telegram_settings,
+            get_weixin_settings,
             save_telegram_settings,
+            save_weixin_settings,
             get_telegram_bridge_status,
+            get_weixin_bridge_status,
             start_telegram_bridge,
+            start_weixin_bridge,
             stop_telegram_bridge,
+            stop_weixin_bridge,
+            start_weixin_login,
+            poll_weixin_login,
             get_telegram_forum_topics,
             bind_telegram_topic,
             get_proxy_debug_state,
@@ -2384,6 +2476,23 @@ fn main() {
                 }
             }
 
+            if let Ok(settings) = weixin::read_weixin_settings() {
+                weixin_manager_for_setup.sync_settings(&settings);
+                if settings.enabled
+                    && settings
+                        .bot_token
+                        .as_ref()
+                        .is_some_and(|value| !value.trim().is_empty())
+                {
+                    if let Err(error) = weixin_manager_for_setup
+                        .clone()
+                        .start(app.handle().clone(), headless_runtime_manager.clone())
+                    {
+                        eprintln!("Weixin bridge auto-start warning: {}", error);
+                    }
+                }
+            }
+
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -2397,6 +2506,7 @@ fn main() {
                 }
             } else if let RunEvent::Exit = event {
                 telegram_manager_for_run.stop();
+                weixin_manager_for_run.stop();
                 interactive_manager_for_run.shutdown_all();
                 headless_manager_for_run.shutdown_all();
                 let proxy_for_shutdown = proxy_manager_for_run.clone();
