@@ -52,6 +52,7 @@ Two flavors — pick whichever you like:
 | Skill management | ✅ | ✅ Streaming search |
 | Claude Code + Codex dual engine | — | ✅ |
 | Telegram remote control | — | ✅ |
+| WeChat remote control | — | ✅ |
 | Cron tasks | — | ✅ |
 | Conversation history | — | ✅ |
 | API request debugging | — | ✅ |
@@ -334,6 +335,25 @@ Need Claude to run something while you're out? Just grab your phone.
 </details>
 
 > Feishu (Lark) integration is in development.
+
+## WeChat Remote Control
+
+No Telegram? No problem. WeChat works too.
+
+This one's been on the wishlist for a while. Telegram is great, but not everyone has it installed. WeChat, on the other hand — if you're in China, it's already on your phone.
+
+Unlike Telegram's Forum Topic approach, WeChat uses direct private chats. Send a message to the bot, ccem spawns a headless Claude Code session locally, runs it, and sends the result back. Straightforward.
+
+Here's how to set it up:
+
+1. **QR Login** — In Desktop's ChatApp → WeChat panel, click "Scan Login QR" and scan with your WeChat
+2. **Allowlist** — Enter the WeChat IDs that are allowed to control the bridge (leave empty for open access, but you probably shouldn't)
+3. **Send messages as commands** — Text the bot from WeChat, ccem creates a session and executes
+4. **Results stream back** — Claude's output is pushed back to your WeChat chat in real time
+
+Permission approval works too — when Claude needs your go-ahead on something, you'll get a prompt in WeChat. Reply `/approve` or `/deny`.
+
+Just like Telegram, Cron task results can also be pushed to WeChat. Wake up, check your WeChat, last night's PR review is already there.
 
 ## Session Management — Multiple Models, Simultaneously
 
