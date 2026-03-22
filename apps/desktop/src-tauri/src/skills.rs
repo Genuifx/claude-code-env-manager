@@ -32,7 +32,7 @@ pub struct CuratedSkill {
     pub package_id: String,
     pub skill_name: String,
     pub description: String,
-    pub category: String,    // "official" | "popular" | "community"
+    pub category: String,     // "official" | "popular" | "community"
     pub install_type: String, // "skills" | "plugin"
 }
 
@@ -92,7 +92,12 @@ fn parse_skill_frontmatter(content: &str) -> (Option<String>, Option<String>) {
 }
 
 /// Scan a directory for skills (each subdirectory with SKILL.md).
-fn scan_skills_dir(dir: &PathBuf, scope: &str, agents: &[String], source: Option<&str>) -> Vec<InstalledSkill> {
+fn scan_skills_dir(
+    dir: &PathBuf,
+    scope: &str,
+    agents: &[String],
+    source: Option<&str>,
+) -> Vec<InstalledSkill> {
     let mut skills = Vec::new();
 
     let entries = match std::fs::read_dir(dir) {
@@ -158,7 +163,10 @@ fn scan_plugin_skills() -> Vec<InstalledSkill> {
     };
 
     // Read installed_plugins.json
-    let plugins_json = home.join(".claude").join("plugins").join("installed_plugins.json");
+    let plugins_json = home
+        .join(".claude")
+        .join("plugins")
+        .join("installed_plugins.json");
     let content = match std::fs::read_to_string(&plugins_json) {
         Ok(c) => c,
         Err(_) => return skills,
@@ -193,7 +201,10 @@ fn scan_plugin_skills() -> Vec<InstalledSkill> {
                 Some(p) => PathBuf::from(p),
                 None => continue,
             };
-            let version = install.get("version").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let version = install
+                .get("version")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
 
             // Scan installPath/skills/ for SKILL.md subdirectories
             let skills_dir = install_path.join("skills");
@@ -309,7 +320,10 @@ pub fn list_installed_skills() -> Result<Vec<InstalledSkill>, String> {
             all_skills.extend(scan_skills_dir(
                 &claude_skills_dir,
                 "global",
-                &claude_agents.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+                &claude_agents
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>(),
                 Some("skills.sh"),
             ));
         }
@@ -332,7 +346,10 @@ pub fn list_installed_skills() -> Result<Vec<InstalledSkill>, String> {
             all_skills.extend(scan_skills_dir(
                 &codex_skills_dir,
                 "global",
-                &codex_agents.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+                &codex_agents
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>(),
                 Some("skills.sh"),
             ));
         }
@@ -514,7 +531,13 @@ pub fn get_curated_skills() -> Vec<CuratedSkill> {
 /// Install a skill via npx skills add (async, event-driven).
 /// Emits "skill-install-done" with { package_id, success, message }.
 #[tauri::command]
-pub fn install_skill(app: AppHandle, package_id: String, skill_name: Option<String>, global: bool, agents: Option<Vec<String>>) {
+pub fn install_skill(
+    app: AppHandle,
+    package_id: String,
+    skill_name: Option<String>,
+    global: bool,
+    agents: Option<Vec<String>>,
+) {
     std::thread::spawn(move || {
         let mut args = vec![
             "skills".to_string(),
@@ -716,7 +739,12 @@ Some content here.
         )
         .unwrap();
 
-        let skills = scan_skills_dir(&dir, "global", &["Claude Code".to_string()], Some("skills.sh"));
+        let skills = scan_skills_dir(
+            &dir,
+            "global",
+            &["Claude Code".to_string()],
+            Some("skills.sh"),
+        );
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "Test Skill");
         assert_eq!(skills[0].description, "A test");

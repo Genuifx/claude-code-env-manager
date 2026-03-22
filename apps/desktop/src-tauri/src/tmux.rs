@@ -109,8 +109,7 @@ impl TmuxManager {
             },
         };
 
-        if let Err(error) =
-            self.configure_session_status(&window.session_name, env_name, env_vars)
+        if let Err(error) = self.configure_session_status(&window.session_name, env_name, env_vars)
         {
             eprintln!(
                 "Failed to configure tmux status for {}: {}",
@@ -711,8 +710,9 @@ fn resolve_tmux_binary() -> Result<&'static str, String> {
         return Ok(path.as_str());
     }
 
-    let path = resolve_tmux_path()
-        .ok_or_else(|| "tmux is not installed. Install it first, e.g. `brew install tmux`.".to_string())?;
+    let path = resolve_tmux_path().ok_or_else(|| {
+        "tmux is not installed. Install it first, e.g. `brew install tmux`.".to_string()
+    })?;
 
     let _ = TMUX_BINARY.set(path);
     Ok(TMUX_BINARY
@@ -777,9 +777,8 @@ mod tests {
     use super::{
         build_status_left_format, build_status_right_format, build_tmux_launch_command,
         compact_model_label, detect_state_from_capture, is_managed_session_name,
-        is_missing_tmux_session_error, is_tmux_session_create_race_error,
-        session_name_for_runtime, target_candidates_for_runtime, window_name_for_runtime,
-        ClaudeTerminalState,
+        is_missing_tmux_session_error, is_tmux_session_create_race_error, session_name_for_runtime,
+        target_candidates_for_runtime, window_name_for_runtime, ClaudeTerminalState,
     };
     use std::collections::HashMap;
 
