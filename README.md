@@ -98,10 +98,14 @@ When adding an environment, choose a preset to auto-fill the URL and models:
 
 | Preset | Base URL | Main Model | Fast Model |
 |--------|----------|------------|------------|
-| GLM (Zhipu) | `https://open.bigmodel.cn/api/anthropic` | glm-4.6 | glm-4.5-air |
-| KIMI (Moonshot) | `https://api.moonshot.cn/anthropic` | kimi-k2-thinking-turbo | kimi-k2-turbo-preview |
-| MiniMax | `https://api.minimaxi.com/anthropic` | MiniMax-M2 | MiniMax-M2 |
+| GLM (Zhipu) | `https://open.bigmodel.cn/api/anthropic` | glm-5 | glm-4.5-air |
+| KIMI (Moonshot) | `https://api.moonshot.cn/anthropic` | kimi-k2.5 | kimi-k2.5 |
+| Kimi Code Plan | `https://api.kimi.com/coding/` | kimi-for-coding | kimi-for-coding |
+| MiniMax | `https://api.minimaxi.com/anthropic` | MiniMax-M2.7 | MiniMax-M2.7-highspeed |
 | DeepSeek | `https://api.deepseek.com/anthropic` | deepseek-chat | deepseek-chat |
+| Bailian (Aliyun) | `https://dashscope.aliyuncs.com/api/v2/apps/claude-code-proxy` | qwen3-coder-plus | qwen3-coder-flash |
+| Bailian Code Plan | `https://coding.dashscope.aliyuncs.com/api/v2/apps/claude-code-proxy` | qwen3-coder-plus | qwen3-coder-plus |
+| OpenRouter | `https://openrouter.ai/api/v1` | anthropic/claude-opus-4-1 | anthropic/claude-3.5-haiku |
 
 > Official environment defaults to `claude-sonnet-4-5-20250929` + `claude-haiku-4-5-20251001`
 
