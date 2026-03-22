@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { LaunchButton } from '@/components/ui/LaunchButton';
 import { Card } from '@/components/ui/card';
+import { formatRemoteSourceHint, getRemotePlatformFromSource, getRemotePlatformMeta } from '@/lib/remote-platforms';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
@@ -28,9 +29,13 @@ function summarizeProject(path: string) {
 }
 
 function sourceLabel(candidate: RuntimeRecoveryCandidate) {
+  const remotePlatform = getRemotePlatformFromSource(candidate.source);
+  if (remotePlatform) {
+    const remoteHint = formatRemoteSourceHint(candidate.source);
+    return `${getRemotePlatformMeta(remotePlatform).displayName}${remoteHint ? ` · ${remoteHint}` : ''}`;
+  }
+
   switch (candidate.source.type) {
-    case 'telegram':
-      return `Telegram · ${candidate.source.chat_id}/${candidate.source.thread_id}`;
     case 'cron':
       return `Cron · ${candidate.source.task_id}`;
     default:

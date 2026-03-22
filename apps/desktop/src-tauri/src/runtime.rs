@@ -6,6 +6,7 @@
 use crate::channel::DesktopChannel;
 use crate::event_bus::{ReplayBatch, SessionEventPayload, SessionStore};
 use crate::event_dispatcher::EventDispatcher;
+use crate::remote::{RemotePeerRef, RemotePlatform};
 use crate::terminal::resolve_claude_path;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -86,7 +87,33 @@ fn default_runtime_kind() -> RuntimeKind {
 pub enum ManagedSessionSource {
     Desktop,
     Telegram { chat_id: i64, thread_id: i64 },
+    Weixin { peer_id: String },
     Cron { task_id: String },
+}
+
+impl ManagedSessionSource {
+    pub fn remote_peer_ref(&self) -> Option<RemotePeerRef> {
+        match self {
+            Self::Desktop | Self::Cron { .. } => None,
+            Self::Telegram { chat_id, thread_id } => {
+                Some(RemotePeerRef::telegram(*chat_id, Some(*thread_id)))
+            }
+            Self::Weixin { peer_id } => Some(RemotePeerRef::weixin(peer_id.clone())),
+        }
+    }
+
+    pub fn matches_remote_peer(
+        &self,
+        platform: RemotePlatform,
+        peer_id: &str,
+        thread_id: Option<&str>,
+    ) -> bool {
+        self.remote_peer_ref().is_some_and(|candidate| {
+            candidate.platform == platform
+                && candidate.peer_id == peer_id
+                && candidate.thread_id.as_deref() == thread_id
+        })
+    }
 }
 
 pub type HeadlessSessionSource = ManagedSessionSource;
@@ -1757,6 +1784,7 @@ mod tests {
         ManagedSessionStatus, RuntimeKind, RuntimeManager, RuntimeRecoveryCandidate,
         RuntimeStateEntry, RuntimeStateFile,
     };
+    use crate::remote::RemotePlatform;
     use chrono::Utc;
     use serde_json::json;
     use std::collections::HashMap;
@@ -2189,6 +2217,31 @@ mod tests {
         assert_eq!(snapshot.sessions[0].pid, Some(54321));
         assert_eq!(sessions[0].status, "initializing");
         assert!(sessions[0].is_active);
+    }
+
+    #[test]
+    fn managed_session_source_remote_helpers_cover_supported_platforms() {
+        let telegram = ManagedSessionSource::Telegram {
+            chat_id: -100123,
+            thread_id: 42,
+        };
+        let weixin = ManagedSessionSource::Weixin {
+            peer_id: "wx-peer-1".to_string(),
+        };
+
+        let telegram_remote = telegram.remote_peer_ref().expect("telegram remote ref");
+        assert_eq!(telegram_remote.platform, RemotePlatform::Telegram);
+        assert_eq!(telegram_remote.peer_id, "-100123");
+        assert_eq!(telegram_remote.thread_id.as_deref(), Some("42"));
+        assert!(telegram.matches_remote_peer(RemotePlatform::Telegram, "-100123", Some("42")));
+        assert!(!telegram.matches_remote_peer(RemotePlatform::Weixin, "-100123", Some("42")));
+
+        let weixin_remote = weixin.remote_peer_ref().expect("weixin remote ref");
+        assert_eq!(weixin_remote.platform, RemotePlatform::Weixin);
+        assert_eq!(weixin_remote.peer_id, "wx-peer-1");
+        assert_eq!(weixin_remote.thread_id, None);
+        assert!(weixin.matches_remote_peer(RemotePlatform::Weixin, "wx-peer-1", None));
+        assert!(!weixin.matches_remote_peer(RemotePlatform::Telegram, "wx-peer-1", None));
     }
 
     #[test]

@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { FolderOpen, Loader2, MessageSquare, PlusSquare, Send } from 'lucide-react';
+import { FolderOpen, Loader2, PlusSquare, Send } from 'lucide-react';
 import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { toast } from 'sonner';
@@ -32,7 +32,7 @@ const MANUAL_TOPIC_VALUE = '__manual__';
 const CURRENT_ENV_VALUE = '__current__';
 const DEFAULT_PERM_VALUE = '__default__';
 
-type ChatPlatform = 'telegram' | 'feishu';
+type ChatPlatform = 'telegram';
 
 interface PlatformConfig {
   id: ChatPlatform;
@@ -97,8 +97,7 @@ export function BindToChatDialog({
   // Platform selection
   const platforms: PlatformConfig[] = useMemo(() => [
     { id: 'telegram', name: 'Telegram', icon: Send, enabled: true },
-    { id: 'feishu', name: t('chatApp.feishu'), icon: MessageSquare, enabled: false, comingSoon: true },
-  ], [t]);
+  ], []);
 
   const availablePlatforms = platforms.filter(p => p.enabled);
   const [selectedPlatform, setSelectedPlatform] = useState<ChatPlatform>(initialPlatform || 'telegram');
@@ -437,12 +436,6 @@ export function BindToChatDialog({
             </div>
           )}
 
-          {selectedPlatform === 'feishu' && (
-            <div className="p-4 rounded-lg border border-dashed border-muted-foreground/30 text-center text-muted-foreground">
-              <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
-              <p>{t('chatApp.feishuComingSoon')}</p>
-            </div>
-          )}
         </div>
 
         <DialogFooter>

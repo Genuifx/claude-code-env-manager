@@ -1,18 +1,25 @@
 import { useState } from 'react';
 import { useLocale } from '@/locales';
 import { TelegramPanel } from '@/components/chat-app/telegram/TelegramPanel';
-import { FeishuPanel } from '@/components/chat-app/feishu/FeishuPanel';
+import { WeixinPanel } from '@/components/chat-app/weixin/WeixinPanel';
+import { getRemotePlatformMeta, REMOTE_PLATFORM_ORDER, type RemotePlatformId } from '@/lib/remote-platforms';
 
 interface TabDef {
-  id: string;
+  id: RemotePlatformId;
   labelKey: string;
   panel: () => JSX.Element;
 }
 
-const tabs: TabDef[] = [
-  { id: 'telegram', labelKey: 'chatApp.telegram', panel: () => <TelegramPanel /> },
-  { id: 'feishu', labelKey: 'chatApp.feishu', panel: () => <FeishuPanel /> },
-];
+const panelByPlatform: Record<RemotePlatformId, () => JSX.Element> = {
+  telegram: () => <TelegramPanel />,
+  weixin: () => <WeixinPanel />,
+};
+
+const tabs: TabDef[] = REMOTE_PLATFORM_ORDER.map((id) => ({
+  id,
+  labelKey: getRemotePlatformMeta(id).labelKey,
+  panel: panelByPlatform[id],
+}));
 
 export function ChatApp() {
   const { t } = useLocale();

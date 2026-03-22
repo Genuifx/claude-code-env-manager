@@ -10,7 +10,6 @@ import {
   Monitor,
   MoreHorizontal,
   PanelLeft,
-  Send,
   Shield,
   SquareArrowOutUpRight,
   SquareTerminal,
@@ -31,6 +30,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { BindToChatDialog } from '@/components/chat/BindToChatDialog';
+import { getRemotePlatformFromChannel, getRemotePlatformMeta } from '@/lib/remote-platforms';
 import { copyBindCommand } from '@/lib/telegram-utils';
 import { cn } from '@/lib/utils';
 import type { TmuxAttachTerminalInfo, TmuxAttachTerminalType } from '@/lib/tauri-ipc';
@@ -268,8 +268,14 @@ export function SessionCard({
       <div className="flex items-center gap-1">
         {channels.map((ch, i) => {
           const isDesktop = ch.kind === 'desktop_ui';
-          const Icon = isDesktop ? Monitor : Send;
-          const label = isDesktop ? t('sessions.channel_desktop') : t('sessions.channel_telegram');
+          const remotePlatform = getRemotePlatformFromChannel(ch.rawKind ?? ch.kind);
+          const remoteMeta = remotePlatform ? getRemotePlatformMeta(remotePlatform) : null;
+          const Icon = isDesktop ? Monitor : remoteMeta?.icon ?? Monitor;
+          const label = isDesktop
+            ? t('sessions.channel_desktop')
+            : remoteMeta
+              ? t(remoteMeta.channelLabelKey)
+              : ch.label || ch.kind;
           const canDisconnect = !isDesktop && onDisconnectChannel;
 
           return (
@@ -434,11 +440,15 @@ export function SessionCard({
   // --- Get source/terminal icon ---
   const getSourceIcon = () => {
     if (!unifiedSession) return isEmbedded ? PanelLeft : Monitor;
+    const remoteMeta = (unifiedSession.source === 'telegram' || unifiedSession.source === 'weixin')
+      ? getRemotePlatformMeta(unifiedSession.source)
+      : null;
+    if (remoteMeta) {
+      return remoteMeta.icon;
+    }
     switch (unifiedSession.source) {
       case 'desktop':
         return Monitor;
-      case 'telegram':
-        return Send;
       case 'cron':
         return Clock;
       case 'cli':
@@ -449,6 +459,15 @@ export function SessionCard({
   };
 
   const SourceIcon = getSourceIcon();
+  const sourceLabel = (() => {
+    if (!unifiedSession) {
+      return isEmbedded ? 'Embedded' : 'Desktop';
+    }
+    if (unifiedSession.source === 'telegram' || unifiedSession.source === 'weixin') {
+      return t(getRemotePlatformMeta(unifiedSession.source).sourceLabelKey);
+    }
+    return t(`sessions.source_${unifiedSession.source}`);
+  })();
 
   // --- Check if source is already shown in channels ---
   const hasDesktopChannel = unifiedSession?.channels?.some(ch => ch.kind === 'desktop_ui');
@@ -490,7 +509,7 @@ export function SessionCard({
                       </div>
                     </TooltipTrigger>
                     <TooltipContent side="top" sideOffset={4}>
-                      {unifiedSession ? t(`sessions.source_${unifiedSession.source}`) : isEmbedded ? 'Embedded' : 'Desktop'}
+                      {sourceLabel}
                     </TooltipContent>
                   </Tooltip>
                 )}
