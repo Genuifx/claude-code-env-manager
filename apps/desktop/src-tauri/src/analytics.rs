@@ -1157,8 +1157,8 @@ mod tests {
     use super::{
         aggregate_model_breakdown, default_prices, extract_model_breakdown_bucket,
         format_week_bucket, normalize_usage_source, parse_codex_jsonl_reader, CacheEntry,
-        CacheFile, CacheFileEntry, CacheMeta, CacheStats, CacheUsage,
-        ModelBreakdownGranularity, ModelPrice, SOURCE_CLAUDE,
+        CacheFile, CacheFileEntry, CacheMeta, CacheStats, CacheUsage, ModelBreakdownGranularity,
+        ModelPrice, SOURCE_CLAUDE,
     };
     use chrono::{Local, TimeZone};
     use std::collections::HashMap;
@@ -1319,7 +1319,10 @@ mod tests {
 
         assert!(result.contains_key(&visible_bucket));
         assert!(!result.contains_key(&stale_bucket));
-        assert_eq!(result[&visible_bucket]["claude-sonnet-4-5"].input_tokens, 120);
+        assert_eq!(
+            result[&visible_bucket]["claude-sonnet-4-5"].input_tokens,
+            120
+        );
         assert!(!result
             .values()
             .any(|models| models.contains_key("gpt-5.3-codex")));

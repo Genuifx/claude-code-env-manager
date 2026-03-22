@@ -711,10 +711,7 @@ pub fn inject_ai_env(cmd: &mut std::process::Command) {
         Err(_) => return,
     };
     let env_name = if settings.ai_enhanced {
-        settings
-            .ai_env_name
-            .as_deref()
-            .or(cfg.current.as_deref())
+        settings.ai_env_name.as_deref().or(cfg.current.as_deref())
     } else {
         cfg.current.as_deref()
     };
