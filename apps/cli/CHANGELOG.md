@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.8
+
+### Patch Changes
+
+- Add Wechat support though official channel.
+
 ## 2.0.0-beta.7
 
 ### Patch Changes
