@@ -1,11 +1,21 @@
 import { useState, useEffect, useRef } from 'react';
+import { getPerformanceMode } from '@/lib/performance';
 
 export function useCountUp(target: number, duration = 800): number {
-  const [value, setValue] = useState(0);
-  const startRef = useRef(0);
-  const currentRef = useRef(0);
+  const [value, setValue] = useState(() => (
+    getPerformanceMode() === 'reduced' ? target : 0
+  ));
+  const startRef = useRef(getPerformanceMode() === 'reduced' ? target : 0);
+  const currentRef = useRef(getPerformanceMode() === 'reduced' ? target : 0);
 
   useEffect(() => {
+    if (getPerformanceMode() === 'reduced') {
+      startRef.current = target;
+      currentRef.current = target;
+      setValue(target);
+      return;
+    }
+
     const start = startRef.current;
     const delta = target - start;
     if (delta === 0) return;

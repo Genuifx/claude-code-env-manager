@@ -623,6 +623,8 @@ pub struct DesktopSettings {
     pub close_to_tray: bool,
     #[serde(rename = "defaultMode", default)]
     pub default_mode: Option<String>,
+    #[serde(rename = "performanceMode", default = "default_performance_mode")]
+    pub performance_mode: String,
     #[serde(rename = "proxyDebugEnabled", default)]
     pub proxy_debug_enabled: bool,
     #[serde(
@@ -652,6 +654,9 @@ fn default_theme() -> String {
 fn default_close_to_tray() -> bool {
     true
 }
+fn default_performance_mode() -> String {
+    "auto".to_string()
+}
 fn default_proxy_debug_codex_upstream_base_url() -> String {
     "https://api.openai.com/v1".to_string()
 }
@@ -670,6 +675,7 @@ impl Default for DesktopSettings {
             start_minimized: false,
             close_to_tray: default_close_to_tray(),
             default_mode: None,
+            performance_mode: default_performance_mode(),
             proxy_debug_enabled: false,
             proxy_debug_codex_upstream_base_url: default_proxy_debug_codex_upstream_base_url(),
             proxy_debug_log_max_bytes: default_proxy_debug_log_max_bytes(),

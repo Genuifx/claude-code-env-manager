@@ -1775,6 +1775,7 @@ fn save_settings(app: tauri::AppHandle, settings: DesktopSettings) -> Result<(),
     merged_settings.start_minimized = settings.start_minimized;
     merged_settings.close_to_tray = settings.close_to_tray;
     merged_settings.default_mode = settings.default_mode;
+    merged_settings.performance_mode = settings.performance_mode;
     merged_settings.ai_enhanced = settings.ai_enhanced;
     merged_settings.ai_env_name = settings.ai_env_name;
     config::write_settings(&merged_settings)?;

@@ -161,9 +161,15 @@ export function InteractiveToolEventsPanel({ sessionId }: InteractiveToolEventsP
     setEventsBySession((current) => {
       const previous = sinceSeq && !batch.gap_detected ? current[targetSessionId] ?? [] : [];
       const merged = [...previous, ...batch.events];
-      const deduped = merged.filter((event, index, all) =>
-        index === all.findIndex((candidate) => candidate.seq === event.seq && candidate.runtime_id === event.runtime_id)
-      );
+      const seen = new Set<string>();
+      const deduped = merged.filter((event) => {
+        const key = `${event.runtime_id}:${event.seq}`;
+        if (seen.has(key)) {
+          return false;
+        }
+        seen.add(key);
+        return true;
+      });
       return {
         ...current,
         [targetSessionId]: deduped,
@@ -185,6 +191,10 @@ export function InteractiveToolEventsPanel({ sessionId }: InteractiveToolEventsP
       return;
     }
     const intervalId = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+
       startRefreshTransition(() => {
         const lastSeen = lastEventSeq(eventsBySession[sessionId]);
         void refreshEvents(sessionId, lastSeen);
