@@ -11,6 +11,7 @@ import type { PermissionModeName } from '@ccem/core/browser';
 import { useLocale } from '../locales';
 import { SettingsSkeleton } from '@/components/ui/skeleton-states';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
+import { setPerformancePreference as applyPerformancePreference, type PerformancePreference } from '@/lib/performance';
 import { shallow } from 'zustand/shallow';
 
 const MODE_DISPLAY_NAMES: Record<PermissionModeName, string> = {
@@ -41,6 +42,14 @@ interface InstallStatusState {
   tmux: boolean | null;
 }
 
+function normalizePerformanceMode(value: unknown): PerformancePreference {
+  if (value === 'default' || value === 'reduced' || value === 'auto') {
+    return value;
+  }
+
+  return 'auto';
+}
+
 export function Settings() {
   const { defaultMode, setDefaultMode, isLoadingSettings, defaultWorkingDir, environments } = useAppStore(
     (state) => ({
@@ -58,6 +67,7 @@ export function Settings() {
     saveDefaultWorkingDir,
   } = useTauriCommands();
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('light');
+  const [performanceMode, setPerformanceMode] = useState<PerformancePreference>('auto');
   const [autoStart, setAutoStart] = useState(false);
   const [startMinimized, setStartMinimized] = useState(false);
   const [closeToTray, setCloseToTray] = useState(true);
@@ -113,13 +123,29 @@ export function Settings() {
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const settings = await invoke<{ theme: string; autoStart: boolean; startMinimized: boolean; closeToTray: boolean; defaultMode: string | null; aiEnhanced: boolean; aiEnvName: string | null }>('get_settings');
+        const settings = await invoke<{
+          theme: string;
+          autoStart: boolean;
+          startMinimized: boolean;
+          closeToTray: boolean;
+          defaultMode: string | null;
+          performanceMode?: PerformancePreference;
+          aiEnhanced: boolean;
+          aiEnvName: string | null;
+        }>('get_settings');
+        const nextPerformanceMode = normalizePerformanceMode(settings.performanceMode);
         setTheme(settings.theme as 'light' | 'dark' | 'system');
+        setPerformanceMode(nextPerformanceMode);
         setAutoStart(settings.autoStart);
         setStartMinimized(settings.startMinimized);
         setCloseToTray(settings.closeToTray);
         setAiEnhanced(settings.aiEnhanced ?? false);
         setAiEnvName(settings.aiEnvName ?? null);
+        applyPerformancePreference(nextPerformanceMode);
+        localStorage.setItem('ccem-settings', JSON.stringify({
+          ...settings,
+          performanceMode: nextPerformanceMode,
+        }));
         if (settings.defaultMode) {
           setDefaultMode(settings.defaultMode as PermissionModeName);
         }
@@ -130,9 +156,12 @@ export function Settings() {
           try {
             const settings = JSON.parse(saved);
             setTheme(settings.theme || 'system');
+            const nextPerformanceMode = normalizePerformanceMode(settings.performanceMode);
+            setPerformanceMode(nextPerformanceMode);
             setAutoStart(settings.autoStart ?? false);
             setStartMinimized(settings.startMinimized ?? false);
             setCloseToTray(settings.closeToTray ?? true);
+            applyPerformancePreference(nextPerformanceMode);
             if (settings.defaultMode) {
               setDefaultMode(settings.defaultMode as PermissionModeName);
             }
@@ -162,20 +191,32 @@ export function Settings() {
     }
   }, [theme]);
 
+  useEffect(() => {
+    applyPerformancePreference(performanceMode);
+  }, [performanceMode]);
+
   // Auto-save whenever settings change (skip initial load)
   useEffect(() => {
     if (!loaded.current) return;
-    const settings = { theme, autoStart, startMinimized, closeToTray, defaultMode, aiEnhanced, aiEnvName };
+    const settings = {
+      theme,
+      autoStart,
+      startMinimized,
+      closeToTray,
+      defaultMode,
+      performanceMode,
+      aiEnhanced,
+      aiEnvName,
+    };
+    localStorage.setItem('ccem-settings', JSON.stringify(settings));
     (async () => {
       try {
         await invoke('save_settings', { settings });
       } catch (e) {
-        // Fallback to localStorage but notify user
-        localStorage.setItem('ccem-settings', JSON.stringify(settings));
         toast.error(t('settings.saveFailed'));
       }
     })();
-  }, [theme, autoStart, startMinimized, closeToTray, defaultMode, aiEnhanced, aiEnvName]);
+  }, [theme, autoStart, startMinimized, closeToTray, defaultMode, performanceMode, aiEnhanced, aiEnvName]);
 
   // Delayed skeleton -- only shows if settings load takes >200ms
   if (isLoadingSettings) {
@@ -247,6 +288,28 @@ export function Settings() {
                   English
                 </button>
               </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                {t('settings.performanceMode')}
+              </label>
+              <p className="text-xs text-muted-foreground/80 mb-2">
+                {t('settings.performanceModeDesc')}
+              </p>
+              <Select
+                value={performanceMode}
+                onValueChange={(value) => setPerformanceMode(value as PerformancePreference)}
+              >
+                <SelectTrigger className="w-full h-auto px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">{t('settings.performanceModeAuto')}</SelectItem>
+                  <SelectItem value="reduced">{t('settings.performanceModeReduced')}</SelectItem>
+                  <SelectItem value="default">{t('settings.performanceModeDefault')}</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </Card>

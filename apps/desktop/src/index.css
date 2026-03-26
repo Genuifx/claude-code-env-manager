@@ -1464,6 +1464,71 @@
   contain-intrinsic-size: 56px;
 }
 
+/* === Reduced Performance Mode === */
+:root[data-performance-mode='reduced'] {
+  --glass-blur: 12px;
+  --glass-saturate: 140%;
+  --glass-sidebar-blur: 14px;
+  --glass-sidebar-saturate: 150%;
+  --chat-assistant-blur: 6px;
+  --chat-user-blur: 0px;
+  --glass-noise-opacity: 0;
+  --ambient-opacity: 0;
+  --content-bg-opacity: 1;
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --duration-slow: 220ms;
+  --duration-extended: 320ms;
+}
+
+:root[data-performance-mode='reduced'] .ambient-bg {
+  display: none;
+}
+
+:root[data-performance-mode='reduced'] .glass-noise::before,
+:root[data-performance-mode='reduced'] .glass-shimmer::after {
+  animation: none !important;
+  opacity: 0 !important;
+}
+
+:root[data-performance-mode='reduced'] .glass,
+:root[data-performance-mode='reduced'] .glass-card,
+:root[data-performance-mode='reduced'] .glass-subtle,
+:root[data-performance-mode='reduced'] .frosted-panel,
+:root[data-performance-mode='reduced'] .glass-header,
+:root[data-performance-mode='reduced'] .glass-dropdown,
+:root[data-performance-mode='reduced'] .glass-sidebar-inset,
+:root[data-performance-mode='reduced'] .glass-sidebar-panel,
+:root[data-performance-mode='reduced'] .glass-list-item,
+:root[data-performance-mode='reduced'] .glass-mode-card,
+:root[data-performance-mode='reduced'] .glass-env-card,
+:root[data-performance-mode='reduced'] .glass-select,
+:root[data-performance-mode='reduced'] .glass-chat-assistant,
+:root[data-performance-mode='reduced'] .glass-chat-user,
+:root[data-performance-mode='reduced'] .stat-card,
+:root[data-performance-mode='reduced'] .hero-gradient,
+:root[data-performance-mode='reduced'] .liquid-launch-btn:not(:disabled):not(.launched) {
+  backdrop-filter: blur(10px) saturate(130%) !important;
+  -webkit-backdrop-filter: blur(10px) saturate(130%) !important;
+}
+
+:root[data-performance-mode='reduced'] .page-transition-enter,
+:root[data-performance-mode='reduced'] .card-stagger,
+:root[data-performance-mode='reduced'] .status-running,
+:root[data-performance-mode='reduced'] .status-error,
+:root[data-performance-mode='reduced'] .glow-amber,
+:root[data-performance-mode='reduced'] .ripple-success,
+:root[data-performance-mode='reduced'] .chart-line,
+:root[data-performance-mode='reduced'] .chart-bar,
+:root[data-performance-mode='reduced'] .milestone-achieved,
+:root[data-performance-mode='reduced'] .heatmap-enter,
+:root[data-performance-mode='reduced'] .msg-enter,
+:root[data-performance-mode='reduced'] .animate-spin,
+:root[data-performance-mode='reduced'] .animate-ping,
+:root[data-performance-mode='reduced'] .animate-pulse {
+  animation: none !important;
+}
+
 /* === Card Remove Animation === */
 @keyframes card-remove {
   0% { opacity: 1; transform: scale(1); }

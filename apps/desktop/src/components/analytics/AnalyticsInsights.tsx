@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
+import { getPerformanceMode } from '@/lib/performance';
 import { TokenChart } from './TokenChart';
 import { ModelDistribution } from './ModelDistribution';
 import { DailyTokenBar } from './DailyTokenBar';
@@ -226,14 +227,16 @@ export const AnalyticsInsights = memo(function AnalyticsInsights({
 }: AnalyticsInsightsProps) {
   const { t, lang } = useLocale();
   const [granularity, setGranularity] = useState<TimeGranularity>('day');
-  const [animateTokenChart, setAnimateTokenChart] = useState(true);
+  const isReducedPerformanceMode = getPerformanceMode() === 'reduced';
+  const [animateTokenChart, setAnimateTokenChart] = useState(() => !isReducedPerformanceMode);
   const [loadedBreakdown, setLoadedBreakdown] = useState<LoadedModelBreakdown | null>(null);
   const breakdownRequestSeqRef = useRef(0);
   const [, startTransition] = useTransition();
   const dateLocale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const modelBreakdownEnabled = enableModelBreakdown && !isReducedPerformanceMode;
 
   useEffect(() => {
-    if (!enableModelBreakdown) {
+    if (!modelBreakdownEnabled) {
       setLoadedBreakdown(null);
       return;
     }
@@ -261,7 +264,7 @@ export const AnalyticsInsights = memo(function AnalyticsInsights({
         console.debug('Model breakdown not available for analytics tooltip:', error);
         setLoadedBreakdown(null);
       });
-  }, [enableModelBreakdown, granularity, usageSource, usageStats.lastUpdated]);
+  }, [granularity, modelBreakdownEnabled, usageSource, usageStats.lastUpdated]);
 
   const activeBreakdown = loadedBreakdown?.granularity === granularity
     && loadedBreakdown.source === usageSource
@@ -391,7 +394,7 @@ export const AnalyticsInsights = memo(function AnalyticsInsights({
                     if (granularity === key) {
                       return;
                     }
-                    setAnimateTokenChart(true);
+                    setAnimateTokenChart(!isReducedPerformanceMode);
                     startTransition(() => setGranularity(key));
                   }}
                   className={cn(
@@ -418,7 +421,11 @@ export const AnalyticsInsights = memo(function AnalyticsInsights({
         {chartData.length === 0 ? (
           <EmptyState icon={BarChart3} message={t('analytics.noDataYet')} />
         ) : (
-          <TokenChart data={chartData} seriesKeys={['Tokens']} animate={animateTokenChart} />
+          <TokenChart
+            data={chartData}
+            seriesKeys={['Tokens']}
+            animate={animateTokenChart && !isReducedPerformanceMode}
+          />
         )}
       </Card>
 

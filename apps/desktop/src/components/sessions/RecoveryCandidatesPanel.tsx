@@ -86,6 +86,10 @@ export function RecoveryCandidatesPanel() {
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+
       startRefreshTransition(() => {
         void refreshCandidates();
       });

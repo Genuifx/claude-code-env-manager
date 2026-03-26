@@ -5,13 +5,9 @@ import { ENV_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { AppLayout } from '@/components/layout';
 import { Dashboard } from '@/pages/Dashboard';
-import { Environments } from '@/pages/Environments';
-import { Sessions } from '@/pages/Sessions';
-import { Settings } from '@/pages/Settings';
 import { useAppStore, type Environment } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
-import { EnvironmentDialog } from '@/components/EnvironmentDialog';
 import { Toaster, toast } from 'sonner';
 import { LocaleProvider, useLocale } from '@/locales';
 import type { UsageStats } from '@/types/analytics';
@@ -21,11 +17,20 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 const AnalyticsPage = lazy(async () =>
   import('@/pages/Analytics').then((m) => ({ default: m.Analytics }))
 );
+const EnvironmentDialogComponent = lazy(async () =>
+  import('@/components/EnvironmentDialog').then((m) => ({ default: m.EnvironmentDialog }))
+);
+const EnvironmentsPage = lazy(async () =>
+  import('@/pages/Environments').then((m) => ({ default: m.Environments }))
+);
 const SkillsPage = lazy(async () =>
   import('@/pages/Skills').then((m) => ({ default: m.Skills }))
 );
 const HistoryPage = lazy(async () =>
   import('@/pages/History').then((m) => ({ default: m.History }))
+);
+const SessionsPage = lazy(async () =>
+  import('@/pages/Sessions').then((m) => ({ default: m.Sessions }))
 );
 const CronTasksPage = lazy(async () =>
   import('@/pages/CronTasks').then((m) => ({ default: m.CronTasks }))
@@ -36,10 +41,14 @@ const ProxyDebugPage = lazy(async () =>
 const ChatAppPage = lazy(async () =>
   import('@/pages/ChatApp').then((m) => ({ default: m.ChatApp }))
 );
+const SettingsPage = lazy(async () =>
+  import('@/pages/Settings').then((m) => ({ default: m.Settings }))
+);
 
 function App() {
   const FOCUS_SYNC_INTERVAL_MS = 5000;
   const FOCUS_SYNC_DELAY_MS = 180;
+  const perfAutopilotEnabled = import.meta.env.DEV && import.meta.env.VITE_PERF_AUTOPILOT === '1';
   const [activeTab, setActiveTab] = useState('dashboard');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<'add' | 'edit'>('add');
@@ -81,22 +90,51 @@ function App() {
     });
   }, []);
 
+  const preloadEnvironmentsPage = useCallback(() => {
+    void import('@/pages/Environments');
+  }, []);
+
   const preloadHistoryPage = useCallback(() => {
     void import('@/pages/History').then((module) => {
       module.primeHistoryPage?.();
     });
   }, []);
 
-  const prefetchTab = useCallback((tab: string) => {
-    if (tab === 'analytics') {
-      preloadAnalyticsPage();
-      return;
-    }
+  const preloadSessionsPage = useCallback(() => {
+    void import('@/pages/Sessions');
+  }, []);
 
-    if (tab === 'history') {
-      preloadHistoryPage();
+  const preloadSettingsPage = useCallback(() => {
+    void import('@/pages/Settings');
+  }, []);
+
+  const prefetchTab = useCallback((tab: string) => {
+    switch (tab) {
+      case 'analytics':
+        preloadAnalyticsPage();
+        return;
+      case 'environments':
+        preloadEnvironmentsPage();
+        return;
+      case 'history':
+        preloadHistoryPage();
+        return;
+      case 'sessions':
+        preloadSessionsPage();
+        return;
+      case 'settings':
+        preloadSettingsPage();
+        return;
+      default:
+        return;
     }
-  }, [preloadAnalyticsPage, preloadHistoryPage]);
+  }, [
+    preloadAnalyticsPage,
+    preloadEnvironmentsPage,
+    preloadHistoryPage,
+    preloadSessionsPage,
+    preloadSettingsPage,
+  ]);
 
   const navigateToTab = useCallback((tab: string) => {
     prefetchTab(tab);
@@ -104,6 +142,30 @@ function App() {
       setActiveTab(tab);
     });
   }, [prefetchTab, startTransition]);
+
+  useEffect(() => {
+    if (!perfAutopilotEnabled) {
+      return;
+    }
+
+    const sequence = [
+      { delayMs: 1200, tab: 'dashboard' },
+      { delayMs: 4200, tab: 'sessions' },
+      { delayMs: 7600, tab: 'history' },
+      { delayMs: 11000, tab: 'analytics' },
+      { delayMs: 14500, tab: 'dashboard' },
+    ] as const;
+
+    const timers = sequence.map(({ delayMs, tab }) => (
+      window.setTimeout(() => {
+        navigateToTab(tab);
+      }, delayMs)
+    ));
+
+    return () => {
+      timers.forEach((timerId) => window.clearTimeout(timerId));
+    };
+  }, [navigateToTab, perfAutopilotEnabled]);
 
   // Show global errors as toast notifications
   useEffect(() => {
@@ -236,39 +298,6 @@ function App() {
   useEffect(() => {
     refreshData();
   }, [refreshData]);
-
-  useEffect(() => {
-    let cancelled = false;
-    let timeoutId: number | null = null;
-    let idleId: number | null = null;
-    const requestIdle = window.requestIdleCallback?.bind(window);
-    const cancelIdle = window.cancelIdleCallback?.bind(window);
-
-    const preloadHeavyTabs = () => {
-      if (cancelled) {
-        return;
-      }
-
-      preloadAnalyticsPage();
-      preloadHistoryPage();
-    };
-
-    if (requestIdle) {
-      idleId = requestIdle(preloadHeavyTabs, { timeout: 1200 });
-    } else {
-      timeoutId = setTimeout(preloadHeavyTabs, 500);
-    }
-
-    return () => {
-      cancelled = true;
-      if (idleId !== null && cancelIdle) {
-        cancelIdle(idleId);
-      }
-      if (timeoutId !== null) {
-        clearTimeout(timeoutId);
-      }
-    };
-  }, [preloadAnalyticsPage, preloadHistoryPage]);
 
   // Re-sync with CLI config when window regains focus
   // This ensures desktop stays in sync when user modifies env via `ccem add/del/use` in terminal
@@ -436,17 +465,17 @@ function App() {
     switch (activeTab) {
       case 'dashboard':
         return (
-            <Dashboard
+          <Dashboard
             onNavigate={navigateToTab}
             onLaunch={handleLaunch}
             onLaunchWithDir={handleLaunchWithDir}
           />
         );
       case 'sessions':
-        return <Sessions onLaunch={handleLaunch} onLaunchWithDir={handleLaunchWithDir} />;
+        return <SessionsPage onLaunch={handleLaunch} onLaunchWithDir={handleLaunchWithDir} />;
       case 'environments':
         return (
-          <Environments
+          <EnvironmentsPage
             onAddEnv={handleAddEnv}
             onEditEnv={handleEditEnv}
             onDeleteEnv={handleDeleteEnv}
@@ -465,7 +494,7 @@ function App() {
       case 'proxy-debug':
         return <ProxyDebugPage />;
       case 'settings':
-        return <Settings />;
+        return <SettingsPage />;
       default:
         return <Dashboard onNavigate={navigateToTab} onLaunch={handleLaunch} onLaunchWithDir={handleLaunchWithDir} />;
     }
@@ -486,14 +515,18 @@ function App() {
         </AppLayout>
 
         {/* Environment Dialog */}
-        <EnvironmentDialog
-          open={dialogOpen}
-          onOpenChange={setDialogOpen}
-          mode={dialogMode}
-          environment={getEditingEnv()}
-          onSave={handleSaveEnv}
-          onServerSync={loadFromRemote}
-        />
+        {dialogOpen ? (
+          <Suspense fallback={null}>
+            <EnvironmentDialogComponent
+              open={dialogOpen}
+              onOpenChange={setDialogOpen}
+              mode={dialogMode}
+              environment={getEditingEnv()}
+              onSave={handleSaveEnv}
+              onServerSync={loadFromRemote}
+            />
+          </Suspense>
+        ) : null}
 
         {/* Delete Environment Confirmation Dialog */}
         {pendingDeleteEnv && (

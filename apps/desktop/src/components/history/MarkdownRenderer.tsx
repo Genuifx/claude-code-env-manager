@@ -1,23 +1,10 @@
-import { useCallback, useState } from 'react';
+import { Suspense, lazy, useCallback, useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import bash from 'react-syntax-highlighter/dist/esm/languages/prism/bash';
-import diff from 'react-syntax-highlighter/dist/esm/languages/prism/diff';
-import go from 'react-syntax-highlighter/dist/esm/languages/prism/go';
-import javascript from 'react-syntax-highlighter/dist/esm/languages/prism/javascript';
-import json from 'react-syntax-highlighter/dist/esm/languages/prism/json';
-import markdown from 'react-syntax-highlighter/dist/esm/languages/prism/markdown';
-import python from 'react-syntax-highlighter/dist/esm/languages/prism/python';
-import rust from 'react-syntax-highlighter/dist/esm/languages/prism/rust';
-import sql from 'react-syntax-highlighter/dist/esm/languages/prism/sql';
-import tsx from 'react-syntax-highlighter/dist/esm/languages/prism/tsx';
-import typescript from 'react-syntax-highlighter/dist/esm/languages/prism/typescript';
-import yaml from 'react-syntax-highlighter/dist/esm/languages/prism/yaml';
 import { Check, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
+import { getPerformanceMode } from '@/lib/performance';
 
 interface MarkdownRendererProps {
   content: string;
@@ -25,32 +12,108 @@ interface MarkdownRendererProps {
   /** "user" adapts colors for the blue user bubble background */
   variant?: 'default' | 'user';
 }
-const REGISTERED_LANGUAGES: Array<[string, unknown]> = [
-  ['bash', bash],
-  ['sh', bash],
-  ['shell', bash],
-  ['diff', diff],
-  ['go', go],
-  ['javascript', javascript],
-  ['js', javascript],
-  ['json', json],
-  ['markdown', markdown],
-  ['md', markdown],
-  ['python', python],
-  ['py', python],
-  ['rust', rust],
-  ['rs', rust],
-  ['sql', sql],
-  ['typescript', typescript],
-  ['ts', typescript],
-  ['tsx', tsx],
-  ['yaml', yaml],
-  ['yml', yaml],
-];
-
-for (const [name, language] of REGISTERED_LANGUAGES) {
-  SyntaxHighlighter.registerLanguage(name, language as never);
+interface CodeHighlighterProps {
+  code: string;
+  language: string;
 }
+
+let syntaxLanguagesRegistered = false;
+
+const LazyCodeHighlighter = lazy(async () => {
+  const [
+    { default: SyntaxHighlighter },
+    { default: oneDark },
+    { default: bash },
+    { default: diff },
+    { default: go },
+    { default: javascript },
+    { default: json },
+    { default: markdown },
+    { default: python },
+    { default: rust },
+    { default: sql },
+    { default: tsx },
+    { default: typescript },
+    { default: yaml },
+  ] = await Promise.all([
+    import('react-syntax-highlighter/dist/esm/prism-light'),
+    import('react-syntax-highlighter/dist/esm/styles/prism/one-dark'),
+    import('react-syntax-highlighter/dist/esm/languages/prism/bash'),
+    import('react-syntax-highlighter/dist/esm/languages/prism/diff'),
+    import('react-syntax-highlighter/dist/esm/languages/prism/go'),
+    import('react-syntax-highlighter/dist/esm/languages/prism/javascript'),
+    import('react-syntax-highlighter/dist/esm/languages/prism/json'),
+    import('react-syntax-highlighter/dist/esm/languages/prism/markdown'),
+    import('react-syntax-highlighter/dist/esm/languages/prism/python'),
+    import('react-syntax-highlighter/dist/esm/languages/prism/rust'),
+    import('react-syntax-highlighter/dist/esm/languages/prism/sql'),
+    import('react-syntax-highlighter/dist/esm/languages/prism/tsx'),
+    import('react-syntax-highlighter/dist/esm/languages/prism/typescript'),
+    import('react-syntax-highlighter/dist/esm/languages/prism/yaml'),
+  ]);
+
+  if (!syntaxLanguagesRegistered) {
+    const registeredLanguages: Array<[string, unknown]> = [
+      ['bash', bash],
+      ['sh', bash],
+      ['shell', bash],
+      ['diff', diff],
+      ['go', go],
+      ['javascript', javascript],
+      ['js', javascript],
+      ['json', json],
+      ['markdown', markdown],
+      ['md', markdown],
+      ['python', python],
+      ['py', python],
+      ['rust', rust],
+      ['rs', rust],
+      ['sql', sql],
+      ['typescript', typescript],
+      ['ts', typescript],
+      ['tsx', tsx],
+      ['yaml', yaml],
+      ['yml', yaml],
+    ];
+
+    for (const [name, language] of registeredLanguages) {
+      SyntaxHighlighter.registerLanguage(name, language as never);
+    }
+
+    syntaxLanguagesRegistered = true;
+  }
+
+  const codeTheme = {
+    ...oneDark,
+    'pre[class*="language-"]': {
+      ...oneDark['pre[class*="language-"]'],
+      background: 'transparent',
+      margin: 0,
+      padding: '0.75rem 1rem',
+      fontSize: '12px',
+      lineHeight: '1.6',
+    },
+    'code[class*="language-"]': {
+      ...oneDark['code[class*="language-"]'],
+      background: 'transparent',
+      fontSize: '12px',
+    },
+  };
+
+  function CodeHighlighter({ code, language }: CodeHighlighterProps) {
+    return (
+      <SyntaxHighlighter
+        style={codeTheme}
+        language={language}
+        PreTag="div"
+      >
+        {code}
+      </SyntaxHighlighter>
+    );
+  }
+
+  return { default: CodeHighlighter };
+});
 
 function CopyButton({ text, dark = false }: { text: string; dark?: boolean }) {
   const { t } = useLocale();
@@ -88,26 +151,39 @@ function CopyButton({ text, dark = false }: { text: string; dark?: boolean }) {
   );
 }
 
-// Custom style overrides to make oneDark blend with glass
-const codeTheme = {
-  ...oneDark,
-  'pre[class*="language-"]': {
-    ...oneDark['pre[class*="language-"]'],
-    background: 'transparent',
-    margin: 0,
-    padding: '0.75rem 1rem',
-    fontSize: '12px',
-    lineHeight: '1.6',
-  },
-  'code[class*="language-"]': {
-    ...oneDark['code[class*="language-"]'],
-    background: 'transparent',
-    fontSize: '12px',
-  },
-};
+function PlainCodeBlock({ code }: { code: string }) {
+  return (
+    <pre className="overflow-x-auto px-4 py-3 text-[12px] leading-[1.6] text-white/85">
+      <code>{code}</code>
+    </pre>
+  );
+}
+
+function CodeBlockFrame({
+  language,
+  code,
+  children,
+}: {
+  language: string;
+  code: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="my-2 overflow-hidden rounded-lg border border-[#1e1e2e]/50 bg-[#1e1e2e]">
+      <div className="flex items-center justify-between border-b border-white/[0.06] px-3 py-1.5">
+        <span className="text-[10px] font-mono uppercase tracking-wider text-white/30">
+          {language}
+        </span>
+        <CopyButton text={code} dark />
+      </div>
+      {children}
+    </div>
+  );
+}
 
 export function MarkdownRenderer({ content, className, variant = 'default' }: MarkdownRendererProps) {
   const isUser = variant === 'user';
+  const shouldReduceCodeRendering = getPerformanceMode() === 'reduced';
   return (
     <div className={cn('markdown-content', className)}>
       <Markdown
@@ -183,27 +259,20 @@ export function MarkdownRenderer({ content, className, variant = 'default' }: Ma
           code: ({ className: codeClassName, children, node }) => {
             const match = /language-(\w+)/.exec(codeClassName || '');
             const codeString = String(children).replace(/\n$/, '');
-            // Fenced code block: has language class
-            const isBlock = node?.position && match || codeClassName;
+            const isBlock = Boolean((node?.position && match) || codeClassName);
 
             if (isBlock) {
               const language = match?.[1] || 'text';
               return (
-                <div className="my-2 rounded-lg overflow-hidden bg-[#1e1e2e] border border-[#1e1e2e]/50">
-                  <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/[0.06]">
-                    <span className="text-[10px] text-white/30 font-mono uppercase tracking-wider">
-                      {language}
-                    </span>
-                    <CopyButton text={codeString} dark />
-                  </div>
-                  <SyntaxHighlighter
-                    style={codeTheme}
-                    language={language}
-                    PreTag="div"
-                  >
-                    {codeString}
-                  </SyntaxHighlighter>
-                </div>
+                <CodeBlockFrame language={language} code={codeString}>
+                  {shouldReduceCodeRendering ? (
+                    <PlainCodeBlock code={codeString} />
+                  ) : (
+                    <Suspense fallback={<PlainCodeBlock code={codeString} />}>
+                      <LazyCodeHighlighter code={codeString} language={language} />
+                    </Suspense>
+                  )}
+                </CodeBlockFrame>
               );
             }
 
