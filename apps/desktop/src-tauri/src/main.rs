@@ -69,7 +69,7 @@ use weixin::{WeixinBridgeManager, WeixinBridgeStatus, WeixinLoginSession, Weixin
 
 /// Global flag: when true, CloseRequested should NOT be intercepted.
 static FORCE_QUIT: AtomicBool = AtomicBool::new(false);
-use tauri::{Manager, RunEvent, State, WindowEvent};
+use tauri::{window::Color, Manager, RunEvent, State, WindowEvent};
 use terminal::{
     ArrangeLayout, ArrangeSessionInfo, TerminalInfo, TerminalType, TmuxAttachTerminalInfo,
     TmuxAttachTerminalType,
@@ -87,6 +87,47 @@ struct LoadedEnv {
 struct LoadResult {
     count: usize,
     environments: Vec<LoadedEnv>,
+}
+
+#[cfg(target_os = "macos")]
+fn should_use_reduced_window_effects(settings: &DesktopSettings) -> bool {
+    settings.performance_mode == "reduced"
+        || matches!(
+            std::env::var("VITE_PERF_MODE").ok().as_deref(),
+            Some("reduced")
+        )
+}
+
+#[cfg(target_os = "macos")]
+fn reduced_window_background_color(settings: &DesktopSettings) -> Color {
+    match settings.theme.as_str() {
+        "light" => Color(242, 245, 249, 255),
+        _ => Color(22, 24, 29, 255),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn sync_macos_window_appearance(
+    main_window: &tauri::WebviewWindow,
+    settings: &DesktopSettings,
+) -> Result<(), String> {
+    use tauri_plugin_decorum::WebviewWindowExt;
+    use window_vibrancy::{apply_vibrancy, clear_vibrancy, NSVisualEffectMaterial};
+
+    let _ = clear_vibrancy(main_window);
+
+    if should_use_reduced_window_effects(settings) {
+        let _ = main_window.set_background_color(Some(reduced_window_background_color(settings)));
+        return Ok(());
+    }
+
+    let _ = main_window.set_background_color(None);
+    main_window
+        .make_transparent()
+        .map_err(|error| format!("Failed to enable window transparency: {}", error))?;
+    apply_vibrancy(main_window, NSVisualEffectMaterial::Sidebar, None, None)
+        .map_err(|error| format!("Failed to apply vibrancy: {}", error))?;
+    Ok(())
 }
 
 fn generate_session_id() -> String {
@@ -1780,6 +1821,15 @@ fn save_settings(app: tauri::AppHandle, settings: DesktopSettings) -> Result<(),
     merged_settings.ai_env_name = settings.ai_env_name;
     config::write_settings(&merged_settings)?;
 
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(main_window) = app.get_webview_window("main") {
+            if let Err(error) = sync_macos_window_appearance(&main_window, &merged_settings) {
+                errors.push(format!("window appearance: {}", error));
+            }
+        }
+    }
+
     if errors.is_empty() {
         Ok(())
     } else {
@@ -2426,13 +2476,9 @@ fn main() {
                 main_window.create_overlay_titlebar().unwrap();
                 // Position traffic lights — offset to align inside the inset sidebar panel
                 main_window.set_traffic_lights_inset(24.0, 28.0).unwrap();
-                // Make window transparent so vibrancy can show through
-                main_window.make_transparent().unwrap();
-
-                // Apply sidebar vibrancy — real NSVisualEffectView
-                use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
-                apply_vibrancy(&main_window, NSVisualEffectMaterial::Sidebar, None, None)
-                    .expect("Failed to apply vibrancy");
+                if let Err(error) = sync_macos_window_appearance(&main_window, &startup_settings) {
+                    eprintln!("Window appearance warning: {}", error);
+                }
             }
 
             // startMinimized: hide window immediately after setup (platform-independent)

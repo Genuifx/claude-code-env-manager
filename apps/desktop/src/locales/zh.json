@@ -597,6 +597,7 @@
     "totalSessions": "{count} 个会话",
     "selectConversation": "选择一个会话查看详情",
     "noMessages": "此会话没有消息记录",
+    "loadingMessages": "正在分批渲染更多消息...",
     "thinking": "思考过程",
     "toolSuccess": "工具执行成功",
     "toolError": "工具执行失败",

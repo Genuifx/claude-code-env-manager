@@ -11,6 +11,7 @@ interface SessionListProps {
   terminalOptions?: TmuxAttachTerminalInfo[];
   selectedEmbeddedSessionId?: string | null;
   onSelectEmbedded?: (id: string) => void;
+  onMenuIntent?: () => void;
   onFocus: (id: string) => void;
   onOpenInTerminal: (id: string, terminalType?: TmuxAttachTerminalType) => void;
   onMinimize: (id: string) => void;
@@ -25,6 +26,7 @@ export function SessionList({
   terminalOptions,
   selectedEmbeddedSessionId,
   onSelectEmbedded,
+  onMenuIntent,
   onFocus,
   onOpenInTerminal,
   onMinimize,
@@ -172,6 +174,7 @@ export function SessionList({
                     terminals={terminalOptions}
                     disabled={session.status !== 'running'}
                     className="glass-btn-outline justify-between"
+                    onMenuIntent={onMenuIntent}
                     onOpenInTerminal={onOpenInTerminal}
                   />
                 ) : (

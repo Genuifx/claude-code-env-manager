@@ -288,14 +288,22 @@ impl SessionManager {
     /// - Checks running sessions against live terminal windows
     /// - Marks orphaned sessions as stopped or interrupted
     pub fn validate_and_reconcile(&self) {
+        let has_running_sessions = {
+            let mut sessions = self.sessions.lock().unwrap();
+            sessions.retain(|s| s.status == "running");
+            !sessions.is_empty()
+        };
+
+        if !has_running_sessions {
+            self.save_to_disk();
+            return;
+        }
+
         let active_iterm_sessions = terminal::list_iterm_sessions();
         let active_terminal_windows = terminal::list_terminal_app_windows();
 
         {
             let mut sessions = self.sessions.lock().unwrap();
-
-            // Remove already-finished sessions from previous run
-            sessions.retain(|s| s.status == "running");
 
             // Validate each remaining running session
             for session in sessions.iter_mut() {

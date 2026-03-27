@@ -1,14 +1,11 @@
 import { invoke } from '@tauri-apps/api/core';
-import { memo, useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { Suspense, lazy, memo, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { BarChart3, DollarSign, Flame, RefreshCw } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { getPerformanceMode } from '@/lib/performance';
-import { TokenChart } from './TokenChart';
-import { ModelDistribution } from './ModelDistribution';
-import { DailyTokenBar } from './DailyTokenBar';
 import type {
   ChartDataPoint,
   Milestone,
@@ -45,6 +42,18 @@ interface AnalyticsInsightsProps {
   isRefreshing: boolean;
   onRefresh: () => void | Promise<void>;
 }
+
+const LazyTokenChart = lazy(async () =>
+  import('./TokenChart').then((module) => ({ default: module.TokenChart }))
+);
+
+const LazyModelDistribution = lazy(async () =>
+  import('./ModelDistribution').then((module) => ({ default: module.ModelDistribution }))
+);
+
+const LazyDailyTokenBar = lazy(async () =>
+  import('./DailyTokenBar').then((module) => ({ default: module.DailyTokenBar }))
+);
 
 function sumTokens(usage: TokenUsageWithCost): number {
   return usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
@@ -217,6 +226,10 @@ function NextMilestone({ milestones }: { milestones: Milestone[] }) {
   );
 }
 
+function ChartSkeleton({ heightClass }: { heightClass: string }) {
+  return <div className={cn('animate-pulse rounded-2xl bg-muted', heightClass)} />;
+}
+
 export const AnalyticsInsights = memo(function AnalyticsInsights({
   usageStats,
   usageSource,
@@ -228,15 +241,17 @@ export const AnalyticsInsights = memo(function AnalyticsInsights({
   const { t, lang } = useLocale();
   const [granularity, setGranularity] = useState<TimeGranularity>('day');
   const isReducedPerformanceMode = getPerformanceMode() === 'reduced';
-  const [animateTokenChart, setAnimateTokenChart] = useState(() => !isReducedPerformanceMode);
+  const [animateTokenChart, setAnimateTokenChart] = useState(true);
   const [loadedBreakdown, setLoadedBreakdown] = useState<LoadedModelBreakdown | null>(null);
   const breakdownRequestSeqRef = useRef(0);
   const [, startTransition] = useTransition();
   const dateLocale = lang === 'zh' ? 'zh-CN' : 'en-US';
-  const modelBreakdownEnabled = enableModelBreakdown && !isReducedPerformanceMode;
+  const modelBreakdownEnabled = enableModelBreakdown;
+  const [showPrimaryChart, setShowPrimaryChart] = useState(() => !isReducedPerformanceMode);
+  const [showSecondaryCharts, setShowSecondaryCharts] = useState(false);
 
   useEffect(() => {
-    if (!modelBreakdownEnabled) {
+    if (!modelBreakdownEnabled || !showPrimaryChart) {
       setLoadedBreakdown(null);
       return;
     }
@@ -264,7 +279,44 @@ export const AnalyticsInsights = memo(function AnalyticsInsights({
         console.debug('Model breakdown not available for analytics tooltip:', error);
         setLoadedBreakdown(null);
       });
-  }, [granularity, modelBreakdownEnabled, usageSource, usageStats.lastUpdated]);
+  }, [granularity, modelBreakdownEnabled, showPrimaryChart, usageSource, usageStats.lastUpdated]);
+
+  useEffect(() => {
+    if (!isReducedPerformanceMode) {
+      setShowPrimaryChart(true);
+      return;
+    }
+
+    setShowPrimaryChart(false);
+    const revealPrimaryChart = () => {
+      startTransition(() => setShowPrimaryChart(true));
+    };
+    const scheduleIdle = window.requestIdleCallback?.bind(window);
+    const cancelIdle = window.cancelIdleCallback?.bind(window);
+
+    if (scheduleIdle && cancelIdle) {
+      const idleId = scheduleIdle(revealPrimaryChart, { timeout: 300 });
+      return () => {
+        cancelIdle(idleId);
+      };
+    }
+
+    const timeoutId = globalThis.setTimeout(revealPrimaryChart, 180);
+    return () => {
+      globalThis.clearTimeout(timeoutId);
+    };
+  }, [granularity, isReducedPerformanceMode, startTransition, usageSource, usageStats.lastUpdated]);
+
+  useEffect(() => {
+    setShowSecondaryCharts(false);
+    const timeoutId = window.setTimeout(() => {
+      setShowSecondaryCharts(true);
+    }, isReducedPerformanceMode ? 650 : 200);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isReducedPerformanceMode, usageSource, usageStats.lastUpdated]);
 
   const activeBreakdown = loadedBreakdown?.granularity === granularity
     && loadedBreakdown.source === usageSource
@@ -376,6 +428,9 @@ export const AnalyticsInsights = memo(function AnalyticsInsights({
     { key: 'week', label: t('analytics.week') },
     { key: 'month', label: t('analytics.month') },
   ], [t]);
+  const deferredChartData = useDeferredValue(chartData);
+  const deferredByModel = useDeferredValue(usageStats.byModel);
+  const deferredDailyHistory = useDeferredValue(usageStats.dailyHistory);
 
   return (
     <>
@@ -394,7 +449,7 @@ export const AnalyticsInsights = memo(function AnalyticsInsights({
                     if (granularity === key) {
                       return;
                     }
-                    setAnimateTokenChart(!isReducedPerformanceMode);
+                    setAnimateTokenChart(true);
                     startTransition(() => setGranularity(key));
                   }}
                   className={cn(
@@ -420,12 +475,16 @@ export const AnalyticsInsights = memo(function AnalyticsInsights({
         </div>
         {chartData.length === 0 ? (
           <EmptyState icon={BarChart3} message={t('analytics.noDataYet')} />
+        ) : !showPrimaryChart ? (
+          <ChartSkeleton heightClass="h-[300px]" />
         ) : (
-          <TokenChart
-            data={chartData}
-            seriesKeys={['Tokens']}
-            animate={animateTokenChart && !isReducedPerformanceMode}
-          />
+          <Suspense fallback={<ChartSkeleton heightClass="h-[300px]" />}>
+            <LazyTokenChart
+              data={deferredChartData}
+              seriesKeys={['Tokens']}
+              animate={animateTokenChart}
+            />
+          </Suspense>
         )}
       </Card>
 
@@ -434,14 +493,26 @@ export const AnalyticsInsights = memo(function AnalyticsInsights({
           <h3 className="mb-4 text-lg font-semibold text-foreground">
             {t('analytics.modelDistribution')}
           </h3>
-          <ModelDistribution byModel={usageStats.byModel} />
+          {showSecondaryCharts ? (
+            <Suspense fallback={<ChartSkeleton heightClass="h-[160px]" />}>
+              <LazyModelDistribution byModel={deferredByModel} />
+            </Suspense>
+          ) : (
+            <ChartSkeleton heightClass="h-[160px]" />
+          )}
         </Card>
 
         <Card className="p-4">
           <h3 className="mb-4 text-lg font-semibold text-foreground">
             {t('analytics.dailyTokens')}
           </h3>
-          <DailyTokenBar dailyHistory={usageStats.dailyHistory} />
+          {showSecondaryCharts ? (
+            <Suspense fallback={<ChartSkeleton heightClass="h-[200px]" />}>
+              <LazyDailyTokenBar dailyHistory={deferredDailyHistory} />
+            </Suspense>
+          ) : (
+            <ChartSkeleton heightClass="h-[200px]" />
+          )}
         </Card>
       </div>
 

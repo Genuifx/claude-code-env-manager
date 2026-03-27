@@ -1,5 +1,5 @@
 // apps/desktop/src/components/sessions/SessionCard.tsx
-import { useEffect, useRef, useState, type ElementType } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState, type ElementType } from 'react';
 import {
   Check,
   Clock,
@@ -29,7 +29,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { BindToChatDialog } from '@/components/chat/BindToChatDialog';
 import { getRemotePlatformFromChannel, getRemotePlatformMeta } from '@/lib/remote-platforms';
 import { copyBindCommand } from '@/lib/telegram-utils';
 import { cn } from '@/lib/utils';
@@ -39,12 +38,19 @@ import type { Session, UnifiedSession, ChannelInfo } from '@/store';
 import { OpenInTerminalPopoverButton } from './OpenInTerminalPopoverButton';
 import { ModelIcon } from '../history/ModelIcon';
 
+const LazyBindToChatDialog = lazy(async () =>
+  import('@/components/chat/BindToChatDialog').then((module) => ({
+    default: module.BindToChatDialog,
+  }))
+);
+
 interface SessionCardProps {
   session: Session;
   unifiedSession?: UnifiedSession;
   terminalOptions?: TmuxAttachTerminalInfo[];
   selectedEmbedded?: boolean;
   onSelectEmbedded?: (id: string) => void;
+  onMenuIntent?: () => void;
   onFocus: (id: string) => void;
   onOpenInTerminal: (id: string, terminalType?: TmuxAttachTerminalType) => void;
   onMinimize: (id: string) => void;
@@ -152,6 +158,7 @@ export function SessionCard({
   terminalOptions,
   selectedEmbedded,
   onSelectEmbedded,
+  onMenuIntent,
   onFocus: _onFocus,
   onOpenInTerminal,
   onMinimize,
@@ -370,13 +377,14 @@ export function SessionCard({
       return (
         <div className="flex items-center justify-between w-full py-1" onClick={(event) => event.stopPropagation()}>
           <div className="flex items-center gap-1">
-            <OpenInTerminalPopoverButton
-              sessionId={sessionId}
-              terminals={terminalOptions}
-              disabled={!isRunning}
-              className="h-9 px-3 rounded-lg glass-btn-outline"
-              onOpenInTerminal={onOpenInTerminal}
-            />
+          <OpenInTerminalPopoverButton
+            sessionId={sessionId}
+            terminals={terminalOptions}
+            disabled={!isRunning}
+            className="h-9 px-3 rounded-lg glass-btn-outline"
+            onMenuIntent={onMenuIntent}
+            onOpenInTerminal={onOpenInTerminal}
+          />
           </div>
           <div className="flex items-center gap-0.5">
             <SessionMoreActionsDropdown
@@ -403,6 +411,7 @@ export function SessionCard({
             disabled={!isRunning}
             className="h-9 px-3 rounded-lg glass-btn-outline"
             label={t('sessions.focus')}
+            onMenuIntent={onMenuIntent}
             onOpenInTerminal={onOpenInTerminal}
           />
         </div>
@@ -561,13 +570,17 @@ export function SessionCard({
           </div>
         </div>
 
-        <BindToChatDialog
-          open={bindDialogOpen}
-          onOpenChange={setBindDialogOpen}
-          initialProjectDir={projectDir}
-          initialEnvName={envName}
-          initialPermMode={permMode}
-        />
+        {bindDialogOpen ? (
+          <Suspense fallback={null}>
+            <LazyBindToChatDialog
+              open={bindDialogOpen}
+              onOpenChange={setBindDialogOpen}
+              initialProjectDir={projectDir}
+              initialEnvName={envName}
+              initialPermMode={permMode}
+            />
+          </Suspense>
+        ) : null}
       </>
     </TooltipProvider>
   );

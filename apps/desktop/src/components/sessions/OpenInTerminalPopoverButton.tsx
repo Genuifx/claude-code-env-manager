@@ -25,6 +25,7 @@ interface OpenInTerminalPopoverButtonProps {
   className?: string;
   align?: 'start' | 'center' | 'end';
   label?: string;
+  onMenuIntent?: () => void;
   onOpenInTerminal: (sessionId: string, terminalType?: TmuxAttachTerminalType) => Promise<void> | void;
 }
 
@@ -35,6 +36,7 @@ export function OpenInTerminalPopoverButton({
   className,
   align = 'end',
   label,
+  onMenuIntent,
   onOpenInTerminal,
 }: OpenInTerminalPopoverButtonProps) {
   const { t } = useLocale();
@@ -60,6 +62,7 @@ export function OpenInTerminalPopoverButton({
 
   const handlePointerEnter = () => {
     clearCloseTimer();
+    onMenuIntent?.();
     setOpen(true);
   };
 
@@ -80,13 +83,22 @@ export function OpenInTerminalPopoverButton({
   const triggerDisabled = disabled || !sessionId;
 
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
+    <Popover.Root
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen) {
+          onMenuIntent?.();
+        }
+        setOpen(nextOpen);
+      }}
+    >
       <Popover.Trigger asChild>
         <Button
           size="sm"
           variant="ghost"
           disabled={triggerDisabled}
           className={cn('h-9 gap-1.5 px-3', className)}
+          onPointerDown={onMenuIntent}
           onMouseEnter={handlePointerEnter}
           onMouseLeave={handlePointerLeave}
           onFocus={handlePointerEnter}

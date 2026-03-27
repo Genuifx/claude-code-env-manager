@@ -95,6 +95,9 @@
     --glass-inset-opacity: 0.12;
     --glass-shadow-base: 222 60% 3%;
     --glass-noise-opacity: 0.035;
+    --glass-rim-opacity: 0.15;
+    --glass-sheen-opacity: 0.1;
+    --glass-caustic-opacity: 0.12;
     /* Ambient orb colors for depth */
     --ambient-1: 211 90% 55%;
     --ambient-2: 260 70% 50%;
@@ -201,6 +204,9 @@
     --glass-inset-opacity: 0.9;
     --glass-shadow-base: 222 15% 20%;
     --glass-noise-opacity: 0.03;
+    --glass-rim-opacity: 0.5;
+    --glass-sheen-opacity: 0.22;
+    --glass-caustic-opacity: 0.18;
     --ambient-1: 211 100% 68%;
     --ambient-2: 270 80% 72%;
     --ambient-3: 170 75% 58%;
@@ -381,6 +387,48 @@
   pointer-events: none;
   z-index: 1;
   mix-blend-mode: overlay;
+}
+
+.app-content-shell {
+  background:
+    linear-gradient(
+      180deg,
+      hsl(var(--glass-border-light) / 0.05) 0%,
+      transparent 18%,
+      transparent 100%
+    ),
+    radial-gradient(
+      130% 110% at 6% 0%,
+      hsl(var(--ambient-1) / calc(var(--ambient-opacity) * 0.35)) 0%,
+      transparent 48%
+    ),
+    radial-gradient(
+      120% 120% at 100% 100%,
+      hsl(var(--ambient-2) / calc(var(--ambient-opacity) * 0.26)) 0%,
+      transparent 46%
+    ),
+    hsl(var(--background) / var(--content-bg-opacity, 1));
+}
+
+.light .app-content-shell {
+  background:
+    linear-gradient(
+      180deg,
+      hsl(var(--glass-border-light) / 0.35) 0%,
+      transparent 18%,
+      transparent 100%
+    ),
+    radial-gradient(
+      130% 110% at 6% 0%,
+      hsl(var(--ambient-1) / calc(var(--ambient-opacity) * 0.24)) 0%,
+      transparent 50%
+    ),
+    radial-gradient(
+      120% 120% at 100% 100%,
+      hsl(var(--ambient-2) / calc(var(--ambient-opacity) * 0.18)) 0%,
+      transparent 48%
+    ),
+    hsl(var(--background) / var(--content-bg-opacity, 1));
 }
 
 /* === Page Transition === */
@@ -578,7 +626,29 @@
 /* --- Base Glass --- */
 .glass {
   position: relative;
-  background: hsl(var(--glass-bg) / var(--glass-bg-opacity));
+  background:
+    linear-gradient(
+      180deg,
+      hsl(var(--glass-border-light) / var(--glass-rim-opacity)) 0%,
+      transparent 18%,
+      transparent 100%
+    ),
+    radial-gradient(
+      120% 110% at 0% 0%,
+      hsl(var(--primary) / var(--glass-caustic-opacity)) 0%,
+      transparent 46%
+    ),
+    radial-gradient(
+      110% 90% at 100% 0%,
+      hsl(var(--ambient-2) / calc(var(--glass-caustic-opacity) * 0.78)) 0%,
+      transparent 40%
+    ),
+    linear-gradient(
+      155deg,
+      hsl(var(--glass-border-light) / var(--glass-sheen-opacity)) 0%,
+      transparent 32%
+    ),
+    hsl(var(--glass-bg) / var(--glass-bg-opacity));
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
@@ -600,7 +670,24 @@
 /* --- Sidebar Glass Inset (rounded floating panel — macOS Sequoia style) --- */
 .glass-sidebar-inset {
   position: relative;
-  background: hsl(var(--glass-sidebar-bg) / var(--glass-sidebar-opacity));
+  background:
+    linear-gradient(
+      180deg,
+      hsl(var(--glass-border-light) / calc(var(--glass-rim-opacity) + 0.02)) 0%,
+      transparent 18%,
+      transparent 100%
+    ),
+    radial-gradient(
+      120% 120% at 0% 0%,
+      hsl(var(--primary) / calc(var(--glass-caustic-opacity) * 0.85)) 0%,
+      transparent 42%
+    ),
+    linear-gradient(
+      150deg,
+      hsl(var(--glass-border-light) / calc(var(--glass-sheen-opacity) + 0.02)) 0%,
+      transparent 34%
+    ),
+    hsl(var(--glass-sidebar-bg) / var(--glass-sidebar-opacity));
   backdrop-filter: blur(var(--glass-sidebar-blur)) saturate(var(--glass-sidebar-saturate));
   -webkit-backdrop-filter: blur(var(--glass-sidebar-blur)) saturate(var(--glass-sidebar-saturate));
   border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
@@ -615,7 +702,24 @@
    subtle tinted background, white border edges, inset highlight, and soft shadow. */
 .glass-sidebar-panel {
   position: relative;
-  background: hsl(var(--glass-sidebar-bg) / 0.28);
+  background:
+    linear-gradient(
+      180deg,
+      hsl(var(--glass-border-light) / calc(var(--glass-rim-opacity) + 0.02)) 0%,
+      transparent 20%,
+      transparent 100%
+    ),
+    radial-gradient(
+      140% 120% at 0% 0%,
+      hsl(var(--primary) / calc(var(--glass-caustic-opacity) * 0.72)) 0%,
+      transparent 42%
+    ),
+    linear-gradient(
+      150deg,
+      hsl(var(--glass-border-light) / calc(var(--glass-sheen-opacity) + 0.02)) 0%,
+      transparent 36%
+    ),
+    hsl(var(--glass-sidebar-bg) / 0.28);
   backdrop-filter: blur(var(--glass-sidebar-blur)) saturate(var(--glass-sidebar-saturate));
   -webkit-backdrop-filter: blur(var(--glass-sidebar-blur)) saturate(var(--glass-sidebar-saturate));
   border: 1px solid hsl(var(--glass-border-light) / calc(var(--glass-border-opacity) + 0.04));
@@ -626,14 +730,48 @@
     0 8px 32px hsl(var(--glass-shadow-base) / 0.08);
 }
 .light .glass-sidebar-panel {
-  background: hsl(var(--glass-sidebar-bg) / 0.22);
+  background:
+    linear-gradient(
+      180deg,
+      hsl(var(--glass-border-light) / 0.65) 0%,
+      transparent 18%,
+      transparent 100%
+    ),
+    radial-gradient(
+      140% 120% at 0% 0%,
+      hsl(var(--primary) / 0.09) 0%,
+      transparent 44%
+    ),
+    linear-gradient(
+      150deg,
+      hsl(var(--glass-border-light) / 0.2) 0%,
+      transparent 36%
+    ),
+    hsl(var(--glass-sidebar-bg) / 0.22);
   border-color: hsl(var(--glass-border-light) / calc(var(--glass-border-opacity) + 0.1));
 }
 
 /* --- Card Glass (medium frost for content cards) --- */
 .glass-card {
   position: relative;
-  background: hsl(var(--glass-bg) / var(--glass-bg-opacity));
+  background:
+    linear-gradient(
+      180deg,
+      hsl(var(--glass-border-light) / var(--glass-rim-opacity)) 0%,
+      transparent 18%,
+      transparent 100%
+    ),
+    radial-gradient(
+      120% 110% at 0% 0%,
+      hsl(var(--primary) / calc(var(--glass-caustic-opacity) * 0.9)) 0%,
+      transparent 44%
+    ),
+    linear-gradient(
+      160deg,
+      hsl(var(--glass-border-light) / var(--glass-sheen-opacity)) 0%,
+      transparent 34%
+    ),
+    hsl(var(--glass-bg) / var(--glass-bg-opacity));
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
@@ -648,7 +786,24 @@
     transform var(--duration-fast) var(--ease-default);
 }
 .glass-card:hover {
-  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) + 0.08));
+  background:
+    linear-gradient(
+      180deg,
+      hsl(var(--glass-border-light) / calc(var(--glass-rim-opacity) + 0.04)) 0%,
+      transparent 18%,
+      transparent 100%
+    ),
+    radial-gradient(
+      120% 110% at 0% 0%,
+      hsl(var(--primary) / calc(var(--glass-caustic-opacity) + 0.04)) 0%,
+      transparent 44%
+    ),
+    linear-gradient(
+      160deg,
+      hsl(var(--glass-border-light) / calc(var(--glass-sheen-opacity) + 0.03)) 0%,
+      transparent 34%
+    ),
+    hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) + 0.08));
   border-color: hsl(var(--glass-border-light) / var(--glass-border-hover-opacity));
   box-shadow:
     inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) + 0.05)),
@@ -672,7 +827,19 @@
 /* --- Subtle Glass (light frost for secondary surfaces) --- */
 .glass-subtle {
   position: relative;
-  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.45));
+  background:
+    linear-gradient(
+      180deg,
+      hsl(var(--glass-border-light) / calc(var(--glass-rim-opacity) * 0.75)) 0%,
+      transparent 22%,
+      transparent 100%
+    ),
+    linear-gradient(
+      155deg,
+      hsl(var(--glass-border-light) / calc(var(--glass-sheen-opacity) * 0.7)) 0%,
+      transparent 34%
+    ),
+    hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.45));
   backdrop-filter: blur(16px) saturate(170%);
   -webkit-backdrop-filter: blur(16px) saturate(170%);
   border: 1px solid hsl(var(--glass-border-light) / calc(var(--glass-border-opacity) * 0.5));
@@ -682,7 +849,24 @@
 /* --- Frosted Panel (heavy frost for modals, drawers, overlays) --- */
 .frosted-panel {
   position: relative;
-  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) + 0.18));
+  background:
+    linear-gradient(
+      180deg,
+      hsl(var(--glass-border-light) / calc(var(--glass-rim-opacity) + 0.04)) 0%,
+      transparent 18%,
+      transparent 100%
+    ),
+    radial-gradient(
+      120% 110% at 0% 0%,
+      hsl(var(--primary) / calc(var(--glass-caustic-opacity) + 0.04)) 0%,
+      transparent 42%
+    ),
+    linear-gradient(
+      155deg,
+      hsl(var(--glass-border-light) / calc(var(--glass-sheen-opacity) + 0.04)) 0%,
+      transparent 30%
+    ),
+    hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) + 0.18));
   backdrop-filter: blur(48px) saturate(var(--glass-sidebar-saturate));
   -webkit-backdrop-filter: blur(48px) saturate(var(--glass-sidebar-saturate));
   border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
@@ -695,7 +879,24 @@
 /* --- Glass Header (frosted header bar) --- */
 .glass-header {
   position: relative;
-  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) + 0.12));
+  background:
+    linear-gradient(
+      180deg,
+      hsl(var(--glass-border-light) / calc(var(--glass-rim-opacity) + 0.03)) 0%,
+      transparent 24%,
+      transparent 100%
+    ),
+    radial-gradient(
+      110% 100% at 0% 0%,
+      hsl(var(--primary) / calc(var(--glass-caustic-opacity) * 0.72)) 0%,
+      transparent 36%
+    ),
+    linear-gradient(
+      155deg,
+      hsl(var(--glass-border-light) / calc(var(--glass-sheen-opacity) + 0.02)) 0%,
+      transparent 30%
+    ),
+    hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) + 0.12));
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   border-bottom: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
@@ -784,6 +985,12 @@
 .hero-gradient {
   position: relative;
   background:
+    linear-gradient(
+      180deg,
+      hsl(var(--glass-border-light) / calc(var(--glass-rim-opacity) + 0.02)) 0%,
+      transparent 22%,
+      transparent 100%
+    ),
     radial-gradient(ellipse at 20% 0%,
       hsl(var(--primary) / 0.06) 0%,
       transparent 50%
@@ -842,7 +1049,24 @@
 /* --- Glass Dropdown (popover menus on glass surfaces) --- */
 .glass-dropdown {
   position: relative;
-  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) + 0.12));
+  background:
+    linear-gradient(
+      180deg,
+      hsl(var(--glass-border-light) / calc(var(--glass-rim-opacity) + 0.03)) 0%,
+      transparent 20%,
+      transparent 100%
+    ),
+    radial-gradient(
+      120% 110% at 0% 0%,
+      hsl(var(--primary) / calc(var(--glass-caustic-opacity) * 0.75)) 0%,
+      transparent 42%
+    ),
+    linear-gradient(
+      155deg,
+      hsl(var(--glass-border-light) / calc(var(--glass-sheen-opacity) + 0.03)) 0%,
+      transparent 32%
+    ),
+    hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) + 0.12));
   backdrop-filter: blur(48px) saturate(var(--glass-sidebar-saturate));
   -webkit-backdrop-filter: blur(48px) saturate(var(--glass-sidebar-saturate));
   border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
@@ -872,7 +1096,19 @@
 /* --- Glass List Item (projectss surfaces) --- */
 .glass-list-item {
   position: relative;
-  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.5));
+  background:
+    linear-gradient(
+      180deg,
+      hsl(var(--glass-border-light) / calc(var(--glass-rim-opacity) * 0.7)) 0%,
+      transparent 22%,
+      transparent 100%
+    ),
+    linear-gradient(
+      155deg,
+      hsl(var(--glass-border-light) / calc(var(--glass-sheen-opacity) * 0.68)) 0%,
+      transparent 34%
+    ),
+    hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.5));
   border: 1px solid hsl(var(--glass-border-light) / calc(var(--glass-border-opacity) * 0.7));
   backdrop-filter: blur(16px) saturate(170%);
   -webkit-backdrop-filter: blur(16px) saturate(170%);
@@ -888,7 +1124,24 @@
 /* === Permission Mode Card (glass selection card) === */
 .glass-mode-card {
   position: relative;
-  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.45));
+  background:
+    linear-gradient(
+      180deg,
+      hsl(var(--glass-border-light) / calc(var(--glass-rim-opacity) * 0.72)) 0%,
+      transparent 20%,
+      transparent 100%
+    ),
+    radial-gradient(
+      120% 110% at 0% 0%,
+      hsl(var(--primary) / calc(var(--glass-caustic-opacity) * 0.6)) 0%,
+      transparent 44%
+    ),
+    linear-gradient(
+      155deg,
+      hsl(var(--glass-border-light) / calc(var(--glass-sheen-opacity) * 0.7)) 0%,
+      transparent 34%
+    ),
+    hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.45));
   backdrop-filter: blur(16px) saturate(170%);
   -webkit-backdrop-filter: blur(16px) saturate(170%);
   border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
@@ -1020,7 +1273,24 @@
 /* === Environment Card (glass env card) === */
 .glass-env-card {
   position: relative;
-  background: hsl(var(--glass-bg) / var(--glass-bg-opacity));
+  background:
+    linear-gradient(
+      180deg,
+      hsl(var(--glass-border-light) / var(--glass-rim-opacity)) 0%,
+      transparent 18%,
+      transparent 100%
+    ),
+    radial-gradient(
+      120% 110% at 0% 0%,
+      hsl(var(--primary) / calc(var(--glass-caustic-opacity) * 0.76)) 0%,
+      transparent 44%
+    ),
+    linear-gradient(
+      160deg,
+      hsl(var(--glass-border-light) / var(--glass-sheen-opacity)) 0%,
+      transparent 34%
+    ),
+    hsl(var(--glass-bg) / var(--glass-bg-opacity));
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
@@ -1129,7 +1399,19 @@
 /* === Glass Select (dropdown) === */
 .glass-select {
   position: relative;
-  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.5));
+  background:
+    linear-gradient(
+      180deg,
+      hsl(var(--glass-border-light) / calc(var(--glass-rim-opacity) * 0.68)) 0%,
+      transparent 24%,
+      transparent 100%
+    ),
+    linear-gradient(
+      155deg,
+      hsl(var(--glass-border-light) / calc(var(--glass-sheen-opacity) * 0.62)) 0%,
+      transparent 34%
+    ),
+    hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.5));
   backdrop-filter: blur(16px) saturate(170%);
   -webkit-backdrop-filter: blur(16px) saturate(170%);
   border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
@@ -1466,50 +1748,91 @@
 
 /* === Reduced Performance Mode === */
 :root[data-performance-mode='reduced'] {
-  --glass-blur: 12px;
-  --glass-saturate: 140%;
-  --glass-sidebar-blur: 14px;
-  --glass-sidebar-saturate: 150%;
-  --chat-assistant-blur: 6px;
-  --chat-user-blur: 0px;
-  --glass-noise-opacity: 0;
-  --ambient-opacity: 0;
-  --content-bg-opacity: 1;
+  --glass-blur: 18px;
+  --glass-saturate: 160%;
+  --glass-bg-opacity: 0.56;
+  --glass-sidebar-opacity: 0.42;
+  --glass-sidebar-blur: 22px;
+  --glass-sidebar-saturate: 165%;
+  --chat-assistant-blur: 10px;
+  --chat-user-blur: 4px;
+  --glass-noise-opacity: 0.014;
+  --glass-rim-opacity: 0.1;
+  --glass-sheen-opacity: 0.07;
+  --glass-caustic-opacity: 0.08;
+  --ambient-opacity: 0.12;
+  --content-bg-opacity: 0.9;
   --duration-fast: 120ms;
   --duration-base: 180ms;
   --duration-slow: 220ms;
   --duration-extended: 320ms;
 }
 
-:root[data-performance-mode='reduced'] .ambient-bg {
-  display: none;
+:root.light[data-performance-mode='reduced'] {
+  --glass-bg-opacity: 0.5;
+  --glass-sidebar-opacity: 0.38;
+  --glass-noise-opacity: 0.022;
+  --glass-rim-opacity: 0.36;
+  --glass-sheen-opacity: 0.14;
+  --glass-caustic-opacity: 0.12;
+  --ambient-opacity: 0.24;
+  --content-bg-opacity: 0.8;
 }
 
-:root[data-performance-mode='reduced'] .glass-noise::before,
+:root[data-performance-mode='reduced'] .ambient-bg::before,
+:root[data-performance-mode='reduced'] .ambient-bg::after,
+:root[data-performance-mode='reduced'] .ambient-orb-3,
+:root[data-performance-mode='reduced'] .ambient-orb-4 {
+  animation: none !important;
+  filter: blur(84px);
+  will-change: auto;
+}
+
+:root[data-performance-mode='reduced'] .glass-noise::before {
+  animation: none !important;
+}
+
 :root[data-performance-mode='reduced'] .glass-shimmer::after {
   animation: none !important;
-  opacity: 0 !important;
+  opacity: 0.55 !important;
 }
 
-:root[data-performance-mode='reduced'] .glass,
-:root[data-performance-mode='reduced'] .glass-card,
-:root[data-performance-mode='reduced'] .glass-subtle,
+:root[data-performance-mode='reduced'] .glass-sidebar-inset,
+:root[data-performance-mode='reduced'] .glass-sidebar-panel,
 :root[data-performance-mode='reduced'] .frosted-panel,
 :root[data-performance-mode='reduced'] .glass-header,
 :root[data-performance-mode='reduced'] .glass-dropdown,
-:root[data-performance-mode='reduced'] .glass-sidebar-inset,
-:root[data-performance-mode='reduced'] .glass-sidebar-panel,
+:root[data-performance-mode='reduced'] .liquid-launch-btn:not(:disabled):not(.launched) {
+  backdrop-filter: blur(28px) saturate(175%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(175%) !important;
+}
+
+:root[data-performance-mode='reduced'] .liquid-launch-btn:not(:disabled):not(.launched):hover {
+  backdrop-filter: blur(32px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(32px) saturate(180%) !important;
+}
+
+:root[data-performance-mode='reduced'] .liquid-launch-btn:not(:disabled):not(.launched):active {
+  backdrop-filter: blur(20px) saturate(155%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(155%) !important;
+}
+
+:root[data-performance-mode='reduced'] .glass-subtle,
 :root[data-performance-mode='reduced'] .glass-list-item,
 :root[data-performance-mode='reduced'] .glass-mode-card,
 :root[data-performance-mode='reduced'] .glass-env-card,
-:root[data-performance-mode='reduced'] .glass-select,
-:root[data-performance-mode='reduced'] .glass-chat-assistant,
-:root[data-performance-mode='reduced'] .glass-chat-user,
-:root[data-performance-mode='reduced'] .stat-card,
-:root[data-performance-mode='reduced'] .hero-gradient,
-:root[data-performance-mode='reduced'] .liquid-launch-btn:not(:disabled):not(.launched) {
-  backdrop-filter: blur(10px) saturate(130%) !important;
-  -webkit-backdrop-filter: blur(10px) saturate(130%) !important;
+:root[data-performance-mode='reduced'] .glass-select {
+  backdrop-filter: blur(12px) saturate(155%) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(155%) !important;
+}
+
+:root[data-performance-mode='reduced'] .glass-sidebar-inset,
+:root[data-performance-mode='reduced'] .glass-sidebar-panel,
+:root[data-performance-mode='reduced'] .frosted-panel,
+:root[data-performance-mode='reduced'] .glass-header,
+:root[data-performance-mode='reduced'] .glass-dropdown {
+  backdrop-filter: blur(calc(var(--glass-sidebar-blur) + 6px)) saturate(var(--glass-sidebar-saturate)) !important;
+  -webkit-backdrop-filter: blur(calc(var(--glass-sidebar-blur) + 6px)) saturate(var(--glass-sidebar-saturate)) !important;
 }
 
 :root[data-performance-mode='reduced'] .page-transition-enter,
@@ -1522,10 +1845,7 @@
 :root[data-performance-mode='reduced'] .chart-bar,
 :root[data-performance-mode='reduced'] .milestone-achieved,
 :root[data-performance-mode='reduced'] .heatmap-enter,
-:root[data-performance-mode='reduced'] .msg-enter,
-:root[data-performance-mode='reduced'] .animate-spin,
-:root[data-performance-mode='reduced'] .animate-ping,
-:root[data-performance-mode='reduced'] .animate-pulse {
+:root[data-performance-mode='reduced'] .msg-enter {
   animation: none !important;
 }
 
@@ -1685,33 +2005,23 @@
     0 4px 12px hsl(var(--glass-shadow-base) / 0.06);
 }
 
-/* === Scroll Stability for Liquid Glass (WebKit flicker mitigation) === */
-.scroll-glass-root[data-scrolling="true"] .glass-card,
-.scroll-glass-root[data-scrolling="true"] .glass-subtle,
-.scroll-glass-root[data-scrolling="true"] .stat-card,
-.scroll-glass-root[data-scrolling="true"] .glass-env-card,
-.scroll-glass-root[data-scrolling="true"] .glass-list-item,
-.scroll-glass-root[data-scrolling="true"] .glass-mode-card,
-.scroll-glass-root[data-scrolling="true"] .glass-select,
-.scroll-glass-root[data-scrolling="true"] .glass-chat-assistant,
-.scroll-glass-root[data-scrolling="true"] .glass-chat-user {
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
+/* === Scroll Stability for Liquid Glass === */
+/* Keep glass layers composited while scrolling instead of disabling blur outright. */
+.scroll-glass-root {
+  isolation: isolate;
 }
 
-.scroll-glass-root[data-scrolling="true"] .glass-card,
-.scroll-glass-root[data-scrolling="true"] .glass-env-card {
-  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) + 0.18));
-}
-
-.scroll-glass-root[data-scrolling="true"] .glass-subtle,
-.scroll-glass-root[data-scrolling="true"] .glass-list-item,
-.scroll-glass-root[data-scrolling="true"] .glass-mode-card,
-.scroll-glass-root[data-scrolling="true"] .glass-select {
-  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) * 0.78));
-}
-
-.scroll-glass-root[data-scrolling="true"] .glass-noise::before {
-  opacity: 0;
-  mix-blend-mode: normal;
+.scroll-glass-root .glass-card,
+.scroll-glass-root .glass-subtle,
+.scroll-glass-root .stat-card,
+.scroll-glass-root .glass-env-card,
+.scroll-glass-root .glass-list-item,
+.scroll-glass-root .glass-mode-card,
+.scroll-glass-root .glass-select,
+.scroll-glass-root .glass-chat-assistant,
+.scroll-glass-root .glass-chat-user {
+  transform: translateZ(0);
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
