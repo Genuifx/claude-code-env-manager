@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useRef, type UIEvent } from 'react';
+import { ReactNode } from 'react';
 import { SideRail } from './SideRail';
 import { useLocale } from '@/locales';
 
@@ -20,7 +20,6 @@ export function AppLayout({
   fullBleed = false,
 }: AppLayoutProps) {
   const { t } = useLocale();
-  const scrollEndTimerRef = useRef<number | null>(null);
   const isDashboard = activeTab === 'dashboard';
   const titleKeyMap: Record<string, string> = {
     'proxy-debug': 'sideRail.proxyDebug',
@@ -43,30 +42,6 @@ export function AppLayout({
   };
   const subtitle = subtitleKeyMap[activeTab] ? t(subtitleKeyMap[activeTab]) : undefined;
 
-  useEffect(() => {
-    return () => {
-      if (scrollEndTimerRef.current !== null) {
-        window.clearTimeout(scrollEndTimerRef.current);
-      }
-    };
-  }, []);
-
-  const handleScrollActivity = (event: UIEvent<HTMLElement>) => {
-    const root = event.currentTarget;
-    if (root.dataset.scrolling !== 'true') {
-      root.dataset.scrolling = 'true';
-    }
-
-    if (scrollEndTimerRef.current !== null) {
-      window.clearTimeout(scrollEndTimerRef.current);
-    }
-
-    scrollEndTimerRef.current = window.setTimeout(() => {
-      root.dataset.scrolling = 'false';
-      scrollEndTimerRef.current = null;
-    }, 140);
-  };
-
   return (
     <div className="h-screen flex overflow-hidden relative">
       {/* Full-width drag region at top — sits above everything for window dragging */}
@@ -78,7 +53,7 @@ export function AppLayout({
       </div>
 
       {/* Main content area — semi-transparent so ambient orbs bleed through glass panels */}
-      <div className="flex-1 flex flex-col min-w-0 relative z-10 overflow-hidden" style={{ background: 'hsl(var(--background) / var(--content-bg-opacity, 1))' }}>
+      <div className="app-content-shell flex-1 flex flex-col min-w-0 relative z-10 overflow-hidden">
         {/* Ambient background — lives inside content area only */}
         <div className="ambient-bg" aria-hidden="true">
           <div className="ambient-orb-3" />
@@ -105,8 +80,6 @@ export function AppLayout({
           className={fullBleed
             ? 'scroll-glass-root flex-1 overflow-hidden relative z-10'
             : 'scroll-glass-root flex-1 overflow-y-auto px-8 py-4 relative z-10'}
-          data-scrolling="false"
-          onScrollCapture={handleScrollActivity}
         >
           <div className={fullBleed ? 'w-full h-full' : 'max-w-6xl'}>
             {children}

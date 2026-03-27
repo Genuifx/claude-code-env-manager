@@ -6,6 +6,9 @@ type NavigatorWithHints = Navigator & {
     saveData?: boolean;
   };
   deviceMemory?: number;
+  userAgentData?: {
+    platform?: string;
+  };
 };
 
 type StoredSettings = {
@@ -50,18 +53,32 @@ function readPerformancePreference(targetWindow: Window): PerformancePreference 
   return 'auto';
 }
 
+function isLikelyMac(targetWindow: Window): boolean {
+  const navigatorWithHints = targetWindow.navigator as NavigatorWithHints;
+  const platform = navigatorWithHints.userAgentData?.platform || navigatorWithHints.platform || '';
+  return /mac/i.test(platform) || /\bmac os x\b/i.test(navigatorWithHints.userAgent);
+}
+
 function detectPerformanceMode(targetWindow: Window): PerformanceMode {
   const navigatorWithHints = targetWindow.navigator as NavigatorWithHints;
   const prefersReducedMotion = targetWindow.matchMedia?.(PERFORMANCE_MODE_QUERY).matches ?? false;
   const saveData = navigatorWithHints.connection?.saveData === true;
   const hardwareConcurrency = navigatorWithHints.hardwareConcurrency ?? 8;
-  const deviceMemory = navigatorWithHints.deviceMemory ?? 8;
+  const deviceMemory =
+    typeof navigatorWithHints.deviceMemory === 'number' ? navigatorWithHints.deviceMemory : null;
+  const isMac = isLikelyMac(targetWindow);
 
   if (prefersReducedMotion || saveData) {
     return 'reduced';
   }
 
-  if (hardwareConcurrency <= 4 || deviceMemory <= 4) {
+  if (hardwareConcurrency <= 4 || (deviceMemory !== null && deviceMemory <= 4)) {
+    return 'reduced';
+  }
+
+  // Keep `auto` conservative on Macs so common 8-core Apple Silicon machines
+  // don't lose the global glass styling by default.
+  if (isMac && hardwareConcurrency <= 6 && deviceMemory !== null && deviceMemory <= 8) {
     return 'reduced';
   }
 

@@ -11,6 +11,7 @@ import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { DashboardSkeleton } from '@/components/ui/skeleton-states';
 import { copyBindCommand } from '@/lib/telegram-utils';
 import { useLocale } from '@/locales';
+import { scheduleAfterFirstPaint } from '@/lib/idle';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { shallow } from 'zustand/shallow';
 
@@ -67,26 +68,38 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
     };
   }, []);
 
-  // Load cron tasks on mount for the Cron metric card
   useEffect(() => {
-    loadCronTasks().catch(() => {});
-  }, [loadCronTasks]);
+    let cancelled = false;
+    const cancelDeferredDashboardSync = scheduleAfterFirstPaint(() => {
+      void loadCronTasks().catch(() => {});
+      void checkCodexInstalled()
+        .then((installed) => {
+          if (cancelled) {
+            return;
+          }
 
-  useEffect(() => {
-    checkCodexInstalled()
-      .then((installed) => {
-        setCodexInstalled(installed);
-        if (!installed && launchClient === 'codex') {
-          setLaunchClient('claude');
-        }
-      })
-      .catch(() => {
-        setCodexInstalled(false);
-        if (launchClient === 'codex') {
-          setLaunchClient('claude');
-        }
-      });
-  }, [checkCodexInstalled, launchClient, setLaunchClient]);
+          setCodexInstalled(installed);
+          if (!installed && launchClient === 'codex') {
+            setLaunchClient('claude');
+          }
+        })
+        .catch(() => {
+          if (cancelled) {
+            return;
+          }
+
+          setCodexInstalled(false);
+          if (launchClient === 'codex') {
+            setLaunchClient('claude');
+          }
+        });
+    }, { delayMs: 260, timeoutMs: 1400 });
+
+    return () => {
+      cancelled = true;
+      cancelDeferredDashboardSync();
+    };
+  }, [checkCodexInstalled, launchClient, loadCronTasks, setLaunchClient]);
 
   const handleSelectDirectory = useCallback(async () => {
     try {

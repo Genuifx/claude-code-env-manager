@@ -13,6 +13,7 @@ import { LocaleProvider, useLocale } from '@/locales';
 import type { UsageStats } from '@/types/analytics';
 import { shallow } from 'zustand/shallow';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { scheduleAfterFirstPaint } from '@/lib/idle';
 
 const AnalyticsPage = lazy(async () =>
   import('@/pages/Analytics').then((m) => ({ default: m.Analytics }))
@@ -45,6 +46,21 @@ const SettingsPage = lazy(async () =>
   import('@/pages/Settings').then((m) => ({ default: m.Settings }))
 );
 
+function calculateContinuousUsageDays(dailyHistory: UsageStats['dailyHistory']): number {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+
+  let streak = 0;
+  while (true) {
+    const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    if (!dailyHistory[dateKey]) {
+      return streak;
+    }
+    streak += 1;
+    date.setDate(date.getDate() - 1);
+  }
+}
+
 function App() {
   const FOCUS_SYNC_INTERVAL_MS = 5000;
   const FOCUS_SYNC_DELAY_MS = 180;
@@ -57,12 +73,13 @@ function App() {
   const lastFocusSyncAtRef = useRef(0);
   const [, startTransition] = useTransition();
 
-  const { setEnvironments, setCurrentEnv, setPermissionMode, setUsageStats, environments, launchClient, error, setError } = useAppStore(
+  const { setEnvironments, setCurrentEnv, setPermissionMode, setUsageStats, setContinuousUsageDays, environments, launchClient, error, setError } = useAppStore(
     (state) => ({
       setEnvironments: state.setEnvironments,
       setCurrentEnv: state.setCurrentEnv,
       setPermissionMode: state.setPermissionMode,
       setUsageStats: state.setUsageStats,
+      setContinuousUsageDays: state.setContinuousUsageDays,
       environments: state.environments,
       launchClient: state.launchClient,
       error: state.error,
@@ -73,16 +90,15 @@ function App() {
 
   const {
     loadEnvironments,
-    loadCurrentEnv,
-    loadSessions,
-    loadAppConfig,
-    launchClaudeCode,
+      loadCurrentEnv,
+      loadSessions,
+      loadAppConfig,
+      launchClaudeCode,
     addEnvironment,
     updateEnvironment,
-    deleteEnvironment,
-    loadFromRemote,
-    loadInstalledSkills,
-  } = useTauriCommands();
+      deleteEnvironment,
+      loadFromRemote,
+    } = useTauriCommands();
 
   const preloadAnalyticsPage = useCallback(() => {
     void import('@/pages/Analytics').then((module) => {
@@ -231,8 +247,7 @@ function App() {
     };
   }, [navigateToTab, setCurrentEnv, setPermissionMode]);
 
-  // Load all data from backend (reusable for both init and refresh)
-  const refreshData = useCallback(async () => {
+  const refreshCriticalData = useCallback(async () => {
     const envPromise = loadEnvironments().catch(() => {
       // Fallback to presets if Tauri is not available (dev mode)
       const envList: Environment[] = Object.entries(ENV_PRESETS).map(([name, config]) => ({
@@ -256,48 +271,65 @@ function App() {
     const currentEnvPromise = loadCurrentEnv().catch(() => {
       setCurrentEnv('official');
     });
-    const sessionsPromise = loadSessions().catch((err) => {
-      console.error('Failed to load sessions:', err);
-    });
+
+    await Promise.allSettled([
+      envPromise,
+      currentEnvPromise,
+    ]);
+  }, [
+    loadEnvironments,
+    loadCurrentEnv,
+    setEnvironments,
+    setCurrentEnv,
+  ]);
+
+  const refreshDeferredData = useCallback(async () => {
     const appConfigPromise = loadAppConfig().catch((err) => {
       console.error('Failed to load app config:', err);
     });
-    const skillsPromise = loadInstalledSkills().catch((err) => {
-      console.error('Failed to load installed skills:', err);
+    const sessionsPromise = loadSessions().catch((err) => {
+      console.error('Failed to load sessions:', err);
     });
     const statsPromise = invoke<UsageStats>('get_usage_stats')
       .then((stats) => {
         if (stats) {
           setUsageStats(stats);
+          setContinuousUsageDays(calculateContinuousUsageDays(stats.dailyHistory));
         }
       })
       .catch(() => {
-        console.debug('Usage stats not available from backend, will use mock data when Analytics tab is opened');
+        console.debug('Usage stats not available during deferred dashboard refresh');
       });
 
     await Promise.allSettled([
-      envPromise,
-      currentEnvPromise,
-      sessionsPromise,
       appConfigPromise,
-      skillsPromise,
+      sessionsPromise,
       statsPromise,
     ]);
   }, [
-    loadEnvironments,
-    loadCurrentEnv,
-    loadSessions,
     loadAppConfig,
-    loadInstalledSkills,
-    setEnvironments,
-    setCurrentEnv,
+    loadSessions,
     setUsageStats,
+    setContinuousUsageDays,
   ]);
 
-  // Initialize data on mount
+  // Keep the cold-start path minimal: render the dashboard first, then fill in
+  // sessions and analytics once the initial paint is complete.
   useEffect(() => {
-    refreshData();
-  }, [refreshData]);
+    let cancelled = false;
+    void refreshCriticalData();
+
+    const cancelDeferredRefresh = scheduleAfterFirstPaint(() => {
+      if (!cancelled) {
+        void refreshDeferredData();
+      }
+    }, { delayMs: 220, timeoutMs: 1200 });
+
+    return () => {
+      cancelled = true;
+      cancelDeferredRefresh();
+    };
+  }, [refreshCriticalData, refreshDeferredData]);
 
   // Re-sync with CLI config when window regains focus
   // This ensures desktop stays in sync when user modifies env via `ccem add/del/use` in terminal
@@ -307,6 +339,7 @@ function App() {
     let idleId: number | null = null;
     const requestIdle = window.requestIdleCallback?.bind(window);
     const cancelIdle = window.cancelIdleCallback?.bind(window);
+    lastFocusSyncAtRef.current = Date.now();
 
     const runFocusSync = () => {
       if (document.visibilityState !== 'visible') {

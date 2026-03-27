@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { LayoutGrid, List, Minimize2, Plus, Terminal, X, FolderOpen, Globe, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { LaunchButton } from '@/components/ui/LaunchButton';
@@ -16,7 +16,6 @@ import {
   SessionList,
   ArrangeBanner,
   SessionLauncherPopover,
-  RecoveryCandidatesPanel,
 } from '@/components/sessions';
 import { useAppStore, type ArrangeLayout, type Session, type UnifiedSession } from '@/store';
 import { PERMISSION_PRESETS } from '@ccem/core/browser';
@@ -29,6 +28,7 @@ import { SessionsSkeleton } from '@/components/ui/skeleton-states';
 import { toast } from 'sonner';
 import { shallow } from 'zustand/shallow';
 import { getRemotePlatformFromSource } from '@/lib/remote-platforms';
+import { scheduleAfterFirstPaint } from '@/lib/idle';
 import type {
   UnifiedSessionInfo,
   ManagedSessionSource,
@@ -36,6 +36,12 @@ import type {
   TmuxAttachTerminalInfo,
   TmuxAttachTerminalType,
 } from '@/lib/tauri-ipc';
+
+const LazyRecoveryCandidatesPanel = lazy(async () =>
+  import('@/components/sessions/RecoveryCandidatesPanel').then((module) => ({
+    default: module.RecoveryCandidatesPanel,
+  }))
+);
 
 // --- Helper: map snake_case UnifiedSessionInfo → camelCase UnifiedSession ---
 function mapSourceToString(source: ManagedSessionSource): UnifiedSession['source'] {
@@ -162,7 +168,11 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   const [isMultiLaunching, setIsMultiLaunching] = useState(false);
   const [launched, setLaunched] = useState(false);
   const [tmuxAttachTerminals, setTmuxAttachTerminals] = useState<TmuxAttachTerminalInfo[]>([]);
+  const [showRecoveryCandidates, setShowRecoveryCandidates] = useState(false);
   const launchedTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const tmuxAttachTerminalsRequestedRef = useRef(false);
+  const tmuxAttachTerminalsPromiseRef = useRef<Promise<void> | null>(null);
+  const [, startTransition] = useTransition();
   const {
     sessions,
     isLoadingSessions,
@@ -172,7 +182,6 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
     setSelectedWorkingDir,
     unifiedSessions,
     setUnifiedSessions,
-    setLoadingUnifiedSessions,
     currentEnv,
     environments,
     permissionMode,
@@ -187,7 +196,6 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
       setSelectedWorkingDir: state.setSelectedWorkingDir,
       unifiedSessions: state.unifiedSessions,
       setUnifiedSessions: state.setUnifiedSessions,
-      setLoadingUnifiedSessions: state.setLoadingUnifiedSessions,
       currentEnv: state.currentEnv,
       environments: state.environments,
       permissionMode: state.permissionMode,
@@ -211,18 +219,18 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
     switchEnvironment,
   } = useTauriCommands();
 
+  const legacySessionById = useMemo(
+    () => new Map(sessions.map((session) => [session.id, session] as const)),
+    [sessions],
+  );
+
   // --- Load unified sessions ---
   useEffect(() => {
     let cancelled = false;
-    let isFirstLoad = true;
 
     const load = async () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
         return;
-      }
-
-      if (isFirstLoad) {
-        setLoadingUnifiedSessions(true);
       }
 
       try {
@@ -231,75 +239,88 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
           const nextSessions = infos.map(toUnifiedSession);
           const currentSessions = useAppStore.getState().unifiedSessions;
           if (!areUnifiedSessionsEqual(currentSessions, nextSessions)) {
-            setUnifiedSessions(nextSessions);
+            startTransition(() => {
+              setUnifiedSessions(nextSessions);
+            });
           }
         }
       } catch (err) {
         console.error('Failed to load unified sessions:', err);
-      } finally {
-        if (!cancelled && isFirstLoad) {
-          setLoadingUnifiedSessions(false);
-        }
-        isFirstLoad = false;
       }
     };
-    load();
-    // Refresh periodically
+
+    const cancelInitialLoad = scheduleAfterFirstPaint(() => {
+      void load();
+    }, { delayMs: 180, timeoutMs: 1200 });
+
     const interval = setInterval(load, 5000);
+
     return () => {
       cancelled = true;
+      cancelInitialLoad();
       clearInterval(interval);
     };
-  }, [listUnifiedSessions, setUnifiedSessions, setLoadingUnifiedSessions]);
+  }, [listUnifiedSessions, setUnifiedSessions, startTransition]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    const loadTerminals = async () => {
-      try {
-        const terminals = await listTmuxAttachTerminals();
-        if (!cancelled) {
-          setTmuxAttachTerminals(terminals);
-        }
-      } catch (err) {
-        console.error('Failed to load tmux attach terminals:', err);
-      }
-    };
-
-    void loadTerminals();
+    const cancelDeferredRecoveryPanel = scheduleAfterFirstPaint(() => {
+      setShowRecoveryCandidates(true);
+    }, { delayMs: 260, timeoutMs: 1400 });
 
     return () => {
-      cancelled = true;
+      cancelDeferredRecoveryPanel();
     };
+  }, []);
+
+  const ensureTmuxAttachTerminalsLoaded = useCallback(() => {
+    if (tmuxAttachTerminalsRequestedRef.current) {
+      return tmuxAttachTerminalsPromiseRef.current;
+    }
+
+    tmuxAttachTerminalsRequestedRef.current = true;
+    const request = listTmuxAttachTerminals()
+      .then((terminals) => {
+        setTmuxAttachTerminals(terminals);
+      })
+      .catch((err) => {
+        console.error('Failed to load tmux attach terminals:', err);
+        tmuxAttachTerminalsRequestedRef.current = false;
+      })
+      .finally(() => {
+        tmuxAttachTerminalsPromiseRef.current = null;
+      });
+
+    tmuxAttachTerminalsPromiseRef.current = request;
+    return request;
   }, [listTmuxAttachTerminals]);
 
   // --- Merge sessions: legacy (external terminal) + unified, dedup by id ---
   type DisplayItem = { session: Session; unifiedSession?: UnifiedSession };
   const mergedSessions: DisplayItem[] = useMemo(() => {
-    const unifiedIds = new Set(unifiedSessions.map(u => u.id));
-
-    // Legacy sessions not covered by unified
-    const legacyOnly = sessions.filter(s => !unifiedIds.has(s.id));
-
     const items: DisplayItem[] = [];
+    const seen = new Set<string>();
 
     // Add unified sessions
     for (const u of unifiedSessions) {
       // Find matching legacy session for external terminal features
-      const legacyMatch = sessions.find(s => s.id === u.id);
+      const legacyMatch = legacySessionById.get(u.id);
       items.push({
         session: legacyMatch ?? unifiedToLegacySession(u),
         unifiedSession: u,
       });
+      seen.add(u.id);
     }
 
     // Add legacy-only sessions (external terminal sessions not in unified)
-    for (const s of legacyOnly) {
+    for (const s of sessions) {
+      if (seen.has(s.id)) {
+        continue;
+      }
       items.push({ session: s });
     }
 
     return items;
-  }, [sessions, unifiedSessions]);
+  }, [legacySessionById, sessions, unifiedSessions]);
 
   // --- Apply filter + counts (memoized) ---
   const { filteredSessions, totalCount } = useMemo(() => {
@@ -312,12 +333,18 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
 
   // Force card view when any unified-only sessions are visible (list view lacks unified data)
   const hasUnifiedOnlyInView = filteredSessions.some(
-    item => item.unifiedSession && !sessions.some(s => s.id === item.unifiedSession!.id)
+    (item) => item.unifiedSession && !legacySessionById.has(item.unifiedSession.id)
   );
   const effectiveViewMode = hasUnifiedOnlyInView ? 'card' : viewMode;
 
-  const runningSessions = sessions.filter(s => s.status === 'running');
-  const externalRunningSessions = runningSessions.filter((session) => session.terminalType !== 'embedded');
+  const runningSessions = useMemo(
+    () => sessions.filter((session) => session.status === 'running'),
+    [sessions],
+  );
+  const externalRunningSessions = useMemo(
+    () => runningSessions.filter((session) => session.terminalType !== 'embedded'),
+    [runningSessions],
+  );
   const externalRunningCount = externalRunningSessions.length;
 
   // Truncate directory path for display (same logic as Dashboard)
@@ -462,8 +489,8 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
 
   // --- Helper: check if a session has a real legacy match (not a placeholder) ---
   const hasLegacySession = useCallback((id: string): boolean => {
-    return sessions.some(s => s.id === id);
-  }, [sessions]);
+    return legacySessionById.has(id);
+  }, [legacySessionById]);
 
   const handleFocus = async (id: string) => {
     const item = findDisplayItem(id);
@@ -737,7 +764,11 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
 
       {/* Sessions Display */}
       <div className="space-y-4">
-        <RecoveryCandidatesPanel />
+        {showRecoveryCandidates ? (
+          <Suspense fallback={null}>
+            <LazyRecoveryCandidatesPanel />
+          </Suspense>
+        ) : null}
         {totalDisplayCount === 0 ? (
           <Card className="p-4">
             <div className="py-8">
@@ -767,6 +798,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
                       session={item.session}
                       unifiedSession={item.unifiedSession}
                       terminalOptions={tmuxAttachTerminals}
+                      onMenuIntent={ensureTmuxAttachTerminalsLoaded}
                       onFocus={handleFocus}
                       onOpenInTerminal={handleOpenInTerminal}
                       onMinimize={handleMinimize}
@@ -784,6 +816,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
                 <SessionList
                   sessions={filteredSessions.map(item => item.session)}
                   terminalOptions={tmuxAttachTerminals}
+                  onMenuIntent={ensureTmuxAttachTerminalsLoaded}
                   onFocus={handleFocus}
                   onOpenInTerminal={handleOpenInTerminal}
                   onMinimize={handleMinimize}

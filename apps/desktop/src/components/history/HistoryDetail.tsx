@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { Check, Download, Play } from 'lucide-react';
 import { MessageBubble, type ConversationMessageData } from './MessageBubble';
 import type { HistorySessionItem } from './HistoryList';
@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
+import { getPerformanceMode } from '@/lib/performance';
 import { getHistorySessionDisplay } from './historySession';
 
 interface ContentBlock {
@@ -138,6 +139,8 @@ export function HistoryDetail({
   const { t } = useLocale();
   const [, startTransition] = useTransition();
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
+  const messageBatchSize = getPerformanceMode() === 'reduced' ? 24 : 48;
   const formatTokens = (v: number) => v.toLocaleString();
   const sessionTitle = getHistorySessionDisplay(selectedSession, t('history.untitledSession'));
 
@@ -162,6 +165,13 @@ export function HistoryDetail({
     if (activeSegment === null) return mergedMessages;
     return mergedMessages.filter((message) => message.segmentIndex === activeSegment);
   }, [mergedMessages, activeSegment]);
+  const [renderedMessageCount, setRenderedMessageCount] = useState(() => (
+    Math.min(visibleMessages.length, messageBatchSize)
+  ));
+  const displayedMessages = useMemo(() => (
+    visibleMessages.slice(0, renderedMessageCount)
+  ), [renderedMessageCount, visibleMessages]);
+  const hasMoreMessages = renderedMessageCount < visibleMessages.length;
 
   const formatSegmentLabel = useMemo(() => (
     (segmentIndex: number) => (
@@ -182,6 +192,61 @@ export function HistoryDetail({
       messagesContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }, [activeSegment]);
+
+  useEffect(() => {
+    const totalMessages = visibleMessages.length;
+    const initialCount = Math.min(totalMessages, messageBatchSize);
+    setRenderedMessageCount(initialCount);
+  }, [messageBatchSize, visibleMessages]);
+
+  useEffect(() => {
+    if (!hasMoreMessages) {
+      return;
+    }
+
+    const root = messagesContainerRef.current;
+    const sentinel = loadMoreSentinelRef.current;
+    if (!root || !sentinel) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) {
+          return;
+        }
+
+        observer.disconnect();
+        startTransition(() => {
+          setRenderedMessageCount((current) => Math.min(current + messageBatchSize, visibleMessages.length));
+        });
+      },
+      {
+        root,
+        rootMargin: '200px 0px',
+        threshold: 0.01,
+      }
+    );
+
+    observer.observe(sentinel);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [hasMoreMessages, messageBatchSize, startTransition, visibleMessages.length]);
+
+  useEffect(() => {
+    if (!hasMoreMessages || !messagesContainerRef.current) {
+      return;
+    }
+
+    const container = messagesContainerRef.current;
+    if (container.scrollHeight <= container.clientHeight + 32) {
+      startTransition(() => {
+        setRenderedMessageCount((current) => Math.min(current + messageBatchSize, visibleMessages.length));
+      });
+    }
+  }, [displayedMessages.length, hasMoreMessages, messageBatchSize, startTransition, visibleMessages.length]);
 
   return (
     <>
@@ -297,8 +362,8 @@ export function HistoryDetail({
             </div>
           ) : (
             <div key={activeSegment ?? 'all'}>
-              {visibleMessages.map((msg, i) => {
-                const prevMsg = i > 0 ? visibleMessages[i - 1] : null;
+              {displayedMessages.map((msg, i) => {
+                const prevMsg = i > 0 ? displayedMessages[i - 1] : null;
                 const prevRole = prevMsg
                   ? (prevMsg.msgType === 'user' || prevMsg.msgType === 'human' ? 'user' : 'assistant')
                   : null;
@@ -314,6 +379,14 @@ export function HistoryDetail({
                   </div>
                 );
               })}
+              {hasMoreMessages ? (
+                <div className="flex justify-center pt-4">
+                  <div className="glass-subtle rounded-full px-3 py-1 text-[11px] text-muted-foreground">
+                    {t('history.loadingMessages')}
+                  </div>
+                </div>
+              ) : null}
+              {hasMoreMessages ? <div ref={loadMoreSentinelRef} className="h-px" /> : null}
             </div>
           )}
 

@@ -1,4 +1,4 @@
-import { startTransition, useMemo, useState } from 'react';
+import { memo, startTransition, useMemo, useState } from 'react';
 import { ChevronRight, Brain, CheckCircle2, XCircle, Circle, Scissors, ChevronsUpDown, ClipboardList, ChevronDown, Terminal, Sparkles, Users, AlertCircle, Copy, Check } from 'lucide-react';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { cn } from '@/lib/utils';
@@ -24,8 +24,33 @@ interface ParsedText {
 }
 
 const TEAMMATE_RE = /<teammate-message\s+teammate_id="([^"]*)"(?:\s+color="([^"]*)")?(?:\s+summary="([^"]*)")?\s*>([\s\S]*?)<\/teammate-message>/g;
+const PARSED_TEXT_CACHE_LIMIT = 500;
+const parsedTextCache = new Map<string, ParsedText>();
+
+function rememberParsedText(raw: string, parsed: ParsedText): ParsedText {
+  if (parsedTextCache.has(raw)) {
+    parsedTextCache.delete(raw);
+  }
+
+  parsedTextCache.set(raw, parsed);
+  if (parsedTextCache.size > PARSED_TEXT_CACHE_LIMIT) {
+    const oldestKey = parsedTextCache.keys().next().value;
+    if (oldestKey) {
+      parsedTextCache.delete(oldestKey);
+    }
+  }
+
+  return parsed;
+}
 
 function parseMessageText(raw: string): ParsedText {
+  const cached = parsedTextCache.get(raw);
+  if (cached) {
+    parsedTextCache.delete(raw);
+    parsedTextCache.set(raw, cached);
+    return cached;
+  }
+
   let text = raw;
 
   // Extract command info before stripping
@@ -46,6 +71,7 @@ function parseMessageText(raw: string): ParsedText {
 
   // Extract teammate messages before stripping
   const teammateMessages: TeammateMessage[] = [];
+  TEAMMATE_RE.lastIndex = 0;
   for (const match of text.matchAll(TEAMMATE_RE)) {
     const [, id, color, summary, content] = match;
     const trimmed = content.trim();
@@ -88,7 +114,7 @@ function parseMessageText(raw: string): ParsedText {
   // Collapse excessive blank lines left after stripping
   text = text.replace(/\n{3,}/g, '\n\n').trim();
 
-  return { cleanText: text, command, teammateMessages };
+  return rememberParsedText(raw, { cleanText: text, command, teammateMessages });
 }
 
 function isCommandOnlyText(text: string): boolean {
@@ -831,7 +857,7 @@ function renderContentBlocks(blocks: ContentBlock[], t: (key: string) => string,
   return result;
 }
 
-export function MessageBubble({ message, prevRole }: MessageBubbleProps) {
+function MessageBubbleComponent({ message, prevRole }: MessageBubbleProps) {
   const { t } = useLocale();
   const isUser = message.msgType === 'user' || message.msgType === 'human';
   const isSummary = message.msgType === 'summary';
@@ -846,6 +872,56 @@ export function MessageBubble({ message, prevRole }: MessageBubbleProps) {
   const spacingClass = prevRole == null ? 'mt-0' : sameRole ? 'mt-1.5' : 'mt-5';
   const showRoleLabel = prevRole !== null && prevRole !== currentRole;
   const roleLabel = isUser ? t('history.you') : (message.model || t('history.assistant'));
+  const { allTeammateMessages, renderedContent, isCommandOnly } = useMemo(() => {
+    if (isSummary || message.isCompactBoundary || message.planContent) {
+      return {
+        allTeammateMessages: [] as TeammateMessage[],
+        renderedContent: null as React.ReactNode,
+        isCommandOnly: false,
+      };
+    }
+
+    const teammateMessages: TeammateMessage[] = [];
+    const collectTeammate = (text: string) => {
+      const { teammateMessages: parsedTeammateMessages } = parseMessageText(text);
+      if (parsedTeammateMessages.length > 0) {
+        teammateMessages.push(...parsedTeammateMessages);
+      }
+    };
+
+    const content = message.content;
+    let nextRenderedContent: React.ReactNode = null;
+    let nextIsCommandOnly = false;
+
+    if (typeof content === 'string') {
+      collectTeammate(content);
+      nextIsCommandOnly = isCommandOnlyText(content);
+      nextRenderedContent = renderTextContent(content, t, isUser, nextIsCommandOnly);
+    } else if (Array.isArray(content)) {
+      for (const block of content as ContentBlock[]) {
+        if (block.type === 'text' && block.text) {
+          collectTeammate(block.text);
+        }
+      }
+
+      const textBlocks = (content as ContentBlock[]).filter((block) => block.type === 'text');
+      if (textBlocks.length === 1 && textBlocks.length === content.length) {
+        nextIsCommandOnly = isCommandOnlyText(textBlocks[0].text || '');
+      }
+
+      nextRenderedContent = nextIsCommandOnly
+        ? renderTextContent((content as ContentBlock[])[0].text || '', t, isUser, true)
+        : renderContentBlocks(content as ContentBlock[], t, isUser);
+    } else if (content && typeof content === 'object') {
+      nextRenderedContent = renderContentBlocks([content as ContentBlock], t, isUser);
+    }
+
+    return {
+      allTeammateMessages: teammateMessages,
+      renderedContent: nextRenderedContent,
+      isCommandOnly: nextIsCommandOnly,
+    };
+  }, [isSummary, isUser, message.content, message.isCompactBoundary, message.planContent, t]);
 
   // Summary messages
   if (isSummary) {
@@ -879,42 +955,6 @@ export function MessageBubble({ message, prevRole }: MessageBubbleProps) {
   // Plan execution card
   if (message.planContent) {
     return <PlanCard content={message.planContent} t={t} spacingClass={spacingClass} />;
-  }
-
-  // Collect all teammate messages from content for standalone rendering
-  const allTeammateMessages: TeammateMessage[] = [];
-  const collectTeammate = (text: string) => {
-    const { teammateMessages } = parseMessageText(text);
-    allTeammateMessages.push(...teammateMessages);
-  };
-
-  // Parse content
-  const content = message.content;
-  let renderedContent: React.ReactNode;
-  let isCommandOnly = false;
-
-  if (typeof content === 'string') {
-    collectTeammate(content);
-    isCommandOnly = isCommandOnlyText(content);
-    renderedContent = renderTextContent(content, t, isUser, isCommandOnly);
-  } else if (Array.isArray(content)) {
-    // Collect teammate messages from all text blocks
-    for (const block of content as ContentBlock[]) {
-      if (block.type === 'text' && block.text) collectTeammate(block.text);
-    }
-    // Check if the only meaningful block is a command-only text
-    const textBlocks = (content as ContentBlock[]).filter(b => b.type === 'text');
-    if (textBlocks.length === 1 && textBlocks.length === content.length) {
-      isCommandOnly = isCommandOnlyText(textBlocks[0].text || '');
-    }
-    renderedContent = isCommandOnly
-      ? renderTextContent((content as ContentBlock[])[0].text || '', t, isUser, true)
-      : renderContentBlocks(content as ContentBlock[], t, isUser);
-  } else if (content && typeof content === 'object') {
-    // Single content block
-    renderedContent = renderContentBlocks([content as ContentBlock], t, isUser);
-  } else {
-    renderedContent = null;
   }
 
   // If message is ONLY teammate messages (no other content), render them standalone
@@ -1030,3 +1070,8 @@ export function MessageBubble({ message, prevRole }: MessageBubbleProps) {
     </div>
   );
 }
+
+export const MessageBubble = memo(MessageBubbleComponent, (prevProps, nextProps) => (
+  prevProps.prevRole === nextProps.prevRole
+  && prevProps.message === nextProps.message
+));
