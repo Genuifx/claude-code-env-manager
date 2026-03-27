@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.9
+
+### Patch Changes
+
+- Improve desktop glass rendering stability and overall UI responsiveness on macOS.
+
 ## 2.0.0-beta.8
 
 ### Patch Changes
