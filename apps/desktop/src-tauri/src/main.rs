@@ -390,12 +390,6 @@ async fn launch_claude_code(
     );
 
     if client_name == "codex" {
-        if resume_session_id
-            .as_ref()
-            .is_some_and(|id| !id.trim().is_empty())
-        {
-            return Err("Codex resume is not supported yet".to_string());
-        }
         if perm_mode
             .as_ref()
             .is_some_and(|mode| !mode.trim().is_empty())
@@ -783,6 +777,61 @@ async fn create_interactive_session(
         return Err(format!("Unsupported client '{}'", client_name));
     }
 
+    if client_name == "codex"
+        && !resume_session_id
+            .as_ref()
+            .is_some_and(|value| value.trim().is_empty())
+        && resume_session_id.is_some()
+    {
+        let session_id = generate_session_id();
+        let effective_working_dir = resolve_headless_working_dir(working_dir);
+        let mut env_vars = HashMap::new();
+        let resume_target = resume_session_id.clone();
+
+        if proxy_state.is_enabled() {
+            let proxy_route_base_url = proxy_state
+                .register_route(RegisterRouteRequest {
+                    session_id: session_id.clone(),
+                    client: client_name.clone(),
+                    env_name: env_name.clone(),
+                    upstream_base_url: proxy_state.codex_upstream_base_url(),
+                })
+                .await?;
+            env_vars.insert("OPENAI_BASE_URL".to_string(), proxy_route_base_url);
+        }
+
+        let session_manager = state.inner().clone();
+        let create_result = interactive_state.create_session(
+            app,
+            session_manager,
+            InteractiveSessionOptions {
+                session_id: session_id.clone(),
+                client: client_name.clone(),
+                env_name,
+                perm_mode: "n/a".to_string(),
+                working_dir: effective_working_dir,
+                resume_session_id,
+                env_vars,
+            },
+        );
+
+        if create_result.is_err() {
+            proxy_state.remove_session_routes(&session_id);
+        }
+
+        let session = create_result?;
+        if let Some(session_id) = resume_target.as_deref() {
+            if let Err(error) = clear_runtime_recovery_candidates_by_claude_session_id(session_id) {
+                eprintln!(
+                    "Failed to clear recovery candidate for resumed interactive session {}: {}",
+                    session_id, error
+                );
+            }
+        }
+
+        return Ok(session);
+    }
+
     if client_name == "codex" {
         return launch_claude_code(
             state,
@@ -825,6 +874,7 @@ async fn create_interactive_session(
         session_manager,
         InteractiveSessionOptions {
             session_id: session_id.clone(),
+            client: client_name.clone(),
             env_name: resolved.env_name,
             perm_mode: effective_perm_mode,
             working_dir: effective_working_dir,

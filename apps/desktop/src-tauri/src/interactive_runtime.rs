@@ -26,6 +26,7 @@ const MAX_TRANSCRIPT_CHUNKS: usize = 1200;
 #[derive(Debug, Clone)]
 pub struct InteractiveSessionOptions {
     pub session_id: String,
+    pub client: String,
     pub env_name: String,
     pub perm_mode: String,
     pub working_dir: String,
@@ -136,8 +137,13 @@ impl InteractiveRuntimeManager {
     ) -> Result<Session, String> {
         let window = self.tmux.create_session(
             &options.session_id,
+            &options.client,
             &options.env_name,
-            &build_claude_args(&options.perm_mode, options.resume_session_id.as_deref()),
+            &build_client_args(
+                &options.client,
+                &options.perm_mode,
+                options.resume_session_id.as_deref(),
+            ),
             &options.env_vars,
             Path::new(&options.working_dir),
         )?;
@@ -145,7 +151,7 @@ impl InteractiveRuntimeManager {
         let session = Session {
             id: options.session_id.clone(),
             pid: window.pane_pid,
-            client: "claude".to_string(),
+            client: options.client.clone(),
             env_name: options.env_name.clone(),
             perm_mode: options.perm_mode.clone(),
             working_dir: options.working_dir.clone(),
@@ -187,7 +193,9 @@ impl InteractiveRuntimeManager {
             ),
         );
 
-        self.sample_jsonl_events(&app, &session.id).ok();
+        if session.client == "claude" {
+            self.sample_jsonl_events(&app, &session.id).ok();
+        }
         self.sample_tmux_output(&app, &session.id).ok();
         self.spawn_capture_poller(app, session_manager, session.id.clone());
 
@@ -273,7 +281,9 @@ impl InteractiveRuntimeManager {
             });
 
             self.insert_handle(hydrated.id.clone(), handle)?;
-            self.sample_jsonl_events(&app, &hydrated.id).ok();
+            if hydrated.client == "claude" {
+                self.sample_jsonl_events(&app, &hydrated.id).ok();
+            }
             self.sample_tmux_output(&app, &hydrated.id).ok();
             self.spawn_capture_poller(app.clone(), session_manager.clone(), hydrated.id.clone());
         }
@@ -626,9 +636,21 @@ impl InteractiveRuntimeManager {
             .map_err(|_| "Failed to lock interactive event store".to_string())?;
 
         if state == ClaudeTerminalState::WaitingApproval {
+            let client_name = handle
+                .session
+                .lock()
+                .ok()
+                .map(|session| {
+                    if session.client == "codex" {
+                        "Codex"
+                    } else {
+                        "Claude"
+                    }
+                })
+                .unwrap_or("Interactive agent");
             let record = store.append(SessionEventPayload::TerminalPromptRequired {
                 prompt_kind: TerminalPromptKind::Permission,
-                prompt_text: "Claude is waiting for approval.".to_string(),
+                prompt_text: format!("{client_name} is waiting for approval."),
             });
             dispatch_session_event(app, session_id, &record);
         } else if *last_state == ClaudeTerminalState::WaitingApproval {
@@ -662,11 +684,19 @@ impl InteractiveRuntimeManager {
             let has_live_terminal_consumer =
                 dispatcher.has_connected_channel(&session_id, &ChannelKind::DesktopUi);
 
-            if let Err(error) = manager.sample_jsonl_events(&app, &session_id) {
-                eprintln!(
-                    "Interactive JSONL poll warning for {}: {}",
-                    session_id, error
-                );
+            let should_poll_jsonl = handle
+                .session
+                .lock()
+                .map(|session| session.client == "claude")
+                .unwrap_or(false);
+
+            if should_poll_jsonl {
+                if let Err(error) = manager.sample_jsonl_events(&app, &session_id) {
+                    eprintln!(
+                        "Interactive JSONL poll warning for {}: {}",
+                        session_id, error
+                    );
+                }
             }
 
             if let Err(error) = manager.sample_tmux_output(&app, &session_id) {
@@ -713,7 +743,20 @@ fn dispatch_interactive_output(app: &AppHandle, runtime_id: &str, chunk: &Intera
     dispatcher.dispatch_interactive_output(runtime_id, chunk);
 }
 
-fn build_claude_args(mode_name: &str, resume_session_id: Option<&str>) -> Vec<String> {
+fn build_client_args(
+    client: &str,
+    mode_name: &str,
+    resume_session_id: Option<&str>,
+) -> Vec<String> {
+    if client == "codex" {
+        let mut args = Vec::new();
+        if let Some(resume_session_id) = resume_session_id {
+            args.push("resume".to_string());
+            args.push(resume_session_id.to_string());
+        }
+        return args;
+    }
+
     let official_mode = match mode_name {
         "yolo" => "bypassPermissions",
         "dev" => "acceptEdits",
