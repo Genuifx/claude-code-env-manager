@@ -23,8 +23,68 @@ permissions:
   contents: write
 
 jobs:
+  prepare-release:
+    name: Prepare Release Notes
+    runs-on: ubuntu-latest
+    outputs:
+      release_body: ${{ steps.release-notes.outputs.release_body }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Generate release body
+        id: release-notes
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            current_tag="${GITHUB_REF_NAME}"
+          else
+            version="$(sed -n 's/.*"version": "\(.*\)".*/\1/p' apps/desktop/package.json | head -n1)"
+            if [[ -z "$version" ]]; then
+              echo "Failed to determine desktop version" >&2
+              exit 1
+            fi
+            current_tag="v${version}"
+          fi
+
+          previous_tag="$(git describe --tags --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
+          version="${current_tag#v}"
+
+          {
+            echo "release_body<<'EOF'"
+            echo "## CCEM Desktop v${version}"
+            echo
+            echo "### Downloads"
+            echo "- **Apple Silicon (M1/M2/M3/M4)**: \`CCEM-Desktop_*_aarch64.dmg\`"
+            echo "- **Intel Mac**: \`CCEM-Desktop_*_x64.dmg\`"
+            echo
+            echo "### CLI"
+            echo '```bash'
+            echo "npm install -g ccem@${version}"
+            echo '```'
+            echo
+            echo "### Important"
+            echo "run the following instruction to avoid the apple sign check."
+            echo
+            echo '```bash'
+            echo 'xattr -c /Applications/CCEM\ Desktop.app'
+            echo '```'
+            echo
+            echo "### Commits"
+            if [[ -n "$previous_tag" ]]; then
+              git log "${previous_tag}..${GITHUB_SHA}" --reverse --pretty=format:'- %s (%h)'
+            else
+              git log --reverse --pretty=format:'- %s (%h)'
+            fi
+            echo
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
   build-desktop:
     name: Build Desktop (${{ matrix.target }})
+    needs: prepare-release
     strategy:
       fail-fast: false
       matrix:
@@ -98,17 +158,7 @@ jobs:
           projectPath: apps/desktop
           tagName: v__VERSION__
           releaseName: 'CCEM v__VERSION__'
-          releaseBody: |
-            ## CCEM Desktop v__VERSION__
-
-            ### Downloads
-            - **Apple Silicon (M1/M2/M3/M4)**: `CCEM-Desktop_*_aarch64.dmg`
-            - **Intel Mac**: `CCEM-Desktop_*_x64.dmg`
-
-            ### CLI
-            ```bash
-            npm install -g ccem@__VERSION__
-            ```
+          releaseBody: ${{ needs.prepare-release.outputs.release_body }}
           releaseDraft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || 'false' }}
           prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
           args: ${{ matrix.args }}
@@ -122,17 +172,7 @@ jobs:
           projectPath: apps/desktop
           tagName: v__VERSION__
           releaseName: 'CCEM v__VERSION__'
-          releaseBody: |
-            ## CCEM Desktop v__VERSION__
-
-            ### Downloads
-            - **Apple Silicon (M1/M2/M3/M4)**: `CCEM-Desktop_*_aarch64.dmg`
-            - **Intel Mac**: `CCEM-Desktop_*_x64.dmg`
-
-            ### CLI
-            ```bash
-            npm install -g ccem@__VERSION__
-            ```
+          releaseBody: ${{ needs.prepare-release.outputs.release_body }}
           releaseDraft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || 'false' }}
           prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
           args: ${{ matrix.args }}
