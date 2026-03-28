@@ -180,15 +180,9 @@ export function History() {
   }, [sourceFilter, syncSessionState]);
 
   const selectedSession = sessions.find((session) => toSessionKey(session) === selectedKey);
-  const selectedSource = selectedSession?.source ?? 'claude';
-  const isCodexSessionSelected = selectedSource === 'codex';
 
   const handleResume = useCallback(async () => {
     if (!selectedSession) return;
-    if (selectedSession.source === 'codex') {
-      toast.info(t('history.resumeUnsupportedCodex'));
-      return;
-    }
     try {
       await launchClaudeCode(selectedSession.project, selectedSession.id, selectedSession.source);
       setLaunched(true);
@@ -391,7 +385,6 @@ export function History() {
               onExport={handleExport}
               onResume={handleResume}
               launched={launched}
-              isCodexSessionSelected={isCodexSessionSelected}
             />
           </Suspense>
         ) : (

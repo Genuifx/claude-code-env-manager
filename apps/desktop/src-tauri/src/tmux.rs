@@ -1,4 +1,4 @@
-use crate::terminal::{resolve_claude_path, resolve_tmux_path};
+use crate::terminal::{resolve_claude_path, resolve_codex_path, resolve_tmux_path};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
@@ -57,8 +57,9 @@ impl TmuxManager {
     pub fn create_session(
         &self,
         runtime_id: &str,
+        client: &str,
         env_name: &str,
-        claude_args: &[String],
+        client_args: &[String],
         env_vars: &HashMap<String, String>,
         working_dir: &Path,
     ) -> Result<TmuxWindowInfo, String> {
@@ -71,7 +72,7 @@ impl TmuxManager {
                 working_dir.display()
             )
         })?;
-        let launch_command = build_tmux_launch_command(claude_args, env_vars);
+        let launch_command = build_tmux_launch_command(client, client_args, env_vars);
         let target = format!("{}:{}", session_name, window_name);
 
         let window_index = match self.run_create_command(
@@ -628,6 +629,7 @@ pub fn detect_state_from_capture(captured: &str) -> ClaudeTerminalState {
 
 fn contains_prompt_pattern(lines: &str) -> bool {
     let trimmed = lines.trim_end();
+    let lower = trimmed.to_ascii_lowercase();
     trimmed.contains("\n❯")
         || trimmed.contains("❯\u{a0}Try ")
         || trimmed.contains("❯ Try ")
@@ -635,7 +637,7 @@ fn contains_prompt_pattern(lines: &str) -> bool {
         || trimmed.contains("\n>")
         || trimmed.ends_with('>')
         || trimmed.contains("accept edits on")
-        || trimmed.contains("Press Enter")
+        || lower.contains("press enter")
 }
 
 fn contains_approval_pattern(lines: &str) -> bool {
@@ -674,8 +676,16 @@ fn parse_target_line(line: &str, fallback_target: &str) -> Option<TmuxWindowInfo
     })
 }
 
-fn build_tmux_launch_command(claude_args: &[String], env_vars: &HashMap<String, String>) -> String {
-    let claude_binary = resolve_claude_path().unwrap_or_else(|| "claude".to_string());
+fn build_tmux_launch_command(
+    client: &str,
+    client_args: &[String],
+    env_vars: &HashMap<String, String>,
+) -> String {
+    let client_binary = if client == "codex" {
+        resolve_codex_path().unwrap_or_else(|| "codex".to_string())
+    } else {
+        resolve_claude_path().unwrap_or_else(|| "claude".to_string())
+    };
     let mut exports = vec![
         format!("export PATH={}", shell_quote(get_user_path())),
         "unset CLAUDECODE".to_string(),
@@ -687,8 +697,8 @@ fn build_tmux_launch_command(claude_args: &[String], env_vars: &HashMap<String, 
         exports.push(format!("export {}={}", key, shell_quote(value)));
     }
 
-    let mut command_parts = vec![shell_quote(&claude_binary)];
-    command_parts.extend(claude_args.iter().map(|arg| shell_quote(arg)));
+    let mut command_parts = vec![shell_quote(&client_binary)];
+    command_parts.extend(client_args.iter().map(|arg| shell_quote(arg)));
 
     format!("{}; exec {}", exports.join("; "), command_parts.join(" "))
 }
@@ -824,6 +834,15 @@ mod tests {
     }
 
     #[test]
+    fn detect_state_flags_idle_for_lowercase_press_enter_prompt() {
+        let captured = "Update available\nPress enter to continue";
+        assert_eq!(
+            detect_state_from_capture(captured),
+            ClaudeTerminalState::Idle
+        );
+    }
+
+    #[test]
     fn window_name_uses_runtime_suffix_for_better_uniqueness() {
         assert_eq!(
             window_name_for_runtime("session-1772984434305"),
@@ -853,9 +872,21 @@ mod tests {
 
     #[test]
     fn launch_command_does_not_override_term_inside_tmux() {
-        let command = build_tmux_launch_command(&["--print".to_string()], &HashMap::new());
+        let command =
+            build_tmux_launch_command("claude", &["--print".to_string()], &HashMap::new());
         assert!(!command.contains("export TERM="));
         assert!(command.contains("unset CLAUDECODE"));
+    }
+
+    #[test]
+    fn launch_command_supports_codex_resume_subcommand() {
+        let command = build_tmux_launch_command(
+            "codex",
+            &["resume".to_string(), "session-123".to_string()],
+            &HashMap::new(),
+        );
+        assert!(command.contains("exec "));
+        assert!(command.contains("'resume' 'session-123'"));
     }
 
     #[test]

@@ -547,6 +547,7 @@ fn build_codex_shell_command(
     env_vars: &HashMap<String, String>,
     working_dir: &str,
     session_id: &str,
+    resume_session_id: Option<&str>,
 ) -> String {
     let mut parts = Vec::new();
     parts.push("mkdir -p ~/.ccem/sessions".to_string());
@@ -563,9 +564,15 @@ fn build_codex_shell_command(
     let codex_path = resolve_codex_path().unwrap_or_else(|| "codex".to_string());
     let escaped_codex = codex_path.replace("'", "'\\''");
     let escaped_session_id = session_id.replace("'", "'\\''");
+    let codex_cmd = if let Some(resume_id) = resume_session_id {
+        let escaped_resume = resume_id.replace("'", "'\\''");
+        format!("'{}' resume '{}'", escaped_codex, escaped_resume)
+    } else {
+        format!("'{}'", escaped_codex)
+    };
     parts.push(format!(
-        "'{}'; echo $? > ~/.ccem/sessions/'{}'.exit",
-        escaped_codex, escaped_session_id
+        "{}; echo $? > ~/.ccem/sessions/'{}'.exit",
+        codex_cmd, escaped_session_id
     ));
 
     parts.join(" && ")
@@ -645,10 +652,7 @@ pub fn launch_in_terminal(
     client: &str,
 ) -> Result<(Option<String>, Option<String>), String> {
     let shell_command = if client == "codex" {
-        if resume_session_id.is_some() {
-            return Err("Codex resume is not supported yet".to_string());
-        }
-        build_codex_shell_command(&env_vars, working_dir, session_id)
+        build_codex_shell_command(&env_vars, working_dir, session_id, resume_session_id)
     } else if is_ccem_launch_supported() {
         let proxy_base_url = env_vars.get("ANTHROPIC_BASE_URL").and_then(|url| {
             if url.starts_with("http://127.0.0.1:") && url.contains("/proxy/claude/") {
@@ -1402,6 +1406,20 @@ mod tests {
     fn test_terminal_type_display_name() {
         assert_eq!(TerminalType::TerminalApp.display_name(), "Terminal.app");
         assert_eq!(TerminalType::ITerm2.display_name(), "iTerm2");
+    }
+
+    #[test]
+    fn test_build_codex_shell_command_uses_resume_subcommand() {
+        let cmd = build_codex_shell_command(
+            &HashMap::new(),
+            "/home/user",
+            "test-session-123",
+            Some("codex-session-456"),
+        );
+
+        assert!(cmd.contains("cd \"/home/user\""));
+        assert!(cmd.contains(" resume 'codex-session-456'"));
+        assert!(cmd.contains("echo $? > ~/.ccem/sessions/'test-session-123'.exit"));
     }
 
     #[test]

@@ -3,7 +3,6 @@ import { Check, Download, Play } from 'lucide-react';
 import { MessageBubble, type ConversationMessageData } from './MessageBubble';
 import type { HistorySessionItem } from './HistoryList';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { getPerformanceMode } from '@/lib/performance';
@@ -44,7 +43,6 @@ interface HistoryDetailProps {
   onExport: () => void;
   onResume: () => void;
   launched: boolean;
-  isCodexSessionSelected: boolean;
 }
 
 function formatHeaderDate(timestamp: number): string {
@@ -134,7 +132,6 @@ export function HistoryDetail({
   onExport,
   onResume,
   launched,
-  isCodexSessionSelected,
 }: HistoryDetailProps) {
   const { t } = useLocale();
   const [, startTransition] = useTransition();
@@ -271,36 +268,16 @@ export function HistoryDetail({
               <Download className="h-3.5 w-3.5" />
               {t('history.export')}
             </Button>
-            {isCodexSessionSelected ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 gap-1.5 px-3 text-xs"
-                      onClick={onResume}
-                      disabled
-                    >
-                      <Play className="h-3.5 w-3.5" />
-                      {t('history.resume')}
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>{t('history.resumeUnsupportedCodex')}</TooltipContent>
-              </Tooltip>
-            ) : (
-              <Button
-                size="sm"
-                variant={launched ? 'ghost' : 'outline'}
-                className="h-8 gap-1.5 px-3 text-xs"
-                onClick={onResume}
-                disabled={launched}
-              >
-                {launched ? <Check className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-                {launched ? t('history.resumed') : t('history.resume')}
-              </Button>
-            )}
+            <Button
+              size="sm"
+              variant={launched ? 'ghost' : 'outline'}
+              className="h-8 gap-1.5 px-3 text-xs"
+              onClick={onResume}
+              disabled={launched}
+            >
+              {launched ? <Check className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+              {launched ? t('history.resumed') : t('history.resume')}
+            </Button>
           </div>
         </div>
         <div className="mt-1 flex items-center gap-3">
