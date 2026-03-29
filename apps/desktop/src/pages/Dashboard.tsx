@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
 import { LaunchStrip } from '@/components/dashboard/LaunchStrip';
+import { ProjectPickerModal } from '@/components/dashboard/ProjectPickerModal';
 import { MetricsRow } from '@/components/dashboard/MetricsRow';
 import { QuickLaunchGrid } from '@/components/dashboard/QuickLaunchGrid';
 import { LiveSessions } from '@/components/dashboard/LiveSessions';
@@ -32,7 +33,6 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
     setPermissionMode,
     selectedWorkingDir,
     setSelectedWorkingDir,
-    recent,
     isLoadingEnvs,
     isLoadingStats,
   } = useAppStore(
@@ -45,7 +45,6 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
       setPermissionMode: state.setPermissionMode,
       selectedWorkingDir: state.selectedWorkingDir,
       setSelectedWorkingDir: state.setSelectedWorkingDir,
-      recent: state.recent,
       isLoadingEnvs: state.isLoadingEnvs,
       isLoadingStats: state.isLoadingStats,
     }),
@@ -54,6 +53,7 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
 
   const { openDirectoryPicker, switchEnvironment, loadCronTasks, checkCodexInstalled } = useTauriCommands();
   const [codexInstalled, setCodexInstalled] = useState(true);
+  const [showProjectPicker, setShowProjectPicker] = useState(false);
 
   // Launch feedback
   const [launched, setLaunched] = useState(false);
@@ -104,14 +104,18 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
   const handleSelectDirectory = useCallback(async () => {
     try {
       const dir = await openDirectoryPicker();
-      if (dir) setSelectedWorkingDir(dir);
+      if (dir) {
+        setSelectedWorkingDir(dir);
+        setShowProjectPicker(false);
+      }
     } catch (err) {
       console.error('Failed to open directory dialog:', err);
     }
   }, [openDirectoryPicker, setSelectedWorkingDir]);
 
-  const handlePickRecentDir = useCallback((dir: string) => {
-    setSelectedWorkingDir(dir);
+  const handleSelectProject = useCallback((path: string) => {
+    setSelectedWorkingDir(path);
+    setShowProjectPicker(false);
   }, [setSelectedWorkingDir]);
 
   const handleLaunchClick = useCallback(() => {
@@ -154,14 +158,6 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
 
   useKeyboardShortcuts(dashboardShortcuts);
 
-  // Recent directories for LaunchStrip dropdown (max 5, unique)
-  const recentDirs = useMemo(() => {
-    return recent
-      .map(r => r.path)
-      .filter((p, i, arr) => arr.indexOf(p) === i)
-      .slice(0, 5);
-  }, [recent]);
-
   if (isLoadingEnvs || isLoadingStats) {
     return <DashboardSkeleton />;
   }
@@ -176,16 +172,21 @@ export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardPr
         environments={environments}
         permissionMode={permissionMode as PermissionModeName}
         selectedWorkingDir={selectedWorkingDir}
-        recentDirs={recentDirs}
         launched={launched}
         bindCopied={bindCopied}
         onSetLaunchClient={setLaunchClient}
         onSwitchEnv={switchEnvironment}
         onSetPermMode={setPermissionMode}
-        onSelectDir={handleSelectDirectory}
-        onPickRecentDir={handlePickRecentDir}
+        onOpenProjectPicker={() => setShowProjectPicker(true)}
         onLaunch={handleLaunchClick}
         onCopyBind={handleCopyBind}
+      />
+
+      <ProjectPickerModal
+        open={showProjectPicker}
+        onOpenChange={setShowProjectPicker}
+        onSelectProject={handleSelectProject}
+        onBrowseFolder={handleSelectDirectory}
       />
 
       {/* Zone 2: Bento Grid — Metrics left + Projects right */}

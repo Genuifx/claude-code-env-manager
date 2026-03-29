@@ -3,6 +3,7 @@ import { LayoutGrid, List, Minimize2, Plus, Terminal, X, FolderOpen, Globe, Shie
 import { Button } from '@/components/ui/button';
 import { LaunchButton } from '@/components/ui/LaunchButton';
 import { Card } from '@/components/ui/card';
+import { ProjectPickerModal } from '@/components/dashboard/ProjectPickerModal';
 import {
   Select,
   SelectContent,
@@ -167,6 +168,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   const [launcherOpen, setLauncherOpen] = useState(false);
   const [isMultiLaunching, setIsMultiLaunching] = useState(false);
   const [launched, setLaunched] = useState(false);
+  const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [tmuxAttachTerminals, setTmuxAttachTerminals] = useState<TmuxAttachTerminalInfo[]>([]);
   const [showRecoveryCandidates, setShowRecoveryCandidates] = useState(false);
   const launchedTimerRef = useRef<ReturnType<typeof setTimeout>>();
@@ -469,8 +471,16 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   // Select directory for launch
   const handleSelectDirectory = useCallback(async () => {
     const dir = await openDirectoryPicker();
-    if (dir) setSelectedWorkingDir(dir);
+    if (dir) {
+      setSelectedWorkingDir(dir);
+      setShowProjectPicker(false);
+    }
   }, [openDirectoryPicker, setSelectedWorkingDir]);
+
+  const handleSelectProject = useCallback((path: string) => {
+    setSelectedWorkingDir(path);
+    setShowProjectPicker(false);
+  }, [setSelectedWorkingDir]);
 
   // Register keyboard shortcuts
   useKeyboardShortcuts({
@@ -676,7 +686,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
             <Button
               variant="ghost"
               size="sm"
-              onClick={handleSelectDirectory}
+              onClick={() => setShowProjectPicker(true)}
               className="glass-btn-outline"
             >
               <FolderOpen className="w-4 h-4" />
@@ -881,6 +891,13 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
           </div>
         </div>
       )}
+
+      <ProjectPickerModal
+        open={showProjectPicker}
+        onOpenChange={setShowProjectPicker}
+        onSelectProject={handleSelectProject}
+        onBrowseFolder={handleSelectDirectory}
+      />
     </div>
   );
 }

@@ -1,5 +1,4 @@
-import { useState } from 'react';
-import { FolderOpen, ChevronDown, Globe, Shield, Clock, Copy, Rocket, TerminalSquare } from 'lucide-react';
+import { FolderOpen, Globe, Shield, Copy, Rocket, TerminalSquare } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -7,7 +6,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import * as Popover from '@radix-ui/react-popover';
 import { useLocale } from '@/locales';
 import { getProjectName, cn, getEnvColorVar } from '@/lib/utils';
 import { PERMISSION_PRESETS } from '@ccem/core/browser';
@@ -22,14 +20,12 @@ interface LaunchStripProps {
   environments: { name: string }[];
   permissionMode: PermissionModeName;
   selectedWorkingDir: string | null;
-  recentDirs: string[];
   launched: boolean;
   bindCopied: boolean;
   onSetLaunchClient: (client: LaunchClient) => void;
   onSwitchEnv: (name: string) => void;
   onSetPermMode: (mode: PermissionModeName) => void;
-  onSelectDir: () => void;
-  onPickRecentDir: (dir: string) => void;
+  onOpenProjectPicker: () => void;
   onLaunch: () => void;
   onCopyBind: () => void;
 }
@@ -41,19 +37,16 @@ export function LaunchStrip({
   environments,
   permissionMode,
   selectedWorkingDir,
-  recentDirs,
   launched,
   bindCopied,
   onSetLaunchClient,
   onSwitchEnv,
   onSetPermMode,
-  onSelectDir,
-  onPickRecentDir,
+  onOpenProjectPicker,
   onLaunch,
   onCopyBind,
 }: LaunchStripProps) {
   const { t } = useLocale();
-  const [dirOpen, setDirOpen] = useState(false);
   const isCodex = launchClient === 'codex';
 
   const dirDisplay = selectedWorkingDir
@@ -161,57 +154,19 @@ export function LaunchStrip({
           <span className="text-muted-foreground/20 text-xs select-none">·</span>
 
           {/* Directory */}
-          <Popover.Root open={dirOpen} onOpenChange={setDirOpen}>
-            <Popover.Trigger asChild>
-              <button
-                className={cn(
-                  'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-colors',
-                  'bg-white/[0.06] text-muted-foreground hover:bg-white/[0.10] hover:text-foreground'
-                )}
-                title={selectedWorkingDir || t('dashboard.selectDirPlaceholder')}
-              >
-                <FolderOpen className="w-3.5 h-3.5" />
-                <span className="truncate max-w-[160px]">
-                  {dirDisplay || t('dashboard.selectDirPlaceholder')}
-                </span>
-                <ChevronDown className="w-3 h-3 opacity-50" />
-              </button>
-            </Popover.Trigger>
-
-            <Popover.Portal>
-              <Popover.Content
-                className="w-72 rounded-xl glass-dropdown glass-noise z-50 py-1.5 animate-in fade-in slide-in-from-top-2 duration-150"
-                sideOffset={8}
-                align="center"
-              >
-                {recentDirs.length > 0 && (
-                  <>
-                    <div className="px-3.5 py-1.5 text-2xs text-muted-foreground/70 uppercase tracking-wider font-medium">
-                      {t('dashboard.recentDirs')}
-                    </div>
-                    {recentDirs.map((dir) => (
-                      <button
-                        key={dir}
-                        onClick={() => { onPickRecentDir(dir); setDirOpen(false); }}
-                        className="glass-dropdown-item w-full text-left px-3.5 py-2 text-sm flex items-center gap-2.5 rounded-lg mx-1 max-w-[calc(100%-8px)] cursor-pointer"
-                      >
-                        <Clock className="w-3.5 h-3.5 text-muted-foreground/60 flex-shrink-0" />
-                        <span className="truncate">{getProjectName(dir)}</span>
-                      </button>
-                    ))}
-                    <div className="border-t border-white/[0.06] my-1.5 mx-3" />
-                  </>
-                )}
-                <button
-                  onClick={() => { onSelectDir(); setDirOpen(false); }}
-                  className="glass-dropdown-item w-full text-left px-3.5 py-2 text-sm flex items-center gap-2.5 rounded-lg mx-1 max-w-[calc(100%-8px)] cursor-pointer"
-                >
-                  <FolderOpen className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-                  <span className="font-medium">{t('dashboard.browse')}</span>
-                </button>
-              </Popover.Content>
-            </Popover.Portal>
-          </Popover.Root>
+          <button
+            onClick={onOpenProjectPicker}
+            className={cn(
+              'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-colors',
+              'bg-white/[0.06] text-muted-foreground hover:bg-white/[0.10] hover:text-foreground'
+            )}
+            title={selectedWorkingDir || t('dashboard.selectDirPlaceholder')}
+          >
+            <FolderOpen className="w-3.5 h-3.5" />
+            <span className="truncate max-w-[160px]">
+              {dirDisplay || t('dashboard.selectDirPlaceholder')}
+            </span>
+          </button>
 
           <span className="text-muted-foreground/20 text-xs select-none">·</span>
 
