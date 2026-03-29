@@ -826,5 +826,19 @@
     "aiError": "生成失败",
     "needWorkingDir": "请先在设置中配置默认工作目录",
     "goToSettings": "前往设置"
+  },
+  "projectPicker": {
+    "title": "选择项目",
+    "favorites": "收藏",
+    "recent": "最近",
+    "vscode": "VSCode",
+    "jetbrains": "JetBrains",
+    "syncVSCode": "同步 VSCode",
+    "syncJetBrains": "同步 JetBrains",
+    "browseFolder": "浏览文件夹",
+    "noFavorites": "暂无收藏项目",
+    "noRecent": "暂无最近项目",
+    "noVSCode": "暂无 VSCode 项目",
+    "noJetBrains": "暂无 JetBrains 项目"
   }
 }

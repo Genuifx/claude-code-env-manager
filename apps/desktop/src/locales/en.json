@@ -826,5 +826,19 @@
     "aiError": "Generation failed",
     "needWorkingDir": "Please set a default working directory in Settings first",
     "goToSettings": "Go to Settings"
+  },
+  "projectPicker": {
+    "title": "Select Project",
+    "favorites": "Favorites",
+    "recent": "Recent",
+    "vscode": "VSCode",
+    "jetbrains": "JetBrains",
+    "syncVSCode": "Sync VSCode",
+    "syncJetBrains": "Sync JetBrains",
+    "browseFolder": "Browse Folder",
+    "noFavorites": "No favorite projects",
+    "noRecent": "No recent projects",
+    "noVSCode": "No VSCode projects",
+    "noJetBrains": "No JetBrains projects"
   }
 }
