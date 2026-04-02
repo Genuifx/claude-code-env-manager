@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { Check, Download, Play } from 'lucide-react';
 import { MessageBubble, type ConversationMessageData } from './MessageBubble';
 import type { HistorySessionItem } from './HistoryList';
@@ -43,6 +43,9 @@ interface HistoryDetailProps {
   onExport: () => void;
   onResume: () => void;
   launched: boolean;
+  /** When true, auto-scrolls to the bottom on session load (dashboard mode).
+   *  When false (default), scrolls to the top (history mode). */
+  scrollToBottomOnLoad?: boolean;
 }
 
 function formatHeaderDate(timestamp: number): string {
@@ -50,6 +53,10 @@ function formatHeaderDate(timestamp: number): string {
     month: 'short',
     day: 'numeric',
   });
+}
+
+function isNearBottom(container: HTMLDivElement): boolean {
+  return container.scrollHeight - container.clientHeight - container.scrollTop <= 48;
 }
 
 function mergeToolResults(msgs: ConversationMessageData[]): ConversationMessageData[] {
@@ -132,11 +139,17 @@ export function HistoryDetail({
   onExport,
   onResume,
   launched,
+  scrollToBottomOnLoad = false,
 }: HistoryDetailProps) {
   const { t } = useLocale();
   const [, startTransition] = useTransition();
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
+  const initialScrollKeyRef = useRef<string | null>(null);
+  const lastVisibleMessageCountRef = useRef(0);
+  const programmaticScrollRef = useRef(false);
+  const autoScrollDetachedRef = useRef(false);
+  const scrollFrameRef = useRef<number | null>(null);
   const messageBatchSize = getPerformanceMode() === 'reduced' ? 24 : 48;
   const formatTokens = (v: number) => v.toLocaleString();
   const sessionTitle = getHistorySessionDisplay(selectedSession, t('history.untitledSession'));
@@ -162,8 +175,9 @@ export function HistoryDetail({
     if (activeSegment === null) return mergedMessages;
     return mergedMessages.filter((message) => message.segmentIndex === activeSegment);
   }, [mergedMessages, activeSegment]);
+  // When scrollToBottomOnLoad, render all messages at once to enable correct scroll
   const [renderedMessageCount, setRenderedMessageCount] = useState(() => (
-    Math.min(visibleMessages.length, messageBatchSize)
+    scrollToBottomOnLoad ? visibleMessages.length : Math.min(visibleMessages.length, messageBatchSize)
   ));
   const displayedMessages = useMemo(() => (
     visibleMessages.slice(0, renderedMessageCount)
@@ -177,24 +191,109 @@ export function HistoryDetail({
         : t('history.segmentShortLabel').replace('{n}', String(segmentIndex))
     )
   ), [t]);
+  const scrollContextKey = `${selectedSession.id}:${activeSegment ?? 'all'}`;
 
-  useEffect(() => {
-    if (messages.length > 0 && messagesContainerRef.current) {
-      messagesContainerRef.current.scrollTo({ top: 0 });
+  // Batch reset: load all for scroll-to-bottom, progressive for scroll-to-top
+  useLayoutEffect(() => {
+    if (scrollToBottomOnLoad) {
+      setRenderedMessageCount(visibleMessages.length);
+    } else {
+      setRenderedMessageCount(Math.min(visibleMessages.length, messageBatchSize));
     }
-  }, [selectedSession.id, messages.length]);
+  }, [scrollToBottomOnLoad, messageBatchSize, visibleMessages]);
 
   useEffect(() => {
-    if (activeSegment !== null && messagesContainerRef.current) {
-      messagesContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    initialScrollKeyRef.current = null;
+    lastVisibleMessageCountRef.current = 0;
+    autoScrollDetachedRef.current = false;
+  }, [scrollContextKey, scrollToBottomOnLoad]);
+
+  useEffect(() => () => {
+    if (scrollFrameRef.current !== null) {
+      cancelAnimationFrame(scrollFrameRef.current);
     }
-  }, [activeSegment]);
+  }, []);
 
   useEffect(() => {
-    const totalMessages = visibleMessages.length;
-    const initialCount = Math.min(totalMessages, messageBatchSize);
-    setRenderedMessageCount(initialCount);
-  }, [messageBatchSize, visibleMessages]);
+    if (!scrollToBottomOnLoad || !messagesContainerRef.current) {
+      return;
+    }
+
+    const container = messagesContainerRef.current;
+    const handleScroll = () => {
+      if (programmaticScrollRef.current) {
+        return;
+      }
+      autoScrollDetachedRef.current = !isNearBottom(container);
+    };
+
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+    };
+  }, [scrollContextKey, scrollToBottomOnLoad]);
+
+  // Initial scroll only once per session/segment context.
+  useEffect(() => {
+    if (displayedMessages.length === 0 || !messagesContainerRef.current) {
+      return;
+    }
+
+    if (initialScrollKeyRef.current === scrollContextKey) {
+      return;
+    }
+
+    initialScrollKeyRef.current = scrollContextKey;
+    const container = messagesContainerRef.current;
+
+    if (scrollToBottomOnLoad) {
+      if (scrollFrameRef.current !== null) {
+        cancelAnimationFrame(scrollFrameRef.current);
+      }
+
+      programmaticScrollRef.current = true;
+      scrollFrameRef.current = requestAnimationFrame(() => {
+        container.scrollTo({ top: container.scrollHeight });
+        scrollFrameRef.current = requestAnimationFrame(() => {
+          programmaticScrollRef.current = false;
+          autoScrollDetachedRef.current = !isNearBottom(container);
+          scrollFrameRef.current = null;
+        });
+      });
+    } else {
+      container.scrollTo({ top: 0 });
+    }
+  }, [displayedMessages.length, scrollContextKey, scrollToBottomOnLoad]);
+
+  useEffect(() => {
+    const previousCount = lastVisibleMessageCountRef.current;
+    lastVisibleMessageCountRef.current = visibleMessages.length;
+
+    if (
+      !scrollToBottomOnLoad
+      || previousCount === 0
+      || visibleMessages.length <= previousCount
+      || autoScrollDetachedRef.current
+      || !messagesContainerRef.current
+    ) {
+      return;
+    }
+
+    const container = messagesContainerRef.current;
+    if (scrollFrameRef.current !== null) {
+      cancelAnimationFrame(scrollFrameRef.current);
+    }
+
+    programmaticScrollRef.current = true;
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      container.scrollTo({ top: container.scrollHeight });
+      scrollFrameRef.current = requestAnimationFrame(() => {
+        programmaticScrollRef.current = false;
+        autoScrollDetachedRef.current = !isNearBottom(container);
+        scrollFrameRef.current = null;
+      });
+    });
+  }, [scrollToBottomOnLoad, visibleMessages.length]);
 
   useEffect(() => {
     if (!hasMoreMessages) {
@@ -230,7 +329,7 @@ export function HistoryDetail({
     return () => {
       observer.disconnect();
     };
-  }, [hasMoreMessages, messageBatchSize, startTransition, visibleMessages.length]);
+  }, [hasMoreMessages, messageBatchSize, renderedMessageCount, startTransition, visibleMessages.length]);
 
   useEffect(() => {
     if (!hasMoreMessages || !messagesContainerRef.current) {
@@ -349,8 +448,10 @@ export function HistoryDetail({
                 return (
                   <div
                     key={msg.uuid || i}
-                    className="msg-enter history-msg-virtualized"
-                    style={{ animationDelay: animDelay }}
+                    className={cn(
+                      !scrollToBottomOnLoad && 'msg-enter history-msg-virtualized'
+                    )}
+                    style={!scrollToBottomOnLoad ? { animationDelay: animDelay } : undefined}
                   >
                     <MessageBubble message={msg} prevRole={prevRole} />
                   </div>
