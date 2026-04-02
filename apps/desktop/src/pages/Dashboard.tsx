@@ -190,6 +190,7 @@ export function Dashboard({ onNavigate, onLaunchWithDir }: DashboardProps) {
                 onExport={handleExport}
                 onResume={handleResume}
                 launched={launched}
+                scrollToBottomOnLoad
               />
             </Suspense>
           ) : (
