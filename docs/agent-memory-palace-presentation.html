@@ -1,0 +1,1284 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Memory Palace</title>
+    <style>
+      :root {
+        --bg: #f6efe1;
+        --bg-deep: #efe1c8;
+        --card: rgba(255, 252, 245, 0.82);
+        --card-strong: rgba(255, 250, 241, 0.95);
+        --ink: #13212d;
+        --muted: #566677;
+        --line: rgba(19, 33, 45, 0.12);
+        --navy: #16354a;
+        --teal: #1f7a82;
+        --copper: #b25a2b;
+        --amber: #d9982c;
+        --rose: #a74843;
+        --shadow: 0 18px 55px rgba(19, 33, 45, 0.12);
+        --radius: 28px;
+        --slide-gap: 32px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background:
+          radial-gradient(circle at 12% 18%, rgba(31, 122, 130, 0.14), transparent 26%),
+          radial-gradient(circle at 84% 12%, rgba(210, 152, 44, 0.18), transparent 24%),
+          radial-gradient(circle at 74% 88%, rgba(178, 90, 43, 0.12), transparent 22%),
+          linear-gradient(135deg, var(--bg) 0%, #f8f3e8 50%, var(--bg-deep) 100%);
+        color: var(--ink);
+        overflow: hidden;
+      }
+
+      body {
+        font-family: "Avenir Next", "Segoe UI", sans-serif;
+      }
+
+      a {
+        color: var(--navy);
+        text-decoration-thickness: 1px;
+        text-underline-offset: 0.18em;
+      }
+
+      .deck-shell {
+        position: relative;
+        height: 100dvh;
+        padding: 28px 28px 20px;
+      }
+
+      .ambient {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        overflow: hidden;
+      }
+
+      .ambient::before,
+      .ambient::after {
+        content: "";
+        position: absolute;
+        border-radius: 999px;
+        filter: blur(40px);
+        opacity: 0.55;
+      }
+
+      .ambient::before {
+        width: 320px;
+        height: 320px;
+        top: 4%;
+        left: -40px;
+        background: rgba(31, 122, 130, 0.12);
+      }
+
+      .ambient::after {
+        width: 420px;
+        height: 420px;
+        bottom: -160px;
+        right: -90px;
+        background: rgba(178, 90, 43, 0.12);
+      }
+
+      .topbar {
+        position: absolute;
+        z-index: 20;
+        top: 20px;
+        left: 28px;
+        right: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px;
+        border: 1px solid rgba(19, 33, 45, 0.08);
+        border-radius: 999px;
+        background: rgba(255, 250, 241, 0.7);
+        backdrop-filter: blur(18px);
+        box-shadow: 0 10px 24px rgba(19, 33, 45, 0.08);
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .brand-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--teal), var(--amber));
+        box-shadow: 0 0 0 5px rgba(31, 122, 130, 0.12);
+      }
+
+      .meta {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .progress-track {
+        width: 180px;
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(19, 33, 45, 0.08);
+        overflow: hidden;
+      }
+
+      .progress-fill {
+        height: 100%;
+        width: 0;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--teal), var(--amber), var(--copper));
+        transition: width 260ms ease;
+      }
+
+      .deck {
+        position: relative;
+        z-index: 10;
+        height: 100%;
+      }
+
+      .slide {
+        position: absolute;
+        inset: 58px 0 72px;
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: var(--slide-gap);
+        padding: 34px;
+        border-radius: var(--radius);
+        background:
+          linear-gradient(180deg, rgba(255, 253, 248, 0.96) 0%, rgba(248, 241, 230, 0.88) 100%);
+        border: 1px solid rgba(19, 33, 45, 0.08);
+        box-shadow: var(--shadow);
+        opacity: 0;
+        transform: translateX(70px) scale(0.985);
+        pointer-events: none;
+        transition: transform 360ms ease, opacity 280ms ease;
+        overflow: hidden;
+      }
+
+      .slide::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(135deg, rgba(31, 122, 130, 0.04), transparent 28%),
+          linear-gradient(315deg, rgba(178, 90, 43, 0.05), transparent 24%);
+        pointer-events: none;
+      }
+
+      .slide.active {
+        opacity: 1;
+        transform: translateX(0) scale(1);
+        pointer-events: auto;
+      }
+
+      .slide.prev {
+        transform: translateX(-70px) scale(0.985);
+      }
+
+      .slide-inner {
+        position: relative;
+        z-index: 1;
+        min-width: 0;
+      }
+
+      .slide-kicker {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 12px;
+        border-radius: 999px;
+        background: rgba(19, 33, 45, 0.05);
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .slide h1,
+      .slide h2,
+      .slide h3 {
+        margin: 16px 0 0;
+        line-height: 0.92;
+        font-family: "Iowan Old Style", "Palatino Linotype", serif;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+      }
+
+      .slide h1 {
+        font-size: clamp(56px, 8vw, 94px);
+      }
+
+      .slide h2 {
+        font-size: clamp(34px, 4.4vw, 58px);
+      }
+
+      .slide h3 {
+        font-size: 20px;
+        line-height: 1.05;
+      }
+
+      .lead {
+        margin: 18px 0 0;
+        font-size: clamp(19px, 2.1vw, 28px);
+        line-height: 1.3;
+        max-width: 16ch;
+      }
+
+      .body {
+        margin: 20px 0 0;
+        font-size: 17px;
+        line-height: 1.6;
+        color: var(--muted);
+      }
+
+      .big-quote {
+        margin: 28px 0 0;
+        padding-left: 18px;
+        border-left: 4px solid rgba(178, 90, 43, 0.55);
+        font-size: 28px;
+        line-height: 1.2;
+        font-family: "Iowan Old Style", "Palatino Linotype", serif;
+      }
+
+      .metric-strip {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 26px;
+      }
+
+      .metric {
+        padding: 18px;
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.58);
+        border: 1px solid rgba(19, 33, 45, 0.08);
+      }
+
+      .metric strong {
+        display: block;
+        font-size: 30px;
+        line-height: 1;
+        color: var(--navy);
+      }
+
+      .metric span {
+        display: block;
+        margin-top: 8px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .panel,
+      .stack-card,
+      .note-card,
+      .source-card,
+      .timeline-card {
+        padding: 22px;
+        border-radius: 24px;
+        background: var(--card);
+        border: 1px solid rgba(19, 33, 45, 0.08);
+        box-shadow: 0 12px 35px rgba(19, 33, 45, 0.06);
+      }
+
+      .panel-title {
+        margin: 0 0 16px;
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .line-list,
+      .chip-list,
+      .principles,
+      .source-list {
+        display: grid;
+        gap: 12px;
+      }
+
+      .line-item {
+        display: grid;
+        grid-template-columns: 120px 1fr;
+        gap: 14px;
+        align-items: start;
+      }
+
+      .line-label {
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--copper);
+      }
+
+      .line-copy {
+        font-size: 16px;
+        line-height: 1.45;
+      }
+
+      .diagram {
+        display: grid;
+        gap: 14px;
+        margin-top: 10px;
+      }
+
+      .diagram-band {
+        display: grid;
+        gap: 12px;
+      }
+
+      .diagram-band.two {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .diagram-band.four {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .diagram-node {
+        position: relative;
+        padding: 18px 16px;
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid rgba(19, 33, 45, 0.08);
+        min-height: 104px;
+      }
+
+      .diagram-node strong {
+        display: block;
+        font-size: 16px;
+        color: var(--navy);
+      }
+
+      .diagram-node span {
+        display: block;
+        margin-top: 8px;
+        font-size: 14px;
+        line-height: 1.45;
+        color: var(--muted);
+      }
+
+      .node-teal {
+        background: linear-gradient(180deg, rgba(31, 122, 130, 0.14), rgba(255, 255, 255, 0.62));
+      }
+
+      .node-amber {
+        background: linear-gradient(180deg, rgba(217, 152, 44, 0.16), rgba(255, 255, 255, 0.68));
+      }
+
+      .node-copper {
+        background: linear-gradient(180deg, rgba(178, 90, 43, 0.16), rgba(255, 255, 255, 0.68));
+      }
+
+      .node-rose {
+        background: linear-gradient(180deg, rgba(167, 72, 67, 0.15), rgba(255, 255, 255, 0.68));
+      }
+
+      .arrow-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 8px 0 2px;
+        color: var(--muted);
+        font-size: 13px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .arrow-row::before,
+      .arrow-row::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: rgba(19, 33, 45, 0.12);
+      }
+
+      .tag-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 11px 13px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid rgba(19, 33, 45, 0.08);
+        color: var(--ink);
+        font-size: 14px;
+      }
+
+      .tag::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--teal);
+        box-shadow: 0 0 0 4px rgba(31, 122, 130, 0.12);
+      }
+
+      .stack {
+        display: grid;
+        gap: 14px;
+      }
+
+      .stack-card strong {
+        display: block;
+        font-size: 18px;
+        color: var(--navy);
+      }
+
+      .stack-card p {
+        margin: 8px 0 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      .principle {
+        display: grid;
+        grid-template-columns: 26px 1fr;
+        gap: 12px;
+        align-items: start;
+      }
+
+      .principle-index {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: rgba(19, 33, 45, 0.08);
+        color: var(--navy);
+        font-weight: 700;
+        font-size: 12px;
+      }
+
+      .principle-copy strong {
+        display: block;
+        color: var(--navy);
+        font-size: 16px;
+      }
+
+      .principle-copy span {
+        display: block;
+        margin-top: 5px;
+        font-size: 14px;
+        line-height: 1.45;
+        color: var(--muted);
+      }
+
+      .matrix {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 20px;
+      }
+
+      .matrix-card {
+        padding: 18px;
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.65);
+        border: 1px solid rgba(19, 33, 45, 0.08);
+      }
+
+      .matrix-card h3 {
+        margin: 0;
+        font-size: 18px;
+      }
+
+      .matrix-card p {
+        margin: 10px 0 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      .code-card {
+        margin-top: 18px;
+        padding: 20px;
+        border-radius: 24px;
+        background: #102431;
+        color: #edf3f6;
+        box-shadow: 0 16px 40px rgba(16, 36, 49, 0.22);
+      }
+
+      .code-card pre {
+        margin: 0;
+        white-space: pre-wrap;
+        font-size: 14px;
+        line-height: 1.6;
+        font-family: "SFMono-Regular", Consolas, monospace;
+      }
+
+      .source-card h3,
+      .timeline-card h3 {
+        margin: 0;
+        font-size: 18px;
+      }
+
+      .source-list a {
+        display: block;
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.6);
+        border: 1px solid rgba(19, 33, 45, 0.08);
+        color: var(--ink);
+        text-decoration: none;
+        transition: transform 180ms ease, border-color 180ms ease;
+      }
+
+      .source-list a:hover {
+        transform: translateY(-1px);
+        border-color: rgba(22, 53, 74, 0.22);
+      }
+
+      .source-list small {
+        display: block;
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      .timeline {
+        display: grid;
+        gap: 14px;
+        margin-top: 18px;
+      }
+
+      .timeline-step {
+        display: grid;
+        grid-template-columns: 92px 1fr;
+        gap: 14px;
+      }
+
+      .timeline-step strong {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 8px 10px;
+        border-radius: 999px;
+        background: rgba(19, 33, 45, 0.08);
+        color: var(--navy);
+        font-size: 12px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .timeline-step span {
+        font-size: 15px;
+        line-height: 1.5;
+        color: var(--muted);
+      }
+
+      .footer-nav {
+        position: absolute;
+        z-index: 20;
+        left: 28px;
+        right: 28px;
+        bottom: 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 20px;
+      }
+
+      .slide-count {
+        color: var(--muted);
+        font-size: 13px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .controls {
+        display: flex;
+        gap: 10px;
+      }
+
+      .control {
+        border: 0;
+        padding: 12px 16px;
+        border-radius: 999px;
+        background: rgba(255, 250, 241, 0.84);
+        color: var(--ink);
+        border: 1px solid rgba(19, 33, 45, 0.08);
+        box-shadow: 0 10px 24px rgba(19, 33, 45, 0.08);
+        cursor: pointer;
+        font-size: 14px;
+      }
+
+      .control:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+
+      .tiny {
+        margin-top: 14px;
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--muted);
+      }
+
+      @media (max-width: 1080px) {
+        .slide {
+          grid-template-columns: 1fr;
+          inset: 72px 0 78px;
+          overflow-y: auto;
+        }
+
+        .lead {
+          max-width: none;
+        }
+
+        .metric-strip,
+        .matrix,
+        .diagram-band.two,
+        .diagram-band.four,
+        .tag-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .deck-shell {
+          padding: 20px 16px 16px;
+        }
+
+        .topbar,
+        .footer-nav {
+          left: 16px;
+          right: 16px;
+        }
+
+        .topbar {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .meta {
+          justify-content: space-between;
+        }
+
+        .slide {
+          padding: 24px 20px;
+          border-radius: 22px;
+        }
+
+        .slide h1 {
+          font-size: clamp(44px, 16vw, 68px);
+        }
+
+        .slide h2 {
+          font-size: clamp(28px, 11vw, 42px);
+        }
+
+        .body {
+          font-size: 15px;
+        }
+
+        .line-item,
+        .timeline-step {
+          grid-template-columns: 1fr;
+        }
+
+        .controls {
+          width: 100%;
+        }
+
+        .control {
+          flex: 1;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="deck-shell">
+      <div class="ambient"></div>
+
+      <div class="topbar">
+        <div class="brand">
+          <span class="brand-dot"></span>
+          Agent Memory Palace
+        </div>
+        <div class="meta">
+          <span>Agent Memory 模块设计讲解</span>
+          <div class="progress-track">
+            <div class="progress-fill" id="progressFill"></div>
+          </div>
+        </div>
+      </div>
+
+      <main class="deck" id="deck">
+        <section class="slide active" data-title="封面">
+          <div class="slide-inner">
+            <div class="slide-kicker">01 / Framing</div>
+            <h1>记忆宫殿</h1>
+            <p class="lead">不是“把聊天记录存起来”，而是给 agent 一套有地址、有层级、有检索成本的记忆系统。</p>
+            <p class="big-quote">从“向量垃圾场”升级到“可导航的认知建筑”。</p>
+            <div class="metric-strip">
+              <div class="metric">
+                <strong>4</strong>
+                <span>核心记忆层 Working / Episodic / Semantic / Procedural</span>
+              </div>
+              <div class="metric">
+                <strong>2</strong>
+                <span>关键路径 Write path 与 Retrieval path 必须分开设计</span>
+              </div>
+              <div class="metric">
+                <strong>1</strong>
+                <span>设计目标 让 agent 先定位房间 再取具体记忆</span>
+              </div>
+            </div>
+          </div>
+          <div class="slide-inner">
+            <div class="panel">
+              <p class="panel-title">这份 deck 讲什么</p>
+              <div class="principles">
+                <div class="principle">
+                  <div class="principle-index">1</div>
+                  <div class="principle-copy">
+                    <strong>为什么“记忆宫殿”这个比喻有用</strong>
+                    <span>它强迫你思考地址、作用域、路径和检索代价，而不是只想“我有个 memory store”。</span>
+                  </div>
+                </div>
+                <div class="principle">
+                  <div class="principle-index">2</div>
+                  <div class="principle-copy">
+                    <strong>外部实践到底在怎么做</strong>
+                    <span>Letta、MemGPT、LangGraph、Mem0、Generative Agents、HEBBS 各自抓住了不同维度。</span>
+                  </div>
+                </div>
+                <div class="principle">
+                  <div class="principle-index">3</div>
+                  <div class="principle-copy">
+                    <strong>如果你要自己做 最小可行架构长什么样</strong>
+                    <span>数据模型、写入策略、检索流程、版本与衰减机制都要明确。</span>
+                  </div>
+                </div>
+              </div>
+              <p class="tiny">操作提示：方向键、空格、PageUp / PageDown 可翻页。</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="slide" data-title="问题定义">
+          <div class="slide-inner">
+            <div class="slide-kicker">02 / Problem</div>
+            <h2>先别急着存<br />先定义失败模式</h2>
+            <p class="body">多数 agent 的“记忆模块”最后会变成三个问题：写入过多、检索过粗、更新过脏。它看起来像积累知识，实际上是在制造噪音。</p>
+            <div class="matrix">
+              <div class="matrix-card">
+                <h3>失败 1: 全量堆积</h3>
+                <p>把所有对话和工具调用都当成长期记忆，最终上下文里充满低价值回声。</p>
+              </div>
+              <div class="matrix-card">
+                <h3>失败 2: 单次相似度检索</h3>
+                <p>永远只做 top-k embedding，缺少作用域和路径，检索结果既贵又不稳定。</p>
+              </div>
+              <div class="matrix-card">
+                <h3>失败 3: 只会新增 不会修订</h3>
+                <p>用户偏好变了、代码结构变了、事实过期了，旧记忆还在不断污染决策。</p>
+              </div>
+              <div class="matrix-card">
+                <h3>失败 4: 没有记忆权限</h3>
+                <p>个人记忆、项目记忆、组织记忆混在一起，多 agent 场景很快失控。</p>
+              </div>
+            </div>
+          </div>
+          <div class="slide-inner">
+            <div class="note-card">
+              <p class="panel-title">记忆宫殿带来的第一个转变</p>
+              <div class="line-list">
+                <div class="line-item">
+                  <div class="line-label">旧思路</div>
+                  <div class="line-copy">“把什么东西记下来？”</div>
+                </div>
+                <div class="line-item">
+                  <div class="line-label">新思路</div>
+                  <div class="line-copy">“这段记忆属于哪一层、哪个房间、谁能访问、多久过期、检索需要花多大代价？”</div>
+                </div>
+              </div>
+            </div>
+            <div class="tag-grid">
+              <div class="tag">Addressable memory</div>
+              <div class="tag">Scoped retrieval</div>
+              <div class="tag">Revision over accumulation</div>
+              <div class="tag">Cost-aware recall</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="slide" data-title="宫殿抽象">
+          <div class="slide-inner">
+            <div class="slide-kicker">03 / Palace Model</div>
+            <h2>把“宫殿”翻译成工程结构</h2>
+            <p class="body">宫殿不是玄学。它在工程上等价于一组可导航的命名空间：楼层决定范围，房间决定主题，架子决定类型，物件决定单条记忆。</p>
+            <div class="diagram">
+              <div class="diagram-band four">
+                <div class="diagram-node node-teal">
+                  <strong>楼层</strong>
+                  <span>user / org / project / session</span>
+                </div>
+                <div class="diagram-node node-amber">
+                  <strong>房间</strong>
+                  <span>preferences / codebase / incidents / goals</span>
+                </div>
+                <div class="diagram-node node-copper">
+                  <strong>架子</strong>
+                  <span>episodic / semantic / procedural / graph</span>
+                </div>
+                <div class="diagram-node node-rose">
+                  <strong>物件</strong>
+                  <span>具体 fact / event / insight / edge</span>
+                </div>
+              </div>
+              <div class="arrow-row">先走地址 再展开内容</div>
+              <div class="diagram-band two">
+                <div class="diagram-node">
+                  <strong>为什么有用</strong>
+                  <span>检索时先缩小范围，减少误召回；写入时先决定归属，减少记忆污染。</span>
+                </div>
+                <div class="diagram-node">
+                  <strong>为什么不是纯文件夹</strong>
+                  <span>同一记忆可以挂多个边：similar_to、derived_from、contradicts、caused_by。</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="slide-inner">
+            <div class="stack">
+              <div class="stack-card">
+                <strong>宫殿的关键不是“空间感”</strong>
+                <p>而是“记忆有位置”。位置意味着可摘要、可权限控制、可衰减、可定向检索。</p>
+              </div>
+              <div class="stack-card">
+                <strong>第一层检索要尽量便宜</strong>
+                <p>先用 room summary、key slots、graph anchors 判断值不值得继续往下挖，而不是直接拉原始 episode。</p>
+              </div>
+              <div class="stack-card">
+                <strong>房间本身也要有元数据</strong>
+                <p>比如用途描述、可信度、更新时间、写入策略、最大容量、允许访问的 agent 角色。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="slide" data-title="四层记忆">
+          <div class="slide-inner">
+            <div class="slide-kicker">04 / Layers</div>
+            <h2>四层记忆<br />不要混成一锅</h2>
+            <p class="body">长期可用的 agent memory，几乎都会走向分层。区别只在名字不同，结构大体一致。</p>
+            <div class="diagram">
+              <div class="diagram-band four">
+                <div class="diagram-node node-teal">
+                  <strong>Working</strong>
+                  <span>当前任务 scratchpad，和线程生命周期绑定。</span>
+                </div>
+                <div class="diagram-node node-amber">
+                  <strong>Episodic</strong>
+                  <span>原始经历流：事件、对话、工具调用、结果。</span>
+                </div>
+                <div class="diagram-node node-copper">
+                  <strong>Semantic</strong>
+                  <span>提炼后的稳定事实、偏好、长期约束。</span>
+                </div>
+                <div class="diagram-node node-rose">
+                  <strong>Procedural</strong>
+                  <span>怎么做事：套路、模板、执行风格、工作规约。</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="slide-inner">
+            <div class="panel">
+              <p class="panel-title">每一层的职责</p>
+              <div class="line-list">
+                <div class="line-item">
+                  <div class="line-label">Working</div>
+                  <div class="line-copy">快、脏、短命。只服务当前 rollout，不应该直接进长期 memory。</div>
+                </div>
+                <div class="line-item">
+                  <div class="line-label">Episodic</div>
+                  <div class="line-copy">保留可追溯证据。之后做 reflection、debug、audit 都要靠它。</div>
+                </div>
+                <div class="line-item">
+                  <div class="line-label">Semantic</div>
+                  <div class="line-copy">真正“下次还该记得”的内容。必须支持 update 和 contradiction。</div>
+                </div>
+                <div class="line-item">
+                  <div class="line-label">Procedural</div>
+                  <div class="line-copy">用户偏好的交付方式、团队约定、工具使用策略。它决定行为风格，不只是知识。</div>
+                </div>
+              </div>
+            </div>
+            <div class="tiny">Letta、MemGPT、Mem0、Generative Agents 虽然命名不同，但都在做这种层次拆分。</div>
+          </div>
+        </section>
+
+        <section class="slide" data-title="写入路径">
+          <div class="slide-inner">
+            <div class="slide-kicker">05 / Write Path</div>
+            <h2>记忆写入<br />比检索更重要</h2>
+            <p class="body">memory 模块的脏数据问题，通常不是检索算法造成的，而是写入时缺少判断。你应该把写入当成一个小型决策系统。</p>
+            <div class="timeline">
+              <div class="timeline-step">
+                <strong>Step 1</strong>
+                <span>从当前 interaction 里抽候选记忆，不要直接全量落库。</span>
+              </div>
+              <div class="timeline-step">
+                <strong>Step 2</strong>
+                <span>判定作用域与房间：user、project、session；preferences、codebase、goals、incidents。</span>
+              </div>
+              <div class="timeline-step">
+                <strong>Step 3</strong>
+                <span>做 memory action：<code>ADD / UPDATE / DELETE / NONE</code>。</span>
+              </div>
+              <div class="timeline-step">
+                <strong>Step 4</strong>
+                <span>为记忆打上证据链：source episode、confidence、valid_until、revision_id。</span>
+              </div>
+              <div class="timeline-step">
+                <strong>Step 5</strong>
+                <span>异步 consolidation：把 episodic 压缩成 semantic / procedural insights。</span>
+              </div>
+            </div>
+          </div>
+          <div class="slide-inner">
+            <div class="code-card">
+              <pre>{
+  "candidate": "User prefers terse technical summaries",
+  "scope": "user",
+  "room": "preferences",
+  "layer": "procedural",
+  "action": "UPDATE",
+  "confidence": 0.88,
+  "source_episode_id": "ep_2026_04_02_019d...",
+  "revises": "mem_user_pref_summary_style_v3",
+  "valid_until": null
+}</pre>
+            </div>
+            <div class="stack" style="margin-top: 16px;">
+              <div class="stack-card">
+                <strong>强约束</strong>
+                <p>长期 memory 写入必须可撤回、可替换、可追溯。否则越用越不敢信。</p>
+              </div>
+              <div class="stack-card">
+                <strong>产品启发</strong>
+                <p>Mem0 把这件事做得最显式：它不是“只会加”，而是把更新规则本身做成模块。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="slide" data-title="检索路径">
+          <div class="slide-inner">
+            <div class="slide-kicker">06 / Retrieval</div>
+            <h2>检索不要一步到位<br />先粗后细</h2>
+            <p class="body">真正像“宫殿”的地方在这里。你不该一上来就取原始记忆，而应该沿路径层层展开。</p>
+            <div class="diagram">
+              <div class="diagram-band two">
+                <div class="diagram-node node-teal">
+                  <strong>第一跳</strong>
+                  <span>Scope filter: 只看 user / org / project / session 中相关层。</span>
+                </div>
+                <div class="diagram-node node-amber">
+                  <strong>第二跳</strong>
+                  <span>Room summary: preferences? codebase? incidents? 先取摘要而不是正文。</span>
+                </div>
+              </div>
+              <div class="diagram-band two">
+                <div class="diagram-node node-copper">
+                  <strong>第三跳</strong>
+                  <span>Graph expansion: 按 derived_from / contradicts / similar_to 展开邻居。</span>
+                </div>
+                <div class="diagram-node node-rose">
+                  <strong>第四跳</strong>
+                  <span>Episode fetch: 只把高价值证据拉进 prompt，控制 token 成本。</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="slide-inner">
+            <div class="note-card">
+              <p class="panel-title">为什么这样做</p>
+              <div class="principles">
+                <div class="principle">
+                  <div class="principle-index">A</div>
+                  <div class="principle-copy">
+                    <strong>便宜</strong>
+                    <span>先摘要后正文，token 和延迟都更稳定。</span>
+                  </div>
+                </div>
+                <div class="principle">
+                  <div class="principle-index">B</div>
+                  <div class="principle-copy">
+                    <strong>准</strong>
+                    <span>先用地址过滤，减少 embedding-only 的误召回。</span>
+                  </div>
+                </div>
+                <div class="principle">
+                  <div class="principle-index">C</div>
+                  <div class="principle-copy">
+                    <strong>可解释</strong>
+                    <span>你能说清楚这条记忆是从哪个房间、哪条边、哪个证据来的。</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="tiny">CueR 和 HEBBS 对“分保真 recall”“先便宜再深入”这件事给了很强的启发。</div>
+          </div>
+        </section>
+
+        <section class="slide" data-title="外部实践">
+          <div class="slide-inner">
+            <div class="slide-kicker">07 / Landscape</div>
+            <h2>外网实践<br />到底各自抓了什么</h2>
+            <p class="body">别把它们当“谁对谁错”。它们更像是在不同位置上切问题：状态管理、长期存储、反思、图结构、开发者体验。</p>
+          </div>
+          <div class="slide-inner">
+            <div class="source-card">
+              <div class="source-list">
+                <a href="https://docs.letta.com/guides/core-concepts/memory/memory-blocks" target="_blank" rel="noreferrer">
+                  Letta
+                  <small>Memory blocks 很像“房间”，有 pinned state、description、shared memory 的概念。</small>
+                </a>
+                <a href="https://research.memgpt.ai/" target="_blank" rel="noreferrer">
+                  MemGPT
+                  <small>把 memory 当“操作系统里的层级存储”，重点是 context management，不只是存储本身。</small>
+                </a>
+                <a href="https://docs.langchain.com/oss/python/deepagents/long-term-memory" target="_blank" rel="noreferrer">
+                  LangGraph / Deep Agents
+                  <small>工程上非常实用：把长期记忆和工作文件分开，让 `/memories/` 成为持久层入口。</small>
+                </a>
+                <a href="https://docs.mem0.ai/core-concepts/memory-types" target="_blank" rel="noreferrer">
+                  Mem0
+                  <small>最值得学的是 update/delete 规则和分层 memory types，不是只会 append。</small>
+                </a>
+                <a href="https://research.google/pubs/generative-agents-interactive-simulacra-of-human-behavior/" target="_blank" rel="noreferrer">
+                  Generative Agents
+                  <small>经典三件套：memory、reflection、planning。说明 episode 需要被提炼成 insight。</small>
+                </a>
+                <a href="https://hebbs.ai/" target="_blank" rel="noreferrer">
+                  HEBBS
+                  <small>少数真的把 palace / graph / contradiction / decay 组合进产品隐喻的方向。</small>
+                </a>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="slide" data-title="数据模型">
+          <div class="slide-inner">
+            <div class="slide-kicker">08 / Data Model</div>
+            <h2>一个够用的<br />Memory Palace schema</h2>
+            <p class="body">你不需要一上来做超复杂数据库，但必须把核心对象定义清楚：memory item、room、edge、revision、policy。</p>
+            <div class="code-card">
+              <pre>memory_item {
+  id,
+  scope,          // user | org | project | session
+  room,           // preferences | codebase | goals | incidents
+  layer,          // episodic | semantic | procedural
+  title,
+  content,
+  summary,
+  confidence,
+  status,         // active | superseded | expired
+  source_episode_id,
+  revision_of,
+  valid_from,
+  valid_until,
+  created_at,
+  updated_at
+}
+
+memory_edge {
+  from_id,
+  to_id,
+  relation,       // derived_from | similar_to | contradicts | caused_by
+  weight
+}</pre>
+            </div>
+          </div>
+          <div class="slide-inner">
+            <div class="panel">
+              <p class="panel-title">实现建议</p>
+              <div class="line-list">
+                <div class="line-item">
+                  <div class="line-label">MVP</div>
+                  <div class="line-copy">SQLite 或 Postgres 就够了；图边单表也够用，不必一开始上图数据库。</div>
+                </div>
+                <div class="line-item">
+                  <div class="line-label">检索</div>
+                  <div class="line-copy">结构化过滤优先，embedding 作为 room 内二次排序，而不是唯一入口。</div>
+                </div>
+                <div class="line-item">
+                  <div class="line-label">版本</div>
+                  <div class="line-copy">不要直接覆盖记忆。用 <code>revision_of</code> 和 <code>status=superseded</code> 保留历史。</div>
+                </div>
+                <div class="line-item">
+                  <div class="line-label">清理</div>
+                  <div class="line-copy">session / task 级 episode 自动过期；semantic 只有在被新证据推翻时才收缩。</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="slide" data-title="路线图">
+          <div class="slide-inner">
+            <div class="slide-kicker">09 / Build Plan</div>
+            <h2>最小落地路线<br />不要一口吃成系统</h2>
+            <p class="body">如果你要自己做，最合理的顺序不是“先搞 fancy recall”，而是先把记忆写脏的问题堵住。</p>
+            <div class="timeline-card">
+              <h3>建议分三段推进</h3>
+              <div class="timeline">
+                <div class="timeline-step">
+                  <strong>v0</strong>
+                  <span>分层 + 作用域 + ADD/UPDATE/DELETE/NONE。先让 memory 可控。</span>
+                </div>
+                <div class="timeline-step">
+                  <strong>v1</strong>
+                  <span>room summary + graph edges + cost-aware retrieval。开始像“宫殿”。</span>
+                </div>
+                <div class="timeline-step">
+                  <strong>v2</strong>
+                  <span>reflection jobs、contradiction detection、shared rooms、agent-specific policies。</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="slide-inner">
+            <div class="stack">
+              <div class="stack-card">
+                <strong>先做什么</strong>
+                <p>把“候选记忆提取器”和“记忆动作决策器”拆出来，先把写入行为模块化。</p>
+              </div>
+              <div class="stack-card">
+                <strong>暂时别做什么</strong>
+                <p>不要一上来就做超级复杂的知识图谱 UI 或多阶段 agent 自主反思调度。</p>
+              </div>
+              <div class="stack-card">
+                <strong>真正的门槛</strong>
+                <p>不是存储，是记忆治理：权限、更新、过期、冲突、证据链、检索预算。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="slide" data-title="结尾">
+          <div class="slide-inner">
+            <div class="slide-kicker">10 / Takeaway</div>
+            <h2>一句话总结</h2>
+            <p class="big-quote">记忆宫殿给你的真正启发，不是“更会记”，而是“更会组织记忆”。</p>
+            <p class="body">如果你正在做 agent memory 模块，优先追求这五件事：<strong>分层</strong>、<strong>地址化</strong>、<strong>修订能力</strong>、<strong>路径式检索</strong>、<strong>证据与版本</strong>。</p>
+          </div>
+          <div class="slide-inner">
+            <div class="source-card">
+              <h3>你可以直接拿去落地的 checklist</h3>
+              <div class="source-list" style="margin-top: 16px;">
+                <a href="javascript:void(0)">
+                  1. memory item 必须有 scope / room / layer / revision / source
+                  <small>没有地址与版本，就没有可治理的长期记忆。</small>
+                </a>
+                <a href="javascript:void(0)">
+                  2. 写入必须返回 ADD / UPDATE / DELETE / NONE
+                  <small>拒绝“只会 append” 的记忆模块。</small>
+                </a>
+                <a href="javascript:void(0)">
+                  3. 检索必须先便宜后昂贵
+                  <small>先 summary，后 episode；先 scope，后 similarity。</small>
+                </a>
+                <a href="javascript:void(0)">
+                  4. 每条长期记忆都要能追溯证据
+                  <small>否则 debugging、trust、replay 都会出问题。</small>
+                </a>
+              </div>
+              <p class="tiny">文件路径：<code>docs/agent-memory-palace-presentation.html</code></p>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <div class="footer-nav">
+        <div class="slide-count" id="slideCount">1 / 10</div>
+        <div class="controls">
+          <button class="control" id="prevBtn" type="button">上一页</button>
+          <button class="control" id="nextBtn" type="button">下一页</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const slides = Array.from(document.querySelectorAll(".slide"));
+      const progressFill = document.getElementById("progressFill");
+      const slideCount = document.getElementById("slideCount");
+      const prevBtn = document.getElementById("prevBtn");
+      const nextBtn = document.getElementById("nextBtn");
+      let current = 0;
+
+      function render() {
+        slides.forEach((slide, index) => {
+          slide.classList.toggle("active", index === current);
+          slide.classList.toggle("prev", index < current);
+        });
+
+        slideCount.textContent = `${current + 1} / ${slides.length}`;
+        progressFill.style.width = `${((current + 1) / slides.length) * 100}%`;
+        prevBtn.disabled = current === 0;
+        nextBtn.disabled = current === slides.length - 1;
+        document.title = `${slides[current].dataset.title} · Agent Memory Palace`;
+      }
+
+      function goTo(index) {
+        current = Math.max(0, Math.min(index, slides.length - 1));
+        render();
+      }
+
+      prevBtn.addEventListener("click", () => goTo(current - 1));
+      nextBtn.addEventListener("click", () => goTo(current + 1));
+
+      window.addEventListener("keydown", (event) => {
+        if (["ArrowRight", "PageDown", " "].includes(event.key)) {
+          event.preventDefault();
+          goTo(current + 1);
+        }
+        if (["ArrowLeft", "PageUp"].includes(event.key)) {
+          event.preventDefault();
+          goTo(current - 1);
+        }
+        if (event.key === "Home") {
+          event.preventDefault();
+          goTo(0);
+        }
+        if (event.key === "End") {
+          event.preventDefault();
+          goTo(slides.length - 1);
+        }
+      });
+
+      render();
+    </script>
+  </body>
+</html>

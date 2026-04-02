@@ -40,7 +40,7 @@ export function AppLayout({
     'proxy-debug': 'proxyDebug.subtitle',
     settings: 'settings.subtitle',
   };
-  const subtitle = subtitleKeyMap[activeTab] ? t(subtitleKeyMap[activeTab]) : undefined;
+  const subtitle = subtitleKeyMap[activeTab] && !isDashboard ? t(subtitleKeyMap[activeTab]) : undefined;
 
   return (
     <div className="h-screen flex overflow-hidden relative">
@@ -61,21 +61,23 @@ export function AppLayout({
         </div>
 
         {/* Titlebar spacer + page title */}
-        <div className="h-[52px] shrink-0 flex items-end px-8 pb-2 relative z-10">
-          <div className="flex items-baseline gap-3">
-            {pageTitle && (
-              <h1 className="text-lg font-semibold text-foreground">{pageTitle}</h1>
-            )}
-            {subtitle && (
-              <span className="text-sm text-muted-foreground">{subtitle}</span>
+        {!isDashboard && (
+          <div className="h-[52px] shrink-0 flex items-end px-8 pb-2 relative z-10">
+            <div className="flex items-baseline gap-3">
+              {pageTitle && (
+                <h1 className="text-lg font-semibold text-foreground">{pageTitle}</h1>
+              )}
+              {subtitle && (
+                <span className="text-sm text-muted-foreground">{subtitle}</span>
+              )}
+            </div>
+            {pageActions && (
+              <div className="flex items-center gap-3 ml-auto relative z-[110]">
+                {pageActions}
+              </div>
             )}
           </div>
-          {pageActions && (
-            <div className="flex items-center gap-3 ml-auto relative z-[110]">
-              {pageActions}
-            </div>
-          )}
-        </div>
+        )}
         <main
           className={fullBleed
             ? 'scroll-glass-root flex-1 overflow-hidden relative z-10'

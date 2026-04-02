@@ -15,7 +15,7 @@ const LazyHistoryDetail = lazy(async () =>
   import('@/components/history/HistoryDetail').then((m) => ({ default: m.HistoryDetail }))
 );
 
-type HistorySourceFilter = 'all' | HistorySource;
+export type HistorySourceFilter = 'all' | HistorySource;
 
 const HISTORY_CACHE_TTL_MS = 60_000;
 
@@ -27,7 +27,7 @@ interface HistorySessionCacheEntry {
 
 const historySessionCache = new Map<HistorySourceFilter, HistorySessionCacheEntry>();
 
-function toSessionKey(session: Pick<HistorySessionItem, 'id' | 'source'>): string {
+export function toSessionKey(session: Pick<HistorySessionItem, 'id' | 'source'>): string {
   return `${session.source}:${session.id}`;
 }
 
@@ -51,7 +51,7 @@ function isHistoryCacheFresh(sourceFilter: HistorySourceFilter): boolean {
   return !!entry && Date.now() - entry.fetchedAt < HISTORY_CACHE_TTL_MS;
 }
 
-async function fetchHistorySessions(sourceFilter: HistorySourceFilter, force = false): Promise<HistorySessionItem[]> {
+export async function fetchHistorySessions(sourceFilter: HistorySourceFilter, force = false): Promise<HistorySessionItem[]> {
   const cached = historySessionCache.get(sourceFilter);
 
   if (!force && cached?.data && isHistoryCacheFresh(sourceFilter)) {

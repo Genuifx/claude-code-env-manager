@@ -89,7 +89,23 @@
     "noFavorites": "还没有收藏项目",
     "addFirstFavorite": "添加你的第一个收藏项目",
     "quickAccessHint": "快速访问你的常用项目",
-    "favoriteRemoved": "已从收藏中移除"
+    "favoriteRemoved": "已从收藏中移除",
+    "newSession": "新会话",
+    "selectConversation": "选择一个会话查看详情",
+    "selectConversationHint": "从左侧项目树选择一个对话",
+    "statusRunning": "个会话运行中",
+    "statusIdle": "无活跃会话",
+    "statusEnv": "当前环境",
+    "statusStreak": "天",
+    "statusCronActive": "个定时任务",
+    "resumeSession": "续作此会话",
+    "resumed": "已恢复 ✓",
+    "selectToResume": "选择会话以续作",
+    "searchProjects": "搜索项目和会话...",
+    "noHistory": "暂无历史会话",
+    "noHistoryHint": "启动 Claude Code 开始你的第一个对话",
+    "projectSessions": "个会话",
+    "loadMore": "加载更多"
   },
   "sessions": {
     "subtitle": "管理运行中的 Claude Code 会话",
@@ -644,7 +660,7 @@
     "tokensOutput": "输出"
   },
   "sideRail": {
-    "dashboard": "仪表盘",
+    "dashboard": "工作间",
     "sessions": "会话",
     "environments": "环境",
     "skills": "技能",
