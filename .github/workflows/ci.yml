@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, refator]
+    branches: [main, refactor]
   pull_request:
     branches: [main]
 
@@ -34,6 +34,12 @@ jobs:
 
       - name: Build all packages
         run: pnpm -r build
+
+      - name: TypeScript type check
+        run: cd apps/desktop && pnpm exec tsc --noEmit
+
+      - name: Rust clippy
+        run: cd apps/desktop/src-tauri && cargo clippy -- -D warnings
 
       - name: Run Rust tests
         run: cd apps/desktop/src-tauri && cargo test
