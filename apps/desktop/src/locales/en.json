@@ -89,7 +89,23 @@
     "noFavorites": "No favorites yet",
     "addFirstFavorite": "Add your first favorite project",
     "quickAccessHint": "Quick access to your favorite projects",
-    "favoriteRemoved": "Removed from favorites"
+    "favoriteRemoved": "Removed from favorites",
+    "newSession": "New Session",
+    "selectConversation": "Select a conversation to view details",
+    "selectConversationHint": "Pick a conversation from the project tree",
+    "statusRunning": "sessions running",
+    "statusIdle": "No active sessions",
+    "statusEnv": "Environment",
+    "statusStreak": "days",
+    "statusCronActive": "cron tasks",
+    "resumeSession": "Resume",
+    "resumed": "Resumed ✓",
+    "selectToResume": "Select a conversation to resume",
+    "searchProjects": "Search projects and conversations...",
+    "noHistory": "No history yet",
+    "noHistoryHint": "Launch Claude Code to start your first conversation",
+    "projectSessions": "sessions",
+    "loadMore": "Load more"
   },
   "sessions": {
     "subtitle": "Manage running Claude Code sessions",
@@ -644,7 +660,7 @@
     "tokensOutput": "Output"
   },
   "sideRail": {
-    "dashboard": "Dashboard",
+    "dashboard": "Workspace",
     "sessions": "Sessions",
     "environments": "Environments",
     "skills": "Skills",

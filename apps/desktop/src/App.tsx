@@ -500,7 +500,6 @@ function App() {
         return (
           <Dashboard
             onNavigate={navigateToTab}
-            onLaunch={handleLaunch}
             onLaunchWithDir={handleLaunchWithDir}
           />
         );
@@ -529,7 +528,7 @@ function App() {
       case 'settings':
         return <SettingsPage />;
       default:
-        return <Dashboard onNavigate={navigateToTab} onLaunch={handleLaunch} onLaunchWithDir={handleLaunchWithDir} />;
+        return <Dashboard onNavigate={navigateToTab} onLaunchWithDir={handleLaunchWithDir} />;
     }
   };
 
@@ -540,7 +539,7 @@ function App() {
           activeTab={activeTab}
           onTabChange={navigateToTab}
           onTabPrefetch={prefetchTab}
-          fullBleed={activeTab === 'history'}
+          fullBleed={activeTab === 'history' || activeTab === 'dashboard'}
         >
           <Suspense fallback={<PageFallback />}>
             {renderPage()}

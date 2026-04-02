@@ -1,204 +1,220 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { MessageSquare } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
-import { LaunchStrip } from '@/components/dashboard/LaunchStrip';
-import { ProjectPickerModal } from '@/components/dashboard/ProjectPickerModal';
-import { MetricsRow } from '@/components/dashboard/MetricsRow';
-import { QuickLaunchGrid } from '@/components/dashboard/QuickLaunchGrid';
-import { LiveSessions } from '@/components/dashboard/LiveSessions';
-import { RuntimeOverviewCard } from '@/components/dashboard/RuntimeOverviewCard';
+import { DashboardStatusStrip } from '@/components/dashboard/DashboardStatusStrip';
+import { ProjectTree } from '@/components/dashboard/ProjectTree';
+import { ResumeBar } from '@/components/dashboard/ResumeBar';
+import { DashboardSkeleton } from '@/components/ui/skeleton-states';
 import { useAppStore } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
-import { DashboardSkeleton } from '@/components/ui/skeleton-states';
-import { copyBindCommand } from '@/lib/telegram-utils';
 import { useLocale } from '@/locales';
 import { scheduleAfterFirstPaint } from '@/lib/idle';
-import type { PermissionModeName } from '@ccem/core/browser';
+import { fetchHistorySessions, toSessionKey } from '@/pages/History';
+import type { HistorySessionItem } from '@/components/history/HistoryList';
+import type { ConversationMessageData } from '@/components/history/MessageBubble';
+import type { HistorySegment } from '@/components/history/HistoryDetail';
 import { shallow } from 'zustand/shallow';
+
+const LazyHistoryDetail = lazy(async () =>
+  import('@/components/history/HistoryDetail').then((m) => ({ default: m.HistoryDetail }))
+);
+
+function DetailFallback() {
+  return <div className="flex-1 overflow-hidden" />;
+}
 
 interface DashboardProps {
   onNavigate: (tab: string) => void;
-  onLaunch: () => void;
   onLaunchWithDir: (dir: string) => void;
 }
 
-export function Dashboard({ onNavigate, onLaunch, onLaunchWithDir }: DashboardProps) {
+export function Dashboard({ onNavigate, onLaunchWithDir }: DashboardProps) {
   const { t } = useLocale();
-  const {
-    launchClient,
-    setLaunchClient,
-    currentEnv,
-    environments,
-    permissionMode,
-    setPermissionMode,
-    selectedWorkingDir,
-    setSelectedWorkingDir,
-    isLoadingEnvs,
-    isLoadingStats,
-  } = useAppStore(
+  const { isLoadingEnvs, isLoadingStats } = useAppStore(
     (state) => ({
-      launchClient: state.launchClient,
-      setLaunchClient: state.setLaunchClient,
-      currentEnv: state.currentEnv,
-      environments: state.environments,
-      permissionMode: state.permissionMode,
-      setPermissionMode: state.setPermissionMode,
-      selectedWorkingDir: state.selectedWorkingDir,
-      setSelectedWorkingDir: state.setSelectedWorkingDir,
       isLoadingEnvs: state.isLoadingEnvs,
       isLoadingStats: state.isLoadingStats,
     }),
     shallow
   );
 
-  const { openDirectoryPicker, switchEnvironment, loadCronTasks, checkCodexInstalled } = useTauriCommands();
-  const [codexInstalled, setCodexInstalled] = useState(true);
-  const [showProjectPicker, setShowProjectPicker] = useState(false);
+  const { launchClaudeCode, openDirectoryPicker, loadCronTasks, checkCodexInstalled } =
+    useTauriCommands();
 
-  // Launch feedback
+  const [sessions, setSessions] = useState<HistorySessionItem[]>([]);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(true);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ConversationMessageData[]>([]);
+  const [segments, setSegments] = useState<HistorySegment[]>([]);
+  const [activeSegment, setActiveSegment] = useState<number | null>(null);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [launched, setLaunched] = useState(false);
   const launchedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [bindCopied, setBindCopied] = useState(false);
-  const bindCopiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     return () => {
       if (launchedTimerRef.current) clearTimeout(launchedTimerRef.current);
-      if (bindCopiedTimerRef.current) clearTimeout(bindCopiedTimerRef.current);
     };
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    const cancelDeferredDashboardSync = scheduleAfterFirstPaint(() => {
+    const cancelDeferred = scheduleAfterFirstPaint(() => {
       void loadCronTasks().catch(() => {});
-      void checkCodexInstalled()
-        .then((installed) => {
-          if (cancelled) {
-            return;
-          }
-
-          setCodexInstalled(installed);
-          if (!installed && launchClient === 'codex') {
-            setLaunchClient('claude');
-          }
-        })
-        .catch(() => {
-          if (cancelled) {
-            return;
-          }
-
-          setCodexInstalled(false);
-          if (launchClient === 'codex') {
-            setLaunchClient('claude');
-          }
-        });
+      void checkCodexInstalled().catch(() => {});
     }, { delayMs: 260, timeoutMs: 1400 });
+    return () => {
+      cancelDeferred();
+    };
+  }, [loadCronTasks, checkCodexInstalled]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoadingSessions(true);
+    fetchHistorySessions('all')
+      .then((data) => {
+        if (!cancelled) {
+          setSessions(data);
+          setIsLoadingSessions(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setIsLoadingSessions(false);
+      });
     return () => {
       cancelled = true;
-      cancelDeferredDashboardSync();
     };
-  }, [checkCodexInstalled, launchClient, loadCronTasks, setLaunchClient]);
+  }, []);
 
-  const handleSelectDirectory = useCallback(async () => {
-    try {
-      const dir = await openDirectoryPicker();
-      if (dir) {
-        setSelectedWorkingDir(dir);
-        setShowProjectPicker(false);
+  const selectedSession = useMemo(() => {
+    if (!selectedKey) return null;
+    return sessions.find((s) => toSessionKey(s) === selectedKey) ?? null;
+  }, [selectedKey, sessions]);
+
+  const handleSelect = useCallback(
+    async (session: HistorySessionItem) => {
+      const key = toSessionKey(session);
+      setSelectedKey(key);
+      setMessages([]);
+      setSegments([]);
+      setActiveSegment(null);
+      setIsLoadingMessages(true);
+      setLaunched(false);
+
+      try {
+        const [msgs, segs] = await Promise.all([
+          invoke<ConversationMessageData[]>('get_conversation_messages', {
+            sessionId: session.id,
+            source: session.source,
+          }),
+          invoke<HistorySegment[]>('get_conversation_segments', {
+            sessionId: session.id,
+            source: session.source,
+          }),
+        ]);
+        setMessages(msgs);
+        setSegments(segs);
+      } catch (err) {
+        console.error('Failed to load conversation:', err);
+      } finally {
+        setIsLoadingMessages(false);
       }
-    } catch (err) {
-      console.error('Failed to open directory dialog:', err);
-    }
-  }, [openDirectoryPicker, setSelectedWorkingDir]);
+    },
+    []
+  );
 
-  const handleSelectProject = useCallback((path: string) => {
-    setSelectedWorkingDir(path);
-    setShowProjectPicker(false);
-  }, [setSelectedWorkingDir]);
-
-  const handleLaunchClick = useCallback(() => {
-    if (selectedWorkingDir) {
-      onLaunchWithDir(selectedWorkingDir);
-    } else {
-      onLaunch();
-    }
+  const handleResume = useCallback(() => {
+    if (!selectedSession) return;
+    void launchClaudeCode(selectedSession.project, selectedSession.id, selectedSession.source);
     localStorage.setItem('ccem-ftue-launched', 'true');
-
     if (launchedTimerRef.current) clearTimeout(launchedTimerRef.current);
     setLaunched(true);
     launchedTimerRef.current = setTimeout(() => {
       setLaunched(false);
       launchedTimerRef.current = null;
     }, 1200);
-  }, [selectedWorkingDir, onLaunch, onLaunchWithDir]);
+  }, [selectedSession, launchClaudeCode]);
 
-  const handleCopyBind = useCallback(async () => {
-    if (!selectedWorkingDir) {
-      return;
-    }
+  const handleNewSession = useCallback(async () => {
     try {
-      await copyBindCommand(selectedWorkingDir, currentEnv, permissionMode);
-      toast.success(t('telegram.bindCommandCopied'));
-      setBindCopied(true);
-      if (bindCopiedTimerRef.current) clearTimeout(bindCopiedTimerRef.current);
-      bindCopiedTimerRef.current = setTimeout(() => {
-        setBindCopied(false);
-        bindCopiedTimerRef.current = null;
-      }, 1500);
-    } catch (error) {
-      toast.error(t('telegram.bindCommandCopyFailed').replace('{error}', String(error)));
+      const dir = await openDirectoryPicker();
+      if (dir) {
+        onLaunchWithDir(dir);
+        localStorage.setItem('ccem-ftue-launched', 'true');
+      }
+    } catch (err) {
+      console.error('Failed to open directory dialog:', err);
     }
-  }, [selectedWorkingDir, currentEnv, permissionMode, t]);
+  }, [openDirectoryPicker, onLaunchWithDir]);
 
-  const dashboardShortcuts = useMemo(() => ({
-    'meta+o': () => handleSelectDirectory(),
-  }), [handleSelectDirectory]);
+  const handleExport = useCallback(() => {
+    toast.info('Use History page for full export');
+  }, []);
 
-  useKeyboardShortcuts(dashboardShortcuts);
+  const shortcuts = useMemo(
+    () => ({
+      'meta+o': () => void handleNewSession(),
+    }),
+    [handleNewSession]
+  );
+  useKeyboardShortcuts(shortcuts);
 
   if (isLoadingEnvs || isLoadingStats) {
     return <DashboardSkeleton />;
   }
 
   return (
-    <div className="page-transition-enter flex flex-col gap-4 min-h-0">
-      {/* Zone 1: Launch Strip */}
-      <LaunchStrip
-        launchClient={launchClient}
-        codexInstalled={codexInstalled}
-        currentEnv={currentEnv}
-        environments={environments}
-        permissionMode={permissionMode as PermissionModeName}
-        selectedWorkingDir={selectedWorkingDir}
-        launched={launched}
-        bindCopied={bindCopied}
-        onSetLaunchClient={setLaunchClient}
-        onSwitchEnv={switchEnvironment}
-        onSetPermMode={setPermissionMode}
-        onOpenProjectPicker={() => setShowProjectPicker(true)}
-        onLaunch={handleLaunchClick}
-        onCopyBind={handleCopyBind}
-      />
+    <div className="page-transition-enter flex flex-col h-full">
+      <DashboardStatusStrip onNavigate={onNavigate} />
 
-      <ProjectPickerModal
-        open={showProjectPicker}
-        onOpenChange={setShowProjectPicker}
-        onSelectProject={handleSelectProject}
-        onBrowseFolder={handleSelectDirectory}
-      />
+      <div className="flex flex-1 min-h-0">
+        <ProjectTree
+          sessions={sessions}
+          isLoading={isLoadingSessions}
+          selectedKey={selectedKey}
+          onSelect={handleSelect}
+          onNewSession={handleNewSession}
+        />
 
-      {/* Zone 2: Bento Grid — Metrics left + Projects right */}
-      <div className="grid grid-cols-2 gap-3 min-h-0 items-start">
-        <MetricsRow onNavigate={onNavigate} />
-        <QuickLaunchGrid onLaunch={onLaunchWithDir} />
+        <div className="flex-1 flex flex-col min-w-0 bg-background">
+          {selectedSession ? (
+            <Suspense fallback={<DetailFallback />}>
+              <LazyHistoryDetail
+                selectedSession={selectedSession}
+                messages={messages}
+                segments={segments}
+                activeSegment={activeSegment}
+                onActiveSegmentChange={setActiveSegment}
+                isLoadingMessages={isLoadingMessages}
+                onExport={handleExport}
+                onResume={handleResume}
+                launched={launched}
+              />
+            </Suspense>
+          ) : (
+            <div className="flex-1 flex items-center justify-center p-8">
+              <div className="text-center max-w-md">
+                <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-primary/10 flex items-center justify-center">
+                  <MessageSquare className="w-8 h-8 text-primary" />
+                </div>
+                <h3 className="text-base font-semibold text-foreground mb-2">
+                  {t('dashboard.selectConversation')}
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  {t('dashboard.selectConversationHint')}
+                </p>
+              </div>
+            </div>
+          )}
+
+          <ResumeBar
+            selectedSession={selectedSession}
+            onResume={handleResume}
+            resumed={launched}
+          />
+        </div>
       </div>
-
-      <RuntimeOverviewCard onNavigate={onNavigate} />
-
-      {/* Zone 3: Live Sessions — full width, only when active */}
-      <LiveSessions onNavigate={onNavigate} />
     </div>
   );
 }
