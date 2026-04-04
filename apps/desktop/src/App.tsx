@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { ENV_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { AppLayout } from '@/components/layout';
-import { Dashboard } from '@/pages/Dashboard';
+import { Workspace } from '@/pages/Workspace';
 import { useAppStore, type Environment, type LaunchClient } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
@@ -65,7 +65,7 @@ function App() {
   const FOCUS_SYNC_INTERVAL_MS = 5000;
   const FOCUS_SYNC_DELAY_MS = 180;
   const perfAutopilotEnabled = import.meta.env.DEV && import.meta.env.VITE_PERF_AUTOPILOT === '1';
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState('workspace');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<'add' | 'edit'>('add');
   const [editingEnvName, setEditingEnvName] = useState<string | undefined>();
@@ -165,11 +165,11 @@ function App() {
     }
 
     const sequence = [
-      { delayMs: 1200, tab: 'dashboard' },
+      { delayMs: 1200, tab: 'workspace' },
       { delayMs: 4200, tab: 'sessions' },
       { delayMs: 7600, tab: 'history' },
       { delayMs: 11000, tab: 'analytics' },
-      { delayMs: 14500, tab: 'dashboard' },
+      { delayMs: 14500, tab: 'workspace' },
     ] as const;
 
     const timers = sequence.map(({ delayMs, tab }) => (
@@ -352,7 +352,7 @@ function App() {
         loadEnvironments({ silent: true }).catch(() => {});
       }
 
-      if (activeTab === 'dashboard' || activeTab === 'sessions') {
+      if (activeTab === 'workspace' || activeTab === 'sessions') {
         loadSessions().catch(() => {});
       }
     };
@@ -416,7 +416,7 @@ function App() {
 
   // Global keyboard shortcuts (Cmd+1..9 for tabs, Cmd+Enter/N for launch, Cmd+, for settings)
   const globalShortcuts = useMemo(() => ({
-    'meta+1': () => navigateToTab('dashboard'),
+    'meta+1': () => navigateToTab('workspace'),
     'meta+2': () => navigateToTab('sessions'),
     'meta+3': () => navigateToTab('environments'),
     'meta+4': () => navigateToTab('skills'),
@@ -497,9 +497,9 @@ function App() {
   // Render page based on active tab
   const renderPage = () => {
     switch (activeTab) {
-      case 'dashboard':
+      case 'workspace':
         return (
-          <Dashboard
+          <Workspace
             onNavigate={navigateToTab}
             onLaunchWithDir={handleLaunchWithDir}
           />
@@ -529,7 +529,7 @@ function App() {
       case 'settings':
         return <SettingsPage />;
       default:
-        return <Dashboard onNavigate={navigateToTab} onLaunchWithDir={handleLaunchWithDir} />;
+        return <Workspace onNavigate={navigateToTab} onLaunchWithDir={handleLaunchWithDir} />;
     }
   };
 
@@ -540,7 +540,7 @@ function App() {
           activeTab={activeTab}
           onTabChange={navigateToTab}
           onTabPrefetch={prefetchTab}
-          fullBleed={activeTab === 'history' || activeTab === 'dashboard'}
+          fullBleed={activeTab === 'history' || activeTab === 'workspace'}
         >
           <Suspense fallback={<PageFallback />}>
             {renderPage()}

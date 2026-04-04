@@ -535,7 +535,7 @@ fn compact_model_label(model: &str) -> String {
     }
 }
 
-const WIDTH_GE_56_PATTERN: &str = "^(5[6-9]|[6-9][0-9]|[1-9][0-9][0-9].*)$";
+const WIDTH_GE_36_PATTERN: &str = "^(3[6-9]|[4-9][0-9]|[1-9][0-9][0-9].*)$";
 const WIDTH_GE_72_PATTERN: &str = "^(7[2-9]|[89][0-9]|[1-9][0-9][0-9].*)$";
 const WIDTH_GE_96_PATTERN: &str = "^(9[6-9]|[1-9][0-9][0-9].*)$";
 const WIDTH_GE_110_PATTERN: &str = "^(11[0-9]|1[2-9][0-9]|[2-9][0-9][0-9].*)$";
@@ -553,19 +553,18 @@ fn build_status_left_format() -> String {
 }
 
 fn build_status_right_format() -> String {
-    let full = "#{@ccem_env} | #{@ccem_model} | ccem";
-    let compact = "#{@ccem_env} | #{@ccem_model_short} | ccem";
-    let short = "#{@ccem_model_short} | ccem";
+    let full = "#{@ccem_model} | #{@ccem_env} | ccem";
+    let compact = "#{@ccem_model_short} | #{@ccem_env} | ccem";
+    let base = "#{@ccem_env} | ccem";
 
     format!(
-        "#{{?{ge_132},{full},#{{?{ge_96},{compact},#{{?{ge_72},{short},#{{?{ge_56},ccem,}}}}}}}}",
-        ge_132 = width_at_least(WIDTH_GE_132_PATTERN),
+        "#{{?{ge_96},{full},#{{?{ge_72},{compact},#{{?{ge_36},{base},}}}}}}",
         ge_96 = width_at_least(WIDTH_GE_96_PATTERN),
         ge_72 = width_at_least(WIDTH_GE_72_PATTERN),
-        ge_56 = width_at_least(WIDTH_GE_56_PATTERN),
+        ge_36 = width_at_least(WIDTH_GE_36_PATTERN),
         full = full,
         compact = compact,
-        short = short,
+        base = base,
     )
 }
 

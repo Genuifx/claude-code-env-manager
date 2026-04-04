@@ -20,16 +20,16 @@ export function AppLayout({
   fullBleed = false,
 }: AppLayoutProps) {
   const { t } = useLocale();
-  const isDashboard = activeTab === 'dashboard';
+  const isWorkspace = activeTab === 'workspace';
   const titleKeyMap: Record<string, string> = {
     'proxy-debug': 'sideRail.proxyDebug',
     'chat-app': 'sideRail.chatApp',
   };
   const pageTitleKey = titleKeyMap[activeTab] || `sideRail.${activeTab}`;
-  const pageTitle = isDashboard ? undefined : (t(pageTitleKey) || t('sideRail.dashboard'));
+  const pageTitle = isWorkspace ? undefined : (t(pageTitleKey) || t('sideRail.workspace'));
 
   const subtitleKeyMap: Record<string, string> = {
-    dashboard: 'dashboard.subtitle',
+    workspace: 'workspace.subtitle',
     sessions: 'sessions.subtitle',
     environments: 'environments.description',
     skills: 'skills.subtitle',
@@ -40,13 +40,13 @@ export function AppLayout({
     'proxy-debug': 'proxyDebug.subtitle',
     settings: 'settings.subtitle',
   };
-  const subtitle = subtitleKeyMap[activeTab] && !isDashboard ? t(subtitleKeyMap[activeTab]) : undefined;
+  const subtitle = subtitleKeyMap[activeTab] && !isWorkspace ? t(subtitleKeyMap[activeTab]) : undefined;
 
   return (
     <div className="h-screen flex overflow-hidden relative">
       {/* Sidebar wrapper — adds inset padding around the floating panel */}
       <div className="p-2 pr-0 shrink-0 relative z-20">
-        <SideRail activeTab={activeTab} onTabChange={onTabChange} onTabPrefetch={onTabPrefetch} />
+        <SideRail activeTab={activeTab} onTabChange={onTabChange} onTabPrefetch={onTabPrefetch} glassMuted={isWorkspace} />
       </div>
 
       {/* Main content area — semi-transparent so ambient orbs bleed through glass panels */}
@@ -57,8 +57,8 @@ export function AppLayout({
           <div className="ambient-orb-4" />
         </div>
 
-        {/* Titlebar spacer + page title — also serves as drag region for non-dashboard pages */}
-        {!isDashboard && (
+        {/* Titlebar spacer + page title — also serves as drag region for non-workspace pages */}
+        {!isWorkspace && (
           <div data-tauri-drag-region className="h-[52px] shrink-0 flex items-end px-8 pb-2 relative z-10">
             <div className="flex items-baseline gap-3">
               {pageTitle && (

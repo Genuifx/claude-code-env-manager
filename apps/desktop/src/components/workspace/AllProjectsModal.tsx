@@ -71,10 +71,10 @@ export function AllProjectsModal({ open, onOpenChange, onLaunch }: AllProjectsMo
   };
 
   const tabs: { key: Tab; label: string }[] = [
-    { key: 'favorites', label: t('dashboard.tabFavorites') },
-    { key: 'recent', label: t('dashboard.tabRecent') },
-    { key: 'vscode', label: t('dashboard.tabVSCode') },
-    { key: 'jetbrains', label: t('dashboard.tabJetBrains') },
+    { key: 'favorites', label: t('workspace.tabFavorites') },
+    { key: 'recent', label: t('workspace.tabRecent') },
+    { key: 'vscode', label: t('workspace.tabVSCode') },
+    { key: 'jetbrains', label: t('workspace.tabJetBrains') },
   ];
 
   return (
@@ -89,7 +89,7 @@ export function AllProjectsModal({ open, onOpenChange, onLaunch }: AllProjectsMo
       <div className="relative frosted-panel glass-noise rounded-2xl w-[540px] max-h-[500px] flex flex-col shadow-elevation-4">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
-          <h2 className="text-sm font-semibold text-foreground tracking-wide">{t('dashboard.allProjects')}</h2>
+          <h2 className="text-sm font-semibold text-foreground tracking-wide">{t('workspace.allProjects')}</h2>
           <Button
             variant="ghost"
             size="icon"
@@ -127,7 +127,7 @@ export function AllProjectsModal({ open, onOpenChange, onLaunch }: AllProjectsMo
               disabled={syncing !== null}
             >
               <RefreshCw className={cn('w-3 h-3', syncing === activeTab && 'animate-spin')} />
-              {t('dashboard.syncProjects')}
+              {t('workspace.syncProjects')}
             </Button>
           )}
 
@@ -139,7 +139,7 @@ export function AllProjectsModal({ open, onOpenChange, onLaunch }: AllProjectsMo
               onClick={handleAddFavorite}
             >
               <Plus className="w-3 h-3" />
-              {t('dashboard.addFavorite')}
+              {t('workspace.addFavorite')}
             </Button>
           )}
         </div>

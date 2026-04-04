@@ -1,6 +1,6 @@
 export { Analytics } from './Analytics';
 export { CronTasks } from './CronTasks';
-export { Dashboard } from './Dashboard';
+export { Workspace } from './Workspace';
 export { Environments } from './Environments';
 export { History } from './History';
 export { ProxyDebug } from './ProxyDebug';

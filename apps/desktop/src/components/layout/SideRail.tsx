@@ -6,6 +6,7 @@ interface SideRailProps {
   activeTab: string;
   onTabChange: (tab: string) => void;
   onTabPrefetch?: (tab: string) => void;
+  glassMuted?: boolean;
 }
 
 interface NavItemDef {
@@ -24,7 +25,7 @@ const navGroupDefs: NavGroupDef[] = [
   {
     titleKey: '',
     items: [
-      { id: 'dashboard', labelKey: 'sideRail.dashboard', icon: Home, shortcut: '1' },
+      { id: 'workspace', labelKey: 'sideRail.workspace', icon: Home, shortcut: '1' },
     ],
   },
   {
@@ -89,10 +90,13 @@ function NavButton({
   );
 }
 
-export function SideRail({ activeTab, onTabChange, onTabPrefetch }: SideRailProps) {
+export function SideRail({ activeTab, onTabChange, onTabPrefetch, glassMuted }: SideRailProps) {
   const { t } = useLocale();
   return (
-    <aside className="w-[200px] h-full shrink-0 flex flex-col glass-sidebar-panel glass-noise relative rounded-xl overflow-hidden">
+    <aside className={cn(
+      "w-[200px] h-full shrink-0 flex flex-col glass-sidebar-panel glass-noise relative rounded-xl overflow-hidden",
+      glassMuted && "glass-sidebar-muted"
+    )}>
       {/* Traffic light region */}
       <div className="h-[52px] shrink-0" />
 

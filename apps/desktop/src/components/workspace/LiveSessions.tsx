@@ -46,7 +46,7 @@ export function LiveSessions({ onNavigate: _onNavigate }: LiveSessionsProps) {
         <div className="flex items-center gap-2.5">
           <Radio className="w-3.5 h-3.5 text-success animate-pulse" />
           <h3 className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-widest">
-            {t('dashboard.liveSessions')}
+            {t('workspace.liveSessions')}
           </h3>
           <span className="text-2xs font-semibold bg-success/[0.12] text-success px-2 py-0.5 rounded-full tabular-nums">
             {runningSessions.length}
@@ -60,7 +60,7 @@ export function LiveSessions({ onNavigate: _onNavigate }: LiveSessionsProps) {
             onClick={handleArrange}
           >
             <LayoutGrid className="w-3 h-3" />
-            {t('dashboard.arrangeWindows')}
+            {t('workspace.arrangeWindows')}
           </Button>
         )}
       </div>
@@ -111,7 +111,7 @@ export function LiveSessions({ onNavigate: _onNavigate }: LiveSessionsProps) {
                     onClick={() => focusSession(session.id)}
                   >
                     <Eye className="w-3 h-3 mr-1" />
-                    {t('dashboard.focus')}
+                    {t('workspace.focus')}
                   </Button>
                   <Button
                     variant="ghost"
@@ -120,7 +120,7 @@ export function LiveSessions({ onNavigate: _onNavigate }: LiveSessionsProps) {
                     onClick={() => closeSession(session.id)}
                   >
                     <X className="w-3 h-3 mr-1" />
-                    {t('dashboard.close')}
+                    {t('workspace.close')}
                   </Button>
                 </div>
               </div>

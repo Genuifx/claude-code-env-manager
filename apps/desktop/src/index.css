@@ -751,6 +751,101 @@
   border-color: hsl(var(--glass-border-light) / calc(var(--glass-border-opacity) + 0.1));
 }
 
+/* --- Sidebar glass muted state (workspace mode) --- */
+.glass-sidebar-panel {
+  transition:
+    background var(--duration-slow) var(--ease-decelerate),
+    backdrop-filter var(--duration-slow) var(--ease-decelerate),
+    -webkit-backdrop-filter var(--duration-slow) var(--ease-decelerate),
+    border-color var(--duration-slow) var(--ease-decelerate),
+    box-shadow var(--duration-slow) var(--ease-decelerate);
+}
+
+.glass-sidebar-muted {
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.glass-sidebar-muted::before {
+  opacity: 0 !important;
+  transition: opacity var(--duration-slow) var(--ease-decelerate);
+}
+
+/* --- Workspace main content container --- */
+.workspace-main-container {
+  background: hsl(var(--background) / 0.85);
+  border: 1px solid hsl(var(--glass-border-light) / 0.08);
+  border-radius: 24px;
+  box-shadow:
+    0 1px 3px hsl(var(--glass-shadow-base) / 0.06),
+    0 4px 16px hsl(var(--glass-shadow-base) / 0.04);
+}
+
+.light .workspace-main-container {
+  background: hsl(var(--background) / 0.92);
+  border: 1px solid hsl(var(--glass-border-light) / 0.15);
+  box-shadow:
+    0 1px 3px hsl(var(--glass-shadow-base) / 0.08),
+    0 8px 24px hsl(var(--glass-shadow-base) / 0.05);
+}
+
+/* --- Status chip liquid glass --- */
+.status-chip-glass {
+  background:
+    linear-gradient(
+      135deg,
+      hsl(var(--glass-border-light) / 0.18) 0%,
+      hsl(var(--glass-border-light) / 0.06) 100%
+    ),
+    hsl(var(--glass-sidebar-bg) / 0.22);
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  border: 1px solid hsl(var(--glass-border-light) / 0.18);
+  box-shadow:
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / 0.12),
+    0 1px 3px hsl(var(--glass-shadow-base) / 0.1),
+    0 4px 12px hsl(var(--glass-shadow-base) / 0.06);
+  transition: all var(--duration-fast) var(--ease-default);
+}
+
+.status-chip-glass:hover {
+  background:
+    linear-gradient(
+      135deg,
+      hsl(var(--glass-border-light) / 0.25) 0%,
+      hsl(var(--glass-border-light) / 0.1) 100%
+    ),
+    hsl(var(--glass-sidebar-bg) / 0.28);
+  box-shadow:
+    inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / 0.16),
+    0 2px 6px hsl(var(--glass-shadow-base) / 0.12),
+    0 6px 16px hsl(var(--glass-shadow-base) / 0.08);
+}
+
+.light .status-chip-glass {
+  background:
+    linear-gradient(
+      135deg,
+      hsl(var(--glass-border-light) / 0.5) 0%,
+      hsl(var(--glass-border-light) / 0.2) 100%
+    ),
+    hsl(var(--background) / 0.45);
+  border: 1px solid hsl(var(--glass-border-light) / 0.35);
+}
+
+.light .status-chip-glass:hover {
+  background:
+    linear-gradient(
+      135deg,
+      hsl(var(--glass-border-light) / 0.6) 0%,
+      hsl(var(--glass-border-light) / 0.28) 100%
+    ),
+    hsl(var(--background) / 0.55);
+}
+
 /* --- Card Glass (medium frost for content cards) --- */
 .glass-card {
   position: relative;
@@ -986,8 +1081,8 @@
     0 2px 8px hsl(var(--glass-shadow-base) / 0.08);
 }
 
-/* === Dashboard Brand Mark — centered above launch button === */
-.dashboard-brand-mark {
+/* === Workspace Brand Mark — centered above launch button === */
+.workspace-brand-mark {
   display: block;
   width: 128px;
   height: 128px;
@@ -1021,7 +1116,7 @@
 }
 
 /* ============================================================ */
-/* === Dashboard Glass Utilities                              === */
+/* === Workspace Glass Utilities                              === */
 /* ============================================================ */
 
 /* --- Glass Dropdown (popover menus on glass surfaces) --- */
@@ -1607,7 +1702,7 @@
   );
 }
 
-/* --- Hero Launch Button (dashboard hero CTA with prominent glow) --- */
+/* --- Hero Launch Button (workspace hero CTA with prominent glow) --- */
 .launch-hero-btn {
   box-shadow:
     0 4px 20px hsl(var(--primary) / 0.35),

@@ -3,7 +3,7 @@ import { LayoutGrid, List, Minimize2, Plus, Terminal, X, FolderOpen, Globe, Shie
 import { Button } from '@/components/ui/button';
 import { LaunchButton } from '@/components/ui/LaunchButton';
 import { Card } from '@/components/ui/card';
-import { ProjectPickerModal } from '@/components/dashboard/ProjectPickerModal';
+import { ProjectPickerModal } from '@/components/workspace/ProjectPickerModal';
 import {
   Select,
   SelectContent,
@@ -691,7 +691,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
             >
               <FolderOpen className="w-4 h-4" />
               <span className="hidden sm:inline font-mono text-xs max-w-[140px] truncate">
-                {launchDirDisplay || t('dashboard.selectDir')}
+                {launchDirDisplay || t('workspace.selectDir')}
               </span>
             </Button>
 
@@ -774,11 +774,6 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
 
       {/* Sessions Display */}
       <div className="space-y-4">
-        {showRecoveryCandidates ? (
-          <Suspense fallback={null}>
-            <LazyRecoveryCandidatesPanel />
-          </Suspense>
-        ) : null}
         {totalDisplayCount === 0 ? (
           <Card className="p-4">
             <div className="py-8">
@@ -863,6 +858,11 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
             </Card>
           </>
         )}
+        {showRecoveryCandidates ? (
+          <Suspense fallback={null}>
+            <LazyRecoveryCandidatesPanel />
+          </Suspense>
+        ) : null}
         {/* HeadlessSessionsPanel removed - unified view */}
       </div>
 

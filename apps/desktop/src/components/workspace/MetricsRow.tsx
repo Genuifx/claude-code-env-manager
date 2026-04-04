@@ -35,10 +35,10 @@ export function MetricsRow({ onNavigate }: MetricsRowProps) {
       {/* Hero card — Today's usage */}
       <HeroMetricCard
         icon={Activity}
-        label={t('dashboard.todayTokens')}
+        label={t('workspace.todayTokens')}
         value={todayTokens}
         formatValue={(v) => v >= 1000000 ? `${(v / 1000000).toFixed(1)}M` : v >= 1000 ? `${(v / 1000).toFixed(1)}K` : String(v)}
-        sublabel={`${t('dashboard.todayCost')}: $${todayCost.toFixed(2)}`}
+        sublabel={`${t('workspace.todayCost')}: $${todayCost.toFixed(2)}`}
         trend={weekTokens > 0 ? `${(todayTokens / (weekTokens / 7) * 100 - 100).toFixed(0)}% vs avg` : undefined}
         onClick={() => onNavigate('analytics')}
       />
@@ -48,35 +48,35 @@ export function MetricsRow({ onNavigate }: MetricsRowProps) {
         <MetricCard
           icon={Zap}
           iconColor="text-primary"
-          label={t('dashboard.runningSessions')}
+          label={t('workspace.runningSessions')}
           value={activeSessions}
           formatValue={(v) => String(v)}
-          sublabel={`${sessions.length} ${t('dashboard.totalSessions')}`}
+          sublabel={`${sessions.length} ${t('workspace.totalSessions')}`}
           onClick={() => onNavigate('sessions')}
         />
         <MetricCard
           icon={Flame}
           iconColor="text-chart-6"
-          label={t('dashboard.streak')}
+          label={t('workspace.streak')}
           value={continuousUsageDays}
           formatValue={(v) => `${v}`}
-          sublabel={t('dashboard.streakDays')}
+          sublabel={t('workspace.streakDays')}
           sublabelColor={continuousUsageDays >= 7 ? 'text-success' : undefined}
           onClick={() => onNavigate('analytics')}
         />
         <MetricCard
           icon={Timer}
           iconColor="text-info"
-          label={t('dashboard.cronStatus')}
+          label={t('workspace.cronStatus')}
           value={hasCron ? enabledTasks.length : 0}
           formatValue={(v) => hasCron ? `${v}` : '—'}
-          sublabel={hasCron ? t('dashboard.cronAllGood') : t('dashboard.cronNotConfigured')}
+          sublabel={hasCron ? t('workspace.cronAllGood') : t('workspace.cronNotConfigured')}
           onClick={() => onNavigate('cron')}
         />
         <MetricCard
           icon={DollarSign}
           iconColor="text-warning"
-          label={t('dashboard.weekTotal')}
+          label={t('workspace.weekTotal')}
           value={Math.round(weekCost * 100)}
           formatValue={(v) => `$${(v / 100).toFixed(2)}`}
           sublabel={weekTokens > 0 ? `${weekTokens >= 1000000 ? `${(weekTokens / 1000000).toFixed(1)}M` : `${(weekTokens / 1000).toFixed(0)}K`} tokens` : undefined}

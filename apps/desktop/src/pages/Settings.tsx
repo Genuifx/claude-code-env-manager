@@ -368,7 +368,7 @@ export function Settings() {
                     if (path) await saveDefaultWorkingDir(path);
                   }}
                 >
-                  {t('dashboard.changeDir')}
+                  {t('workspace.changeDir')}
                 </Button>
                 <button
                   onClick={() => saveDefaultWorkingDir(null)}

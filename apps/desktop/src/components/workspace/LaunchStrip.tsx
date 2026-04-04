@@ -79,7 +79,7 @@ export function LaunchStrip({
 
       <div className="relative flex flex-col items-center px-6 pt-12 pb-8">
         {/* App icon — light mode only */}
-        <img src="/logo.png" alt="" aria-hidden="true" className="dashboard-brand-mark mb-8" />
+        <img src="/logo.png" alt="" aria-hidden="true" className="workspace-brand-mark mb-8" />
 
         {/* Launch button — hero CTA */}
         <LaunchButton
@@ -90,7 +90,7 @@ export function LaunchStrip({
           shortcut="⌘↵"
           className="w-full max-w-[320px]"
         >
-          {launched ? t('dashboard.launchBtnDone') : t('dashboard.launchBtn')}
+          {launched ? t('workspace.launchBtnDone') : t('workspace.launchBtn')}
         </LaunchButton>
 
         {/* Config selectors — secondary row */}
@@ -160,11 +160,11 @@ export function LaunchStrip({
               'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-colors',
               'bg-white/[0.06] text-muted-foreground hover:bg-white/[0.10] hover:text-foreground'
             )}
-            title={selectedWorkingDir || t('dashboard.selectDirPlaceholder')}
+            title={selectedWorkingDir || t('workspace.selectDirPlaceholder')}
           >
             <FolderOpen className="w-3.5 h-3.5" />
             <span className="truncate max-w-[160px]">
-              {dirDisplay || t('dashboard.selectDirPlaceholder')}
+              {dirDisplay || t('workspace.selectDirPlaceholder')}
             </span>
           </button>
 

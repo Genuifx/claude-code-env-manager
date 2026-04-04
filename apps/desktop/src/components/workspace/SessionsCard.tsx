@@ -90,11 +90,11 @@ export function SessionsCard({ onStopAll }: SessionsCardProps) {
           <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
             <Terminal className="w-4 h-4 text-primary" />
           </div>
-          <h3 className="font-semibold text-foreground">{t('dashboard.runningSessions')}</h3>
+          <h3 className="font-semibold text-foreground">{t('workspace.runningSessions')}</h3>
         </div>
         {runningSessions.length > 0 && (
           <span className="text-xs font-medium bg-primary/10 text-primary px-2.5 py-1 rounded-full">
-            {runningSessions.length} {t('dashboard.sessionsRunning')}
+            {runningSessions.length} {t('workspace.sessionsRunning')}
           </span>
         )}
       </div>
