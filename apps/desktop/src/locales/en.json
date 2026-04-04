@@ -91,6 +91,8 @@
     "quickAccessHint": "Quick access to your favorite projects",
     "favoriteRemoved": "Removed from favorites",
     "newSession": "New Session",
+    "newSessionClaude": "Claude Code",
+    "newSessionCodex": "Codex",
     "selectConversation": "Select a conversation to view details",
     "selectConversationHint": "Pick a conversation from the project tree",
     "statusRunning": "sessions running",
@@ -105,7 +107,8 @@
     "noHistory": "No history yet",
     "noHistoryHint": "Launch Claude Code to start your first conversation",
     "projectSessions": "sessions",
-    "loadMore": "Load more"
+    "loadMore": "Load more",
+    "manageEnvs": "Manage environments..."
   },
   "sessions": {
     "subtitle": "Manage running Claude Code sessions",

@@ -7,6 +7,7 @@ import { ProjectTree } from '@/components/dashboard/ProjectTree';
 import { ResumeBar } from '@/components/dashboard/ResumeBar';
 import { DashboardSkeleton } from '@/components/ui/skeleton-states';
 import { useAppStore } from '@/store';
+import type { LaunchClient } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useLocale } from '@/locales';
@@ -27,7 +28,7 @@ function DetailFallback() {
 
 interface DashboardProps {
   onNavigate: (tab: string) => void;
-  onLaunchWithDir: (dir: string) => void;
+  onLaunchWithDir: (dir: string, client?: LaunchClient) => void;
 }
 
 export function Dashboard({ onNavigate, onLaunchWithDir }: DashboardProps) {
@@ -51,6 +52,7 @@ export function Dashboard({ onNavigate, onLaunchWithDir }: DashboardProps) {
   const [activeSegment, setActiveSegment] = useState<number | null>(null);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [launched, setLaunched] = useState(false);
+  const [codexInstalled, setCodexInstalled] = useState(false);
   const launchedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -62,7 +64,7 @@ export function Dashboard({ onNavigate, onLaunchWithDir }: DashboardProps) {
   useEffect(() => {
     const cancelDeferred = scheduleAfterFirstPaint(() => {
       void loadCronTasks().catch(() => {});
-      void checkCodexInstalled().catch(() => {});
+      checkCodexInstalled().then(setCodexInstalled).catch(() => {});
     }, { delayMs: 260, timeoutMs: 1400 });
     return () => {
       cancelDeferred();
@@ -136,11 +138,11 @@ export function Dashboard({ onNavigate, onLaunchWithDir }: DashboardProps) {
     }, 1200);
   }, [selectedSession, launchClaudeCode]);
 
-  const handleNewSession = useCallback(async () => {
+  const handleNewSession = useCallback(async (client: LaunchClient = 'claude') => {
     try {
       const dir = await openDirectoryPicker();
       if (dir) {
-        onLaunchWithDir(dir);
+        onLaunchWithDir(dir, client);
         localStorage.setItem('ccem-ftue-launched', 'true');
       }
     } catch (err) {
@@ -175,6 +177,7 @@ export function Dashboard({ onNavigate, onLaunchWithDir }: DashboardProps) {
           selectedKey={selectedKey}
           onSelect={handleSelect}
           onNewSession={handleNewSession}
+          codexInstalled={codexInstalled}
         />
 
         <div className="flex-1 flex flex-col min-w-0 bg-background">

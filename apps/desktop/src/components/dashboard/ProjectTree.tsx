@@ -1,16 +1,18 @@
 import { useMemo, useState, useDeferredValue, useCallback } from 'react';
-import { ChevronRight, FolderOpen, FolderClosed, MessageSquare, Plus, Search } from 'lucide-react';
+import { ChevronRight, FolderOpen, FolderClosed, MessageSquare, Search } from 'lucide-react';
 import type { HistorySessionItem } from '@/components/history/HistoryList';
-import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
+import type { LaunchClient } from '@/store';
+import { AgentLaunchSplitButton } from './AgentLaunchSplitButton';
 
 interface ProjectTreeProps {
   sessions: HistorySessionItem[];
   isLoading: boolean;
   selectedKey: string | null;
   onSelect: (session: HistorySessionItem) => void;
-  onNewSession: () => void;
+  onNewSession: (client?: LaunchClient) => void;
+  codexInstalled?: boolean;
 }
 
 interface ProjectNode {
@@ -70,6 +72,7 @@ export function ProjectTree({
   selectedKey,
   onSelect,
   onNewSession,
+  codexInstalled = false,
 }: ProjectTreeProps) {
   const { t } = useLocale();
   const [search, setSearch] = useState('');
@@ -159,16 +162,17 @@ export function ProjectTree({
 
   return (
     <div className="w-[280px] shrink-0 flex flex-col border-r border-border bg-surface backdrop-blur-xl">
-      {/* Header: New Session + Search */}
+      {/* Header: Dual Launch Button + Search */}
       <div className="shrink-0 p-3 flex flex-col gap-2">
-        <Button
-          size="sm"
-          className="w-full gap-1.5 h-9 bg-primary hover:bg-primary/90 text-primary-foreground shadow-sm"
-          onClick={onNewSession}
-        >
-          <Plus className="w-4 h-4" />
-          {t('dashboard.newSession')}
-        </Button>
+        <AgentLaunchSplitButton
+          newSessionLabel={t('dashboard.newSession')}
+          claudeLabel={t('dashboard.newSessionClaude')}
+          codexLabel={t('dashboard.newSessionCodex')}
+          codexUnavailableLabel={t('settings.cliNotInstalled')}
+          codexInstalled={codexInstalled}
+          onLaunchClaude={() => onNewSession('claude')}
+          onLaunchCodex={() => onNewSession('codex')}
+        />
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <input

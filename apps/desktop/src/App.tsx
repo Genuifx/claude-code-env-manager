@@ -5,7 +5,7 @@ import { ENV_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { AppLayout } from '@/components/layout';
 import { Dashboard } from '@/pages/Dashboard';
-import { useAppStore, type Environment } from '@/store';
+import { useAppStore, type Environment, type LaunchClient } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { Toaster, toast } from 'sonner';
@@ -434,10 +434,11 @@ function App() {
   useKeyboardShortcuts(globalShortcuts);
 
   // Handle launch with specific directory
-  const handleLaunchWithDir = useCallback(async (workingDir: string) => {
+  const handleLaunchWithDir = useCallback(async (workingDir: string, client?: LaunchClient) => {
+    const effectiveClient = client ?? launchClient;
     try {
-      await launchClaudeCode(workingDir, undefined, launchClient);
-      if (launchClient === 'claude') {
+      await launchClaudeCode(workingDir, undefined, effectiveClient);
+      if (effectiveClient === 'claude') {
         navigateToTab('sessions');
       }
     } catch (err) {
