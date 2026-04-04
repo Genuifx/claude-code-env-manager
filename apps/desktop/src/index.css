@@ -1505,6 +1505,7 @@
     0 0 0 1px hsl(var(--primary) / 0.18);
 }
 
+
 /* --- Liquid Glass Launch Button (3D depth via translucent layers) --- */
 .liquid-launch-btn:not(:disabled):not(.launched) {
   background: linear-gradient(
@@ -2002,4 +2003,9 @@
   transform-style: preserve-3d;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
+}
+
+/* === Tauri window control bar — match sidebar width === */
+div[data-tauri-decorum-tb] {
+  width: 200px !important;
 }

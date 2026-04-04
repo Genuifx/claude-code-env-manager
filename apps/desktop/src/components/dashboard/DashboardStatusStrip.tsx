@@ -1,9 +1,17 @@
-import { Radio, Circle, Flame, Clock } from 'lucide-react';
+import { Radio, Circle, Flame, Clock, Check, Settings2 } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { useLocale } from '@/locales';
-import { getEnvColorVar } from '@/lib/utils';
+import { getEnvColorVar, cn } from '@/lib/utils';
 import { shallow } from 'zustand/shallow';
-import { cn } from '@/lib/utils';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+
+import { useTauriCommands } from '@/hooks/useTauriCommands';
 
 interface DashboardStatusStripProps {
   onNavigate: (tab: string) => void;
@@ -63,21 +71,23 @@ function StatusChip({
 
 export function DashboardStatusStrip({ onNavigate }: DashboardStatusStripProps) {
   const { t } = useLocale();
-  const { sessions, currentEnv, continuousUsageDays, cronTasks } = useAppStore(
+  const { sessions, currentEnv, environments, continuousUsageDays, cronTasks } = useAppStore(
     (state) => ({
       sessions: state.sessions,
       currentEnv: state.currentEnv,
+      environments: state.environments,
       continuousUsageDays: state.continuousUsageDays,
       cronTasks: state.cronTasks,
     }),
     shallow
   );
+  const { switchEnvironment } = useTauriCommands();
 
   const runningSessions = sessions.filter((s) => s.status === 'running');
   const activeCronTasks = cronTasks.filter((t) => t.enabled !== false);
 
   return (
-    <div className="h-12 flex items-center gap-2.5 px-4 border-b border-border bg-surface backdrop-blur-xl shrink-0">
+    <div data-tauri-drag-region className="h-12 flex items-center gap-2.5 px-4 border-b border-border bg-surface backdrop-blur-xl shrink-0">
       <StatusChip
         icon={Radio}
         label={
@@ -90,12 +100,65 @@ export function DashboardStatusStrip({ onNavigate }: DashboardStatusStripProps) 
         onClick={() => onNavigate('sessions')}
       />
 
-      <StatusChip
-        icon={Circle}
-        label={currentEnv || '—'}
-        color={getEnvColorVar(currentEnv)}
-        onClick={() => onNavigate('environments')}
-      />
+      {/* Environment quick-switch capsule */}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className={cn(
+              'group relative inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full',
+              'bg-surface-raised/80 border border-border',
+              'shadow-sm',
+              'backdrop-blur-xl',
+              'transition-all duration-200 ease-out',
+              'hover:scale-[1.02] active:scale-[0.98]',
+              'cursor-pointer'
+            )}
+          >
+            <span className="relative flex items-center justify-center w-3.5 h-3.5">
+              <Circle
+                className="w-3.5 h-3.5 transition-transform duration-200 group-hover:scale-110"
+                style={{ color: getEnvColorVar(currentEnv) }}
+              />
+            </span>
+            <span className="text-[13px] font-medium text-foreground transition-colors">
+              {currentEnv || '—'}
+            </span>
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="min-w-[180px] p-0">
+          <div className={cn('p-1', environments.length > 6 && 'max-h-[264px] overflow-y-auto')}>
+            {environments.map((env) => {
+              const isActive = env.name === currentEnv;
+              const envColor = getEnvColorVar(env.name);
+              return (
+                <DropdownMenuItem
+                  key={env.name}
+                  className={cn('gap-2.5', isActive && 'bg-primary/5')}
+                  onSelect={() => {
+                    if (!isActive) void switchEnvironment(env.name);
+                  }}
+                >
+                  <Circle
+                    className="w-2.5 h-2.5 shrink-0"
+                    style={{ color: envColor, fill: `hsl(${envColor})` }}
+                  />
+                  <span className="flex-1 text-[13px]">{env.name}</span>
+                  {isActive && <Check className="w-3.5 h-3.5 text-primary shrink-0" />}
+                </DropdownMenuItem>
+              );
+            })}
+          </div>
+          {environments.length > 0 && <DropdownMenuSeparator className="mx-1" />}
+          <DropdownMenuItem
+            className="text-muted-foreground gap-2.5 mx-1 mb-1"
+            onSelect={() => onNavigate('environments')}
+          >
+            <Settings2 className="w-3.5 h-3.5 shrink-0" />
+            <span className="text-[13px]">{t('dashboard.manageEnvs')}</span>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       {continuousUsageDays > 0 && (
         <StatusChip

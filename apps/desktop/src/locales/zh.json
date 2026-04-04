@@ -91,6 +91,8 @@
     "quickAccessHint": "快速访问你的常用项目",
     "favoriteRemoved": "已从收藏中移除",
     "newSession": "新会话",
+    "newSessionClaude": "Claude Code",
+    "newSessionCodex": "Codex",
     "selectConversation": "选择一个会话查看详情",
     "selectConversationHint": "从左侧项目树选择一个对话",
     "statusRunning": "个会话运行中",
@@ -105,7 +107,8 @@
     "noHistory": "暂无历史会话",
     "noHistoryHint": "启动 Claude Code 开始你的第一个对话",
     "projectSessions": "个会话",
-    "loadMore": "加载更多"
+    "loadMore": "加载更多",
+    "manageEnvs": "管理环境..."
   },
   "sessions": {
     "subtitle": "管理运行中的 Claude Code 会话",
