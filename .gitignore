@@ -36,3 +36,4 @@ apps/desktop/src-tauri/target/
 .claude/skills/kaz-writer/
 
 baymax
+.worktrees
