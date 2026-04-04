@@ -165,9 +165,9 @@ export function ProjectTree({
       {/* Header: Dual Launch Button + Search */}
       <div className="shrink-0 p-3 flex flex-col gap-2">
         <AgentLaunchSplitButton
-          newSessionLabel={t('dashboard.newSession')}
-          claudeLabel={t('dashboard.newSessionClaude')}
-          codexLabel={t('dashboard.newSessionCodex')}
+          newSessionLabel={t('workspace.newSession')}
+          claudeLabel={t('workspace.newSessionClaude')}
+          codexLabel={t('workspace.newSessionCodex')}
           codexUnavailableLabel={t('settings.cliNotInstalled')}
           codexInstalled={codexInstalled}
           onLaunchClaude={() => onNewSession('claude')}
@@ -179,7 +179,7 @@ export function ProjectTree({
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={t('dashboard.searchProjects')}
+            placeholder={t('workspace.searchProjects')}
             className="w-full h-8 pl-8 pr-3 rounded-md text-xs bg-surface-raised border border-border text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
           />
         </div>
@@ -192,8 +192,8 @@ export function ProjectTree({
         ) : filteredNodes.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-center px-4">
             <MessageSquare className="w-8 h-8 text-muted-foreground/40 mb-3" />
-            <p className="text-xs text-muted-foreground mb-1">{t('dashboard.noHistory')}</p>
-            <p className="text-xs text-muted-foreground/70">{t('dashboard.noHistoryHint')}</p>
+            <p className="text-xs text-muted-foreground mb-1">{t('workspace.noHistory')}</p>
+            <p className="text-xs text-muted-foreground/70">{t('workspace.noHistoryHint')}</p>
           </div>
         ) : (
           filteredNodes.map((node) => {
@@ -263,7 +263,7 @@ export function ProjectTree({
                         onClick={() => loadMore(node.project)}
                         className="w-full py-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors pl-9"
                       >
-                        {t('dashboard.loadMore')}
+                        {t('workspace.loadMore')}
                       </button>
                     )}
                   </div>
@@ -278,7 +278,7 @@ export function ProjectTree({
       {totalSessions > 0 && (
         <div className="shrink-0 px-3 py-2 border-t border-border-subtle text-2xs text-muted-foreground">
           {totalProjects} {t('history.allProjects').toLowerCase()} · {totalSessions}{' '}
-          {t('dashboard.projectSessions')}
+          {t('workspace.projectSessions')}
         </div>
       )}
     </div>

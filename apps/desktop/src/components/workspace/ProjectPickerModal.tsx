@@ -201,7 +201,7 @@ export function ProjectPickerModal({
               className="ml-auto h-6 text-2xs gap-1.5 text-muted-foreground hover:text-foreground px-2 py-1 rounded-md hover:bg-white/[0.06] transition-colors flex items-center disabled:opacity-50"
             >
               <RefreshCw className={cn('w-3 h-3', syncing === activeTab && 'animate-spin')} />
-              {t('dashboard.syncProjects')}
+              {t('workspace.syncProjects')}
             </button>
           )}
         </div>

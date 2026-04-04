@@ -12,9 +12,9 @@ function Bone({ className }: { className?: string }) {
   return <div className={cn('bg-muted rounded-xl', className)} />;
 }
 
-/* ─── Dashboard ────────────────────────────────────────────────────── */
+/* ─── Workspace ────────────────────────────────────────────────────── */
 
-export function DashboardSkeleton() {
+export function WorkspaceSkeleton() {
   return (
     <div className="flex flex-col h-full">
       {/* Status strip */}

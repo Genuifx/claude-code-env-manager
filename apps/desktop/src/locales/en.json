@@ -11,7 +11,7 @@
     "local": "Local",
     "default": "Default"
   },
-  "dashboard": {
+  "workspace": {
     "subtitle": "Overview of your Claude Code workspace",
     "currentEnv": "Current Environment",
     "permissions": "Permission",
@@ -663,7 +663,7 @@
     "tokensOutput": "Output"
   },
   "sideRail": {
-    "dashboard": "Workspace",
+    "workspace": "Workspace",
     "sessions": "Sessions",
     "environments": "Environments",
     "skills": "Skills",

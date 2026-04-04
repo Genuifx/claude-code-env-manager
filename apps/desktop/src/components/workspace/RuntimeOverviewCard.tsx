@@ -133,10 +133,10 @@ export function RuntimeOverviewCard({ onNavigate }: RuntimeOverviewCardProps) {
         <div>
           <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
             <Workflow className="h-4 w-4 text-primary" />
-            {t('dashboard.runtimeOverview')}
+            {t('workspace.runtimeOverview')}
           </h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            {t('dashboard.runtimeOverviewDesc')}
+            {t('workspace.runtimeOverviewDesc')}
           </p>
         </div>
         <div className={cn(
@@ -145,40 +145,40 @@ export function RuntimeOverviewCard({ onNavigate }: RuntimeOverviewCardProps) {
             ? 'bg-warning/10 text-warning'
             : 'bg-success/10 text-success'
         )}>
-          {needsAttention ? t('dashboard.runtimeNeedsAttention') : t('dashboard.runtimeHealthy')}
+          {needsAttention ? t('workspace.runtimeNeedsAttention') : t('workspace.runtimeHealthy')}
         </div>
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
         <RuntimeStat
           icon={TerminalSquare}
-          label={t('dashboard.runtimeInteractive')}
-          value={snapshot.tmuxInstalled ? interactiveCount : t('dashboard.tmuxMissing')}
+          label={t('workspace.runtimeInteractive')}
+          value={snapshot.tmuxInstalled ? interactiveCount : t('workspace.tmuxMissing')}
           highlight={!snapshot.tmuxInstalled}
           isText={!snapshot.tmuxInstalled}
         />
         <RuntimeStat
           icon={Bot}
-          label={t('dashboard.runtimeHeadless')}
+          label={t('workspace.runtimeHeadless')}
           value={snapshot.headlessCount}
         />
         <RuntimeStat
           icon={LifeBuoy}
-          label={t('dashboard.runtimeRecovery')}
+          label={t('workspace.runtimeRecovery')}
           value={snapshot.recoveryCount}
           highlight={snapshot.recoveryCount > 0}
         />
         <RuntimeStat
           icon={HeartPulse}
-          label={t('dashboard.runtimeTelegram')}
+          label={t('workspace.runtimeTelegram')}
           value={
             snapshot.telegramConfigured
               ? snapshot.telegramRunning
                 ? snapshot.telegramRestricted
-                  ? t('dashboard.telegramOnline')
-                  : t('dashboard.telegramOpenAccess')
-                : t('dashboard.telegramOffline')
-              : t('dashboard.telegramNotReady')
+                  ? t('workspace.telegramOnline')
+                  : t('workspace.telegramOpenAccess')
+                : t('workspace.telegramOffline')
+              : t('workspace.telegramNotReady')
           }
           highlight={
             (snapshot.telegramConfigured && !snapshot.telegramRunning)
@@ -190,13 +190,13 @@ export function RuntimeOverviewCard({ onNavigate }: RuntimeOverviewCardProps) {
 
       <div className="mt-4 flex flex-wrap gap-2">
         <Button variant="outline" className="glass-btn-outline" size="sm" onClick={() => onNavigate('sessions')}>
-          {t('dashboard.runtimeOpenSessions')}
+          {t('workspace.runtimeOpenSessions')}
         </Button>
         <Button variant="outline" className="glass-btn-outline" size="sm" onClick={() => onNavigate('cron')}>
-          {t('dashboard.runtimeOpenCron')}
+          {t('workspace.runtimeOpenCron')}
         </Button>
         <Button variant="outline" className="glass-btn-outline" size="sm" onClick={() => onNavigate('chat-app')}>
-          {t('dashboard.runtimeOpenTelegram')}
+          {t('workspace.runtimeOpenTelegram')}
         </Button>
       </div>
     </Card>

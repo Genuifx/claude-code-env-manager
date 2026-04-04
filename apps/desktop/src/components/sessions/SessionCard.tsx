@@ -395,7 +395,7 @@ export function SessionCard({
               onCopyBind={handleCopyBind}
               onOpenBindDialog={() => setBindDialogOpen(true)}
             />
-            <SessionActionIconButton icon={X} onClick={() => onClose(sessionId)} tooltip={t('dashboard.close')} variant="destructive" />
+            <SessionActionIconButton icon={X} onClick={() => onClose(sessionId)} tooltip={t('workspace.close')} variant="destructive" />
           </div>
         </div>
       );
@@ -440,7 +440,7 @@ export function SessionCard({
               {t('sessions.minimizeAll')}
             </TooltipContent>
           </Tooltip>
-          <SessionActionIconButton icon={X} onClick={() => onClose(sessionId)} tooltip={t('dashboard.close')} variant="destructive" />
+          <SessionActionIconButton icon={X} onClick={() => onClose(sessionId)} tooltip={t('workspace.close')} variant="destructive" />
         </div>
       </div>
     );

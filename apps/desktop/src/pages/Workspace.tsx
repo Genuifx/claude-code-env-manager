@@ -2,10 +2,10 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 import { MessageSquare } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
-import { DashboardStatusStrip } from '@/components/dashboard/DashboardStatusStrip';
-import { ProjectTree } from '@/components/dashboard/ProjectTree';
-import { ResumeBar } from '@/components/dashboard/ResumeBar';
-import { DashboardSkeleton } from '@/components/ui/skeleton-states';
+import { WorkspaceStatusStrip } from '@/components/workspace/WorkspaceStatusStrip';
+import { ProjectTree } from '@/components/workspace/ProjectTree';
+import { ResumeBar } from '@/components/workspace/ResumeBar';
+import { WorkspaceSkeleton } from '@/components/ui/skeleton-states';
 import { useAppStore } from '@/store';
 import type { LaunchClient } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
@@ -26,12 +26,12 @@ function DetailFallback() {
   return <div className="flex-1 overflow-hidden" />;
 }
 
-interface DashboardProps {
+interface WorkspaceProps {
   onNavigate: (tab: string) => void;
   onLaunchWithDir: (dir: string, client?: LaunchClient) => void;
 }
 
-export function Dashboard({ onNavigate, onLaunchWithDir }: DashboardProps) {
+export function Workspace({ onNavigate, onLaunchWithDir }: WorkspaceProps) {
   const { t } = useLocale();
   const { isLoadingEnvs, isLoadingStats } = useAppStore(
     (state) => ({
@@ -163,14 +163,14 @@ export function Dashboard({ onNavigate, onLaunchWithDir }: DashboardProps) {
   useKeyboardShortcuts(shortcuts);
 
   if (isLoadingEnvs || isLoadingStats) {
-    return <DashboardSkeleton />;
+    return <WorkspaceSkeleton />;
   }
 
   return (
     <div className="page-transition-enter flex flex-col h-full">
-      <DashboardStatusStrip onNavigate={onNavigate} />
+      <WorkspaceStatusStrip onNavigate={onNavigate} />
 
-      <div className="flex flex-1 min-h-0">
+      <div className="workspace-main-container flex flex-1 min-h-0 mx-3 mb-3 overflow-hidden">
         <ProjectTree
           sessions={sessions}
           isLoading={isLoadingSessions}
@@ -203,10 +203,10 @@ export function Dashboard({ onNavigate, onLaunchWithDir }: DashboardProps) {
                   <MessageSquare className="w-8 h-8 text-primary" />
                 </div>
                 <h3 className="text-base font-semibold text-foreground mb-2">
-                  {t('dashboard.selectConversation')}
+                  {t('workspace.selectConversation')}
                 </h3>
                 <p className="text-sm text-muted-foreground">
-                  {t('dashboard.selectConversationHint')}
+                  {t('workspace.selectConversationHint')}
                 </p>
               </div>
             </div>

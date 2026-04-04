@@ -36,19 +36,19 @@ export function ResumeBar({ selectedSession, onResume, resumed }: ResumeBarProps
             {resumed ? (
               <>
                 <Check className="w-3.5 h-3.5" />
-                {t('dashboard.resumed')}
+                {t('workspace.resumed')}
               </>
             ) : (
               <>
                 <Play className="w-3.5 h-3.5" />
-                {t('dashboard.resumeSession')}
+                {t('workspace.resumeSession')}
               </>
             )}
           </Button>
         </div>
       ) : (
         <p className="text-xs text-muted-foreground text-center py-1">
-          {t('dashboard.selectToResume')}
+          {t('workspace.selectToResume')}
         </p>
       )}
     </div>

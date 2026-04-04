@@ -11,7 +11,7 @@
     "local": "本地",
     "default": "默认"
   },
-  "dashboard": {
+  "workspace": {
     "subtitle": "Claude Code 工作区总览",
     "currentEnv": "当前环境",
     "permissions": "权限",
@@ -663,7 +663,7 @@
     "tokensOutput": "输出"
   },
   "sideRail": {
-    "dashboard": "工作间",
+    "workspace": "工作间",
     "sessions": "会话",
     "environments": "环境",
     "skills": "技能",

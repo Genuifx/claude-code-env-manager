@@ -13,7 +13,7 @@ import {
 
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 
-interface DashboardStatusStripProps {
+interface WorkspaceStatusStripProps {
   onNavigate: (tab: string) => void;
 }
 
@@ -36,10 +36,7 @@ function StatusChip({
       onClick={onClick}
       className={cn(
         'group relative inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full',
-        'bg-surface-raised/80 border border-border',
-        'shadow-sm',
-        'backdrop-blur-xl',
-        'transition-all duration-200 ease-out',
+        'status-chip-glass',
         'hover:scale-[1.02] active:scale-[0.98]',
         onClick && 'cursor-pointer'
       )}
@@ -69,7 +66,7 @@ function StatusChip({
   );
 }
 
-export function DashboardStatusStrip({ onNavigate }: DashboardStatusStripProps) {
+export function WorkspaceStatusStrip({ onNavigate }: WorkspaceStatusStripProps) {
   const { t } = useLocale();
   const { sessions, currentEnv, environments, continuousUsageDays, cronTasks } = useAppStore(
     (state) => ({
@@ -87,13 +84,13 @@ export function DashboardStatusStrip({ onNavigate }: DashboardStatusStripProps) 
   const activeCronTasks = cronTasks.filter((t) => t.enabled !== false);
 
   return (
-    <div data-tauri-drag-region className="h-12 flex items-center gap-2.5 px-4 border-b border-border bg-surface backdrop-blur-xl shrink-0">
+    <div data-tauri-drag-region className="h-12 flex items-center gap-2.5 px-4 shrink-0">
       <StatusChip
         icon={Radio}
         label={
           runningSessions.length > 0
-            ? `${runningSessions.length} ${t('dashboard.statusRunning')}`
-            : t('dashboard.statusIdle')
+            ? `${runningSessions.length} ${t('workspace.statusRunning')}`
+            : t('workspace.statusIdle')
         }
         color={runningSessions.length > 0 ? 'hsl(142 71% 45%)' : undefined}
         pulse={runningSessions.length > 0}
@@ -107,10 +104,7 @@ export function DashboardStatusStrip({ onNavigate }: DashboardStatusStripProps) 
             type="button"
             className={cn(
               'group relative inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full',
-              'bg-surface-raised/80 border border-border',
-              'shadow-sm',
-              'backdrop-blur-xl',
-              'transition-all duration-200 ease-out',
+              'status-chip-glass',
               'hover:scale-[1.02] active:scale-[0.98]',
               'cursor-pointer'
             )}
@@ -155,7 +149,7 @@ export function DashboardStatusStrip({ onNavigate }: DashboardStatusStripProps) 
             onSelect={() => onNavigate('environments')}
           >
             <Settings2 className="w-3.5 h-3.5 shrink-0" />
-            <span className="text-[13px]">{t('dashboard.manageEnvs')}</span>
+            <span className="text-[13px]">{t('workspace.manageEnvs')}</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -163,7 +157,7 @@ export function DashboardStatusStrip({ onNavigate }: DashboardStatusStripProps) 
       {continuousUsageDays > 0 && (
         <StatusChip
           icon={Flame}
-          label={`${continuousUsageDays} ${t('dashboard.statusStreak')}`}
+          label={`${continuousUsageDays} ${t('workspace.statusStreak')}`}
           color="hsl(25 95% 53%)"
         />
       )}
@@ -171,7 +165,7 @@ export function DashboardStatusStrip({ onNavigate }: DashboardStatusStripProps) 
       {activeCronTasks.length > 0 && (
         <StatusChip
           icon={Clock}
-          label={`${activeCronTasks.length} ${t('dashboard.statusCronActive')}`}
+          label={`${activeCronTasks.length} ${t('workspace.statusCronActive')}`}
           onClick={() => onNavigate('cron')}
         />
       )}
