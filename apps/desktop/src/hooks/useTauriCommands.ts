@@ -985,6 +985,10 @@ export function useTauriCommands() {
     });
   }, []);
 
+  const setSessionTitle = useCallback(async (source: string, sessionId: string, title: string): Promise<void> => {
+    await invoke('set_session_title', { source, sessionId, title });
+  }, []);
+
   return {
     loadEnvironments,
     loadCurrentEnv,
@@ -1074,5 +1078,6 @@ export function useTauriCommands() {
     getProxyTrafficDetail,
     clearProxyTraffic,
     openTextInVSCode,
+    setSessionTitle,
   };
 }

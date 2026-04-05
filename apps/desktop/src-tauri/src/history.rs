@@ -148,6 +148,15 @@ pub async fn get_conversation_history(
         }
 
         sessions.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
+        // Overlay user-edited title overrides
+        let overrides = crate::title_overrides::TitleOverrides::load();
+        for session in &mut sessions {
+            if let Some(ov) = overrides.get(&session.source, &session.id) {
+                session.display = ov.title.clone();
+            }
+        }
+
         Ok(sessions)
     })
     .await
@@ -1403,12 +1412,125 @@ fn normalize_unix_timestamp(ts: u64) -> u64 {
 }
 
 fn normalize_history_display(display: Option<String>) -> String {
-    let trimmed = display.unwrap_or_default().trim().to_string();
-    if trimmed.is_empty() {
-        "Untitled".to_string()
-    } else {
-        trimmed
+    let raw = display.unwrap_or_default();
+    let cleaned = clean_display_title(&raw);
+    // Return empty string — frontend fallback chain handles "Untitled" display
+    cleaned
+}
+
+/// Non-destructive cleanup: strip noise artifacts but do NOT truncate.
+/// Search and export rely on the raw string; truncation is handled by frontend CSS.
+fn clean_display_title(raw: &str) -> String {
+    let s = raw.trim();
+    if s.is_empty() {
+        return String::new();
     }
+
+    // 1. Replace newlines with spaces
+    let s = s.replace('\n', " ").replace('\r', "");
+
+    // 2. Strip leading artifact markers (only from start to preserve legitimate content)
+    //    Loop to handle stacked markers like "[Request interrupted][Error ...]actual title"
+    let mut s = s;
+    loop {
+        let cleaned = strip_leading_bracket(&s, "[Request interrupted");
+        let cleaned = strip_leading_system_error(&cleaned);
+        let cleaned = cleaned.trim_start().trim_start_matches("<synthetic>").trim_start();
+        let cleaned = strip_leading_image_marker(&cleaned);
+        if cleaned == s {
+            break;
+        }
+        s = cleaned;
+    }
+
+    // 3. Collapse consecutive whitespace
+    let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    s.trim().to_string()
+}
+
+/// Strip a leading system error bracket like "[Error]", "[Error: ...]", "[Error - ...]".
+/// Only strips system artifact formats — NOT "[Error boundary]" or "[Error handling]".
+fn strip_leading_system_error(text: &str) -> String {
+    let lowered = text.trim_start().to_lowercase();
+    if !lowered.starts_with("[error") {
+        return text.to_string();
+    }
+    // Reuse the same precise matching as is_noise_display
+    if !lower_starts_with_error_artifact(&lowered) {
+        return text.to_string();
+    }
+    // Match confirmed — find closing ']' and strip
+    let chars: Vec<char> = text.trim_start().chars().collect();
+    if let Some(offset) = chars.iter().position(|&c| c == ']') {
+        let rest: String = chars[offset + 1..].iter().collect();
+        rest.trim_start().to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+/// Remove a leading "[...]" segment starting with `prefix` from `text`.
+/// Only strips from the **beginning** of the string to avoid mangling legitimate
+/// titles like "Fix [Error boundary] crash".
+/// UTF-8 safe: operates on `Vec<char>`, not byte indices.
+fn strip_leading_bracket(text: &str, prefix: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let prefix_chars: Vec<char> = prefix.chars().collect();
+    if chars.len() <= prefix_chars.len() || chars[0] != '[' {
+        return text.to_string();
+    }
+    let matches_prefix = chars[..prefix_chars.len()]
+        .iter()
+        .zip(prefix_chars.iter())
+        .all(|(a, b)| a == b);
+    if !matches_prefix {
+        return text.to_string();
+    }
+    // Find closing ']' for the leading bracket
+    if let Some(offset) = chars.iter().position(|&c| c == ']') {
+        let rest: String = chars[offset + 1..].iter().collect();
+        rest.trim_start().to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+/// Remove a leading "[Image #N]" or "[image #N]" pattern from `text`.
+/// Only strips from the **beginning** to preserve legitimate content.
+/// UTF-8 safe: char-based.
+fn strip_leading_image_marker(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= 7 || chars[0] != '[' {
+        return text.to_string();
+    }
+    let tag: String = chars[..7].iter().collect();
+    if tag != "[Image " && tag != "[image " {
+        return text.to_string();
+    }
+    if let Some(offset) = chars.iter().position(|&c| c == ']') {
+        let rest: String = chars[offset + 1..].iter().collect();
+        rest.trim_start().to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+/// Check if a lowered string starts with a Claude system error artifact.
+/// Matches "[error]" (bare), "[error:" (with details), "[error -" (dash format).
+/// Does NOT match "[error boundary]" or "[error handling]" — legitimate user titles.
+fn lower_starts_with_error_artifact(lowered: &str) -> bool {
+    if !lowered.starts_with("[error") {
+        return false;
+    }
+    let rest = &lowered[6..]; // after "[error"
+    if rest.is_empty() {
+        return true; // "[error" alone
+    }
+    let next_char = rest.chars().next().unwrap();
+    // Only treat as noise if followed by ']', ':', '-', or '/'
+    // Space is intentionally excluded to preserve "[Error boundary]", "[Error handling]", etc.
+    matches!(next_char, ']' | ':' | '-' | '/')
 }
 
 /// Returns true if display text is command noise, not a real topic.
@@ -1418,7 +1540,30 @@ fn is_noise_display(display: &str) -> bool {
         return true;
     }
 
+    // Filter out very short / punctuation-only content ("？", "??", "...")
+    // Use chars() for correct Unicode handling (CJK, emoji, etc.)
+    let meaningful: usize = trimmed
+        .chars()
+        .filter(|c| c.is_alphanumeric() || (*c as u32) >= 0x4E00)
+        .count();
+    if meaningful < 2 {
+        return true;
+    }
+
+    // System message patterns — match specific Claude system artifacts only.
+    // Use exact prefixes to avoid catching legitimate user titles like "[Error boundary] crash".
     let lowered = trimmed.to_lowercase();
+    if lowered.starts_with("[request interrupted") {
+        return true;
+    }
+    // Only match "[error]" (bare) or "[error:" (with details), not "[error boundary]"
+    if lower_starts_with_error_artifact(&lowered) {
+        return true;
+    }
+    if lowered.starts_with("<synthetic>") {
+        return true;
+    }
+
     if lowered == "clear" || lowered == "compact" {
         return true;
     }
@@ -1476,8 +1621,10 @@ fn is_noise_slash_command(command: &str, args: &str) -> bool {
     let cmd = command.to_ascii_lowercase();
 
     const ALWAYS_NOISE: &[&str] = &[
-        "clear", "compact", "help", "quit", "exit", "new", "resume", "status", "stats", "config",
-        "mcp", "plugin", "skills",
+        "clear", "compact", "help", "quit", "exit", "new", "resume",
+        "status", "stats", "config", "mcp", "plugin", "skills",
+        // System/display-only commands — never meaningful as conversation titles
+        "buddy", "doctor", "cost", "memory", "login",
     ];
     if ALWAYS_NOISE.contains(&cmd.as_str()) {
         return true;
@@ -1593,7 +1740,8 @@ mod tests {
         );
 
         let item = map.get("sid-1").expect("session should exist");
-        assert_eq!(item.display, "Untitled");
+        // Now returns empty string — frontend handles the fallback
+        assert_eq!(item.display, "");
         assert_eq!(item.source, "codex");
         assert_eq!(item.timestamp, 1_700_000_000_000);
 
@@ -1634,8 +1782,9 @@ mod tests {
 
     #[test]
     fn test_normalize_history_display_falls_back_for_blank_values() {
-        assert_eq!(normalize_history_display(None), "Untitled");
-        assert_eq!(normalize_history_display(Some(String::new())), "Untitled");
+        // Empty string — frontend handles "Untitled" display
+        assert_eq!(normalize_history_display(None), "");
+        assert_eq!(normalize_history_display(Some(String::new())), "");
         assert_eq!(
             normalize_history_display(Some("   keep title   ".to_string())),
             "keep title"
