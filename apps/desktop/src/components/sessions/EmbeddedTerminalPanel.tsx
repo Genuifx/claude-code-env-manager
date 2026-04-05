@@ -6,7 +6,7 @@ import { Monitor, SquareTerminal } from 'lucide-react';
 import type { Session } from '@/store';
 import type { ChannelKind, TmuxAttachTerminalInfo, TmuxAttachTerminalType } from '@/lib/tauri-ipc';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
-import { cn } from '@/lib/utils';
+import { cn, getProjectName } from '@/lib/utils';
 import '@xterm/xterm/css/xterm.css';
 import { OpenInTerminalPopoverButton } from './OpenInTerminalPopoverButton';
 
@@ -25,9 +25,6 @@ interface EmbeddedTerminalPanelProps {
   onOpenInTerminal: (sessionId: string, terminalType?: TmuxAttachTerminalType) => void;
 }
 
-function sessionLabel(session: Session) {
-  return session.workingDir.split('/').pop() || session.workingDir;
-}
 
 const DESKTOP_UI_CHANNEL: ChannelKind = { kind: 'desktop_ui' };
 
@@ -234,7 +231,7 @@ export function EmbeddedTerminalPanel({
                   )}
                 >
                   <Monitor className="h-3.5 w-3.5" />
-                  <span>{sessionLabel(session)}</span>
+                  <span>{getProjectName(session.workingDir)}</span>
                   <span className="text-[10px] uppercase tracking-[0.16em] text-slate-400">
                     {session.envName}
                   </span>

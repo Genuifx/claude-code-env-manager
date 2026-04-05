@@ -3,6 +3,7 @@ import type { HistorySessionItem } from '@/components/history/HistoryList';
 import { Button } from '@/components/ui/button';
 import { useLocale } from '@/locales';
 import { cn } from '@/lib/utils';
+import { getHistorySessionDisplay } from '@/components/history/historySession';
 
 interface ResumeBarProps {
   selectedSession: HistorySessionItem | null;
@@ -21,7 +22,7 @@ export function ResumeBar({ selectedSession, onResume, resumed }: ResumeBarProps
             <p className="text-xs text-foreground truncate">
               <span className="font-medium">{selectedSession.projectName}</span>
               <span className="mx-2 text-muted-foreground">/</span>
-              <span className="text-muted-foreground">{selectedSession.display}</span>
+              <span className="text-muted-foreground">{getHistorySessionDisplay(selectedSession, '')}</span>
             </p>
           </div>
           <Button

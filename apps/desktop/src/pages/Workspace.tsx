@@ -12,7 +12,7 @@ import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useLocale } from '@/locales';
 import { scheduleAfterFirstPaint } from '@/lib/idle';
-import { fetchHistorySessions, toSessionKey } from '@/pages/History';
+import { fetchHistorySessions, invalidateHistoryCache, toSessionKey } from '@/pages/History';
 import type { HistorySessionItem } from '@/components/history/HistoryList';
 import type { ConversationMessageData } from '@/components/history/MessageBubble';
 import type { HistorySegment } from '@/components/history/HistoryDetail';
@@ -41,7 +41,7 @@ export function Workspace({ onNavigate, onLaunchWithDir }: WorkspaceProps) {
     shallow
   );
 
-  const { launchClaudeCode, openDirectoryPicker, loadCronTasks, checkCodexInstalled } =
+  const { launchClaudeCode, openDirectoryPicker, loadCronTasks, checkCodexInstalled, setSessionTitle } =
     useTauriCommands();
 
   const [sessions, setSessions] = useState<HistorySessionItem[]>([]);
@@ -126,16 +126,20 @@ export function Workspace({ onNavigate, onLaunchWithDir }: WorkspaceProps) {
     []
   );
 
-  const handleResume = useCallback(() => {
+  const handleResume = useCallback(async () => {
     if (!selectedSession) return;
-    void launchClaudeCode(selectedSession.project, selectedSession.id, selectedSession.source);
-    localStorage.setItem('ccem-ftue-launched', 'true');
-    if (launchedTimerRef.current) clearTimeout(launchedTimerRef.current);
-    setLaunched(true);
-    launchedTimerRef.current = setTimeout(() => {
-      setLaunched(false);
-      launchedTimerRef.current = null;
-    }, 1200);
+    try {
+      await launchClaudeCode(selectedSession.project, selectedSession.id, selectedSession.source);
+      localStorage.setItem('ccem-ftue-launched', 'true');
+      if (launchedTimerRef.current) clearTimeout(launchedTimerRef.current);
+      setLaunched(true);
+      launchedTimerRef.current = setTimeout(() => {
+        setLaunched(false);
+        launchedTimerRef.current = null;
+      }, 1200);
+    } catch (err) {
+      console.error('Failed to resume session:', err);
+    }
   }, [selectedSession, launchClaudeCode]);
 
   const handleNewSession = useCallback(async (client: LaunchClient = 'claude') => {
@@ -178,12 +182,21 @@ export function Workspace({ onNavigate, onLaunchWithDir }: WorkspaceProps) {
           onSelect={handleSelect}
           onNewSession={handleNewSession}
           codexInstalled={codexInstalled}
+          onSaveTitle={async (session, title) => {
+            await setSessionTitle(session.source, session.id, title);
+          }}
+          onSessionsChanged={async () => {
+            invalidateHistoryCache();
+            const refreshed = await fetchHistorySessions('all', true);
+            setSessions(refreshed);
+          }}
         />
 
         <div className="flex-1 flex flex-col min-w-0 bg-background">
           {selectedSession ? (
             <Suspense fallback={<DetailFallback />}>
               <LazyHistoryDetail
+                key={selectedSession ? toSessionKey(selectedSession) : undefined}
                 selectedSession={selectedSession}
                 messages={messages}
                 segments={segments}
@@ -194,6 +207,12 @@ export function Workspace({ onNavigate, onLaunchWithDir }: WorkspaceProps) {
                 onResume={handleResume}
                 launched={launched}
                 scrollToBottomOnLoad
+                onSessionTitleChange={async (source, sessionId, newTitle) => {
+                  await setSessionTitle(source, sessionId, newTitle);
+                  invalidateHistoryCache();
+                  const refreshed = await fetchHistorySessions('all', true);
+                  setSessions(refreshed);
+                }}
               />
             </Suspense>
           ) : (

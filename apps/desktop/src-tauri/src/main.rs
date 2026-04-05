@@ -19,6 +19,7 @@ mod session;
 mod skills;
 mod telegram;
 mod terminal;
+mod title_overrides;
 mod tmux;
 mod tray;
 mod unified_runtime;
@@ -2421,6 +2422,7 @@ fn main() {
             get_conversation_history,
             get_conversation_messages,
             get_conversation_segments,
+            title_overrides::set_session_title,
             skills::search_skills_stream,
             skills::list_installed_skills,
             skills::get_curated_skills,

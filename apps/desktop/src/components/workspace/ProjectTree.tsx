@@ -2,6 +2,7 @@ import { useMemo, useState, useDeferredValue, useCallback } from 'react';
 import { ChevronRight, FolderOpen, FolderClosed, MessageSquare, Search } from 'lucide-react';
 import type { HistorySessionItem } from '@/components/history/HistoryList';
 import { cn } from '@/lib/utils';
+import { getHistorySessionDisplay } from '@/components/history/historySession';
 import { useLocale } from '@/locales';
 import type { LaunchClient } from '@/store';
 import { AgentLaunchSplitButton } from './AgentLaunchSplitButton';
@@ -13,6 +14,9 @@ interface ProjectTreeProps {
   onSelect: (session: HistorySessionItem) => void;
   onNewSession: (client?: LaunchClient) => void;
   codexInstalled?: boolean;
+  /** Save a title override. Returns a promise so callers can await it. */
+  onSaveTitle?: (session: HistorySessionItem, title: string) => Promise<void>;
+  onSessionsChanged?: () => Promise<void>;
 }
 
 interface ProjectNode {
@@ -73,9 +77,24 @@ export function ProjectTree({
   onSelect,
   onNewSession,
   codexInstalled = false,
+  onSaveTitle,
+  onSessionsChanged,
 }: ProjectTreeProps) {
   const { t } = useLocale();
   const [search, setSearch] = useState('');
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+
+  const saveEdit = useCallback(async (session: HistorySessionItem, newTitle: string) => {
+    try {
+      if (onSaveTitle) {
+        await onSaveTitle(session, newTitle.trim());
+      }
+      await onSessionsChanged?.();
+    } catch (err) {
+      console.error('Failed to save title:', err);
+    }
+  }, [onSaveTitle, onSessionsChanged]);
   const deferredSearch = useDeferredValue(search);
   const [expandedProjects, setExpandedProjects] = useState<Set<string> | null>(null);
   const [projectVisibleCount, setProjectVisibleCount] = useState<Record<string, number>>({});
@@ -123,7 +142,7 @@ export function ProjectTree({
       .map((node) => {
         const nameMatch = node.projectName.toLowerCase().includes(q);
         const filteredSessions = node.sessions.filter(
-          (s) => s.display.toLowerCase().includes(q) || nameMatch
+          (s) => getHistorySessionDisplay(s, '').toLowerCase().includes(q) || nameMatch
         );
         if (filteredSessions.length === 0) return null;
         return { ...node, sessions: nameMatch ? node.sessions : filteredSessions };
@@ -237,11 +256,37 @@ export function ProjectTree({
                     {visible.map((session) => {
                       const key = toKey(session);
                       const isSelected = key === selectedKey;
-                      return (
+                      const isEditing = editingKey === key;
+                      return isEditing ? (
+                        <div
+                          key={key}
+                          className="w-full flex items-center gap-2 pl-9 pr-3 py-1.5 mx-1 rounded-md bg-surface-raised"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5 shrink-0 text-primary" />
+                          <input
+                            autoFocus
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                setEditingKey(null);
+                                void saveEdit(session, editValue);
+                              }
+                              if (e.key === 'Escape') setEditingKey(null);
+                            }}
+                            onBlur={() => setEditingKey(null)}
+                            className="h-5 text-[12px] bg-transparent outline-none border-b border-primary/40 flex-1 min-w-0"
+                          />
+                        </div>
+                      ) : (
                         <button
                           key={key}
                           type="button"
                           onClick={() => onSelect(session)}
+                          onDoubleClick={() => {
+                            setEditingKey(key);
+                            setEditValue(getHistorySessionDisplay(session, ''));
+                          }}
                           className={cn(
                             'w-full flex items-center gap-2 pl-9 pr-3 py-1.5 text-left transition-all rounded-md mx-1',
                             isSelected
@@ -250,7 +295,7 @@ export function ProjectTree({
                           )}
                         >
                           <MessageSquare className={cn('w-3.5 h-3.5 shrink-0', isSelected ? 'text-primary' : 'text-muted-foreground')} />
-                          <span className="text-[12px] truncate flex-1">{session.display}</span>
+                          <span className="text-[12px] truncate flex-1">{getHistorySessionDisplay(session, t('history.untitledSession'))}</span>
                           <span className="text-[10px] text-muted-foreground shrink-0">
                             {formatRelativeTime(session.timestamp)}
                           </span>

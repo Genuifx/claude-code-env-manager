@@ -46,6 +46,7 @@ interface HistoryDetailProps {
   /** When true, auto-scrolls to the bottom on session load (dashboard mode).
    *  When false (default), scrolls to the top (history mode). */
   scrollToBottomOnLoad?: boolean;
+  onSessionTitleChange?: (source: string, sessionId: string, newTitle: string) => Promise<void>;
 }
 
 function formatHeaderDate(timestamp: number): string {
@@ -140,9 +141,12 @@ export function HistoryDetail({
   onResume,
   launched,
   scrollToBottomOnLoad = false,
+  onSessionTitleChange,
 }: HistoryDetailProps) {
   const { t } = useLocale();
   const [, startTransition] = useTransition();
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
   const initialScrollKeyRef = useRef<string | null>(null);
@@ -350,7 +354,33 @@ export function HistoryDetail({
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
             <h3 className="truncate text-sm font-medium text-foreground" title={sessionTitle}>
-              {sessionTitle}
+              {isEditingTitle ? (
+                <input
+                  autoFocus
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      setIsEditingTitle(false);
+                      onSessionTitleChange?.(selectedSession.source, selectedSession.id, editTitle)
+                        .catch((err) => console.error('Failed to save title:', err));
+                    }
+                    if (e.key === 'Escape') setIsEditingTitle(false);
+                  }}
+                  onBlur={() => setIsEditingTitle(false)}
+                  className="w-full text-[15px] font-semibold bg-surface-raised rounded px-2 py-0.5 outline-none border border-primary/40"
+                />
+              ) : (
+                <span
+                  className="cursor-text"
+                  onDoubleClick={() => {
+                    setIsEditingTitle(true);
+                    setEditTitle(sessionTitle);
+                  }}
+                >
+                  {sessionTitle}
+                </span>
+              )}
             </h3>
             <p className="mt-1 min-w-0 truncate text-[11px] text-muted-foreground">
               {selectedSession.projectName} · {formatHeaderDate(selectedSession.timestamp)}

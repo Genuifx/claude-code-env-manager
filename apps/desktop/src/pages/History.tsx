@@ -95,6 +95,10 @@ export function primeHistoryPage() {
   void fetchHistorySessions('all').catch(() => {});
 }
 
+export function invalidateHistoryCache() {
+  historySessionCache.clear();
+}
+
 function HistoryDetailFallback() {
   return (
     <div className="flex-1 overflow-hidden">
@@ -117,7 +121,7 @@ function HistoryDetailFallback() {
 
 export function History() {
   const { t } = useLocale();
-  const { launchClaudeCode } = useTauriCommands();
+  const { launchClaudeCode, setSessionTitle } = useTauriCommands();
   const [sessions, setSessions] = useState<HistorySessionItem[]>(() => getCachedHistorySessions('all') ?? []);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [messages, setMessages] = useState<ConversationMessageData[]>([]);
@@ -376,6 +380,7 @@ export function History() {
         ) : selectedSession ? (
           <Suspense fallback={<HistoryDetailFallback />}>
             <LazyHistoryDetail
+              key={selectedSession ? toSessionKey(selectedSession) : undefined}
               selectedSession={selectedSession}
               messages={messages}
               segments={segments}
@@ -385,6 +390,12 @@ export function History() {
               onExport={handleExport}
               onResume={handleResume}
               launched={launched}
+              onSessionTitleChange={async (source, sessionId, newTitle) => {
+                await setSessionTitle(source, sessionId, newTitle);
+                invalidateHistoryCache();
+                const refreshed = await fetchHistorySessions(sourceFilter, true);
+                syncSessionState(refreshed);
+              }}
             />
           </Suspense>
         ) : (
