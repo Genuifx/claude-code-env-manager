@@ -73,13 +73,14 @@ function App() {
   const lastFocusSyncAtRef = useRef(0);
   const [, startTransition] = useTransition();
 
-  const { setEnvironments, setCurrentEnv, setPermissionMode, setUsageStats, setContinuousUsageDays, environments, launchClient, error, setError } = useAppStore(
+  const { setEnvironments, setCurrentEnv, setPermissionMode, setUsageStats, setContinuousUsageDays, setCompanion, environments, launchClient, error, setError } = useAppStore(
     (state) => ({
       setEnvironments: state.setEnvironments,
       setCurrentEnv: state.setCurrentEnv,
       setPermissionMode: state.setPermissionMode,
       setUsageStats: state.setUsageStats,
       setContinuousUsageDays: state.setContinuousUsageDays,
+      setCompanion: state.setCompanion,
       environments: state.environments,
       launchClient: state.launchClient,
       error: state.error,
@@ -300,17 +301,22 @@ function App() {
       .catch(() => {
         console.debug('Usage stats not available during deferred dashboard refresh');
       });
+    const companionPromise = invoke<import('@/store').Companion | null>('get_companion')
+      .then((c) => setCompanion(c))
+      .catch(() => {});
 
     await Promise.allSettled([
       appConfigPromise,
       sessionsPromise,
       statsPromise,
+      companionPromise,
     ]);
   }, [
     loadAppConfig,
     loadSessions,
     setUsageStats,
     setContinuousUsageDays,
+    setCompanion,
   ]);
 
   // Keep the cold-start path minimal: render the dashboard first, then fill in

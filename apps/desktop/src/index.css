@@ -2104,3 +2104,13 @@
 div[data-tauri-decorum-tb] {
   width: 200px !important;
 }
+
+/* === Pet widget — heart float animation === */
+@keyframes pet-float-up {
+  0%   { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-40px) scale(1.3); }
+}
+.pet-heart {
+  animation: pet-float-up 2.5s ease-out forwards;
+  color: oklch(var(--color-primary));
+}

@@ -2,6 +2,18 @@ import { create } from 'zustand';
 import type { PermissionModeName } from '@ccem/core/browser';
 import type { UsageStats, Milestone } from '@/types/analytics';
 
+export interface Companion {
+  name: string;
+  personality: string;
+  hatchedAt: number;
+  species: string;
+  rarity: string;
+  eye: string;
+  hat: string;
+  shiny: boolean;
+  stats: Record<string, number>;
+}
+
 export interface Environment {
   name: string;
   baseUrl: string;
@@ -218,6 +230,9 @@ interface AppState {
   setLoadingStats: (loading: boolean) => void;
   setLoadingSkills: (loading: boolean) => void;
   setLoadingSettings: (loading: boolean) => void;
+  // Companion (pet)
+  companion: Companion | null;
+  setCompanion: (c: Companion | null) => void;
 }
 
 function areEnvironmentsEqual(left: Environment[], right: Environment[]) {
@@ -370,4 +385,8 @@ export const useAppStore = create<AppState>((set) => ({
   setLoadingStats: (loading) => set({ isLoadingStats: loading }),
   setLoadingSkills: (loading) => set({ isLoadingSkills: loading }),
   setLoadingSettings: (loading) => set({ isLoadingSettings: loading }),
+
+  // Companion
+  companion: null,
+  setCompanion: (c) => set({ companion: c }),
 }));

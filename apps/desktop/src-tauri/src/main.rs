@@ -19,6 +19,7 @@ mod session;
 mod skills;
 mod telegram;
 mod terminal;
+mod companion;
 mod tmux;
 mod tray;
 mod unified_runtime;
@@ -2345,6 +2346,7 @@ fn main() {
         .manage(weixin_bridge_manager.clone())
         .manage(proxy_debug_manager.clone())
         .invoke_handler(tauri::generate_handler![
+            companion::get_companion,
             greet,
             get_system_username,
             get_environments,
