@@ -23,10 +23,10 @@ export function PetEntry() {
         </button>
       </PopoverTrigger>
       <PopoverContent
-        side="right"
-        align="end"
+        side="top"
+        align="start"
         sideOffset={8}
-        className="w-[180px] p-3 glass-card glass-noise border-0 shadow-xl"
+        className="w-[260px] p-0 !bg-transparent !border-0 shadow-none overflow-hidden rounded-none"
       >
         <PetPanel companion={companion} />
       </PopoverContent>
