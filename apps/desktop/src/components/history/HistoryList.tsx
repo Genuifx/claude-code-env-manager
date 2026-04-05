@@ -119,7 +119,7 @@ export function HistoryList({
     const normalizedSearch = deferredSearch.toLowerCase();
     return sessions.filter(s => {
       const matchesSearch = !normalizedSearch ||
-        s.display.toLowerCase().includes(normalizedSearch) ||
+        getHistorySessionDisplay(s, '').toLowerCase().includes(normalizedSearch) ||
         s.projectName.toLowerCase().includes(normalizedSearch) ||
         s.source.toLowerCase().includes(normalizedSearch);
       const matchesProject = projectFilter === 'all' || s.projectName === projectFilter;

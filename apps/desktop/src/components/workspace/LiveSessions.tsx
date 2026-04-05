@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useLocale } from '@/locales';
-import { cn } from '@/lib/utils';
+import { cn, getProjectName } from '@/lib/utils';
 import { shallow } from 'zustand/shallow';
 
 interface LiveSessionsProps {
@@ -85,7 +85,7 @@ export function LiveSessions({ onNavigate: _onNavigate }: LiveSessionsProps) {
                   <div className="min-w-0">
                     <div className="text-sm font-medium text-foreground truncate">
                       <span className="flex items-center gap-1.5">
-                        <span>{session.envName}</span>
+                        <span>{getProjectName(session.workingDir)}</span>
                         <span className="inline-flex items-center text-[9px] uppercase tracking-wide text-muted-foreground/80 rounded-md bg-white/[0.04] px-1.5 py-0.5">
                           {session.client === 'codex' ? 'Codex' : 'Claude'}
                         </span>

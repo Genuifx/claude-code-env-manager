@@ -9,6 +9,7 @@ export function getHistorySessionDisplay(
   fallbackLabel: string
 ): string {
   const trimmed = session.display.trim();
+  // Empty string → fall back to projectName
   if (trimmed) {
     return trimmed;
   }
