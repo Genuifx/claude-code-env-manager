@@ -191,10 +191,10 @@ export function MarkdownRenderer({ content, className, variant = 'default' }: Ma
         components={{
           // Headings
           h1: ({ children }) => (
-            <h1 className={cn('text-base font-semibold mt-4 mb-2 first:mt-0', isUser ? 'text-inherit' : 'text-foreground')}>{children}</h1>
+            <h1 className={cn('text-[17px] font-semibold mt-4 mb-2 first:mt-0', isUser ? 'text-inherit' : 'text-foreground')}>{children}</h1>
           ),
           h2: ({ children }) => (
-            <h2 className={cn('text-[14px] font-semibold mt-3 mb-1.5 first:mt-0', isUser ? 'text-inherit' : 'text-foreground')}>{children}</h2>
+            <h2 className={cn('text-[15px] font-semibold mt-3 mb-1.5 first:mt-0', isUser ? 'text-inherit' : 'text-foreground')}>{children}</h2>
           ),
           h3: ({ children }) => (
             <h3 className={cn('text-[13px] font-semibold mt-2.5 mb-1 first:mt-0', isUser ? 'text-inherit' : 'text-foreground')}>{children}</h3>
@@ -205,18 +205,18 @@ export function MarkdownRenderer({ content, className, variant = 'default' }: Ma
 
           // Paragraph
           p: ({ children }) => (
-            <p className="text-[13px] leading-[1.65] mb-2 last:mb-0">{children}</p>
+            <p className="text-[13.5px] leading-[1.75] mb-3 last:mb-0">{children}</p>
           ),
 
           // Lists
           ul: ({ children }) => (
-            <ul className="pl-5 list-disc text-[13px] leading-[1.65] mb-2 last:mb-0 space-y-0.5">{children}</ul>
+            <ul className="pl-5 list-disc text-[13.5px] leading-[1.75] mb-3 last:mb-0 space-y-1">{children}</ul>
           ),
           ol: ({ children }) => (
-            <ol className="pl-5 list-decimal text-[13px] leading-[1.65] mb-2 last:mb-0 space-y-0.5">{children}</ol>
+            <ol className="pl-5 list-decimal text-[13.5px] leading-[1.75] mb-3 last:mb-0 space-y-1">{children}</ol>
           ),
           li: ({ children }) => (
-            <li className="text-[13px] leading-[1.65]">{children}</li>
+            <li className="text-[13.5px] leading-[1.75]">{children}</li>
           ),
 
           // Links
@@ -237,7 +237,7 @@ export function MarkdownRenderer({ content, className, variant = 'default' }: Ma
           // Blockquote
           blockquote: ({ children }) => (
             <blockquote className={cn(
-              'border-l-2 pl-3 my-2 italic',
+              'border-l-[3px] pl-4 my-3 italic',
               isUser ? 'border-white/40 text-white/70' : 'border-primary/30 text-muted-foreground'
             )}>
               {children}

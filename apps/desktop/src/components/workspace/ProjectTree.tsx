@@ -184,7 +184,7 @@ export function ProjectTree({
   const totalSessions = sessions.length;
 
   return (
-    <div className="w-[280px] shrink-0 flex flex-col border-r border-border bg-surface backdrop-blur-xl">
+    <div className="w-[280px] shrink-0 flex flex-col border-r border-border/40 bg-surface backdrop-blur-xl">
       {/* Header: Dual Launch Button + Search */}
       <div className="shrink-0 p-3 flex flex-col gap-2">
         <AgentLaunchSplitButton
@@ -309,10 +309,10 @@ export function ProjectTree({
                             setEditValue(getHistorySessionDisplay(session, ''));
                           }}
                           className={cn(
-                            'w-full flex items-center gap-2 pl-9 pr-3 py-1.5 text-left transition-all rounded-md mx-1',
+                            'w-full flex items-center gap-2 pl-9 pr-3 py-1.5 text-left transition-all rounded-md mx-1 border-l-2',
                             isSelected
-                              ? 'bg-primary/10 text-primary border-l-2 border-primary'
-                              : 'hover:bg-muted/50 text-muted-foreground hover:text-foreground'
+                              ? 'bg-primary/10 text-primary border-primary'
+                              : 'hover:bg-muted/50 text-muted-foreground hover:text-foreground border-transparent'
                           )}
                         >
                           <MessageSquare className={cn('w-3.5 h-3.5 shrink-0', isSelected ? 'text-primary' : 'text-muted-foreground')} />

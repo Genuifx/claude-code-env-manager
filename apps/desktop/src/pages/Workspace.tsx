@@ -396,7 +396,7 @@ export function Workspace({ isActive = true, onNavigate, onLaunchWithDir }: Work
           }}
         />
 
-        <div className="flex-1 flex flex-col min-w-0 bg-background">
+        <div className="flex-1 flex flex-col min-w-0 workspace-reading-surface">
           {selectedSession ? (
             <Suspense fallback={<DetailFallback />}>
               <LazyHistoryDetail

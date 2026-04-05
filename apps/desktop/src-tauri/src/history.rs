@@ -396,12 +396,14 @@ fn parse_claude_project_session_index(path: &Path) -> Option<HistorySession> {
             }
         }
 
+        let is_meta = value.get("isMeta").and_then(|v| v.as_bool()) == Some(true);
+        if is_meta {
+            continue;
+        }
+
         if let Some(candidate) = extract_claude_project_display_candidate(&value) {
-            if !candidate.trim().is_empty()
-                && (display.is_none()
-                    || !is_noise_display(&candidate)
-                    || is_noise_display(display.as_deref().unwrap_or_default()))
-            {
+            let candidate = normalize_history_display(Some(candidate));
+            if !candidate.is_empty() {
                 display = Some(candidate);
             }
         }
@@ -1414,6 +1416,9 @@ fn normalize_unix_timestamp(ts: u64) -> u64 {
 fn normalize_history_display(display: Option<String>) -> String {
     let raw = display.unwrap_or_default();
     let cleaned = clean_display_title(&raw);
+    if is_noise_display(&cleaned) {
+        return String::new();
+    }
     // Return empty string — frontend fallback chain handles "Untitled" display
     cleaned
 }
@@ -1435,8 +1440,13 @@ fn clean_display_title(raw: &str) -> String {
     loop {
         let cleaned = strip_leading_bracket(&s, "[Request interrupted");
         let cleaned = strip_leading_system_error(&cleaned);
-        let cleaned = cleaned.trim_start().trim_start_matches("<synthetic>").trim_start();
+        let cleaned = cleaned
+            .trim_start()
+            .trim_start_matches("<synthetic>")
+            .trim_start();
         let cleaned = strip_leading_image_marker(&cleaned);
+        let cleaned = strip_leading_image_source_marker(&cleaned);
+        let cleaned = strip_leading_skill_reference(&cleaned);
         if cleaned == s {
             break;
         }
@@ -1516,6 +1526,83 @@ fn strip_leading_image_marker(text: &str) -> String {
     }
 }
 
+/// Remove a leading "[Image: source: ...]" marker from `text`.
+/// Only strips from the beginning to preserve legitimate content later in the title.
+fn strip_leading_image_source_marker(text: &str) -> String {
+    let trimmed = text.trim_start();
+    if !trimmed.starts_with("[Image: source:") && !trimmed.starts_with("[image: source:") {
+        return text.to_string();
+    }
+
+    if let Some(offset) = trimmed.find(']') {
+        return trimmed[offset + 1..].trim_start().to_string();
+    }
+
+    text.to_string()
+}
+
+/// Strip a leading skill marker such as:
+/// - `[$skill](/path/to/SKILL.md)`
+/// - `$skill-name`
+/// Only strips from the beginning so normal markdown links in real titles are preserved.
+fn strip_leading_skill_reference(text: &str) -> String {
+    let trimmed = text.trim_start();
+    let cleaned = strip_one_leading_markdown_skill_link(trimmed);
+    if cleaned != trimmed {
+        return cleaned;
+    }
+
+    strip_one_leading_skill_token(trimmed)
+}
+
+fn strip_one_leading_markdown_skill_link(text: &str) -> String {
+    if !text.starts_with('[') {
+        return text.to_string();
+    }
+
+    let Some(label_end) = text.find("](") else {
+        return text.to_string();
+    };
+    let target_start = label_end + 2;
+    let Some(target_end_rel) = text[target_start..].find(')') else {
+        return text.to_string();
+    };
+    let target_end = target_start + target_end_rel;
+    let target = &text[target_start..target_end];
+    if !target.contains("/SKILL.md") {
+        return text.to_string();
+    }
+
+    text[target_end + 1..].trim_start().to_string()
+}
+
+fn strip_one_leading_skill_token(text: &str) -> String {
+    if !text.starts_with('$') {
+        return text.to_string();
+    }
+
+    let token_end = text
+        .char_indices()
+        .find(|(_, c)| c.is_whitespace())
+        .map(|(i, _)| i)
+        .unwrap_or(text.len());
+    let token = &text[..token_end];
+    if token.len() <= 1 {
+        return text.to_string();
+    }
+
+    let body = &token[1..];
+    let valid = body
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == ':' || c == '.');
+    let looks_like_skill = body.chars().any(|c| c.is_ascii_alphabetic());
+    if !valid || !looks_like_skill {
+        return text.to_string();
+    }
+
+    text[token_end..].trim_start().to_string()
+}
+
 /// Check if a lowered string starts with a Claude system error artifact.
 /// Matches "[error]" (bare), "[error:" (with details), "[error -" (dash format).
 /// Does NOT match "[error boundary]" or "[error handling]" — legitimate user titles.
@@ -1550,6 +1637,10 @@ fn is_noise_display(display: &str) -> bool {
         return true;
     }
 
+    if is_low_signal_followup(trimmed) {
+        return true;
+    }
+
     // System message patterns — match specific Claude system artifacts only.
     // Use exact prefixes to avoid catching legitimate user titles like "[Error boundary] crash".
     let lowered = trimmed.to_lowercase();
@@ -1561,6 +1652,22 @@ fn is_noise_display(display: &str) -> bool {
         return true;
     }
     if lowered.starts_with("<synthetic>") {
+        return true;
+    }
+    if lowered.starts_with("unknown skill:") {
+        return true;
+    }
+    if lowered.starts_with("base directory for this skill:") {
+        return true;
+    }
+    if lowered.starts_with("[image: source:") {
+        return true;
+    }
+    if lowered.starts_with("<local-command-caveat>")
+        || lowered.starts_with("<local-command-stdout>")
+        || lowered.starts_with("<command-name>")
+        || lowered.starts_with("<command-message>")
+    {
         return true;
     }
 
@@ -1577,6 +1684,17 @@ fn is_noise_display(display: &str) -> bool {
     }
 
     false
+}
+
+fn is_low_signal_followup(display: &str) -> bool {
+    let trimmed = display
+        .trim()
+        .trim_start_matches(|c: char| {
+            matches!(c, '?' | '？' | '!' | '！' | '.' | '。' | ',' | '，')
+        })
+        .trim_start();
+
+    matches!(trimmed, "继续" | "继续呢" | "继续啊" | "怎么样了")
 }
 
 /// Heuristic: slash command token such as /clear, /superpowers:executing-plans.
@@ -1621,8 +1739,8 @@ fn is_noise_slash_command(command: &str, args: &str) -> bool {
     let cmd = command.to_ascii_lowercase();
 
     const ALWAYS_NOISE: &[&str] = &[
-        "clear", "compact", "help", "quit", "exit", "new", "resume",
-        "status", "stats", "config", "mcp", "plugin", "skills",
+        "clear", "compact", "help", "quit", "exit", "new", "resume", "status", "stats", "config",
+        "mcp", "plugin", "skills",
         // System/display-only commands — never meaningful as conversation titles
         "buddy", "doctor", "cost", "memory", "login",
     ];
@@ -1722,6 +1840,48 @@ mod tests {
         assert!(!is_noise_display("How do we handle auth token refresh?"));
         assert!(!is_noise_display("/Users/g/Github/ccem/docs"));
         assert!(!is_noise_display("I typed /clear but this is a sentence"));
+    }
+
+    #[test]
+    fn test_normalize_history_display_strips_skill_prefixes() {
+        assert_eq!(
+            normalize_history_display(Some(
+                "[$vercel-react-best-practices](/Users/g/.agents/skills/vercel-react-best-practices/SKILL.md) Dashboard 现在一点进去有卡顿定位下问题".to_string()
+            )),
+            "Dashboard 现在一点进去有卡顿定位下问题"
+        );
+        assert_eq!(
+            normalize_history_display(Some(
+                "$pua [$vercel-react-best-practices](/Users/g/.agents/skills/vercel-react-best-practices/SKILL.md) 最近有多个用户向我反馈说 ui 很卡".to_string()
+            )),
+            "最近有多个用户向我反馈说 ui 很卡"
+        );
+        assert_eq!(
+            normalize_history_display(Some(
+                "[$done](/Users/g/.codex/claude-done/skills/done/SKILL.md)".to_string()
+            )),
+            ""
+        );
+    }
+
+    #[test]
+    fn test_normalize_history_display_filters_low_signal_noise() {
+        assert_eq!(
+            normalize_history_display(Some("Unknown skill: codex:setup".to_string())),
+            ""
+        );
+        assert_eq!(normalize_history_display(Some("继续".to_string())), "");
+        assert_eq!(normalize_history_display(Some("继续呢".to_string())), "");
+        assert_eq!(normalize_history_display(Some("怎么样了".to_string())), "");
+        assert_eq!(normalize_history_display(Some("/status".to_string())), "");
+        assert_eq!(
+            normalize_history_display(Some("[Image: source: /tmp/test.png]".to_string())),
+            ""
+        );
+        assert_eq!(
+            normalize_history_display(Some("[Image #1] 右边的空状态为啥有个新会按钮".to_string())),
+            "右边的空状态为啥有个新会按钮"
+        );
     }
 
     #[test]
@@ -1856,6 +2016,37 @@ mod tests {
         assert_eq!(session.project, "/Users/g/cc-home");
         assert_eq!(session.project_name, "cc-home");
         assert_eq!(session.display, "Real follow-up");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_claude_project_index_ignores_meta_skill_payload_for_title() {
+        let root = temp_history_dir("meta-skip");
+        let history_path = root.join("history.jsonl");
+        let projects_dir = root.join("projects");
+        let project_dir = projects_dir.join("-Users-g-ccem");
+        fs::create_dir_all(&project_dir).expect("create project dir");
+
+        fs::write(
+            project_dir.join("session-1.jsonl"),
+            concat!(
+                "{\"type\":\"user\",\"sessionId\":\"session-1\",\"timestamp\":\"2026-03-31T15:54:28.964Z\",\"cwd\":\"/Users/g/ccem\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Base directory for this skill: /Users/g/.claude/skills/foo\\n\\nARGUMENTS: hello\"}]},\"isMeta\":true}\n",
+                "{\"type\":\"file-history-snapshot\",\"sessionId\":\"session-1\",\"timestamp\":\"2026-03-31T15:54:29.000Z\",\"cwd\":\"/Users/g/ccem\"}\n"
+            ),
+        )
+        .expect("write session file");
+
+        let sessions =
+            load_claude_history_from_paths(&history_path, &projects_dir).expect("load history");
+        let session = sessions
+            .into_iter()
+            .find(|session| session.id == "session-1")
+            .expect("session should be indexed");
+
+        assert_eq!(session.project, "/Users/g/ccem");
+        assert_eq!(session.project_name, "ccem");
+        assert_eq!(session.display, "");
 
         let _ = fs::remove_dir_all(root);
     }
