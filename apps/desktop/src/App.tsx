@@ -412,13 +412,10 @@ function App() {
   const handleLaunch = useCallback(async () => {
     try {
       await launchClaudeCode(undefined, undefined, launchClient);
-      if (launchClient === 'claude') {
-        navigateToTab('sessions');
-      }
     } catch (err) {
       console.error('Launch failed:', err);
     }
-  }, [launchClaudeCode, launchClient, navigateToTab]);
+  }, [launchClaudeCode, launchClient]);
 
   // Global keyboard shortcuts (Cmd+1..9 for tabs, Cmd+Enter/N for launch, Cmd+, for settings)
   const globalShortcuts = useMemo(() => ({
@@ -444,13 +441,10 @@ function App() {
     const effectiveClient = client ?? launchClient;
     try {
       await launchClaudeCode(workingDir, undefined, effectiveClient);
-      if (effectiveClient === 'claude') {
-        navigateToTab('sessions');
-      }
     } catch (err) {
       console.error('Launch failed:', err);
     }
-  }, [launchClaudeCode, launchClient, navigateToTab]);
+  }, [launchClaudeCode, launchClient]);
 
   // Environment CRUD handlers
   const handleAddEnv = () => {
@@ -500,16 +494,12 @@ function App() {
     return env;
   };
 
-  // Render page based on active tab
-  const renderPage = () => {
+  // Render current non-workspace page. Workspace stays mounted so its local UI state
+  // survives tab switches instead of remounting on every return.
+  const renderActivePage = () => {
     switch (activeTab) {
       case 'workspace':
-        return (
-          <Workspace
-            onNavigate={navigateToTab}
-            onLaunchWithDir={handleLaunchWithDir}
-          />
-        );
+        return null;
       case 'sessions':
         return <SessionsPage onLaunch={handleLaunch} onLaunchWithDir={handleLaunchWithDir} />;
       case 'environments':
@@ -535,7 +525,7 @@ function App() {
       case 'settings':
         return <SettingsPage />;
       default:
-        return <Workspace onNavigate={navigateToTab} onLaunchWithDir={handleLaunchWithDir} />;
+        return null;
     }
   };
 
@@ -548,9 +538,25 @@ function App() {
           onTabPrefetch={prefetchTab}
           fullBleed={activeTab === 'history' || activeTab === 'workspace'}
         >
-          <Suspense fallback={<PageFallback />}>
-            {renderPage()}
-          </Suspense>
+          <>
+            <div
+              className={activeTab === 'workspace' ? 'h-full w-full' : 'hidden'}
+              hidden={activeTab !== 'workspace'}
+              aria-hidden={activeTab !== 'workspace'}
+            >
+              <Workspace
+                isActive={activeTab === 'workspace'}
+                onNavigate={navigateToTab}
+                onLaunchWithDir={handleLaunchWithDir}
+              />
+            </div>
+
+            {activeTab !== 'workspace' ? (
+              <Suspense fallback={<PageFallback />}>
+                {renderActivePage()}
+              </Suspense>
+            ) : null}
+          </>
         </AppLayout>
 
         {/* Environment Dialog */}
