@@ -1,7 +1,7 @@
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { Home, Terminal, Globe, BarChart3, Sparkles, Settings, MessageSquare, MessageCircleMore, Clock, Bug } from 'lucide-react';
-import { PetEntry } from '@/components/pet/PetEntry';
+// import { PetEntry } from '@/components/pet/PetEntry';
 
 interface SideRailProps {
   activeTab: string;
@@ -128,7 +128,7 @@ export function SideRail({ activeTab, onTabChange, onTabPrefetch, glassMuted }: 
 
       {/* Bottom items */}
       <div className="flex flex-col gap-0.5 px-3 py-3 border-t border-white/[0.06]">
-        <PetEntry />
+        {/* <PetEntry /> */}
         {bottomItemDefs.map((item) => (
           <NavButton
             key={item.id}

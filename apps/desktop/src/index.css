@@ -2105,12 +2105,277 @@ div[data-tauri-decorum-tb] {
   width: 200px !important;
 }
 
-/* === Pet widget — heart float animation === */
+/* === Pet widget — pixel RPG game card === */
+
+/* Google Fonts pixel font — loaded via @import at top or link tag */
+@import url('https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&display=swap');
+
+.pet-card {
+  font-family: 'Silkscreen', 'Courier New', monospace;
+  image-rendering: pixelated;
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: unset;
+}
+
+/* ── Outer frame: 3-layer pixel border like RPG window ── */
+.pet-frame {
+  background: #1a1a2e;
+  /* Stacked box-shadow = thick pixel border */
+  box-shadow:
+    0 0 0 2px #e2e8f0,
+    0 0 0 4px #4a5568,
+    0 0 0 6px #1a202c;
+  overflow: hidden;
+}
+
+.pet-frame-inner {
+  border: 2px solid #2d3748;
+  margin: 4px;
+  background: #0f0f23;
+}
+
+/* ── Title bar ── */
+.pet-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  background: #2d3748;
+  border-bottom: 2px solid #4a5568;
+}
+
+.pet-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #e2e8f0;
+  letter-spacing: 0.08em;
+}
+
+.pet-rarity {
+  font-size: 8px;
+  color: var(--pet-fg);
+  background: var(--pet-dim);
+  padding: 1px 6px;
+  border: 1px solid var(--pet-bg);
+}
+
+/* ── Sprite screen ── */
+.pet-screen {
+  position: relative;
+  margin: 6px;
+  background: #0a0a1a;
+  border: 2px solid #2d3748;
+  cursor: pointer;
+  overflow: hidden;
+  min-height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Checkerboard ground */
+.pet-ground {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 16px;
+  background:
+    repeating-conic-gradient(#1a1a2e 0% 25%, #12122a 0% 50%) 0 0 / 8px 8px;
+  opacity: 0.6;
+}
+
+.pet-sprite {
+  position: relative;
+  z-index: 1;
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
+  line-height: 1.3;
+  text-align: center;
+  padding: 10px 8px 14px;
+  text-shadow: 0 0 8px var(--pet-fg), 0 0 2px var(--pet-fg);
+  /* Idle bob animation */
+  animation: pet-bob 2s ease-in-out infinite;
+}
+
+@keyframes pet-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+
+.pet-species-tag {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  font-size: 7px;
+  padding: 1px 5px;
+  border: 1px solid var(--pet-bg);
+  z-index: 2;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.pet-shiny-star {
+  color: #fefcbf;
+  margin-left: 2px;
+  animation: pet-shiny-blink 1s steps(2) infinite;
+}
+
+@keyframes pet-shiny-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* ── HP bar ── */
+.pet-hp-section {
+  padding: 4px 8px;
+}
+
+.pet-hp-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pet-hp-text {
+  font-size: 9px;
+  font-weight: 700;
+  color: #fefcbf;
+  min-width: 16px;
+}
+
+.pet-hp-bar-outer {
+  flex: 1;
+  height: 6px;
+  background: #2d3748;
+  border: 1px solid #4a5568;
+  overflow: hidden;
+}
+
+.pet-hp-bar-fill {
+  height: 100%;
+  transition: width 0.3s steps(8);
+  /* Pixel segment lines */
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0px,
+    transparent 5px,
+    rgba(0,0,0,0.4) 5px,
+    rgba(0,0,0,0.4) 6px
+  );
+  background-size: 100% 100%;
+}
+
+.pet-hp-num {
+  font-size: 8px;
+  color: #a0aec0;
+  min-width: 30px;
+  text-align: right;
+}
+
+/* ── Dialogue box (RPG text box) ── */
+.pet-dialogue {
+  margin: 4px 8px;
+  padding: 4px 6px;
+  background: #1a1a2e;
+  border: 2px solid #4a5568;
+  display: flex;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.pet-dialogue-arrow {
+  font-size: 8px;
+  color: var(--pet-fg);
+  animation: pet-arrow-blink 1s steps(2) infinite;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+@keyframes pet-arrow-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.pet-dialogue-text {
+  font-size: 8px;
+  line-height: 1.4;
+  color: #a0aec0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Stats section ── */
+.pet-stats-section {
+  padding: 4px 8px 6px;
+}
+
+.pet-stats-header {
+  font-size: 8px;
+  color: #4a5568;
+  text-align: center;
+  margin-bottom: 4px;
+  letter-spacing: 0.15em;
+}
+
+.pet-stat-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 14px;
+}
+
+.pet-stat-icon {
+  font-size: 8px;
+  width: 10px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.pet-stat-name {
+  font-size: 8px;
+  color: #718096;
+  width: 22px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.pet-stat-blocks {
+  display: flex;
+  gap: 2px;
+  flex: 1;
+}
+
+.pet-stat-block {
+  height: 6px;
+  flex: 1;
+  transition: background 0.2s steps(1);
+}
+
+.pet-stat-val {
+  font-size: 8px;
+  width: 20px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* ── Footer ── */
+.pet-footer {
+  font-size: 7px;
+  color: #4a5568;
+  text-align: center;
+  padding: 2px 0 4px;
+  border-top: 1px solid #2d3748;
+  letter-spacing: 0.15em;
+}
+
+/* ── Heart float ── */
 @keyframes pet-float-up {
   0%   { opacity: 1; transform: translateY(0) scale(1); }
   100% { opacity: 0; transform: translateY(-40px) scale(1.3); }
 }
 .pet-heart {
-  animation: pet-float-up 2.5s ease-out forwards;
-  color: oklch(var(--color-primary));
+  animation: pet-float-up 2s ease-out forwards;
 }
