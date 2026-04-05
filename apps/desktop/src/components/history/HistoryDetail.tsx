@@ -350,7 +350,7 @@ export function HistoryDetail({
 
   return (
     <>
-      <div className="glass-header glass-noise shrink-0 border-b border-white/[0.06] px-5 py-2.5">
+      <div className="glass-header glass-noise shrink-0 border-b border-border/30 px-5 py-3">
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
             <h3 className="truncate text-sm font-medium text-foreground" title={sessionTitle}>
@@ -425,7 +425,7 @@ export function HistoryDetail({
                     'shrink-0 rounded-full border px-2 py-0.5 text-[10px] transition-colors',
                     activeSegment === null
                       ? 'border-primary/40 bg-primary/12 text-foreground'
-                      : 'border-white/[0.08] text-muted-foreground hover:text-foreground'
+                      : 'border-border/50 text-muted-foreground hover:text-foreground'
                   )}
                 >
                   {t('history.allSegments')}
@@ -438,7 +438,7 @@ export function HistoryDetail({
                       'shrink-0 rounded-full border px-2 py-0.5 text-[10px] transition-colors',
                       activeSegment === seg.segmentIndex
                         ? 'border-primary/40 bg-primary/12 text-foreground'
-                        : 'border-white/[0.08] text-muted-foreground hover:text-foreground'
+                        : 'border-border/50 text-muted-foreground hover:text-foreground'
                     )}
                   >
                     {formatSegmentLabel(seg.segmentIndex)}
@@ -457,7 +457,7 @@ export function HistoryDetail({
               {Array.from({ length: 4 }).map((_, i) => (
                 <div key={i} className={`flex ${i % 2 === 0 ? 'justify-end' : 'justify-start'}`}>
                   <div className="animate-pulse">
-                    <div className={`h-16 rounded-xl ${i % 2 === 0 ? 'bg-primary/10 w-48' : 'bg-white/[0.04] w-64'}`} />
+                    <div className={`h-16 rounded-xl ${i % 2 === 0 ? 'bg-primary/10 w-48' : 'bg-muted/40 w-64'}`} />
                   </div>
                 </div>
               ))}
@@ -500,13 +500,13 @@ export function HistoryDetail({
 
           {!isLoadingMessages && (
             <div className="mt-8 flex justify-center">
-              <div className="glass-subtle glass-noise w-full max-w-sm rounded-xl border border-white/[0.06] px-4 py-4 text-center shadow-[0_8px_30px_rgba(0,0,0,0.08)]">
+              <div className="glass-subtle glass-noise w-full max-w-sm rounded-xl border border-border/40 px-4 py-4 text-center shadow-[0_8px_30px_rgba(0,0,0,0.08)]">
                 <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-muted-foreground/40">
                   {t('history.sessionInfo')}
                 </p>
                 <p className="mt-2 text-sm text-muted-foreground">
                   <span className="font-mono text-foreground/90">{formatTokens(sessionUsage.input)}</span> {t('history.tokensInput')}
-                  <span className="mx-2 text-muted-foreground/25">·</span>
+                  <span className="mx-2 text-muted-foreground/50">·</span>
                   <span className="font-mono text-foreground/90">{formatTokens(sessionUsage.output)}</span> {t('history.tokensOutput')}
                 </p>
                 <p

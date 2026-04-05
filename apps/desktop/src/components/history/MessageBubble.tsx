@@ -302,11 +302,11 @@ function CollapsibleBlock({
   };
 
   return (
-    <div className="rounded-lg border border-white/[0.06] overflow-hidden my-1">
+    <div className="rounded-lg border border-border/40 overflow-hidden my-1">
       <button
         onClick={handleToggle}
         aria-expanded={open}
-        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-white/[0.03] transition-colors"
+        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-muted/30 transition-colors"
       >
         <ChevronRight className={cn('w-3.5 h-3.5 transition-transform', open && 'rotate-90')} />
         <Icon className={cn('w-3.5 h-3.5', iconClassName)} />
@@ -314,7 +314,7 @@ function CollapsibleBlock({
       </button>
       {open && !hasRenderedBody && (
         <div className="px-3 pb-3 pt-1">
-          <div className="h-5 animate-pulse rounded bg-white/[0.04]" />
+          <div className="h-5 animate-pulse rounded bg-muted/30" />
         </div>
       )}
       {hasRenderedBody && (
@@ -401,7 +401,7 @@ function ToolCallBlock({ block, t }: { block: ContentBlock; t: (key: string) => 
       <button
         onClick={handleToggle}
         aria-expanded={open}
-        className="w-full min-w-0 flex items-center gap-1.5 py-1 text-xs hover:bg-white/[0.03] rounded transition-colors group text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="w-full min-w-0 flex items-center gap-1.5 py-1 text-xs hover:bg-muted/30 rounded transition-colors group text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       >
         <Circle className={cn(
           'w-[5px] h-[5px] shrink-0 fill-current',
@@ -432,7 +432,7 @@ function ToolCallBlock({ block, t }: { block: ContentBlock; t: (key: string) => 
 
       {open && !hasRenderedBody && (
         <div className="ml-4 mt-1 mb-2">
-          <div className="h-8 animate-pulse rounded-md bg-white/[0.04]" />
+          <div className="h-8 animate-pulse rounded-md bg-muted/30" />
         </div>
       )}
 
@@ -450,7 +450,7 @@ function ToolCallBlock({ block, t }: { block: ContentBlock; t: (key: string) => 
           </div>
           {/* Result */}
           {hasResult && (
-            <div className={cn('border-l-2 pl-3', isError ? 'border-destructive/30' : 'border-primary/20')}>
+            <div className={cn('border-l-2 pl-3', isError ? 'border-destructive/30' : 'border-primary/35')}>
               <p className="text-[10px] text-muted-foreground/60 uppercase tracking-wider mb-1">{t('history.toolOutput')}</p>
               <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px] leading-relaxed max-h-[200px] overflow-y-auto">
                 {resultText}
@@ -498,7 +498,7 @@ function PlanCard({ content, t, spacingClass }: { content: string; t: (key: stri
     <div className={cn('max-w-[90%] mx-auto', spacingClass)}>
       <div className="glass-card glass-noise rounded-2xl overflow-hidden border-l-[3px] border-primary">
         {/* Header */}
-        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/[0.06]">
+        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border/40">
           <ClipboardList className="w-4 h-4 text-primary shrink-0" />
           <span className="text-xs font-medium text-primary">{t('history.plan')}</span>
           {title && (
@@ -651,7 +651,7 @@ function TeammateMessageBlock({ msg }: { msg: TeammateMessage }) {
           });
         }}
         aria-expanded={expanded}
-        className="relative w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/[0.03] transition-colors"
+        className="relative w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-muted/30 transition-colors"
       >
         <Users className="w-3.5 h-3.5 text-muted-foreground/60 shrink-0" />
         <span className={cn(
@@ -672,14 +672,14 @@ function TeammateMessageBlock({ msg }: { msg: TeammateMessage }) {
       </button>
       {/* Expandable content */}
       {expanded && !hasRenderedBody && (
-        <div className="px-3 pb-3 pt-2 border-t border-white/[0.06]">
-          <div className="h-8 animate-pulse rounded bg-white/[0.04]" />
+        <div className="px-3 pb-3 pt-2 border-t border-border/40">
+          <div className="h-8 animate-pulse rounded bg-muted/30" />
         </div>
       )}
       {hasRenderedBody && (
         <div
           aria-hidden={!expanded}
-          className={cn('px-3 pb-3 border-t border-white/[0.06]', !expanded && 'hidden')}
+          className={cn('px-3 pb-3 border-t border-border/40', !expanded && 'hidden')}
         >
           <div className="pt-2 max-h-[500px] overflow-y-auto">
             <MarkdownRenderer content={msg.content} />
@@ -940,14 +940,14 @@ function MessageBubbleComponent({ message, prevRole }: MessageBubbleProps) {
   if (message.isCompactBoundary) {
     return (
       <div className="flex items-center gap-3 my-6 px-2">
-        <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.12] to-transparent" />
+        <div className="flex-1 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
         <div className="glass-subtle glass-noise rounded-lg px-3 py-1.5 flex items-center gap-2 shrink-0">
           <Scissors className="w-3.5 h-3.5 text-muted-foreground" />
           <span className="text-[11px] text-muted-foreground">
             {t('history.compactBoundary')}
           </span>
         </div>
-        <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.12] to-transparent" />
+        <div className="flex-1 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
       </div>
     );
   }
@@ -1027,7 +1027,7 @@ function MessageBubbleComponent({ message, prevRole }: MessageBubbleProps) {
             {timeLabel && (
               <p className={cn(
                 'text-[10px] tabular-nums',
-                isUser ? 'text-white/50 mr-auto' : 'text-muted-foreground/45'
+                isUser ? 'text-white/50' : 'text-muted-foreground/45'
               )}>
                 {timeLabel}
               </p>
@@ -1036,7 +1036,7 @@ function MessageBubbleComponent({ message, prevRole }: MessageBubbleProps) {
               onClick={handleCopyMessage}
               className={cn(
                 'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors',
-                'opacity-0 group-hover/bubble:opacity-100 focus-visible:opacity-100',
+                'opacity-0 group-hover/bubble:opacity-40 hover:!opacity-100 focus-visible:!opacity-100',
                 !isUser && 'ml-auto',
                 isUser
                   ? 'text-white/50 hover:text-white/90 hover:bg-white/[0.08]'

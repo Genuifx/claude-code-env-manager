@@ -14,7 +14,7 @@ export function ResumeBar({ selectedSession, onResume, resumed }: ResumeBarProps
   const { t } = useLocale();
 
   return (
-    <div className="shrink-0 border-t border-border bg-surface backdrop-blur-xl px-4 py-3">
+    <div className="shrink-0 border-t border-border/30 bg-surface backdrop-blur-xl px-4 py-3">
       {selectedSession ? (
         <div className="flex items-center justify-between gap-4">
           <div className="flex-1 min-w-0">
@@ -47,7 +47,7 @@ export function ResumeBar({ selectedSession, onResume, resumed }: ResumeBarProps
           </button>
         </div>
       ) : (
-        <p className="text-xs text-muted-foreground text-center py-1">
+        <p className="text-xs text-muted-foreground text-center">
           {t('workspace.selectToResume')}
         </p>
       )}

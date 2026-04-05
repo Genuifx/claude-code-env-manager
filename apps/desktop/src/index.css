@@ -47,6 +47,11 @@
     --input: 0 0% 100% / 0.08;
     --ring: 211 85% 52%;
 
+    /* Reading surface — warm elevated content area */
+    --reading-surface: 30 8% 14%;
+    --reading-surface-gradient-top: 30 10% 15%;
+    --reading-surface-gradient-bottom: 30 6% 13%;
+
     /* Semantic status */
     --success: 142 65% 45%;
     --success-foreground: 0 0% 100%;
@@ -107,14 +112,14 @@
     /* Content area background opacity (1 = opaque, <1 = ambient bleeds through) */
     --content-bg-opacity: 1;
 
-    /* Chat bubble glass tokens (dark) */
-    --chat-assistant-bg: 30 8% 9%;
-    --chat-assistant-opacity: 0.76;
+    /* Chat bubble glass tokens (dark) — Medium-style warm reading cards */
+    --chat-assistant-bg: 30 8% 15%;
+    --chat-assistant-opacity: 0.88;
     --chat-assistant-blur: 20px;
     --chat-user-bg: var(--primary);
     --chat-user-opacity: 0.88;
     --chat-user-blur: 8px;
-    --tool-input-bg: 0 0% 100% / 0.03;
+    --tool-input-bg: 0 0% 100% / 0.04;
 
     /* Segmented control — selected pill */
     --seg-active-bg: 0 0% 100% / 0.16;
@@ -128,7 +133,7 @@
     --heatmap-4: 211 85% 52%;
   }
 
-  /* === Light Mode — Frosted Glass / macOS Sequoia === */
+  /* === Light Mode — Medium-style Reading Experience === */
   .light {
     --primary: 211 100% 45%;
     --primary-foreground: 0 0% 100%;
@@ -142,10 +147,11 @@
     --accent-hover: 212 10% 40%;
     --accent-muted: 212 6% 58%;
 
-    --background: 220 20% 97%;
-    --foreground: 220 16% 10%;
-    --surface-sunken: 220 15% 93%;
-    --surface: 0 0% 99%;
+    /* Medium-style warm paper background */
+    --background: 40 20% 98%;
+    --foreground: 220 16% 12%;
+    --surface-sunken: 40 15% 94%;
+    --surface: 40 10% 99%;
     --surface-raised: 0 0% 100%;
     --surface-overlay: 0 0% 100%;
     --surface-peak: 0 0% 100%;
@@ -157,14 +163,19 @@
 
     --secondary: 220 10% 93%;
     --secondary-foreground: 220 12% 22%;
-    --muted: 220 10% 93%;
-    --muted-foreground: 210 6% 46%;
+    --muted: 40 10% 92%;
+    --muted-foreground: 40 5% 45%;
 
-    --border-subtle: 220 8% 90%;
-    --border: 220 10% 84%;
-    --border-strong: 220 12% 72%;
-    --input: 220 10% 84%;
+    --border-subtle: 40 8% 88%;
+    --border: 40 10% 82%;
+    --border-strong: 40 12% 72%;
+    --input: 40 10% 84%;
     --ring: 211 100% 45%;
+
+    /* Reading surface — warm paper content area (consistent warmth, no pure white) */
+    --reading-surface: 40 16% 97%;
+    --reading-surface-gradient-top: 40 20% 98%;
+    --reading-surface-gradient-bottom: 40 12% 96%;
 
     --success: 142 55% 38%;
     --success-foreground: 0 0% 100%;
@@ -175,7 +186,7 @@
     --info: 200 78% 45%;
     --info-foreground: 0 0% 100%;
 
-    --sidebar: 220 15% 95%;
+    --sidebar: 40 15% 96%;
     --sidebar-foreground: 210 6% 46%;
     --sidebar-active: 211 100% 45%;
     --sidebar-active-foreground: 0 0% 100%;
@@ -192,9 +203,9 @@
     --glass-blur: 40px;
     --glass-saturate: 190%;
     --glass-bg: 0 0% 100%;
-    --glass-bg-opacity: 0.38;
-    --glass-sidebar-bg: 220 15% 98%;
-    --glass-sidebar-opacity: 0.35;
+    --glass-bg-opacity: 0.55;
+    --glass-sidebar-bg: 40 20% 99%;
+    --glass-sidebar-opacity: 0.45;
     --glass-sidebar-blur: 56px;
     --glass-sidebar-saturate: 200%;
     --glass-border-light: 0 0% 100%;
@@ -215,14 +226,14 @@
     /* Content area — semi-transparent so ambient orbs bleed through */
     --content-bg-opacity: 0.82;
 
-    /* Chat bubble glass tokens (light) */
-    --chat-assistant-bg: 0 0% 100%;
-    --chat-assistant-opacity: 0.78;
-    --chat-assistant-blur: 20px;
+    /* Chat bubble glass tokens (light) — Medium-style warm paper cards */
+    --chat-assistant-bg: 40 25% 99%;
+    --chat-assistant-opacity: 0.97;
+    --chat-assistant-blur: 12px;
     --chat-user-bg: var(--primary);
     --chat-user-opacity: 0.88;
     --chat-user-blur: 8px;
-    --tool-input-bg: 220 10% 50% / 0.06;
+    --tool-input-bg: 40 10% 45% / 0.08;
 
     /* Segmented control — selected pill */
     --seg-active-bg: 0 0% 100% / 0.60;
@@ -414,21 +425,42 @@
   background:
     linear-gradient(
       180deg,
-      hsl(var(--glass-border-light) / 0.35) 0%,
-      transparent 18%,
-      transparent 100%
+      hsl(40 30% 99% / 0.8) 0%,
+      hsl(40 20% 98% / 0.95) 18%,
+      hsl(40 20% 97% / 1) 100%
     ),
     radial-gradient(
       130% 110% at 6% 0%,
-      hsl(var(--ambient-1) / calc(var(--ambient-opacity) * 0.24)) 0%,
+      hsl(35 60% 75% / 0.12) 0%,
       transparent 50%
     ),
     radial-gradient(
       120% 120% at 100% 100%,
-      hsl(var(--ambient-2) / calc(var(--ambient-opacity) * 0.18)) 0%,
+      hsl(200 50% 75% / 0.08) 0%,
       transparent 48%
     ),
-    hsl(var(--background) / var(--content-bg-opacity, 1));
+    hsl(40 25% 97% / var(--content-bg-opacity, 1));
+}
+
+/* === Workspace Reading Surface — Medium-style elevated content area === */
+.workspace-reading-surface {
+  background:
+    linear-gradient(
+      180deg,
+      hsl(var(--reading-surface-gradient-top)) 0%,
+      hsl(var(--reading-surface)) 40%,
+      hsl(var(--reading-surface-gradient-bottom)) 100%
+    );
+}
+.light .workspace-reading-surface {
+  background:
+    linear-gradient(
+      180deg,
+      hsl(var(--reading-surface-gradient-top)) 0%,
+      hsl(var(--reading-surface)) 40%,
+      hsl(var(--reading-surface-gradient-bottom)) 100%
+    );
+  border-left: none;
 }
 
 /* === Page Transition === */
@@ -785,11 +817,11 @@
 }
 
 .light .workspace-main-container {
-  background: hsl(var(--background) / 0.92);
-  border: 1px solid hsl(var(--glass-border-light) / 0.15);
+  background: hsl(40 25% 99% / 0.98);
+  border: 1px solid hsl(40 15% 85% / 0.6);
   box-shadow:
-    0 1px 3px hsl(var(--glass-shadow-base) / 0.08),
-    0 8px 24px hsl(var(--glass-shadow-base) / 0.05);
+    0 1px 3px hsl(40 10% 10% / 0.05),
+    0 8px 24px hsl(40 10% 10% / 0.03);
 }
 
 /* --- Status chip liquid glass --- */
@@ -977,6 +1009,25 @@
     inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / var(--glass-inset-opacity)),
     inset 0 -0.5px 0 0 hsl(var(--glass-shadow-base) / 0.06),
     0 1px 4px hsl(var(--glass-shadow-base) / 0.06);
+}
+
+.light .glass-header {
+  background:
+    linear-gradient(
+      180deg,
+      hsl(40 30% 100% / 0.65) 0%,
+      hsl(40 20% 99% / 0.9) 24%,
+      hsl(40 20% 98% / 0.98) 100%
+    ),
+    radial-gradient(
+      110% 100% at 0% 0%,
+      hsl(35 60% 75% / 0.1) 0%,
+      transparent 36%
+    );
+  border-bottom-color: hsl(40 15% 90% / 0.45);
+  box-shadow:
+    inset 0 1px 0 0 hsl(0 0% 100% / 0.9),
+    0 1px 2px hsl(40 10% 10% / 0.02);
 }
 
 /* --- Glass Shimmer (ambient light sweep on premium elements) --- */
@@ -1786,8 +1837,18 @@
   background: hsl(var(--chat-assistant-bg) / var(--chat-assistant-opacity));
   backdrop-filter: blur(var(--chat-assistant-blur)) saturate(170%);
   -webkit-backdrop-filter: blur(var(--chat-assistant-blur)) saturate(170%);
-  border: 1px solid hsl(var(--glass-border-light) / var(--glass-border-opacity));
-  box-shadow: inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / calc(var(--glass-inset-opacity) * 0.5));
+  border: 1px solid hsl(0 0% 100% / 0.06);
+  box-shadow:
+    0 1px 3px hsl(0 0% 0% / 0.08),
+    0 2px 8px hsl(0 0% 0% / 0.04),
+    inset 0 1px 0 0 hsl(0 0% 100% / 0.06);
+}
+
+.light .glass-chat-assistant {
+  border-color: hsl(40 15% 88%);
+  box-shadow:
+    0 1px 3px hsl(40 10% 10% / 0.04),
+    inset 0 1px 0 0 hsl(0 0% 100% / 0.9);
 }
 
 /* --- Chat User Bubble (subtle glass tint on primary) --- */
@@ -1795,6 +1856,10 @@
   background: hsl(var(--chat-user-bg) / var(--chat-user-opacity));
   backdrop-filter: blur(var(--chat-user-blur));
   -webkit-backdrop-filter: blur(var(--chat-user-blur));
+  border: 1px solid hsl(var(--primary) / 0.25);
+  box-shadow:
+    0 1px 3px hsl(0 0% 0% / 0.06),
+    inset 0 1px 0 0 hsl(0 0% 100% / 0.12);
 }
 
 /* --- Message entrance animation --- */
@@ -1813,7 +1878,7 @@
 }
 
 .history-msg-virtualized {
-  contain-intrinsic-size: 280px;
+  contain-intrinsic-size: auto 280px;
 }
 
 .history-item-virtualized {
