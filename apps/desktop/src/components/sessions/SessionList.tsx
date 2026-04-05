@@ -1,6 +1,6 @@
 import { Clock, FolderOpen, Minus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { cn, getProjectName } from '@/lib/utils';
 import type { TmuxAttachTerminalInfo, TmuxAttachTerminalType } from '@/lib/tauri-ipc';
 import { useLocale } from '../../locales';
 import type { Session } from '@/store';
@@ -63,10 +63,6 @@ export function SessionList({
       return `${hours}h ${minutes % 60}m`;
     }
     return `${minutes}m`;
-  };
-
-  const getProjectName = (path: string) => {
-    return path.split('/').pop() || path;
   };
 
   return (

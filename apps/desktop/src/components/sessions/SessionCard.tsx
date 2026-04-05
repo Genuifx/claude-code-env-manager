@@ -31,7 +31,7 @@ import {
 } from '@/components/ui/tooltip';
 import { getRemotePlatformFromChannel, getRemotePlatformMeta } from '@/lib/remote-platforms';
 import { copyBindCommand } from '@/lib/telegram-utils';
-import { cn } from '@/lib/utils';
+import { cn, getProjectName } from '@/lib/utils';
 import type { TmuxAttachTerminalInfo, TmuxAttachTerminalType } from '@/lib/tauri-ipc';
 import { useLocale } from '../../locales';
 import type { Session, UnifiedSession, ChannelInfo } from '@/store';
@@ -230,9 +230,6 @@ export function SessionCard({
     return `${minutes}m`;
   };
 
-  const getProjectName = (path: string) => {
-    return path.split('/').pop() || path;
-  };
 
   // --- Derive display values ---
   const projectDir = unifiedSession?.projectDir ?? session.workingDir;
