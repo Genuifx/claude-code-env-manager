@@ -1,6 +1,5 @@
 import { Check, Play } from 'lucide-react';
 import type { HistorySessionItem } from '@/components/history/HistoryList';
-import { Button } from '@/components/ui/button';
 import { useLocale } from '@/locales';
 import { cn } from '@/lib/utils';
 
@@ -24,11 +23,11 @@ export function ResumeBar({ selectedSession, onResume, resumed }: ResumeBarProps
               <span className="text-muted-foreground">{selectedSession.display}</span>
             </p>
           </div>
-          <Button
-            size="sm"
+          <button
             className={cn(
-              'shrink-0 gap-1.5 h-8 px-4 font-medium shadow-sm transition-all',
-              resumed && 'bg-emerald-600 hover:bg-emerald-600'
+              'shrink-0 inline-flex items-center gap-1.5 h-8 px-4 rounded-lg text-sm font-medium text-white transition-all',
+              'liquid-launch-btn',
+              resumed && 'launched'
             )}
             onClick={onResume}
             disabled={resumed}
@@ -44,7 +43,7 @@ export function ResumeBar({ selectedSession, onResume, resumed }: ResumeBarProps
                 {t('workspace.resumeSession')}
               </>
             )}
-          </Button>
+          </button>
         </div>
       ) : (
         <p className="text-xs text-muted-foreground text-center py-1">
