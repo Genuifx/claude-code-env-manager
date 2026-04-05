@@ -1,5 +1,5 @@
 import { useMemo, useState, useDeferredValue, useCallback } from 'react';
-import { ChevronRight, FolderOpen, FolderClosed, MessageSquare, Search } from 'lucide-react';
+import { ChevronRight, FolderOpen, FolderClosed, MessageSquare, RefreshCw, Search } from 'lucide-react';
 import type { HistorySessionItem } from '@/components/history/HistoryList';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
@@ -9,9 +9,11 @@ import { AgentLaunchSplitButton } from './AgentLaunchSplitButton';
 interface ProjectTreeProps {
   sessions: HistorySessionItem[];
   isLoading: boolean;
+  isRefreshing?: boolean;
   selectedKey: string | null;
   onSelect: (session: HistorySessionItem) => void;
   onNewSession: (client?: LaunchClient) => void;
+  onRefresh: () => void;
   codexInstalled?: boolean;
 }
 
@@ -69,9 +71,11 @@ const PAGE_SIZE = 10;
 export function ProjectTree({
   sessions,
   isLoading,
+  isRefreshing = false,
   selectedKey,
   onSelect,
   onNewSession,
+  onRefresh,
   codexInstalled = false,
 }: ProjectTreeProps) {
   const { t } = useLocale();
@@ -173,15 +177,32 @@ export function ProjectTree({
           onLaunchClaude={() => onNewSession('claude')}
           onLaunchCodex={() => onNewSession('codex')}
         />
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t('workspace.searchProjects')}
-            className="w-full h-8 pl-8 pr-3 rounded-md text-xs bg-surface-raised border border-border text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
-          />
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t('workspace.searchProjects')}
+              className="w-full h-8 pl-8 pr-3 rounded-md text-xs bg-surface-raised border border-border text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={isRefreshing}
+            aria-label={isRefreshing ? t('workspace.refreshing') : t('workspace.refresh')}
+            title={isRefreshing ? t('workspace.refreshing') : t('workspace.refresh')}
+            className={cn(
+              'h-8 w-8 shrink-0 rounded-md border border-border bg-surface-raised',
+              'flex items-center justify-center text-muted-foreground transition-colors',
+              'hover:text-foreground hover:border-primary/40 hover:bg-primary/5',
+              'disabled:cursor-default disabled:opacity-70'
+            )}
+          >
+            <RefreshCw className={cn('w-3.5 h-3.5', isRefreshing && 'animate-spin')} />
+          </button>
         </div>
       </div>
 

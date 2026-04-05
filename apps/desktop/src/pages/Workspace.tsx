@@ -9,6 +9,12 @@ import { WorkspaceSkeleton } from '@/components/ui/skeleton-states';
 import { useAppStore } from '@/store';
 import type { LaunchClient } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
+import {
+  useSessionUpdatedEvent,
+  useTaskCompletedEvent,
+  useTaskErrorEvent,
+  useSessionInterruptedEvent,
+} from '@/hooks/useTauriEvents';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useLocale } from '@/locales';
 import { scheduleAfterFirstPaint } from '@/lib/idle';
@@ -27,11 +33,12 @@ function DetailFallback() {
 }
 
 interface WorkspaceProps {
+  isActive?: boolean;
   onNavigate: (tab: string) => void;
   onLaunchWithDir: (dir: string, client?: LaunchClient) => void;
 }
 
-export function Workspace({ onNavigate, onLaunchWithDir }: WorkspaceProps) {
+export function Workspace({ isActive = true, onNavigate, onLaunchWithDir }: WorkspaceProps) {
   const { t } = useLocale();
   const { isLoadingEnvs, isLoadingStats } = useAppStore(
     (state) => ({
@@ -46,6 +53,7 @@ export function Workspace({ onNavigate, onLaunchWithDir }: WorkspaceProps) {
 
   const [sessions, setSessions] = useState<HistorySessionItem[]>([]);
   const [isLoadingSessions, setIsLoadingSessions] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [messages, setMessages] = useState<ConversationMessageData[]>([]);
   const [segments, setSegments] = useState<HistorySegment[]>([]);
@@ -54,10 +62,22 @@ export function Workspace({ onNavigate, onLaunchWithDir }: WorkspaceProps) {
   const [launched, setLaunched] = useState(false);
   const [codexInstalled, setCodexInstalled] = useState(false);
   const launchedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshRequestSeqRef = useRef(0);
+  const conversationRequestSeqRef = useRef(0);
+  const pendingRefreshRef = useRef(false);
+  const hasLoadedRef = useRef(false);
+  const prevIsActiveRef = useRef(isActive);
+  const selectedKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    selectedKeyRef.current = selectedKey;
+  }, [selectedKey]);
 
   useEffect(() => {
     return () => {
       if (launchedTimerRef.current) clearTimeout(launchedTimerRef.current);
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     };
   }, []);
 
@@ -71,38 +91,44 @@ export function Workspace({ onNavigate, onLaunchWithDir }: WorkspaceProps) {
     };
   }, [loadCronTasks, checkCodexInstalled]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setIsLoadingSessions(true);
-    fetchHistorySessions('all')
-      .then((data) => {
-        if (!cancelled) {
-          setSessions(data);
-          setIsLoadingSessions(false);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setIsLoadingSessions(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const syncSessionState = useCallback((nextSessions: HistorySessionItem[]) => {
+    setSessions(nextSessions);
 
-  const selectedSession = useMemo(() => {
-    if (!selectedKey) return null;
-    return sessions.find((s) => toSessionKey(s) === selectedKey) ?? null;
-  }, [selectedKey, sessions]);
+    const currentSelectedKey = selectedKeyRef.current;
+    if (!currentSelectedKey) {
+      return;
+    }
 
-  const handleSelect = useCallback(
-    async (session: HistorySessionItem) => {
-      const key = toSessionKey(session);
-      setSelectedKey(key);
+    const stillExists = nextSessions.some((session) => toSessionKey(session) === currentSelectedKey);
+    if (!stillExists) {
+      selectedKeyRef.current = null;
+      setSelectedKey(null);
       setMessages([]);
       setSegments([]);
       setActiveSegment(null);
-      setIsLoadingMessages(true);
+      setIsLoadingMessages(false);
       setLaunched(false);
+    }
+  }, []);
+
+  const loadConversation = useCallback(
+    async (
+      session: HistorySessionItem,
+      options: { resetBeforeLoad?: boolean; showLoading?: boolean } = {}
+    ) => {
+      const { resetBeforeLoad = true, showLoading = true } = options;
+      const requestSeq = ++conversationRequestSeqRef.current;
+
+      if (resetBeforeLoad) {
+        setMessages([]);
+        setSegments([]);
+        setActiveSegment(null);
+        setLaunched(false);
+      }
+
+      if (showLoading) {
+        setIsLoadingMessages(true);
+      }
 
       try {
         const [msgs, segs] = await Promise.all([
@@ -115,15 +141,183 @@ export function Workspace({ onNavigate, onLaunchWithDir }: WorkspaceProps) {
             source: session.source,
           }),
         ]);
+
+        if (requestSeq !== conversationRequestSeqRef.current) {
+          return;
+        }
+
         setMessages(msgs);
         setSegments(segs);
       } catch (err) {
+        if (requestSeq !== conversationRequestSeqRef.current) {
+          return;
+        }
         console.error('Failed to load conversation:', err);
       } finally {
-        setIsLoadingMessages(false);
+        if (showLoading && requestSeq === conversationRequestSeqRef.current) {
+          setIsLoadingMessages(false);
+        }
       }
     },
     []
+  );
+
+  const refreshWorkspaceData = useCallback(
+    async (
+      options: { force?: boolean; silent?: boolean; includeSelectedConversation?: boolean } = {}
+    ) => {
+      const {
+        force = true,
+        silent = true,
+        includeSelectedConversation = true,
+      } = options;
+      const requestSeq = ++refreshRequestSeqRef.current;
+
+      setIsRefreshing(true);
+      if (!hasLoadedRef.current) {
+        setIsLoadingSessions(true);
+      }
+
+      try {
+        const nextSessions = await fetchHistorySessions('all', force);
+
+        if (requestSeq !== refreshRequestSeqRef.current) {
+          return;
+        }
+
+        syncSessionState(nextSessions);
+        hasLoadedRef.current = true;
+
+        if (includeSelectedConversation) {
+          const currentSelectedKey = selectedKeyRef.current;
+          if (currentSelectedKey) {
+            const selectedSession = nextSessions.find(
+              (session) => toSessionKey(session) === currentSelectedKey
+            );
+            if (selectedSession) {
+              await loadConversation(selectedSession, {
+                resetBeforeLoad: false,
+                showLoading: false,
+              });
+            }
+          }
+        }
+      } catch (err) {
+        if (requestSeq !== refreshRequestSeqRef.current) {
+          return;
+        }
+
+        console.error('Failed to refresh workspace history:', err);
+        if (!silent) {
+          toast.error(t('workspace.refreshFailed'));
+        }
+      } finally {
+        if (requestSeq === refreshRequestSeqRef.current) {
+          setIsRefreshing(false);
+          setIsLoadingSessions(false);
+          pendingRefreshRef.current = false;
+        }
+      }
+    },
+    [loadConversation, syncSessionState, t]
+  );
+
+  const scheduleWorkspaceRefresh = useCallback((delayMs = 700) => {
+    pendingRefreshRef.current = true;
+
+    if (refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current);
+    }
+
+    refreshTimerRef.current = setTimeout(() => {
+      refreshTimerRef.current = null;
+      if (!isActive) {
+        return;
+      }
+
+      void refreshWorkspaceData({
+        force: true,
+        silent: true,
+        includeSelectedConversation: true,
+      });
+    }, delayMs);
+  }, [isActive, refreshWorkspaceData]);
+
+  useEffect(() => {
+    void refreshWorkspaceData({
+      force: false,
+      silent: true,
+      includeSelectedConversation: false,
+    });
+  }, [refreshWorkspaceData]);
+
+  useEffect(() => {
+    if (!hasLoadedRef.current) {
+      prevIsActiveRef.current = isActive;
+      return;
+    }
+
+    const becameActive = isActive && !prevIsActiveRef.current;
+    prevIsActiveRef.current = isActive;
+
+    if (!becameActive) {
+      return;
+    }
+
+    void refreshWorkspaceData({
+      force: true,
+      silent: true,
+      includeSelectedConversation: true,
+    });
+  }, [isActive, refreshWorkspaceData]);
+
+  useEffect(() => {
+    if (!isActive) {
+      return;
+    }
+
+    const handleWindowFocus = () => {
+      scheduleWorkspaceRefresh(220);
+    };
+
+    window.addEventListener('focus', handleWindowFocus);
+    return () => {
+      window.removeEventListener('focus', handleWindowFocus);
+    };
+  }, [isActive, scheduleWorkspaceRefresh]);
+
+  useSessionUpdatedEvent(() => {
+    scheduleWorkspaceRefresh();
+  });
+
+  useTaskCompletedEvent(() => {
+    scheduleWorkspaceRefresh();
+  });
+
+  useTaskErrorEvent(() => {
+    scheduleWorkspaceRefresh();
+  });
+
+  useSessionInterruptedEvent(() => {
+    scheduleWorkspaceRefresh();
+  });
+
+  const selectedSession = useMemo(() => {
+    if (!selectedKey) return null;
+    return sessions.find((s) => toSessionKey(s) === selectedKey) ?? null;
+  }, [selectedKey, sessions]);
+
+  const handleSelect = useCallback(
+    async (session: HistorySessionItem) => {
+      const key = toSessionKey(session);
+      setSelectedKey(key);
+      selectedKeyRef.current = key;
+      await loadConversation(session, {
+        resetBeforeLoad: true,
+        showLoading: true,
+      });
+    },
+    [loadConversation]
   );
 
   const handleResume = useCallback(() => {
@@ -136,7 +330,8 @@ export function Workspace({ onNavigate, onLaunchWithDir }: WorkspaceProps) {
       setLaunched(false);
       launchedTimerRef.current = null;
     }, 1200);
-  }, [selectedSession, launchClaudeCode]);
+    scheduleWorkspaceRefresh(1200);
+  }, [selectedSession, launchClaudeCode, scheduleWorkspaceRefresh]);
 
   const handleNewSession = useCallback(async (client: LaunchClient = 'claude') => {
     try {
@@ -144,11 +339,12 @@ export function Workspace({ onNavigate, onLaunchWithDir }: WorkspaceProps) {
       if (dir) {
         onLaunchWithDir(dir, client);
         localStorage.setItem('ccem-ftue-launched', 'true');
+        scheduleWorkspaceRefresh(1200);
       }
     } catch (err) {
       console.error('Failed to open directory dialog:', err);
     }
-  }, [openDirectoryPicker, onLaunchWithDir]);
+  }, [openDirectoryPicker, onLaunchWithDir, scheduleWorkspaceRefresh]);
 
   const handleExport = useCallback(() => {
     toast.info('Use History page for full export');
@@ -160,7 +356,7 @@ export function Workspace({ onNavigate, onLaunchWithDir }: WorkspaceProps) {
     }),
     [handleNewSession]
   );
-  useKeyboardShortcuts(shortcuts);
+  useKeyboardShortcuts(isActive ? shortcuts : {});
 
   if (isLoadingEnvs || isLoadingStats) {
     return <WorkspaceSkeleton />;
@@ -174,9 +370,17 @@ export function Workspace({ onNavigate, onLaunchWithDir }: WorkspaceProps) {
         <ProjectTree
           sessions={sessions}
           isLoading={isLoadingSessions}
+          isRefreshing={isRefreshing}
           selectedKey={selectedKey}
           onSelect={handleSelect}
           onNewSession={handleNewSession}
+          onRefresh={() => {
+            void refreshWorkspaceData({
+              force: true,
+              silent: false,
+              includeSelectedConversation: true,
+            });
+          }}
           codexInstalled={codexInstalled}
         />
 
