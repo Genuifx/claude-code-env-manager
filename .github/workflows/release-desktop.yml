@@ -52,8 +52,10 @@ jobs:
           previous_tag="$(git describe --tags --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
           version="${current_tag#v}"
 
+          delimiter="CCEM_RELEASE_BODY_$(date +%s)"
+
           {
-            echo "release_body<<'EOF'"
+            echo "release_body<<${delimiter}"
             echo "## CCEM Desktop v${version}"
             echo
             echo "### Downloads"
@@ -79,7 +81,7 @@ jobs:
               git log --reverse --pretty=format:'- %s (%h)'
             fi
             echo
-            echo "EOF"
+            echo "${delimiter}"
           } >> "$GITHUB_OUTPUT"
 
   build-desktop:
