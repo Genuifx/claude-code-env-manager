@@ -240,6 +240,7 @@ pub fn set_preferred_terminal(terminal: TerminalType) -> Result<(), String> {
 static CCEM_LAUNCH_SUPPORTED: OnceLock<bool> = OnceLock::new();
 static CCEM_INSTALLED: OnceLock<bool> = OnceLock::new();
 static CLAUDE_INSTALLED: OnceLock<bool> = OnceLock::new();
+static LOGIN_SHELL_PATHS: OnceLock<Vec<PathBuf>> = OnceLock::new();
 
 /// Compare a parsed semver tuple against a minimum requirement.
 fn version_gte(
@@ -315,38 +316,53 @@ fn check_ccem_launch_support() -> bool {
     supported
 }
 
+fn binary_exists(path: &std::path::Path) -> bool {
+    path.exists() && path.is_file()
+}
+
+fn find_binary_in_paths(binary: &str, paths: impl IntoIterator<Item = PathBuf>) -> Option<String> {
+    paths.into_iter().find_map(|dir| {
+        let path = dir.join(binary);
+        if binary_exists(&path) {
+            Some(path.to_string_lossy().to_string())
+        } else {
+            None
+        }
+    })
+}
+
+fn login_shell_paths() -> &'static [PathBuf] {
+    LOGIN_SHELL_PATHS.get_or_init(|| {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        let output = Command::new(&shell)
+            .args(["-li", "-c", "printf %s \"$PATH\""])
+            .output();
+
+        match output {
+            Ok(out) if out.status.success() => std::env::split_paths(
+                std::ffi::OsStr::new(String::from_utf8_lossy(&out.stdout).trim()),
+            )
+            .collect(),
+            _ => Vec::new(),
+        }
+    })
+}
+
 /// Resolve a CLI binary path from shell + common fallback locations.
 fn resolve_binary_path(binary: &str, candidates: &[String]) -> Option<String> {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    let which_cmd = format!("which {}", binary);
-
-    // Try login+interactive first (sources .zshrc for nvm/fnm/volta)
-    // Then fallback to login-only (in case shell doesn't support -i with -c)
-    for flags in &[
-        &["-li", "-c", which_cmd.as_str()][..],
-        &["-l", "-c", which_cmd.as_str()][..],
-    ] {
-        if let Ok(output) = Command::new(&shell).args(*flags).output() {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                // Take only the last non-empty line — shell banners/motd appear before it
-                if let Some(path) = stdout.lines().rev().find(|l| !l.trim().is_empty()) {
-                    let path = path.trim().to_string();
-                    if path.starts_with('/') && std::path::Path::new(&path).exists() {
-                        return Some(path);
-                    }
-                }
-            }
-        }
-    }
-
     for candidate in candidates {
-        if std::path::Path::new(candidate).exists() {
+        if binary_exists(std::path::Path::new(candidate)) {
             return Some(candidate.clone());
         }
     }
 
-    None
+    if let Some(path) = std::env::var_os("PATH").and_then(|value| {
+        find_binary_in_paths(binary, std::env::split_paths(&value).collect::<Vec<_>>())
+    }) {
+        return Some(path);
+    }
+
+    find_binary_in_paths(binary, login_shell_paths().iter().cloned())
 }
 
 /// Resolve the full path to the `ccem` binary.

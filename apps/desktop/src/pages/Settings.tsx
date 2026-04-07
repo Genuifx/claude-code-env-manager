@@ -12,6 +12,7 @@ import { useLocale } from '../locales';
 import { SettingsSkeleton } from '@/components/ui/skeleton-states';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { setPerformancePreference as applyPerformancePreference, type PerformancePreference } from '@/lib/performance';
+import { scheduleAfterFirstPaint } from '@/lib/idle';
 import { shallow } from 'zustand/shallow';
 
 const MODE_DISPLAY_NAMES: Record<PermissionModeName, string> = {
@@ -106,10 +107,13 @@ export function Settings() {
       });
     };
 
-    void loadInstallStatus();
+    const cancelDeferredLoad = scheduleAfterFirstPaint(() => {
+      void loadInstallStatus();
+    }, { delayMs: 180, timeoutMs: 1200 });
 
     return () => {
       cancelled = true;
+      cancelDeferredLoad();
     };
   }, []);
 
