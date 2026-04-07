@@ -152,8 +152,24 @@ export async function launchClaude(options: LaunchOptions): Promise<void> {
       process.exit(code ?? 0);
     });
 
-    child.on('error', (err) => {
-      console.error(chalk.red(`启动 Claude Code 失败: ${err.message}`));
+    child.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') {
+        console.error('');
+        console.error(chalk.red.bold('✘ 未找到 Claude Code'));
+        console.error('');
+        console.error(chalk.white('  CCEM 需要 Claude Code CLI 才能启动会话，但在系统中未检测到 ') + chalk.cyan('claude') + chalk.white(' 命令。'));
+        console.error('');
+        console.error(chalk.white('  请先安装 Claude Code:'));
+        console.error(chalk.cyan('    npm install -g @anthropic-ai/claude-code'));
+        console.error('');
+        console.error(chalk.gray('  如果已安装但仍报错，请检查:'));
+        console.error(chalk.gray('    1. 运行 claude --version 确认安装成功'));
+        console.error(chalk.gray('    2. 确保 npm 全局目录在系统 PATH 中（npm config get prefix）'));
+        console.error(chalk.gray('    3. 安装后请重启终端'));
+        console.error('');
+      } else {
+        console.error(chalk.red(`启动 Claude Code 失败: ${err.message}`));
+      }
       process.exit(1);
     });
   });
