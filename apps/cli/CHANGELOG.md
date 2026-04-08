@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.13
+
+### Patch Changes
+
+- Publish a clean beta release after fixing the GLM preset test expectation.
+
 ## 2.0.0-beta.12
 
 ### Patch Changes
