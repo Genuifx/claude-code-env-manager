@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.12
+
+### Patch Changes
+
+- Trigger the next beta release for the latest CLI and Desktop changes.
+
 ## 2.0.0-beta.11
 
 ### Patch Changes
