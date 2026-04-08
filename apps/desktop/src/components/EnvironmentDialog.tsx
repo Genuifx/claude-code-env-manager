@@ -31,7 +31,7 @@ import {
   Zap,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Zhipu, Moonshot, Minimax, DeepSeek, Qwen, OpenRouter as OpenRouterIcon } from "@lobehub/icons";
+import { Zhipu, Moonshot, Minimax, DeepSeek, Qwen, OpenRouter as OpenRouterIcon, Ollama } from "@lobehub/icons";
 import type { Environment } from "@/store";
 
 const PRESET_ICONS: Record<string, { icon: any; color?: string; needsContrastBg?: boolean }> = {
@@ -43,6 +43,7 @@ const PRESET_ICONS: Record<string, { icon: any; color?: string; needsContrastBg?
   Bailian:        { icon: Qwen,           color: '#615CED' },
   BailianCodePlan:{ icon: Qwen,           color: '#615CED' },
   OpenRouter:     { icon: OpenRouterIcon, color: '#6467F2' },
+  Ollama:         { icon: Ollama,         color: '#fff', needsContrastBg: true },
 };
 
 interface EnvironmentDialogProps {
