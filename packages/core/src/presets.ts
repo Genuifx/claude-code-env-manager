@@ -12,8 +12,8 @@ export const ENV_PRESETS: Record<
 > = {
   'GLM': {
     ANTHROPIC_BASE_URL: 'https://open.bigmodel.cn/api/anthropic',
-    ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5',
-    ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-5',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5.1',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-5.1',
     ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-4.5-air',
     ANTHROPIC_MODEL: 'opus'
   },
@@ -47,23 +47,30 @@ export const ENV_PRESETS: Record<
   },
   'Bailian': {
     ANTHROPIC_BASE_URL: 'https://dashscope.aliyuncs.com/api/v2/apps/claude-code-proxy',
-    ANTHROPIC_DEFAULT_OPUS_MODEL: 'qwen3-coder-plus',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'qwen3-coder-next',
     ANTHROPIC_DEFAULT_SONNET_MODEL: 'qwen3-coder-plus',
     ANTHROPIC_DEFAULT_HAIKU_MODEL: 'qwen3-coder-flash',
     ANTHROPIC_MODEL: 'opus'
   },
   'BailianCodePlan': {
     ANTHROPIC_BASE_URL: 'https://coding.dashscope.aliyuncs.com/api/v2/apps/claude-code-proxy',
-    ANTHROPIC_DEFAULT_OPUS_MODEL: 'qwen3-coder-plus',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'qwen3-coder-next',
     ANTHROPIC_DEFAULT_SONNET_MODEL: 'qwen3-coder-plus',
-    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'qwen3-coder-plus',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'qwen3-coder-flash',
     ANTHROPIC_MODEL: 'opus'
   },
   'OpenRouter': {
     ANTHROPIC_BASE_URL: 'https://openrouter.ai/api/v1',
-    ANTHROPIC_DEFAULT_OPUS_MODEL: 'anthropic/claude-opus-4-1',
-    ANTHROPIC_DEFAULT_SONNET_MODEL: 'anthropic/claude-opus-4-1',
-    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'anthropic/claude-3.5-haiku',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'anthropic/claude-opus-4.6',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'anthropic/claude-sonnet-4.6',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'anthropic/claude-haiku-4.5',
+    ANTHROPIC_MODEL: 'opus'
+  },
+  'Ollama': {
+    ANTHROPIC_BASE_URL: 'http://localhost:11434',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'gemma4:31b',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'gemma4:26b',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'gemma4:e4b',
     ANTHROPIC_MODEL: 'opus'
   },
 };
@@ -108,6 +115,11 @@ export const ENV_PRESET_METADATA: Record<string, EnvPresetMetadata> = {
     displayName: { zh: 'OpenRouter', en: 'OpenRouter' },
     description: { zh: 'OpenRouter Anthropic 兼容入口', en: 'OpenRouter Anthropic-compatible routing' },
     credentialUrl: 'https://openrouter.ai/settings/keys',
+  },
+  'Ollama': {
+    displayName: { zh: 'Ollama', en: 'Ollama' },
+    description: { zh: '本地运行的开源大模型', en: 'Local open-source LLM runtime' },
+    credentialUrl: 'https://ollama.com/',
   },
 };
 
