@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -2171,9 +2173,6 @@ div[data-tauri-decorum-tb] {
 }
 
 /* === Pet widget — pixel RPG game card === */
-
-/* Google Fonts pixel font — loaded via @import at top or link tag */
-@import url('https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&display=swap');
 
 .pet-card {
   font-family: 'Silkscreen', 'Courier New', monospace;
