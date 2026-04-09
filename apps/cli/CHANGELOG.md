@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.14
+
+### Patch Changes
+
+- Release the desktop analytics parsing, dev startup, and build verification fixes.
+
 ## 2.0.0-beta.13
 
 ### Patch Changes
