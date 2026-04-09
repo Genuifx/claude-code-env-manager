@@ -12,6 +12,7 @@ use std::path::PathBuf;
 
 const SOURCE_CLAUDE: &str = "claude";
 const SOURCE_CODEX: &str = "codex";
+const USAGE_CACHE_VERSION: u32 = 2;
 
 // ============================================================================
 // Output types — sent to frontend (must use camelCase)
@@ -100,13 +101,13 @@ struct CacheFile {
 }
 
 fn default_cache_version() -> u32 {
-    1
+    USAGE_CACHE_VERSION
 }
 
 impl Default for CacheFile {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: USAGE_CACHE_VERSION,
             files: HashMap::new(),
             last_updated: None,
         }
@@ -561,7 +562,7 @@ fn parse_claude_jsonl_reader<R: BufRead>(
 // Codex JSONL parsing
 // ============================================================================
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct CodexTotals {
     input_tokens: u64,
     cached_input_tokens: u64,
@@ -685,9 +686,21 @@ fn parse_codex_jsonl_reader<R: BufRead>(
                     None => continue,
                 };
 
-                let delta = match &last_total {
-                    Some(last) => total_usage.diff_from(last),
-                    None => total_usage.clone(),
+                if last_total.as_ref() == Some(&total_usage) {
+                    continue;
+                }
+
+                let last_usage = payload
+                    .get("info")
+                    .and_then(|v| v.get("last_token_usage"))
+                    .and_then(CodexTotals::from_value);
+
+                let delta = match last_usage {
+                    Some(last_usage) => last_usage,
+                    None => match &last_total {
+                        Some(last) => total_usage.diff_from(last),
+                        None => total_usage.clone(),
+                    },
                 };
                 last_total = Some(total_usage);
 
@@ -750,7 +763,10 @@ fn read_usage_cache() -> CacheFile {
         Ok(c) => c,
         Err(_) => return CacheFile::default(),
     };
-    serde_json::from_str(&content).unwrap_or_default()
+    match serde_json::from_str::<CacheFile>(&content) {
+        Ok(cache) if cache.version == USAGE_CACHE_VERSION => cache,
+        _ => CacheFile::default(),
+    }
 }
 
 fn write_usage_cache(cache: &CacheFile) {
@@ -774,7 +790,7 @@ fn refresh_usage_cache() -> CacheFile {
     let existing_cache = read_usage_cache();
 
     let mut new_cache = CacheFile {
-        version: 1,
+        version: USAGE_CACHE_VERSION,
         files: HashMap::new(),
         last_updated: Some(Local::now().to_rfc3339()),
     };
@@ -1199,6 +1215,49 @@ mod tests {
         assert_eq!(second.usage.input_tokens, 20);
         assert_eq!(second.usage.cache_read_tokens, 30);
         assert_eq!(second.usage.output_tokens, 18);
+    }
+
+    #[test]
+    fn test_codex_token_count_prefers_last_usage_and_skips_duplicate_snapshots() {
+        let mut prices = HashMap::new();
+        prices.insert(
+            "gpt-5.4".to_string(),
+            ModelPrice {
+                input_cost_per_token: 1.0,
+                output_cost_per_token: 1.0,
+                cache_read_input_token_cost: Some(1.0),
+                cache_creation_input_token_cost: Some(0.0),
+            },
+        );
+
+        let input = [
+            r#"{"type":"turn_context","payload":{"model":"gpt-5.4"}}"#,
+            r#"{"timestamp":"2026-03-01T00:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":20,"output_tokens":10,"reasoning_output_tokens":5},"last_token_usage":{"input_tokens":100,"cached_input_tokens":20,"output_tokens":10,"reasoning_output_tokens":5}}}}"#,
+            r#"{"timestamp":"2026-03-01T00:00:02.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":20,"output_tokens":10,"reasoning_output_tokens":5},"last_token_usage":{"input_tokens":100,"cached_input_tokens":20,"output_tokens":10,"reasoning_output_tokens":5}}}}"#,
+            r#"{"timestamp":"2026-03-01T00:00:03.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":120,"cached_input_tokens":40,"output_tokens":12,"reasoning_output_tokens":6},"last_token_usage":{"input_tokens":20,"cached_input_tokens":20,"output_tokens":2,"reasoning_output_tokens":1}}}}"#,
+            r#"{"timestamp":"2026-03-01T00:00:04.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":90,"cached_input_tokens":30,"output_tokens":11,"reasoning_output_tokens":6},"last_token_usage":{"input_tokens":15,"cached_input_tokens":10,"output_tokens":1,"reasoning_output_tokens":0}}}}"#,
+        ]
+        .join("\n");
+
+        let reader = BufReader::new(input.as_bytes());
+        let stats = parse_codex_jsonl_reader(reader, &prices);
+
+        assert_eq!(stats.entries.len(), 3);
+
+        let first = &stats.entries[0];
+        assert_eq!(first.usage.input_tokens, 80);
+        assert_eq!(first.usage.cache_read_tokens, 20);
+        assert_eq!(first.usage.output_tokens, 15);
+
+        let second = &stats.entries[1];
+        assert_eq!(second.usage.input_tokens, 0);
+        assert_eq!(second.usage.cache_read_tokens, 20);
+        assert_eq!(second.usage.output_tokens, 3);
+
+        let third = &stats.entries[2];
+        assert_eq!(third.usage.input_tokens, 5);
+        assert_eq!(third.usage.cache_read_tokens, 10);
+        assert_eq!(third.usage.output_tokens, 1);
     }
 
     #[test]

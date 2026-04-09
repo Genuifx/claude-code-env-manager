@@ -58,7 +58,12 @@ export function DailyTokenBar({ dailyHistory }: DailyTokenBarProps) {
             borderRadius: '8px',
             backdropFilter: 'blur(12px)',
           }}
-          formatter={(value: number | undefined) => [formatTokenAxisValue(value ?? 0), 'Tokens']}
+          formatter={(value) => {
+            const numericValue = typeof value === 'number'
+              ? value
+              : Number(Array.isArray(value) ? value[0] : value) || 0;
+            return [formatTokenAxisValue(numericValue), 'Tokens'];
+          }}
         />
         <Bar
           dataKey="tokens"
