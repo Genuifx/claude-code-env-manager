@@ -2,12 +2,14 @@
 //
 // Conversation history support for both Claude and Codex sources.
 
+use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
 const SOURCE_CLAUDE: &str = "claude";
 const SOURCE_CODEX: &str = "codex";
@@ -115,6 +117,63 @@ struct CodexLine {
 struct CodexSessionMeta {
     cwd: Option<String>,
 }
+
+#[derive(Debug, Clone)]
+struct CodexPathConfig {
+    home_dir: PathBuf,
+    codex_home: PathBuf,
+    history_path: PathBuf,
+    sessions_root: PathBuf,
+    session_index_path: PathBuf,
+    sqlite_home: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+struct CodexSessionFileInfo {
+    rollout_path: PathBuf,
+    cwd: Option<String>,
+    modified_at: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct CodexSessionIndexLine {
+    id: Option<String>,
+    thread_name: Option<String>,
+    updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct CodexThreadRecord {
+    id: String,
+    rollout_path: Option<PathBuf>,
+    created_at: u64,
+    updated_at: u64,
+    cwd: Option<String>,
+    title: Option<String>,
+}
+
+#[derive(Debug, Default, Clone)]
+struct CodexSessionRecord {
+    id: String,
+    display: String,
+    display_priority: u8,
+    display_timestamp: u64,
+    timestamp: u64,
+    project: String,
+    project_priority: u8,
+    project_timestamp: u64,
+    rollout_path: Option<PathBuf>,
+    rollout_priority: u8,
+    rollout_timestamp: u64,
+}
+
+const CODEX_TITLE_PRIORITY_HISTORY: u8 = 1;
+const CODEX_TITLE_PRIORITY_SQLITE: u8 = 2;
+const CODEX_TITLE_PRIORITY_SESSION_INDEX: u8 = 3;
+const CODEX_PROJECT_PRIORITY_SESSION_META: u8 = 1;
+const CODEX_PROJECT_PRIORITY_SQLITE: u8 = 2;
+const CODEX_ROLLOUT_PRIORITY_SESSION_SCAN: u8 = 1;
+const CODEX_ROLLOUT_PRIORITY_SQLITE: u8 = 2;
 
 async fn run_blocking<T, F>(task: F) -> Result<T, String>
 where
@@ -657,57 +716,11 @@ fn parse_claude_conversation_file(
 // ============================================================================
 
 fn load_codex_history() -> Result<Vec<HistorySession>, String> {
-    let home = dirs::home_dir().ok_or("Could not find home directory")?;
-    let history_path = home.join(".codex").join("history.jsonl");
-    if !history_path.exists() {
-        return Ok(vec![]);
-    }
-
-    let file = fs::File::open(&history_path)
-        .map_err(|e| format!("Failed to open codex history.jsonl: {}", e))?;
-
-    let sessions_root = home.join(".codex").join("sessions");
-    let codex_file_map = collect_codex_session_files(&sessions_root);
-
-    let reader = BufReader::new(file);
-    let mut session_map: HashMap<String, HistorySession> = HashMap::new();
-
-    for line_result in reader.lines() {
-        let line = match line_result {
-            Ok(l) => l,
-            Err(_) => continue,
-        };
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        let parsed: CodexHistoryLine = match serde_json::from_str(&line) {
-            Ok(p) => p,
-            Err(_) => continue,
-        };
-
-        upsert_codex_history_session(&mut session_map, parsed);
-    }
-
-    let mut meta_cache: HashMap<String, CodexSessionMeta> = HashMap::new();
-    for session in session_map.values_mut() {
-        if let Some(path) = codex_file_map.get(&session.id) {
-            let path_key = path.to_string_lossy().to_string();
-
-            let meta = meta_cache
-                .entry(path_key.clone())
-                .or_insert_with(|| read_codex_session_meta(path).unwrap_or_default());
-
-            if let Some(cwd) = &meta.cwd {
-                session.project = cwd.clone();
-                session.project_name = cwd.split('/').next_back().unwrap_or("unknown").to_string();
-            }
-        }
-    }
-
-    Ok(session_map.into_values().collect())
+    let config = resolve_codex_path_config()?;
+    load_codex_history_from_config(&config)
 }
 
+#[cfg(test)]
 fn upsert_codex_history_session(
     session_map: &mut HashMap<String, HistorySession>,
     parsed: CodexHistoryLine,
@@ -743,23 +756,401 @@ fn upsert_codex_history_session(
 }
 
 fn find_codex_session_file(session_id: &str) -> Option<PathBuf> {
-    let home = dirs::home_dir()?;
-    let sessions_root = home.join(".codex").join("sessions");
-    if !sessions_root.exists() {
-        return None;
-    }
-
-    let file_map = collect_codex_session_files(&sessions_root);
-    file_map.get(session_id).cloned()
+    let config = resolve_codex_path_config().ok()?;
+    find_codex_session_file_with_config(session_id, &config)
 }
 
-fn collect_codex_session_files(root: &PathBuf) -> HashMap<String, PathBuf> {
-    let mut file_map: HashMap<String, PathBuf> = HashMap::new();
+fn resolve_codex_path_config() -> Result<CodexPathConfig, String> {
+    let home_dir = dirs::home_dir().ok_or("Could not find home directory")?;
+    let codex_home_env = std::env::var("CODEX_HOME").ok();
+    let sqlite_home_env = std::env::var("CODEX_SQLITE_HOME").ok();
+    resolve_codex_path_config_from(
+        Some(home_dir.as_path()),
+        codex_home_env.as_deref(),
+        sqlite_home_env.as_deref(),
+    )
+}
+
+fn resolve_codex_path_config_from(
+    home_dir: Option<&Path>,
+    codex_home_env: Option<&str>,
+    sqlite_home_env: Option<&str>,
+) -> Result<CodexPathConfig, String> {
+    let home_dir = home_dir.ok_or("Could not find home directory")?;
+    let env_base = std::env::current_dir().unwrap_or_else(|_| home_dir.to_path_buf());
+
+    let codex_home = codex_home_env
+        .and_then(non_empty_str)
+        .map(|raw| resolve_path_value(raw, home_dir, &env_base))
+        .unwrap_or_else(|| home_dir.join(".codex"));
+
+    let sqlite_home = sqlite_home_env
+        .and_then(non_empty_str)
+        .map(|raw| resolve_path_value(raw, home_dir, &env_base))
+        .or_else(|| {
+            read_codex_sqlite_home_from_config(&codex_home)
+                .as_deref()
+                .map(|raw| resolve_path_value(raw, home_dir, &codex_home))
+        })
+        .unwrap_or_else(|| codex_home.clone());
+
+    Ok(CodexPathConfig {
+        home_dir: home_dir.to_path_buf(),
+        history_path: codex_home.join("history.jsonl"),
+        sessions_root: codex_home.join("sessions"),
+        session_index_path: codex_home.join("session_index.jsonl"),
+        sqlite_home,
+        codex_home,
+    })
+}
+
+fn non_empty_str(value: &str) -> Option<&str> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+fn resolve_path_value(raw: &str, home_dir: &Path, relative_base: &Path) -> PathBuf {
+    if raw == "~" {
+        return home_dir.to_path_buf();
+    }
+    if let Some(rest) = raw.strip_prefix("~/") {
+        return home_dir.join(rest);
+    }
+
+    let path = PathBuf::from(raw);
+    if path.is_absolute() {
+        path
+    } else {
+        relative_base.join(path)
+    }
+}
+
+fn read_codex_sqlite_home_from_config(codex_home: &Path) -> Option<String> {
+    let config_path = codex_home.join("config.toml");
+    let content = fs::read_to_string(config_path).ok()?;
+    let parsed: toml::Value = toml::from_str(&content).ok()?;
+    parsed
+        .get("sqlite_home")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string())
+}
+
+fn load_codex_history_from_config(config: &CodexPathConfig) -> Result<Vec<HistorySession>, String> {
+    let session_map = build_codex_session_records(config)?;
+
+    Ok(session_map
+        .into_values()
+        .filter_map(|record| {
+            let rollout_path = record.rollout_path?;
+            if fs::File::open(&rollout_path).is_err() {
+                return None;
+            }
+
+            let project_name = record
+                .project
+                .split('/')
+                .next_back()
+                .unwrap_or("unknown")
+                .to_string();
+
+            Some(HistorySession {
+                id: record.id,
+                source: SOURCE_CODEX.to_string(),
+                display: record.display,
+                timestamp: record.timestamp,
+                project: record.project,
+                project_name,
+            })
+        })
+        .collect())
+}
+
+fn build_codex_session_records(
+    config: &CodexPathConfig,
+) -> Result<HashMap<String, CodexSessionRecord>, String> {
+    let session_files = collect_codex_session_files(&config.sessions_root);
+    let history_entries = load_codex_history_index(&config.history_path);
+    let session_index_entries = load_codex_session_index(&config.session_index_path);
+    let sqlite_threads = load_codex_threads_from_state_db(config);
+
+    let mut session_map: HashMap<String, CodexSessionRecord> = HashMap::new();
+
+    for (session_id, file_info) in session_files {
+        let record = codex_record(&mut session_map, &session_id);
+        apply_codex_rollout_path(
+            record,
+            file_info.rollout_path,
+            CODEX_ROLLOUT_PRIORITY_SESSION_SCAN,
+            file_info.modified_at,
+        );
+        apply_codex_project(
+            record,
+            file_info.cwd.unwrap_or_default(),
+            CODEX_PROJECT_PRIORITY_SESSION_META,
+            file_info.modified_at,
+        );
+        record.timestamp = record.timestamp.max(file_info.modified_at);
+    }
+
+    for parsed in history_entries {
+        let id = match parsed.session_id {
+            Some(id) if !id.is_empty() => id,
+            _ => continue,
+        };
+        let timestamp = parse_codex_history_timestamp(&parsed.ts);
+        let display = normalize_history_display(parsed.text);
+        let record = codex_record(&mut session_map, &id);
+        apply_codex_display(record, display, CODEX_TITLE_PRIORITY_HISTORY, timestamp);
+        record.timestamp = record.timestamp.max(timestamp);
+    }
+
+    for parsed in session_index_entries {
+        let id = match parsed.id {
+            Some(id) if !id.is_empty() => id,
+            _ => continue,
+        };
+        let timestamp = parsed
+            .updated_at
+            .as_deref()
+            .map(parse_codex_datetime_string)
+            .unwrap_or(0);
+        let display = normalize_history_display(parsed.thread_name);
+        let record = codex_record(&mut session_map, &id);
+        apply_codex_display(
+            record,
+            display,
+            CODEX_TITLE_PRIORITY_SESSION_INDEX,
+            timestamp,
+        );
+        record.timestamp = record.timestamp.max(timestamp);
+    }
+
+    for thread in sqlite_threads {
+        let timestamp = thread.updated_at.max(thread.created_at);
+        let record = codex_record(&mut session_map, &thread.id);
+        apply_codex_display(
+            record,
+            normalize_history_display(thread.title),
+            CODEX_TITLE_PRIORITY_SQLITE,
+            timestamp,
+        );
+        apply_codex_project(
+            record,
+            thread.cwd.unwrap_or_default(),
+            CODEX_PROJECT_PRIORITY_SQLITE,
+            timestamp,
+        );
+        if let Some(path) = thread.rollout_path {
+            apply_codex_rollout_path(record, path, CODEX_ROLLOUT_PRIORITY_SQLITE, timestamp);
+        }
+        record.timestamp = record.timestamp.max(timestamp);
+    }
+
+    Ok(session_map)
+}
+
+fn find_codex_session_file_with_config(
+    session_id: &str,
+    config: &CodexPathConfig,
+) -> Option<PathBuf> {
+    build_codex_session_records(config)
+        .ok()?
+        .get(session_id)
+        .and_then(|record| record.rollout_path.clone())
+        .filter(|path| fs::File::open(path).is_ok())
+}
+
+fn load_codex_history_index(path: &Path) -> Vec<CodexHistoryLine> {
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(_) => return vec![],
+    };
+
+    BufReader::new(file)
+        .lines()
+        .filter_map(|line_result| line_result.ok())
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| serde_json::from_str::<CodexHistoryLine>(&line).ok())
+        .collect()
+}
+
+fn load_codex_session_index(path: &Path) -> Vec<CodexSessionIndexLine> {
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(_) => return vec![],
+    };
+
+    BufReader::new(file)
+        .lines()
+        .filter_map(|line_result| line_result.ok())
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| serde_json::from_str::<CodexSessionIndexLine>(&line).ok())
+        .collect()
+}
+
+fn load_codex_threads_from_state_db(config: &CodexPathConfig) -> Vec<CodexThreadRecord> {
+    for state_db_path in list_codex_state_db_candidates(&config.sqlite_home) {
+        let conn = match Connection::open_with_flags(
+            &state_db_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+        ) {
+            Ok(conn) => conn,
+            Err(_) => continue,
+        };
+
+        let mut stmt = match conn
+            .prepare("SELECT id, rollout_path, created_at, updated_at, cwd, title FROM threads")
+        {
+            Ok(stmt) => stmt,
+            Err(_) => continue,
+        };
+
+        let rows = match stmt.query_map([], |row| {
+            let rollout_path: Option<String> = row.get(1)?;
+            Ok(CodexThreadRecord {
+                id: row.get(0)?,
+                rollout_path: rollout_path
+                    .as_deref()
+                    .map(|raw| resolve_path_value(raw, &config.home_dir, &config.codex_home))
+                    .filter(|path| path.exists()),
+                created_at: normalize_unix_timestamp_i64(row.get::<_, i64>(2)?),
+                updated_at: normalize_unix_timestamp_i64(row.get::<_, i64>(3)?),
+                cwd: row.get(4)?,
+                title: row.get(5)?,
+            })
+        }) {
+            Ok(rows) => rows,
+            Err(_) => continue,
+        };
+
+        return rows.filter_map(|row| row.ok()).collect();
+    }
+
+    vec![]
+}
+
+fn list_codex_state_db_candidates(sqlite_home: &Path) -> Vec<PathBuf> {
+    let entries = match fs::read_dir(sqlite_home) {
+        Ok(entries) => entries,
+        Err(_) => return vec![],
+    };
+    let mut candidates: Vec<(u64, String, PathBuf)> = Vec::new();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !is_codex_state_db(&path) {
+            continue;
+        }
+
+        let Some(name) = path.file_name().map(|name| name.to_string_lossy().to_string()) else {
+            continue;
+        };
+        candidates.push((file_modified_at_millis(&path), name, path));
+    }
+
+    candidates.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+
+    candidates
+        .into_iter()
+        .map(|(_, _, path)| path)
+        .collect()
+}
+
+fn is_codex_state_db(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+
+    match path.file_name().and_then(|name| name.to_str()) {
+        Some("state.sqlite") => true,
+        Some(name) if name.starts_with("state_") && name.ends_with(".sqlite") => true,
+        _ => false,
+    }
+}
+
+fn codex_record<'a>(
+    session_map: &'a mut HashMap<String, CodexSessionRecord>,
+    session_id: &str,
+) -> &'a mut CodexSessionRecord {
+    session_map
+        .entry(session_id.to_string())
+        .or_insert_with(|| CodexSessionRecord {
+            id: session_id.to_string(),
+            ..Default::default()
+        })
+}
+
+fn apply_codex_display(
+    record: &mut CodexSessionRecord,
+    display: String,
+    priority: u8,
+    timestamp: u64,
+) {
+    if display.is_empty() {
+        return;
+    }
+
+    if priority > record.display_priority
+        || (priority == record.display_priority
+            && (record.display.is_empty() || timestamp >= record.display_timestamp))
+    {
+        record.display = display;
+        record.display_priority = priority;
+        record.display_timestamp = timestamp;
+    }
+}
+
+fn apply_codex_project(
+    record: &mut CodexSessionRecord,
+    project: String,
+    priority: u8,
+    timestamp: u64,
+) {
+    if project.is_empty() {
+        return;
+    }
+
+    if priority > record.project_priority
+        || (priority == record.project_priority
+            && (record.project.is_empty() || timestamp >= record.project_timestamp))
+    {
+        record.project = project;
+        record.project_priority = priority;
+        record.project_timestamp = timestamp;
+    }
+}
+
+fn apply_codex_rollout_path(
+    record: &mut CodexSessionRecord,
+    rollout_path: PathBuf,
+    priority: u8,
+    timestamp: u64,
+) {
+    if !rollout_path.exists() {
+        return;
+    }
+
+    if priority > record.rollout_priority
+        || (priority == record.rollout_priority
+            && (record.rollout_path.is_none() || timestamp >= record.rollout_timestamp))
+    {
+        record.rollout_path = Some(rollout_path);
+        record.rollout_priority = priority;
+        record.rollout_timestamp = timestamp;
+    }
+}
+
+fn collect_codex_session_files(root: &Path) -> HashMap<String, CodexSessionFileInfo> {
+    let mut file_map: HashMap<String, CodexSessionFileInfo> = HashMap::new();
     if !root.exists() {
         return file_map;
     }
 
-    let mut stack = vec![root.clone()];
+    let mut stack = vec![root.to_path_buf()];
 
     while let Some(dir) = stack.pop() {
         let entries = match fs::read_dir(&dir) {
@@ -779,7 +1170,18 @@ fn collect_codex_session_files(root: &PathBuf) -> HashMap<String, PathBuf> {
             }
 
             if let Some(session_id) = extract_codex_session_id_from_path(&path) {
-                file_map.entry(session_id).or_insert(path);
+                let candidate = CodexSessionFileInfo {
+                    cwd: read_codex_session_meta(&path).and_then(|meta| meta.cwd),
+                    modified_at: file_modified_at_millis(&path),
+                    rollout_path: path,
+                };
+
+                match file_map.get(&session_id) {
+                    Some(existing) if existing.modified_at >= candidate.modified_at => {}
+                    _ => {
+                        file_map.insert(session_id, candidate);
+                    }
+                }
             }
         }
     }
@@ -787,7 +1189,7 @@ fn collect_codex_session_files(root: &PathBuf) -> HashMap<String, PathBuf> {
     file_map
 }
 
-fn extract_codex_session_id_from_path(path: &PathBuf) -> Option<String> {
+fn extract_codex_session_id_from_path(path: &Path) -> Option<String> {
     let stem = path.file_stem()?.to_str()?;
     if stem.len() < 36 {
         return None;
@@ -822,7 +1224,7 @@ fn looks_like_uuid(value: &str) -> bool {
     true
 }
 
-fn read_codex_session_meta(path: &PathBuf) -> Option<CodexSessionMeta> {
+fn read_codex_session_meta(path: &Path) -> Option<CodexSessionMeta> {
     let file = fs::File::open(path).ok()?;
     let reader = BufReader::new(file);
 
@@ -847,6 +1249,29 @@ fn read_codex_session_meta(path: &PathBuf) -> Option<CodexSessionMeta> {
     }
 
     None
+}
+
+fn file_modified_at_millis(path: &Path) -> u64 {
+    fs::metadata(path)
+        .ok()
+        .and_then(|meta| meta.modified().ok())
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn parse_codex_datetime_string(value: &str) -> u64 {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|dt| dt.timestamp_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn normalize_unix_timestamp_i64(ts: i64) -> u64 {
+    if ts <= 0 {
+        0
+    } else {
+        normalize_unix_timestamp(ts as u64)
+    }
 }
 
 fn parse_codex_conversation_file(
@@ -1793,14 +2218,16 @@ fn extract_usage_fields(
 #[cfg(test)]
 mod tests {
     use super::{
-        is_noise_display, load_claude_history_from_paths, normalize_history_display,
-        normalize_history_source, parse_codex_history_timestamp, upsert_codex_history_session,
-        CodexHistoryLine,
+        find_codex_session_file_with_config, is_noise_display, load_claude_history_from_paths,
+        load_codex_history_from_config, normalize_history_display, normalize_history_source,
+        parse_codex_history_timestamp, resolve_codex_path_config_from,
+        upsert_codex_history_session, CodexHistoryLine, CodexPathConfig,
     };
+    use rusqlite::Connection;
     use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     fn temp_history_dir(prefix: &str) -> PathBuf {
         let unique = SystemTime::now()
@@ -1810,6 +2237,81 @@ mod tests {
         let path = std::env::temp_dir().join(format!("ccem-history-{prefix}-{unique}"));
         fs::create_dir_all(&path).expect("create temp dir");
         path
+    }
+
+    fn temp_codex_config(root: &PathBuf, sqlite_home: &PathBuf) -> CodexPathConfig {
+        CodexPathConfig {
+            home_dir: root.clone(),
+            codex_home: root.clone(),
+            history_path: root.join("history.jsonl"),
+            sessions_root: root.join("sessions"),
+            session_index_path: root.join("session_index.jsonl"),
+            sqlite_home: sqlite_home.clone(),
+        }
+    }
+
+    fn write_codex_session_file(root: &PathBuf, session_id: &str, cwd: &str) -> PathBuf {
+        let session_dir = root.join("sessions").join("2026").join("04").join("15");
+        fs::create_dir_all(&session_dir).expect("create codex session dir");
+        let path = session_dir.join(format!("rollout-2026-04-15T12-00-00-{session_id}.jsonl"));
+        fs::write(
+            &path,
+            format!(
+                concat!(
+                    "{{\"timestamp\":\"2026-04-15T12:00:00.000Z\",\"type\":\"session_meta\",\"payload\":",
+                    "{{\"id\":\"{session_id}\",\"cwd\":\"{cwd}\"}}}}\n",
+                    "{{\"timestamp\":\"2026-04-15T12:00:01.000Z\",\"type\":\"event_msg\",\"payload\":",
+                    "{{\"type\":\"user_message\",\"message\":\"hello\"}}}}\n"
+                ),
+                session_id = session_id,
+                cwd = cwd,
+            ),
+        )
+        .expect("write codex session file");
+        path
+    }
+
+    fn create_state_db(sqlite_home: &PathBuf, filename: &str, statements: &[&str]) -> PathBuf {
+        fs::create_dir_all(sqlite_home).expect("create sqlite home");
+        let db_path = sqlite_home.join(filename);
+        let conn = Connection::open(&db_path).expect("open sqlite");
+        conn.execute_batch(concat!(
+            "CREATE TABLE threads (",
+            "id TEXT PRIMARY KEY,",
+            "rollout_path TEXT NOT NULL,",
+            "created_at INTEGER NOT NULL,",
+            "updated_at INTEGER NOT NULL,",
+            "source TEXT NOT NULL DEFAULT '',",
+            "model_provider TEXT NOT NULL DEFAULT '',",
+            "cwd TEXT NOT NULL DEFAULT '',",
+            "title TEXT NOT NULL DEFAULT '',",
+            "sandbox_policy TEXT NOT NULL DEFAULT '',",
+            "approval_mode TEXT NOT NULL DEFAULT '',",
+            "tokens_used INTEGER NOT NULL DEFAULT 0,",
+            "has_user_event INTEGER NOT NULL DEFAULT 0,",
+            "archived INTEGER NOT NULL DEFAULT 0,",
+            "archived_at INTEGER,",
+            "git_sha TEXT,",
+            "git_branch TEXT,",
+            "git_origin_url TEXT,",
+            "cli_version TEXT NOT NULL DEFAULT '',",
+            "first_user_message TEXT NOT NULL DEFAULT '',",
+            "agent_nickname TEXT,",
+            "agent_role TEXT,",
+            "memory_mode TEXT NOT NULL DEFAULT 'enabled',",
+            "model TEXT,",
+            "reasoning_effort TEXT,",
+            "agent_path TEXT",
+            ");"
+        ))
+        .expect("create threads table");
+
+        for statement in statements {
+            conn.execute_batch(statement).expect("insert thread row");
+        }
+
+        drop(conn);
+        db_path
     }
 
     #[test]
@@ -2047,6 +2549,274 @@ mod tests {
         assert_eq!(session.project, "/Users/g/ccem");
         assert_eq!(session.project_name, "ccem");
         assert_eq!(session.display, "");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_codex_history_uses_session_index_when_history_missing() {
+        let root = temp_history_dir("codex-session-index");
+        let sqlite_home = root.join("sqlite");
+        write_codex_session_file(
+            &root,
+            "019d8ca8-cf4d-74e2-be37-5554a73ec50a",
+            "/Users/g/ccem",
+        );
+        fs::write(
+            root.join("session_index.jsonl"),
+            "{\"id\":\"019d8ca8-cf4d-74e2-be37-5554a73ec50a\",\"thread_name\":\"排查 ccem 无法抓取 Codex 聊天记录\",\"updated_at\":\"2026-04-14T15:43:05.46082Z\"}\n",
+        )
+        .expect("write session index");
+
+        let config = temp_codex_config(&root, &sqlite_home);
+        let sessions = load_codex_history_from_config(&config).expect("load codex history");
+        let session = sessions
+            .into_iter()
+            .find(|session| session.id == "019d8ca8-cf4d-74e2-be37-5554a73ec50a")
+            .expect("session should exist");
+
+        assert_eq!(session.display, "排查 ccem 无法抓取 Codex 聊天记录");
+        assert_eq!(session.project, "/Users/g/ccem");
+        assert_eq!(session.project_name, "ccem");
+        assert!(session.timestamp > 0);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_codex_history_uses_sqlite_threads_when_session_index_missing() {
+        let root = temp_history_dir("codex-sqlite-only");
+        let sqlite_home = root.join("sqlite");
+        let rollout_path = write_codex_session_file(
+            &root,
+            "019d8c8b-16d2-7c22-bb28-dfe820b21994",
+            "/Users/g/sqlite",
+        );
+
+        create_state_db(
+            &sqlite_home,
+            "state_9.sqlite",
+            &[&format!(
+                concat!(
+                    "INSERT INTO threads (",
+                    "id, rollout_path, created_at, updated_at, source, model_provider, cwd, title, sandbox_policy, approval_mode",
+                    ") VALUES (",
+                    "'019d8c8b-16d2-7c22-bb28-dfe820b21994', '{}', 1776183186, 1776183187, 'vscode', 'openai', '/Users/g/sqlite', 'SQLite 标题', 'workspace-write', 'never'",
+                    ");"
+                ),
+                rollout_path.display()
+            )],
+        );
+
+        let config = temp_codex_config(&root, &sqlite_home);
+        let sessions = load_codex_history_from_config(&config).expect("load codex history");
+        let session = sessions
+            .into_iter()
+            .find(|session| session.id == "019d8c8b-16d2-7c22-bb28-dfe820b21994")
+            .expect("session should exist");
+
+        assert_eq!(session.display, "SQLite 标题");
+        assert_eq!(session.project, "/Users/g/sqlite");
+        assert_eq!(session.project_name, "sqlite");
+        assert!(session.timestamp >= 1_776_183_187_000);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_codex_title_precedence_prefers_session_index_then_sqlite_then_history() {
+        let root = temp_history_dir("codex-precedence");
+        let sqlite_home = root.join("sqlite");
+        let rollout_path = write_codex_session_file(
+            &root,
+            "019d7d58-6c57-76d3-8712-d9126006a5cb",
+            "/Users/g/ccem",
+        );
+        fs::write(
+            root.join("history.jsonl"),
+            "{\"session_id\":\"019d7d58-6c57-76d3-8712-d9126006a5cb\",\"ts\":1776183000,\"text\":\"历史标题\"}\n",
+        )
+        .expect("write history");
+        fs::write(
+            root.join("session_index.jsonl"),
+            "{\"id\":\"019d7d58-6c57-76d3-8712-d9126006a5cb\",\"thread_name\":\"Session Index 标题\",\"updated_at\":\"2026-04-14T15:43:05.46082Z\"}\n",
+        )
+        .expect("write session index");
+        create_state_db(
+            &sqlite_home,
+            "state_2.sqlite",
+            &[&format!(
+                concat!(
+                    "INSERT INTO threads (",
+                    "id, rollout_path, created_at, updated_at, source, model_provider, cwd, title, sandbox_policy, approval_mode",
+                    ") VALUES (",
+                    "'019d7d58-6c57-76d3-8712-d9126006a5cb', '{}', 1776182000, 1776182001, 'vscode', 'openai', '/Users/g/sqlite', 'SQLite 标题', 'workspace-write', 'never'",
+                    ");"
+                ),
+                rollout_path.display()
+            )],
+        );
+
+        let config = temp_codex_config(&root, &sqlite_home);
+        let sessions = load_codex_history_from_config(&config).expect("load codex history");
+        let session = sessions
+            .into_iter()
+            .find(|session| session.id == "019d7d58-6c57-76d3-8712-d9126006a5cb")
+            .expect("session should exist");
+
+        assert_eq!(session.display, "Session Index 标题");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_resolve_codex_paths_honors_env_and_config() {
+        let root = temp_history_dir("codex-paths");
+        let home_dir = root.join("home");
+        let codex_home = root.join("custom-codex");
+        let sqlite_from_config = root.join("sqlite-from-config");
+        fs::create_dir_all(&home_dir).expect("create home");
+        fs::create_dir_all(&codex_home).expect("create codex home");
+        fs::write(
+            codex_home.join("config.toml"),
+            "sqlite_home = \"sqlite-from-config\"\n",
+        )
+        .expect("write config");
+
+        let resolved = resolve_codex_path_config_from(
+            Some(home_dir.as_path()),
+            Some(codex_home.to_str().expect("utf8 path")),
+            None,
+        )
+        .expect("resolve codex path config");
+
+        assert_eq!(resolved.codex_home, codex_home);
+        assert_eq!(resolved.sqlite_home, codex_home.join("sqlite-from-config"));
+
+        let env_override = root.join("sqlite-from-env");
+        let overridden = resolve_codex_path_config_from(
+            Some(home_dir.as_path()),
+            Some(codex_home.to_str().expect("utf8 path")),
+            Some(env_override.to_str().expect("utf8 path")),
+        )
+        .expect("resolve codex path config with env override");
+
+        assert_eq!(overridden.sqlite_home, env_override);
+
+        let defaulted = resolve_codex_path_config_from(Some(home_dir.as_path()), None, None)
+            .expect("resolve default config");
+        assert_eq!(defaulted.codex_home, home_dir.join(".codex"));
+        assert_eq!(defaulted.sqlite_home, home_dir.join(".codex"));
+        assert_eq!(resolved.sqlite_home, codex_home.join("sqlite-from-config"));
+        assert_ne!(sqlite_from_config, resolved.sqlite_home);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_threads_rollout_path_is_used_for_session_lookup() {
+        let root = temp_history_dir("codex-find-rollout");
+        let sqlite_home = root.join("sqlite");
+        let rollout_path = write_codex_session_file(
+            &root,
+            "019cbc5a-5720-7451-905e-84b96a508abb",
+            "/Users/g/state",
+        );
+        create_state_db(
+            &sqlite_home,
+            "state_5.sqlite",
+            &[&format!(
+                concat!(
+                    "INSERT INTO threads (",
+                    "id, rollout_path, created_at, updated_at, source, model_provider, cwd, title, sandbox_policy, approval_mode",
+                    ") VALUES (",
+                    "'019cbc5a-5720-7451-905e-84b96a508abb', '{}', 1776181000, 1776181001, 'vscode', 'openai', '/Users/g/state', 'State title', 'workspace-write', 'never'",
+                    ");"
+                ),
+                rollout_path.display()
+            )],
+        );
+
+        let config = temp_codex_config(&root, &sqlite_home);
+        let found =
+            find_codex_session_file_with_config("019cbc5a-5720-7451-905e-84b96a508abb", &config)
+                .expect("find rollout path");
+
+        assert_eq!(found, rollout_path);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_invalid_sqlite_falls_back_to_session_index_and_sessions() {
+        let root = temp_history_dir("codex-invalid-sqlite");
+        let sqlite_home = root.join("sqlite");
+        write_codex_session_file(
+            &root,
+            "019cc871-ada9-7a30-a350-f7d9ef7771a7",
+            "/Users/g/fallback",
+        );
+        fs::create_dir_all(&sqlite_home).expect("create sqlite dir");
+        fs::write(sqlite_home.join("state_999.sqlite"), "not a sqlite file")
+            .expect("write bad sqlite");
+        fs::write(
+            root.join("session_index.jsonl"),
+            "{\"id\":\"019cc871-ada9-7a30-a350-f7d9ef7771a7\",\"thread_name\":\"Fallback 标题\",\"updated_at\":\"2026-04-14T15:14:18.712062Z\"}\n",
+        )
+        .expect("write session index");
+
+        let config = temp_codex_config(&root, &sqlite_home);
+        let sessions = load_codex_history_from_config(&config).expect("load codex history");
+        let session = sessions
+            .into_iter()
+            .find(|session| session.id == "019cc871-ada9-7a30-a350-f7d9ef7771a7")
+            .expect("session should exist");
+
+        assert_eq!(session.display, "Fallback 标题");
+        assert_eq!(session.project, "/Users/g/fallback");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_newer_invalid_state_db_falls_back_to_older_valid_db() {
+        let root = temp_history_dir("codex-fallback-older-valid-db");
+        let sqlite_home = root.join("sqlite");
+        let rollout_path = write_codex_session_file(
+            &root,
+            "019dd111-aaaa-7bbb-8ccc-1234567890ab",
+            "/Users/g/fallback-sqlite",
+        );
+
+        create_state_db(
+            &sqlite_home,
+            "state_4.sqlite",
+            &[&format!(
+                concat!(
+                    "INSERT INTO threads (",
+                    "id, rollout_path, created_at, updated_at, source, model_provider, cwd, title, sandbox_policy, approval_mode",
+                    ") VALUES (",
+                    "'019dd111-aaaa-7bbb-8ccc-1234567890ab', '{}', 1776186000, 1776186001, 'vscode', 'openai', '/Users/g/fallback-sqlite', 'Older valid SQLite 标题', 'workspace-write', 'never'",
+                    ");"
+                ),
+                rollout_path.display()
+            )],
+        );
+
+        std::thread::sleep(Duration::from_millis(20));
+        fs::write(sqlite_home.join("state_5.sqlite"), "not a sqlite file")
+            .expect("write newer invalid sqlite");
+
+        let config = temp_codex_config(&root, &sqlite_home);
+        let sessions = load_codex_history_from_config(&config).expect("load codex history");
+        let session = sessions
+            .into_iter()
+            .find(|session| session.id == "019dd111-aaaa-7bbb-8ccc-1234567890ab")
+            .expect("session should exist");
+
+        assert_eq!(session.display, "Older valid SQLite 标题");
+        assert_eq!(session.project, "/Users/g/fallback-sqlite");
+        assert_eq!(session.project_name, "fallback-sqlite");
 
         let _ = fs::remove_dir_all(root);
     }

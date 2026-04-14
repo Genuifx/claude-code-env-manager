@@ -17,6 +17,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs = "5"
 chrono = { version = "0.4", features = ["serde"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+toml = "0.9"
 # 新增加密依赖
 scrypt = "0.11"
 aes = "0.8"
