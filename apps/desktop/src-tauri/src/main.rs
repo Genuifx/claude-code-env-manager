@@ -1879,6 +1879,10 @@ fn save_settings(app: tauri::AppHandle, settings: DesktopSettings) -> Result<(),
     merged_settings.ai_enhanced = settings.ai_enhanced;
     merged_settings.ai_env_name = settings.ai_env_name;
     config::write_settings(&merged_settings)?;
+    if let Some(notification_prefs_state) = app.try_state::<notifications::NotificationPrefsState>()
+    {
+        notification_prefs_state.replace_from_settings(&merged_settings);
+    }
 
     #[cfg(target_os = "macos")]
     {
@@ -2333,6 +2337,7 @@ fn main() {
     let telegram_manager_for_run = telegram_bridge_manager.clone();
     let weixin_manager_for_setup = weixin_bridge_manager.clone();
     let weixin_manager_for_run = weixin_bridge_manager.clone();
+    let notification_prefs_state = notifications::NotificationPrefsState::new();
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -2356,6 +2361,7 @@ fn main() {
         .manage(telegram_bridge_manager.clone())
         .manage(weixin_bridge_manager.clone())
         .manage(proxy_debug_manager.clone())
+        .manage(notification_prefs_state)
         .invoke_handler(tauri::generate_handler![
             companion::get_companion,
             greet,
