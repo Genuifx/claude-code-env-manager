@@ -625,6 +625,26 @@ pub struct DesktopSettings {
     pub default_mode: Option<String>,
     #[serde(rename = "performanceMode", default = "default_performance_mode")]
     pub performance_mode: String,
+    #[serde(
+        rename = "desktopNotificationsEnabled",
+        default = "default_desktop_notifications_enabled"
+    )]
+    pub desktop_notifications_enabled: bool,
+    #[serde(
+        rename = "notifyOnTaskCompleted",
+        default = "default_notify_on_task_completed"
+    )]
+    pub notify_on_task_completed: bool,
+    #[serde(
+        rename = "notifyOnTaskFailed",
+        default = "default_notify_on_task_failed"
+    )]
+    pub notify_on_task_failed: bool,
+    #[serde(
+        rename = "notifyOnActionRequired",
+        default = "default_notify_on_action_required"
+    )]
+    pub notify_on_action_required: bool,
     #[serde(rename = "proxyDebugEnabled", default)]
     pub proxy_debug_enabled: bool,
     #[serde(
@@ -657,6 +677,18 @@ fn default_close_to_tray() -> bool {
 fn default_performance_mode() -> String {
     "auto".to_string()
 }
+fn default_desktop_notifications_enabled() -> bool {
+    true
+}
+fn default_notify_on_task_completed() -> bool {
+    true
+}
+fn default_notify_on_task_failed() -> bool {
+    true
+}
+fn default_notify_on_action_required() -> bool {
+    true
+}
 fn default_proxy_debug_codex_upstream_base_url() -> String {
     "https://api.openai.com/v1".to_string()
 }
@@ -676,6 +708,10 @@ impl Default for DesktopSettings {
             close_to_tray: default_close_to_tray(),
             default_mode: None,
             performance_mode: default_performance_mode(),
+            desktop_notifications_enabled: default_desktop_notifications_enabled(),
+            notify_on_task_completed: default_notify_on_task_completed(),
+            notify_on_task_failed: default_notify_on_task_failed(),
+            notify_on_action_required: default_notify_on_action_required(),
             proxy_debug_enabled: false,
             proxy_debug_codex_upstream_base_url: default_proxy_debug_codex_upstream_base_url(),
             proxy_debug_log_max_bytes: default_proxy_debug_log_max_bytes(),

@@ -6,6 +6,7 @@ use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
+use crate::notifications::{self, NotificationContext};
 use crate::terminal;
 
 fn default_client() -> String {
@@ -427,25 +428,6 @@ pub fn cleanup_stale_exit_files_except(manager: &SessionManager) {
     }
 }
 
-/// Send a system notification
-#[cfg(target_os = "macos")]
-fn send_notification(title: &str, body: &str) {
-    use std::process::Command;
-
-    // Use osascript to send notification on macOS
-    let script = format!(
-        r#"display notification "{}" with title "{}""#,
-        body.replace("\"", "\\\""),
-        title.replace("\"", "\\\"")
-    );
-    let _ = Command::new("osascript").arg("-e").arg(&script).output();
-}
-
-#[cfg(not(target_os = "macos"))]
-fn send_notification(_title: &str, _body: &str) {
-    // Notifications not implemented for other platforms yet
-}
-
 /// Start a background thread to monitor session status
 /// Checks every 5 seconds if processes are still alive
 pub fn start_session_monitor(app: AppHandle, manager: Arc<SessionManager>) {
@@ -472,25 +454,37 @@ pub fn start_session_monitor(app: AppHandle, manager: Arc<SessionManager>) {
             // 3. Check terminal-based sessions
             let terminal_sessions = manager.get_running_terminal_sessions();
             for session in terminal_sessions {
+                let context = NotificationContext::new(
+                    session.env_name.clone(),
+                    session.working_dir.clone(),
+                    if session.client == "codex" {
+                        "Codex"
+                    } else {
+                        "Claude"
+                    },
+                );
+
                 // First check for exit status file
                 if let Some(exit_code) = check_exit_file(&session.id) {
-                    let (event_name, notification_title) = if exit_code == 0 {
-                        ("task-completed", "Task Completed")
+                    let event_name = if exit_code == 0 {
+                        "task-completed"
                     } else {
-                        ("task-error", "Task Error")
-                    };
-
-                    let notification_body = if exit_code == 0 {
-                        format!("{} task completed", session.env_name)
-                    } else {
-                        format!("{} exited with code: {}", session.env_name, exit_code)
+                        "task-error"
                     };
 
                     manager.update_session_status(&session.id, "stopped");
                     if let Some(updated_session) = manager.get_session(&session.id) {
                         let _ = app.emit(event_name, &updated_session);
                     }
-                    send_notification(notification_title, &notification_body);
+                    if exit_code == 0 {
+                        notifications::maybe_notify_task_completed(&app, &context);
+                    } else {
+                        notifications::maybe_notify_task_failed(
+                            &app,
+                            &context,
+                            format!("{} exited with code {}", context.client_name, exit_code),
+                        );
+                    }
                     cleanup_exit_file(&session.id);
                     continue;
                 }
@@ -509,13 +503,26 @@ pub fn start_session_monitor(app: AppHandle, manager: Arc<SessionManager>) {
                         if let Some(updated_session) = manager.get_session(&session.id) {
                             let _ = app.emit("session-interrupted", &updated_session);
                         }
-                        send_notification(
-                            "Session Interrupted",
-                            &format!("{} window was closed", session.env_name),
+                        notifications::maybe_notify_task_failed(
+                            &app,
+                            &context,
+                            format!(
+                                "{} was interrupted because the terminal window closed",
+                                project_label(&session.working_dir)
+                            ),
                         );
                     }
                 }
             }
         }
     });
+}
+
+fn project_label(working_dir: &str) -> String {
+    std::path::Path::new(working_dir)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| working_dir.to_string())
 }

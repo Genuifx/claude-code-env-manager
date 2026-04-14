@@ -11,6 +11,7 @@ mod event_dispatcher;
 mod history;
 mod interactive_runtime;
 mod jsonl_watcher;
+mod notifications;
 mod permission;
 mod proxy_debug;
 mod remote;
@@ -157,6 +158,7 @@ fn get_system_username() -> String {
 #[tauri::command]
 async fn get_environments() -> Result<HashMap<String, EnvConfig>, String> {
     tauri::async_runtime::spawn_blocking(|| {
+        #[cfg(debug_assertions)]
         let start = std::time::Instant::now();
         let cfg = config::read_config()?;
         let decrypted: HashMap<String, EnvConfig> = cfg
@@ -1870,6 +1872,10 @@ fn save_settings(app: tauri::AppHandle, settings: DesktopSettings) -> Result<(),
     merged_settings.close_to_tray = settings.close_to_tray;
     merged_settings.default_mode = settings.default_mode;
     merged_settings.performance_mode = settings.performance_mode;
+    merged_settings.desktop_notifications_enabled = settings.desktop_notifications_enabled;
+    merged_settings.notify_on_task_completed = settings.notify_on_task_completed;
+    merged_settings.notify_on_task_failed = settings.notify_on_task_failed;
+    merged_settings.notify_on_action_required = settings.notify_on_action_required;
     merged_settings.ai_enhanced = settings.ai_enhanced;
     merged_settings.ai_env_name = settings.ai_env_name;
     config::write_settings(&merged_settings)?;
@@ -1888,6 +1894,11 @@ fn save_settings(app: tauri::AppHandle, settings: DesktopSettings) -> Result<(),
     } else {
         Err(format!("Partial save failures: {}", errors.join("; ")))
     }
+}
+
+#[tauri::command]
+fn send_test_notification(app: tauri::AppHandle) -> Result<(), String> {
+    notifications::send_test_notification(&app)
 }
 
 #[tauri::command]
@@ -2323,7 +2334,7 @@ fn main() {
     let weixin_manager_for_setup = weixin_bridge_manager.clone();
     let weixin_manager_for_run = weixin_bridge_manager.clone();
 
-    let mut builder = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -2334,9 +2345,7 @@ fn main() {
         ));
 
     #[cfg(debug_assertions)]
-    {
-        builder = builder.plugin(tauri_plugin_mcp_bridge::init());
-    }
+    let builder = builder.plugin(tauri_plugin_mcp_bridge::init());
 
     builder
         .manage(session_manager.clone())
@@ -2446,6 +2455,7 @@ fn main() {
             set_default_working_dir,
             get_settings,
             save_settings,
+            send_test_notification,
             get_telegram_settings,
             get_weixin_settings,
             save_telegram_settings,

@@ -358,6 +358,10 @@ export interface DesktopSettings {
   autoStart: boolean;
   startMinimized: boolean;
   closeToTray: boolean;
+  desktopNotificationsEnabled?: boolean;
+  notifyOnTaskCompleted?: boolean;
+  notifyOnTaskFailed?: boolean;
+  notifyOnActionRequired?: boolean;
   defaultMode?: string;
   proxyDebugEnabled?: boolean;
   proxyDebugCodexUpstreamBaseUrl?: string;
