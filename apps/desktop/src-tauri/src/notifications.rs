@@ -1,7 +1,8 @@
 use crate::config::{self, DesktopSettings};
 use crate::event_bus::{InteractiveToolPrompt, SessionEventPayload};
 use std::path::Path;
-use tauri::{AppHandle, Runtime};
+use std::sync::RwLock;
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_notification::NotificationExt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,6 +18,17 @@ struct NotificationPrefs {
     task_completed: bool,
     task_failed: bool,
     action_required: bool,
+}
+
+impl NotificationPrefs {
+    fn disabled() -> Self {
+        Self {
+            enabled: false,
+            task_completed: false,
+            task_failed: false,
+            action_required: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,10 +70,43 @@ impl From<&DesktopSettings> for NotificationPrefs {
     }
 }
 
-fn load_prefs() -> NotificationPrefs {
-    config::read_settings()
-        .map(|settings| NotificationPrefs::from(&settings))
-        .unwrap_or_else(|_| NotificationPrefs::from(&DesktopSettings::default()))
+pub struct NotificationPrefsState {
+    prefs: RwLock<NotificationPrefs>,
+}
+
+impl NotificationPrefsState {
+    pub fn new() -> Self {
+        let prefs = match config::read_settings() {
+            Ok(settings) => NotificationPrefs::from(&settings),
+            Err(error) => {
+                eprintln!("Failed to read notification prefs: {}", error);
+                NotificationPrefs::disabled()
+            }
+        };
+
+        Self {
+            prefs: RwLock::new(prefs),
+        }
+    }
+
+    fn snapshot(&self) -> NotificationPrefs {
+        self.prefs
+            .read()
+            .map(|prefs| prefs.clone())
+            .unwrap_or_else(|_| NotificationPrefs::disabled())
+    }
+
+    pub fn replace_from_settings(&self, settings: &DesktopSettings) {
+        if let Ok(mut prefs) = self.prefs.write() {
+            *prefs = NotificationPrefs::from(settings);
+        }
+    }
+}
+
+fn load_prefs<R: Runtime>(app: &AppHandle<R>) -> NotificationPrefs {
+    app.try_state::<NotificationPrefsState>()
+        .map(|state| state.snapshot())
+        .unwrap_or_else(NotificationPrefs::disabled)
 }
 
 fn project_label(project_dir: &str) -> String {
@@ -243,10 +288,10 @@ pub fn maybe_notify_session_event<R: Runtime>(
     context: &NotificationContext,
     payload: &SessionEventPayload,
 ) {
-    let prefs = load_prefs();
     let Some(draft) = build_session_event_draft(context, payload) else {
         return;
     };
+    let prefs = load_prefs(app);
 
     if should_send(&prefs, &draft) {
         let _ = show_notification(app, &draft);
@@ -257,7 +302,7 @@ pub fn maybe_notify_task_completed<R: Runtime>(
     app: &AppHandle<R>,
     context: &NotificationContext,
 ) {
-    let prefs = load_prefs();
+    let prefs = load_prefs(app);
     let draft = build_task_completed_draft(context);
     if should_send(&prefs, &draft) {
         let _ = show_notification(app, &draft);
@@ -269,7 +314,7 @@ pub fn maybe_notify_task_failed<R: Runtime>(
     context: &NotificationContext,
     detail: impl Into<String>,
 ) {
-    let prefs = load_prefs();
+    let prefs = load_prefs(app);
     let draft = build_task_failed_draft(context, detail);
     if should_send(&prefs, &draft) {
         let _ = show_notification(app, &draft);
