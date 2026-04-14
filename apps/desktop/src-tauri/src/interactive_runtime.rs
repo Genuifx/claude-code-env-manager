@@ -3,6 +3,7 @@ use crate::config::resolve_claude_env;
 use crate::event_bus::{ReplayBatch, SessionEventPayload, SessionStore, TerminalPromptKind};
 use crate::event_dispatcher::EventDispatcher;
 use crate::jsonl_watcher::{JsonlPollResult, JsonlWatcher};
+use crate::notifications::{self, NotificationContext};
 use crate::runtime::{
     replace_runtime_entries_for_kind, runtime_state_file_path, RuntimeKind, RuntimeStateEntry,
 };
@@ -583,6 +584,7 @@ impl InteractiveRuntimeManager {
             .map_err(|_| "Failed to lock interactive event store".to_string())?;
         for payload in poll_result.events {
             let record = store.append(payload);
+            maybe_notify_interactive_session_event(app, handle, &record.payload);
             dispatch_session_event(app, session_id, &record);
         }
 
@@ -652,6 +654,7 @@ impl InteractiveRuntimeManager {
                 prompt_kind: TerminalPromptKind::Permission,
                 prompt_text: format!("{client_name} is waiting for approval."),
             });
+            maybe_notify_interactive_session_event(app, handle, &record.payload);
             dispatch_session_event(app, session_id, &record);
         } else if *last_state == ClaudeTerminalState::WaitingApproval {
             let record = store.append(SessionEventPayload::TerminalPromptResolved {
@@ -741,6 +744,28 @@ fn dispatch_session_event(
 fn dispatch_interactive_output(app: &AppHandle, runtime_id: &str, chunk: &InteractiveOutputChunk) {
     let dispatcher = app.state::<Arc<EventDispatcher>>().inner().clone();
     dispatcher.dispatch_interactive_output(runtime_id, chunk);
+}
+
+fn maybe_notify_interactive_session_event(
+    app: &AppHandle,
+    handle: &Arc<InteractiveSessionHandle>,
+    payload: &SessionEventPayload,
+) {
+    if let Ok(session) = handle.session.lock() {
+        notifications::maybe_notify_session_event(
+            app,
+            &NotificationContext::new(
+                session.env_name.clone(),
+                session.working_dir.clone(),
+                if session.client == "codex" {
+                    "Codex"
+                } else {
+                    "Claude"
+                },
+            ),
+            payload,
+        );
+    }
 }
 
 fn build_client_args(

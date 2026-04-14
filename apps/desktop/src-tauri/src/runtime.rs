@@ -6,6 +6,7 @@
 use crate::channel::DesktopChannel;
 use crate::event_bus::{ReplayBatch, SessionEventPayload, SessionStore};
 use crate::event_dispatcher::EventDispatcher;
+use crate::notifications::{self, NotificationContext};
 use crate::remote::{RemotePeerRef, RemotePlatform};
 use crate::terminal::resolve_claude_path;
 use chrono::{DateTime, Utc};
@@ -708,6 +709,17 @@ impl RuntimeManager {
             let mut events = handle.events.lock().ok()?;
             events.append(payload)
         };
+        if let Ok(session) = handle.record.lock() {
+            notifications::maybe_notify_session_event(
+                app,
+                &NotificationContext::new(
+                    session.env_name.clone(),
+                    session.project_dir.clone(),
+                    "Claude",
+                ),
+                &record.payload,
+            );
+        }
         dispatch_session_event(app, runtime_id, &record);
         Some(())
     }

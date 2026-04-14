@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Moon, Sun, MonitorSmartphone, Lightbulb, Terminal, CheckCircle2, XCircle, Copy, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search, FolderOpen, X, Sparkles, Clock, Image } from 'lucide-react';
+import { Moon, Sun, MonitorSmartphone, Lightbulb, Terminal, CheckCircle2, XCircle, Copy, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search, FolderOpen, X, Sparkles, Clock, Image, BellRing } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
@@ -72,6 +72,10 @@ export function Settings() {
   const [autoStart, setAutoStart] = useState(false);
   const [startMinimized, setStartMinimized] = useState(false);
   const [closeToTray, setCloseToTray] = useState(true);
+  const [desktopNotificationsEnabled, setDesktopNotificationsEnabled] = useState(true);
+  const [notifyOnTaskCompleted, setNotifyOnTaskCompleted] = useState(true);
+  const [notifyOnTaskFailed, setNotifyOnTaskFailed] = useState(true);
+  const [notifyOnActionRequired, setNotifyOnActionRequired] = useState(true);
   const [installStatus, setInstallStatus] = useState<InstallStatusState>({
     ccem: null,
     claude: null,
@@ -132,6 +136,10 @@ export function Settings() {
           autoStart: boolean;
           startMinimized: boolean;
           closeToTray: boolean;
+          desktopNotificationsEnabled?: boolean;
+          notifyOnTaskCompleted?: boolean;
+          notifyOnTaskFailed?: boolean;
+          notifyOnActionRequired?: boolean;
           defaultMode: string | null;
           performanceMode?: PerformancePreference;
           aiEnhanced: boolean;
@@ -143,6 +151,10 @@ export function Settings() {
         setAutoStart(settings.autoStart);
         setStartMinimized(settings.startMinimized);
         setCloseToTray(settings.closeToTray);
+        setDesktopNotificationsEnabled(settings.desktopNotificationsEnabled ?? true);
+        setNotifyOnTaskCompleted(settings.notifyOnTaskCompleted ?? true);
+        setNotifyOnTaskFailed(settings.notifyOnTaskFailed ?? true);
+        setNotifyOnActionRequired(settings.notifyOnActionRequired ?? true);
         setAiEnhanced(settings.aiEnhanced ?? false);
         setAiEnvName(settings.aiEnvName ?? null);
         applyPerformancePreference(nextPerformanceMode);
@@ -165,6 +177,10 @@ export function Settings() {
             setAutoStart(settings.autoStart ?? false);
             setStartMinimized(settings.startMinimized ?? false);
             setCloseToTray(settings.closeToTray ?? true);
+            setDesktopNotificationsEnabled(settings.desktopNotificationsEnabled ?? true);
+            setNotifyOnTaskCompleted(settings.notifyOnTaskCompleted ?? true);
+            setNotifyOnTaskFailed(settings.notifyOnTaskFailed ?? true);
+            setNotifyOnActionRequired(settings.notifyOnActionRequired ?? true);
             applyPerformancePreference(nextPerformanceMode);
             if (settings.defaultMode) {
               setDefaultMode(settings.defaultMode as PermissionModeName);
@@ -207,6 +223,10 @@ export function Settings() {
       autoStart,
       startMinimized,
       closeToTray,
+      desktopNotificationsEnabled,
+      notifyOnTaskCompleted,
+      notifyOnTaskFailed,
+      notifyOnActionRequired,
       defaultMode,
       performanceMode,
       aiEnhanced,
@@ -220,7 +240,21 @@ export function Settings() {
         toast.error(t('settings.saveFailed'));
       }
     })();
-  }, [theme, autoStart, startMinimized, closeToTray, defaultMode, performanceMode, aiEnhanced, aiEnvName]);
+  }, [
+    theme,
+    autoStart,
+    startMinimized,
+    closeToTray,
+    desktopNotificationsEnabled,
+    notifyOnTaskCompleted,
+    notifyOnTaskFailed,
+    notifyOnActionRequired,
+    defaultMode,
+    performanceMode,
+    aiEnhanced,
+    aiEnvName,
+    t,
+  ]);
 
   // Delayed skeleton -- only shows if settings load takes >200ms
   if (isLoadingSettings) {
@@ -345,6 +379,64 @@ export function Settings() {
           </div>
         </Card>
       </div>
+
+      <Card className="p-5">
+        <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+          <BellRing className="w-4 h-4 text-primary" />
+          {t('settings.notifications')}
+        </h3>
+        <div className="space-y-4">
+          <ToggleSetting
+            checked={desktopNotificationsEnabled}
+            onChange={setDesktopNotificationsEnabled}
+            title={t('settings.desktopNotificationsEnabled')}
+            description={t('settings.desktopNotificationsEnabledDesc')}
+          />
+
+          <div className={`space-y-4 transition-opacity duration-150 ${desktopNotificationsEnabled ? '' : 'opacity-50 pointer-events-none'}`}>
+            <ToggleSetting
+              checked={notifyOnTaskCompleted}
+              onChange={setNotifyOnTaskCompleted}
+              title={t('settings.notifyOnTaskCompleted')}
+              description={t('settings.notifyOnTaskCompletedDesc')}
+            />
+            <ToggleSetting
+              checked={notifyOnTaskFailed}
+              onChange={setNotifyOnTaskFailed}
+              title={t('settings.notifyOnTaskFailed')}
+              description={t('settings.notifyOnTaskFailedDesc')}
+            />
+            <ToggleSetting
+              checked={notifyOnActionRequired}
+              onChange={setNotifyOnActionRequired}
+              title={t('settings.notifyOnActionRequired')}
+              description={t('settings.notifyOnActionRequiredDesc')}
+            />
+          </div>
+
+          <div className="pt-2 border-t glass-divider flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="glass-btn-outline"
+              onClick={async () => {
+                try {
+                  await invoke('send_test_notification');
+                  toast.success(t('settings.notificationTestSent'));
+                } catch (error) {
+                  toast.error(t('settings.notificationTestFailed').replace('{error}', String(error)));
+                }
+              }}
+            >
+              <BellRing className="w-3.5 h-3.5 mr-1.5" />
+              {t('settings.notificationTest')}
+            </Button>
+            <p className="text-xs text-muted-foreground/80">
+              {t('settings.notificationHint')}
+            </p>
+          </div>
+        </div>
+      </Card>
 
       {/* Row 2: AI Enhancement */}
       <Card className="p-5">
