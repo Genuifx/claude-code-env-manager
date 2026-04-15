@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.15
+
+### Patch Changes
+
+- Ship the next beta with OpenCode desktop integration and the latest desktop runtime improvements.
+
 ## 2.0.0-beta.14
 
 ### Patch Changes
