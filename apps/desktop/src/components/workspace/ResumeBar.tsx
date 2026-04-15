@@ -1,7 +1,7 @@
 import { Check, Play } from 'lucide-react';
-import type { HistorySessionItem } from '@/components/history/HistoryList';
 import { useLocale } from '@/locales';
 import { cn } from '@/lib/utils';
+import type { HistorySessionItem } from '@/features/conversations/types';
 import { getHistorySessionDisplay } from '@/components/history/historySession';
 
 interface ResumeBarProps {
