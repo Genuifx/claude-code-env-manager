@@ -48,6 +48,11 @@ export function EmbeddedTerminalPanel({
     writeInteractiveInput,
   } = useTauriCommands();
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
+  const activeClientLabel = activeSession?.client === 'opencode'
+    ? 'OpenCode PTY'
+    : activeSession?.client === 'codex'
+      ? 'Codex PTY'
+      : 'Claude PTY';
 
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
@@ -255,7 +260,7 @@ export function EmbeddedTerminalPanel({
             ? `${sessions.find((session) => session.id === activeSessionId)?.workingDir ?? ''}`
             : 'No interactive session selected'}
         </span>
-        <span>Claude PTY</span>
+        <span>{activeClientLabel}</span>
       </div>
 
       <div

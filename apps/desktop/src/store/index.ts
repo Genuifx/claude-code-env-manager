@@ -26,12 +26,13 @@ export interface Environment {
 }
 
 export type ArrangeLayout = 'horizontal2' | 'vertical2' | 'grid4' | 'left_main3';
-export type LaunchClient = 'claude' | 'codex';
+export type LaunchClient = 'claude' | 'codex' | 'opencode';
 
 export interface Session {
   id: string;
   client: LaunchClient;
   envName: string;
+  configSource?: 'ccem' | 'native';
   workingDir: string;
   pid?: number;
   startedAt: Date;

@@ -4067,6 +4067,7 @@ fn create_interactive_telegram_session(
             session_id: runtime_id,
             client: "claude".to_string(),
             env_name: resolved.env_name,
+            config_source: Some("ccem".to_string()),
             perm_mode,
             working_dir: working_dir.clone(),
             resume_session_id,

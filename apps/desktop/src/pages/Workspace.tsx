@@ -48,7 +48,14 @@ export function Workspace({ isActive = true, onNavigate, onLaunchWithDir }: Work
     shallow
   );
 
-  const { launchClaudeCode, openDirectoryPicker, loadCronTasks, checkCodexInstalled, setSessionTitle } =
+  const {
+    launchClaudeCode,
+    openDirectoryPicker,
+    loadCronTasks,
+    checkCodexInstalled,
+    checkOpenCodeInstalled,
+    setSessionTitle,
+  } =
     useTauriCommands();
 
   const [sessions, setSessions] = useState<HistorySessionItem[]>([]);
@@ -61,6 +68,7 @@ export function Workspace({ isActive = true, onNavigate, onLaunchWithDir }: Work
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [launched, setLaunched] = useState(false);
   const [codexInstalled, setCodexInstalled] = useState(false);
+  const [opencodeInstalled, setOpenCodeInstalled] = useState(false);
   const launchedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshRequestSeqRef = useRef(0);
@@ -85,11 +93,12 @@ export function Workspace({ isActive = true, onNavigate, onLaunchWithDir }: Work
     const cancelDeferred = scheduleAfterFirstPaint(() => {
       void loadCronTasks().catch(() => {});
       checkCodexInstalled().then(setCodexInstalled).catch(() => {});
+      checkOpenCodeInstalled().then(setOpenCodeInstalled).catch(() => {});
     }, { delayMs: 260, timeoutMs: 1400 });
     return () => {
       cancelDeferred();
     };
-  }, [loadCronTasks, checkCodexInstalled]);
+  }, [loadCronTasks, checkCodexInstalled, checkOpenCodeInstalled]);
 
   const syncSessionState = useCallback((nextSessions: HistorySessionItem[]) => {
     setSessions(nextSessions);
@@ -323,7 +332,12 @@ export function Workspace({ isActive = true, onNavigate, onLaunchWithDir }: Work
   const handleResume = useCallback(async () => {
     if (!selectedSession) return;
     try {
-      await launchClaudeCode(selectedSession.project, selectedSession.id, selectedSession.source);
+      await launchClaudeCode(
+        selectedSession.project || undefined,
+        selectedSession.id,
+        selectedSession.source,
+        selectedSession.envName,
+      );
       localStorage.setItem("ccem-ftue-launched", "true");
       if (launchedTimerRef.current) clearTimeout(launchedTimerRef.current);
       setLaunched(true);
@@ -386,6 +400,7 @@ export function Workspace({ isActive = true, onNavigate, onLaunchWithDir }: Work
             });
           }}
           codexInstalled={codexInstalled}
+          opencodeInstalled={opencodeInstalled}
           onSaveTitle={async (session, title) => {
             await setSessionTitle(session.source, session.id, title);
           }}

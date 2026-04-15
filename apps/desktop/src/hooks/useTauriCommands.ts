@@ -39,6 +39,7 @@ interface TauriSession {
   pid?: number;
   client?: string;
   env_name: string;
+  config_source?: 'ccem' | 'native';
   perm_mode: string;
   working_dir: string;
   start_time: string;
@@ -137,7 +138,14 @@ interface ProxyTrafficDetail {
 }
 
 function normalizeLaunchClient(client?: string): LaunchClient {
-  return client?.toLowerCase() === 'codex' ? 'codex' : 'claude';
+  switch (client?.toLowerCase()) {
+    case 'codex':
+      return 'codex';
+    case 'opencode':
+      return 'opencode';
+    default:
+      return 'claude';
+  }
 }
 
 function toFrontendSession(tauriSession: TauriSession): Session {
@@ -145,6 +153,7 @@ function toFrontendSession(tauriSession: TauriSession): Session {
     id: tauriSession.id,
     client: normalizeLaunchClient(tauriSession.client),
     envName: tauriSession.env_name,
+    configSource: tauriSession.config_source,
     workingDir: tauriSession.working_dir,
     pid: tauriSession.pid,
     startedAt: new Date(tauriSession.start_time),
@@ -384,7 +393,11 @@ export function useTauriCommands() {
 
       return session;
     } catch (err) {
-      const clientLabel = options.client === 'codex' ? 'Codex' : 'Claude Code';
+      const clientLabel = options.client === 'codex'
+        ? 'Codex'
+        : options.client === 'opencode'
+          ? 'OpenCode'
+          : 'Claude Code';
       setError(`Failed to launch ${clientLabel}: ${err}`);
       throw err;
     } finally {
@@ -403,8 +416,10 @@ export function useTauriCommands() {
     workingDir?: string,
     resumeSessionId?: string,
     client: LaunchClient = 'claude',
+    envName?: string,
   ) => {
     await createInteractiveSession({
+      envName: envName ?? undefined,
       workingDir: workingDir ?? null,
       resumeSessionId: resumeSessionId ?? null,
       client,
@@ -751,6 +766,14 @@ export function useTauriCommands() {
     }
   }, []);
 
+  const checkOpenCodeInstalled = useCallback(async (): Promise<boolean> => {
+    try {
+      return await invoke<boolean>('check_opencode_installed');
+    } catch {
+      return false;
+    }
+  }, []);
+
   const checkTmuxInstalled = useCallback(async (): Promise<boolean> => {
     try {
       return await invoke<boolean>('check_tmux_installed');
@@ -1044,6 +1067,7 @@ export function useTauriCommands() {
     arrangeSessions,
     checkArrangeSupport,
     checkCodexInstalled,
+    checkOpenCodeInstalled,
     checkTmuxInstalled,
     loadInstalledSkills,
     loadCronTasks,

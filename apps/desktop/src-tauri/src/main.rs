@@ -12,6 +12,7 @@ mod history;
 mod interactive_runtime;
 mod jsonl_watcher;
 mod notifications;
+mod opencode;
 mod permission;
 mod proxy_debug;
 mod remote;
@@ -34,8 +35,9 @@ use analytics::{
 };
 use channel::ChannelKind;
 use config::{
-    create_env_with_encrypted_key, resolve_claude_env, AppConfig, DesktopSettings, EnvConfig,
-    FavoriteProject, JetBrainsProject, RecentProject, VSCodeProject,
+    create_env_with_encrypted_key, resolve_claude_env, resolve_opencode_runtime, AppConfig,
+    DesktopSettings, EnvConfig, FavoriteProject, JetBrainsProject, RecentProject,
+    VSCodeProject,
 };
 use cron::{start_cron_scheduler, CronScheduler};
 use event_dispatcher::EventDispatcher;
@@ -43,6 +45,7 @@ use history::{get_conversation_history, get_conversation_messages, get_conversat
 use interactive_runtime::{
     InteractiveReplayBatch, InteractiveRuntimeManager, InteractiveSessionOptions,
 };
+use opencode::{snapshot_known_session_ids, track_launched_session};
 use proxy_debug::{
     ProxyDebugManager, ProxyDebugState, ProxyTrafficDetail, ProxyTrafficPage, RegisterRouteRequest,
 };
@@ -384,7 +387,7 @@ async fn launch_claude_code(
     let client_name = client
         .unwrap_or_else(|| "claude".to_string())
         .to_lowercase();
-    if client_name != "claude" && client_name != "codex" {
+    if client_name != "claude" && client_name != "codex" && client_name != "opencode" {
         return Err(format!("Unsupported client '{}'", client_name));
     }
 
@@ -394,12 +397,12 @@ async fn launch_claude_code(
         client_name, env_name, perm_mode, working_dir, resume_session_id
     );
 
-    if client_name == "codex" {
+    if client_name == "codex" || client_name == "opencode" {
         if perm_mode
             .as_ref()
             .is_some_and(|mode| !mode.trim().is_empty())
         {
-            println!("Codex launch ignores permission mode");
+            println!("{client_name} launch ignores permission mode");
         }
     }
 
@@ -409,34 +412,45 @@ async fn launch_claude_code(
     // Build environment variables map
     let mut env_vars: HashMap<String, String> = HashMap::new();
     let mut claude_upstream_base_url: Option<String> = None;
+    let mut resolved_env_name = env_name.clone();
+    let mut config_source = None;
     if client_name == "claude" {
         let resolved = resolve_claude_env(&env_name)?;
         claude_upstream_base_url = resolved.upstream_base_url;
         env_vars = resolved.env_vars;
+    } else if client_name == "opencode" {
+        let resolved = resolve_opencode_runtime(&env_name)?;
+        resolved_env_name = resolved.env_name;
+        config_source = Some(resolved.config_source);
+        env_vars = resolved.env_vars;
     }
 
     if proxy_state.is_enabled() {
-        let upstream_base_url = if client_name == "claude" {
-            claude_upstream_base_url
-                .clone()
-                .unwrap_or_else(|| "https://api.anthropic.com".to_string())
+        if client_name == "opencode" {
+            println!("OpenCode launch ignores proxy debug routing");
         } else {
-            proxy_state.codex_upstream_base_url()
-        };
+            let upstream_base_url = if client_name == "claude" {
+                claude_upstream_base_url
+                    .clone()
+                    .unwrap_or_else(|| "https://api.anthropic.com".to_string())
+            } else {
+                proxy_state.codex_upstream_base_url()
+            };
 
-        let proxy_route_base_url = proxy_state
-            .register_route(RegisterRouteRequest {
-                session_id: session_id.clone(),
-                client: client_name.clone(),
-                env_name: env_name.clone(),
-                upstream_base_url,
-            })
-            .await?;
+            let proxy_route_base_url = proxy_state
+                .register_route(RegisterRouteRequest {
+                    session_id: session_id.clone(),
+                    client: client_name.clone(),
+                    env_name: resolved_env_name.clone(),
+                    upstream_base_url,
+                })
+                .await?;
 
-        if client_name == "claude" {
-            env_vars.insert("ANTHROPIC_BASE_URL".to_string(), proxy_route_base_url);
-        } else {
-            env_vars.insert("OPENAI_BASE_URL".to_string(), proxy_route_base_url);
+            if client_name == "claude" {
+                env_vars.insert("ANTHROPIC_BASE_URL".to_string(), proxy_route_base_url);
+            } else {
+                env_vars.insert("OPENAI_BASE_URL".to_string(), proxy_route_base_url);
+            }
         }
     }
 
@@ -455,6 +469,11 @@ async fn launch_claude_code(
     println!("Session ID: {}", session_id);
     println!("Work dir: {}", work_dir);
     println!("Env vars count: {}", env_vars.len());
+    let opencode_known_sessions = if client_name == "opencode" {
+        Some(snapshot_known_session_ids())
+    } else {
+        None
+    };
 
     // Get preferred terminal and launch
     let preferred_terminal = terminal::get_preferred_terminal();
@@ -465,7 +484,7 @@ async fn launch_claude_code(
         env_vars,
         &work_dir,
         &session_id,
-        &env_name,
+        &resolved_env_name,
         perm_mode.as_deref(),
         resume_session_id.as_deref(),
         &client_name,
@@ -486,6 +505,18 @@ async fn launch_claude_code(
         }
     };
 
+    if client_name == "opencode" {
+        track_launched_session(
+            opencode_known_sessions.unwrap_or_default(),
+            resolved_env_name.clone(),
+            config_source
+                .clone()
+                .unwrap_or_else(|| "native".to_string()),
+            work_dir.clone(),
+            resume_session_id.clone(),
+        );
+    }
+
     // Determine terminal type string for session metadata
     let terminal_type_str = match preferred_terminal {
         TerminalType::ITerm2 => "iterm2",
@@ -496,7 +527,8 @@ async fn launch_claude_code(
         id: session_id,
         pid: None, // Terminal-launched sessions don't have direct PID access
         client: client_name,
-        env_name,
+        env_name: resolved_env_name,
+        config_source,
         perm_mode: perm,
         working_dir: work_dir,
         start_time: chrono::Utc::now().to_rfc3339(),
@@ -778,7 +810,7 @@ async fn create_interactive_session(
     let client_name = client
         .unwrap_or_else(|| "claude".to_string())
         .to_lowercase();
-    if client_name != "claude" && client_name != "codex" {
+    if client_name != "claude" && client_name != "codex" && client_name != "opencode" {
         return Err(format!("Unsupported client '{}'", client_name));
     }
 
@@ -813,6 +845,7 @@ async fn create_interactive_session(
                 session_id: session_id.clone(),
                 client: client_name.clone(),
                 env_name,
+                config_source: None,
                 perm_mode: "n/a".to_string(),
                 working_dir: effective_working_dir,
                 resume_session_id,
@@ -850,6 +883,56 @@ async fn create_interactive_session(
         .await;
     }
 
+    if client_name == "opencode" {
+        let session_id = generate_session_id();
+        let resolved = resolve_opencode_runtime(&env_name)?;
+        let resolved_env_name = resolved.env_name.clone();
+        let resolved_config_source = resolved.config_source.clone();
+        let effective_working_dir = resolve_headless_working_dir(working_dir);
+        let resume_target = resume_session_id.clone();
+        let before_session_ids = snapshot_known_session_ids();
+        let env_vars = resolved.env_vars;
+
+        if proxy_state.is_enabled() {
+            println!("OpenCode interactive sessions ignore proxy debug routing");
+        }
+
+        let session_manager = state.inner().clone();
+        let create_result = interactive_state.create_session(
+            app,
+            session_manager,
+            InteractiveSessionOptions {
+                session_id: session_id.clone(),
+                client: client_name.clone(),
+                env_name: resolved_env_name.clone(),
+                config_source: Some(resolved_config_source.clone()),
+                perm_mode: "n/a".to_string(),
+                working_dir: effective_working_dir.clone(),
+                resume_session_id,
+                env_vars,
+            },
+        );
+
+        let session = create_result?;
+        track_launched_session(
+            before_session_ids,
+            resolved_env_name,
+            resolved_config_source,
+            effective_working_dir.clone(),
+            resume_target.clone(),
+        );
+        if let Some(session_id) = resume_target.as_deref() {
+            if let Err(error) = clear_runtime_recovery_candidates_by_claude_session_id(session_id) {
+                eprintln!(
+                    "Failed to clear recovery candidate for resumed interactive session {}: {}",
+                    session_id, error
+                );
+            }
+        }
+
+        return Ok(session);
+    }
+
     let session_id = generate_session_id();
     let resolved = resolve_claude_env(&env_name)?;
     let effective_working_dir = resolve_headless_working_dir(working_dir);
@@ -881,6 +964,7 @@ async fn create_interactive_session(
             session_id: session_id.clone(),
             client: client_name.clone(),
             env_name: resolved.env_name,
+            config_source: Some("ccem".to_string()),
             perm_mode: effective_perm_mode,
             working_dir: effective_working_dir,
             resume_session_id,
@@ -1391,6 +1475,14 @@ fn check_arrange_support() -> Result<bool, String> {
 async fn open_directory_dialog(app: tauri::AppHandle) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
 
+    if let Some(path) = std::env::var("CCEM_TEST_DIRECTORY_PICKER_PATH")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(Some(path));
+    }
+
     let (tx, rx) = std::sync::mpsc::channel();
 
     app.dialog().file().pick_folder(move |folder_path| {
@@ -1635,6 +1727,11 @@ fn check_claude_installed() -> bool {
 #[tauri::command]
 fn check_codex_installed() -> bool {
     terminal::is_codex_installed()
+}
+
+#[tauri::command]
+fn check_opencode_installed() -> bool {
+    terminal::is_opencode_installed()
 }
 
 #[tauri::command]
@@ -2433,6 +2530,7 @@ fn main() {
             check_ccem_installed,
             check_claude_installed,
             check_codex_installed,
+            check_opencode_installed,
             check_tmux_installed,
             load_from_remote,
             arrange_sessions,

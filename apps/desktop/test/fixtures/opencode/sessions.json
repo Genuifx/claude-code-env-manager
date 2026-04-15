@@ -1,0 +1,9 @@
+[
+  {
+    "id": "fixture-opencode-session",
+    "cwd": "/tmp/fixture-opencode-workspace",
+    "title": "OpenCode 历史会话",
+    "updatedAt": "2026-04-15T12:34:56.000Z",
+    "envName": "Fixture Anthropic"
+  }
+]

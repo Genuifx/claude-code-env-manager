@@ -3,6 +3,7 @@
 // Conversation history support for both Claude and Codex sources.
 
 use rusqlite::{Connection, OpenFlags};
+use crate::opencode;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
@@ -13,6 +14,7 @@ use std::time::UNIX_EPOCH;
 
 const SOURCE_CLAUDE: &str = "claude";
 const SOURCE_CODEX: &str = "codex";
+const SOURCE_OPENCODE: &str = "opencode";
 
 // ============================================================================
 // Output types — sent to frontend (camelCase for TypeScript)
@@ -27,6 +29,10 @@ pub struct HistorySession {
     pub timestamp: u64,
     pub project: String,
     pub project_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_source: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -206,6 +212,10 @@ pub async fn get_conversation_history(
             sessions.extend(load_codex_history()?);
         }
 
+        if source_filter.is_none() || source_filter == Some(SOURCE_OPENCODE) {
+            sessions.extend(load_opencode_history()?);
+        }
+
         sessions.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
 
         // Overlay user-edited title overrides
@@ -254,6 +264,13 @@ pub async fn get_conversation_messages(
                 };
                 parse_codex_conversation_file(&path)?
             }
+            SOURCE_OPENCODE => {
+                let export = match load_opencode_export(&session_id)? {
+                    Some(value) => value,
+                    None => return Ok(vec![]),
+                };
+                parse_opencode_conversation_export(&export)?
+            }
             _ => return Ok(vec![]),
         };
 
@@ -284,6 +301,10 @@ pub async fn get_conversation_segments(
             SOURCE_CODEX => {
                 let path = find_codex_session_file(&session_id).ok_or("Session file not found")?;
                 parse_codex_conversation_file(&path)?
+            }
+            SOURCE_OPENCODE => {
+                let export = load_opencode_export(&session_id)?.ok_or("Session file not found")?;
+                parse_opencode_conversation_export(&export)?
             }
             _ => return Err("Unsupported source".to_string()),
         };
@@ -355,6 +376,8 @@ fn load_claude_history_from_paths(
                     timestamp,
                     project,
                     project_name,
+                    env_name: None,
+                    config_source: None,
                 },
             );
         }
@@ -481,6 +504,8 @@ fn parse_claude_project_session_index(path: &Path) -> Option<HistorySession> {
         timestamp,
         project,
         project_name,
+        env_name: None,
+        config_source: None,
     })
 }
 
@@ -750,6 +775,8 @@ fn upsert_codex_history_session(
                 timestamp,
                 project: String::new(),
                 project_name: "unknown".to_string(),
+                env_name: None,
+                config_source: None,
             },
         );
     }
@@ -864,6 +891,8 @@ fn load_codex_history_from_config(config: &CodexPathConfig) -> Result<Vec<Histor
                 timestamp: record.timestamp,
                 project: record.project,
                 project_name,
+                env_name: None,
+                config_source: None,
             })
         })
         .collect())
@@ -1741,6 +1770,366 @@ fn extract_reasoning_text(payload: &serde_json::Value) -> String {
 }
 
 // ============================================================================
+// OpenCode history helpers
+// ============================================================================
+
+fn load_opencode_history() -> Result<Vec<HistorySession>, String> {
+    let mut session_map: HashMap<String, HistorySession> = HashMap::new();
+
+    if let Some(raw_value) = opencode::load_session_list_value_from_cli_or_fixture()? {
+        if let Some(items) = raw_value.as_array() {
+            for item in items {
+                if let Some(session) = parse_opencode_history_session(item) {
+                    merge_opencode_history_session(&mut session_map, session);
+                }
+            }
+        }
+
+        if let Some(items) = raw_value.get("sessions").and_then(|value| value.as_array()) {
+            for item in items {
+                if let Some(session) = parse_opencode_history_session(item) {
+                    merge_opencode_history_session(&mut session_map, session);
+                }
+            }
+        }
+    }
+
+    for session in opencode::list_local_sessions()? {
+        merge_opencode_history_session(
+            &mut session_map,
+            local_opencode_session_to_history_session(session),
+        );
+    }
+
+    Ok(session_map.into_values().collect())
+}
+
+fn parse_opencode_history_session(value: &serde_json::Value) -> Option<HistorySession> {
+    let id = extract_opencode_string(value, &["id", "sessionId", "session_id"])?;
+    let metadata = opencode::read_session_metadata(&id);
+    let project = extract_opencode_string(value, &["cwd", "path", "projectPath", "project"])
+        .or_else(|| metadata.as_ref().and_then(|item| item.project.clone()))
+        .unwrap_or_default();
+    let project_name = project
+        .split(['/', '\\'])
+        .next_back()
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown")
+        .to_string();
+    let timestamp = extract_opencode_timestamp(value)
+        .or_else(|| {
+            extract_opencode_string(value, &["updatedAt", "createdAt", "timestamp", "lastUpdated"])
+                .map(|text| parse_string_timestamp(&text))
+        })
+        .unwrap_or(0);
+    let display = normalize_history_display(
+        extract_opencode_string(value, &["title", "display", "summary", "preview", "name"]),
+    );
+
+    Some(HistorySession {
+        id,
+        source: SOURCE_OPENCODE.to_string(),
+        display,
+        timestamp,
+        project,
+        project_name,
+        env_name: extract_opencode_string(value, &["envName", "environment", "env"]).or_else(|| {
+            metadata
+                .as_ref()
+                .map(|item| item.env_name.clone())
+                .or_else(|| Some(opencode::OPENCODE_NATIVE_ENV_NAME.to_string()))
+        }),
+        config_source: extract_opencode_string(value, &["configSource"]).or_else(|| {
+            metadata
+                .as_ref()
+                .map(|item| item.config_source.clone())
+                .or_else(|| Some("native".to_string()))
+        }),
+    })
+}
+
+fn merge_opencode_history_session(
+    session_map: &mut HashMap<String, HistorySession>,
+    candidate: HistorySession,
+) {
+    if let Some(existing) = session_map.get_mut(&candidate.id) {
+        if candidate.timestamp > existing.timestamp {
+            existing.timestamp = candidate.timestamp;
+        }
+        if existing.project.is_empty() && !candidate.project.is_empty() {
+            existing.project = candidate.project.clone();
+            existing.project_name = candidate.project_name.clone();
+        }
+        if (existing.env_name.is_none()
+            || existing.env_name.as_deref() == Some(opencode::OPENCODE_NATIVE_ENV_NAME))
+            && candidate.env_name.is_some()
+            && candidate.env_name.as_deref() != Some(opencode::OPENCODE_NATIVE_ENV_NAME)
+        {
+            existing.env_name = candidate.env_name.clone();
+        }
+        if (existing.config_source.is_none()
+            || existing.config_source.as_deref() == Some("native"))
+            && candidate.config_source.as_deref() == Some("ccem")
+        {
+            existing.config_source = candidate.config_source.clone();
+        }
+        if (existing.display.is_empty() || is_noise_display(&existing.display))
+            && !candidate.display.is_empty()
+            && !is_noise_display(&candidate.display)
+        {
+            existing.display = candidate.display;
+        }
+    } else {
+        session_map.insert(candidate.id.clone(), candidate);
+    }
+}
+
+fn load_opencode_export(session_id: &str) -> Result<Option<serde_json::Value>, String> {
+    if let Some(value) = opencode::load_export_from_cli_or_fixture(session_id)? {
+        return Ok(Some(value));
+    }
+
+    let messages = opencode::load_local_messages(session_id)?;
+    Ok(messages.map(build_local_opencode_export))
+}
+
+fn parse_opencode_conversation_export(
+    value: &serde_json::Value,
+) -> Result<(Vec<ConversationMessage>, Vec<CompactSegment>), String> {
+    let Some(items) = find_opencode_message_array(value) else {
+        return Ok((Vec::new(), Vec::new()));
+    };
+
+    let mut messages = Vec::new();
+    for item in items {
+        let msg_type = extract_opencode_string(item, &["role", "type", "kind"])
+            .unwrap_or_else(|| "assistant".to_string());
+        let content_text = extract_opencode_content_text(item);
+        let usage = extract_opencode_usage(item);
+        let timestamp = extract_opencode_timestamp(item)
+            .or_else(|| {
+                extract_opencode_string(item, &["timestamp", "createdAt", "updatedAt"])
+                    .map(|text| parse_string_timestamp(&text))
+            })
+            .unwrap_or(0);
+
+        messages.push(ConversationMessage {
+            msg_type,
+            uuid: extract_opencode_string(item, &["id", "uuid"]),
+            content: content_text.map_or(serde_json::Value::Null, |text| json!(text)),
+            model: extract_opencode_string(item, &["model"]),
+            summary: None,
+            plan_content: None,
+            timestamp,
+            input_tokens: usage.as_ref().map(|usage| usage.input_tokens),
+            output_tokens: usage.as_ref().map(|usage| usage.output_tokens),
+            cache_creation_tokens: usage.as_ref().map(|usage| usage.cache_creation_tokens),
+            cache_read_tokens: usage.as_ref().map(|usage| usage.cache_read_tokens),
+            segment_index: 0,
+            is_compact_boundary: false,
+        });
+    }
+
+    Ok((messages, Vec::new()))
+}
+
+#[derive(Debug, Clone, Default)]
+struct OpenCodeUsage {
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_read_tokens: u64,
+    cache_creation_tokens: u64,
+}
+
+fn find_opencode_message_array(value: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {
+    if let Some(array) = value.as_array() {
+        if array.iter().any(opencode_message_candidate) {
+            return Some(array);
+        }
+        return None;
+    }
+
+    let object = value.as_object()?;
+    for key in ["messages", "items", "entries", "conversation"] {
+        if let Some(candidate) = object.get(key) {
+            if let Some(array) = find_opencode_message_array(candidate) {
+                return Some(array);
+            }
+        }
+    }
+
+    for child in object.values() {
+        if let Some(array) = find_opencode_message_array(child) {
+            return Some(array);
+        }
+    }
+
+    None
+}
+
+fn opencode_message_candidate(value: &serde_json::Value) -> bool {
+    value
+        .as_object()
+        .map(|object| {
+            object.contains_key("role")
+                || object.contains_key("type")
+                || object.contains_key("content")
+                || object.contains_key("message")
+                || object.contains_key("text")
+        })
+        .unwrap_or(false)
+}
+
+fn extract_opencode_string(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    if let Some(object) = value.as_object() {
+        for key in keys {
+            if let Some(raw) = object.get(*key) {
+                if let Some(text) = raw.as_str().filter(|text| !text.trim().is_empty()) {
+                    return Some(text.to_string());
+                }
+                if let Some(nested) = raw
+                    .as_object()
+                    .and_then(|nested| nested.get("path"))
+                    .and_then(|nested| nested.as_str())
+                    .filter(|text| !text.trim().is_empty())
+                {
+                    return Some(nested.to_string());
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn extract_opencode_timestamp(value: &serde_json::Value) -> Option<u64> {
+    for key in ["timestamp", "updatedAt", "createdAt", "lastUpdated"] {
+        let Some(raw) = value.get(key) else {
+            continue;
+        };
+
+        if let Some(number) = raw.as_u64() {
+            return Some(normalize_unix_timestamp(number));
+        }
+        if let Some(text) = raw.as_str().filter(|text| !text.trim().is_empty()) {
+            let parsed = parse_string_timestamp(text);
+            if parsed > 0 {
+                return Some(parsed);
+            }
+        }
+    }
+
+    None
+}
+
+fn parse_string_timestamp(value: &str) -> u64 {
+    if let Ok(number) = value.parse::<u64>() {
+        return normalize_unix_timestamp(number);
+    }
+
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|dt| dt.timestamp_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn extract_opencode_content_text(value: &serde_json::Value) -> Option<String> {
+    if let Some(text) = value.as_str().filter(|text| !text.trim().is_empty()) {
+        return Some(text.to_string());
+    }
+
+    if let Some(array) = value.as_array() {
+        let parts = array
+            .iter()
+            .filter_map(extract_opencode_content_text)
+            .collect::<Vec<_>>();
+        if !parts.is_empty() {
+            return Some(parts.join("\n\n"));
+        }
+    }
+
+    let object = value.as_object()?;
+    for key in ["content", "text", "body", "message", "input", "output", "result"] {
+        if let Some(text) = object.get(key).and_then(extract_opencode_content_text) {
+            return Some(text);
+        }
+    }
+
+    None
+}
+
+fn extract_opencode_usage(value: &serde_json::Value) -> Option<OpenCodeUsage> {
+    let usage_node = value
+        .get("usage")
+        .or_else(|| value.get("tokens"))
+        .or_else(|| value.get("stats"))
+        .or_else(|| value.get("cost"))?;
+    let object = usage_node.as_object()?;
+
+    Some(OpenCodeUsage {
+        input_tokens: object
+            .get("inputTokens")
+            .or_else(|| object.get("input_tokens"))
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0),
+        output_tokens: object
+            .get("outputTokens")
+            .or_else(|| object.get("output_tokens"))
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0),
+        cache_read_tokens: object
+            .get("cacheReadTokens")
+            .or_else(|| object.get("cache_read_tokens"))
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0),
+        cache_creation_tokens: object
+            .get("cacheCreationTokens")
+            .or_else(|| object.get("cache_creation_tokens"))
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0),
+    })
+}
+
+fn local_opencode_session_to_history_session(
+    session: opencode::LocalOpenCodeSession,
+) -> HistorySession {
+    let project = session.project.unwrap_or_default();
+    let project_name = project
+        .split(['/', '\\'])
+        .next_back()
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown")
+        .to_string();
+
+    HistorySession {
+        id: session.id,
+        source: SOURCE_OPENCODE.to_string(),
+        display: normalize_history_display(Some(session.title)),
+        timestamp: session.updated_at.max(session.created_at),
+        project,
+        project_name,
+        env_name: session.env_name,
+        config_source: session.config_source,
+    }
+}
+
+fn build_local_opencode_export(messages: Vec<opencode::LocalOpenCodeMessage>) -> serde_json::Value {
+    json!({
+        "messages": messages
+            .into_iter()
+            .map(|message| {
+                json!({
+                    "id": message.id,
+                    "role": message.role,
+                    "timestamp": message.timestamp,
+                    "model": message.model,
+                    "content": message.content,
+                })
+            })
+            .collect::<Vec<_>>()
+    })
+}
+
+// ============================================================================
 // Shared helpers
 // ============================================================================
 
@@ -1758,8 +2147,9 @@ fn normalize_history_source(source: Option<&str>) -> Result<Option<&'static str>
     match lowered.as_str() {
         SOURCE_CLAUDE => Ok(Some(SOURCE_CLAUDE)),
         SOURCE_CODEX => Ok(Some(SOURCE_CODEX)),
+        SOURCE_OPENCODE => Ok(Some(SOURCE_OPENCODE)),
         _ => Err(format!(
-            "Unsupported source '{}'. Use claude, codex, or all.",
+            "Unsupported source '{}'. Use claude, codex, opencode, or all.",
             raw
         )),
     }
@@ -1775,6 +2165,7 @@ fn resolve_history_source_for_session(
 
     let has_claude = has_claude_session(session_id);
     let has_codex = has_codex_session(session_id);
+    let has_opencode = has_opencode_session(session_id);
 
     if has_claude {
         // Keep legacy behavior: if both exist, default to Claude unless caller passes source.
@@ -1783,6 +2174,10 @@ fn resolve_history_source_for_session(
 
     if has_codex {
         return Some(SOURCE_CODEX);
+    }
+
+    if has_opencode {
+        return Some(SOURCE_OPENCODE);
     }
 
     None
@@ -1799,6 +2194,12 @@ fn has_claude_session(session_id: &str) -> bool {
 
 fn has_codex_session(session_id: &str) -> bool {
     find_codex_session_file(session_id).is_some()
+}
+
+fn has_opencode_session(session_id: &str) -> bool {
+    load_opencode_export(session_id)
+        .map(|value| value.is_some())
+        .unwrap_or(false)
 }
 
 /// Parse timestamp value that could be number or ISO string.
@@ -2222,6 +2623,8 @@ mod tests {
         load_codex_history_from_config, normalize_history_display, normalize_history_source,
         parse_codex_history_timestamp, resolve_codex_path_config_from,
         upsert_codex_history_session, CodexHistoryLine, CodexPathConfig,
+        merge_opencode_history_session, parse_opencode_conversation_export,
+        parse_opencode_history_session, HistorySession,
     };
     use rusqlite::Connection;
     use std::collections::HashMap;
@@ -2431,7 +2834,108 @@ mod tests {
             normalize_history_source(Some("CoDeX")).unwrap(),
             Some("codex")
         );
+        assert_eq!(
+            normalize_history_source(Some("OpenCode")).unwrap(),
+            Some("opencode")
+        );
         assert!(normalize_history_source(Some("other")).is_err());
+    }
+
+    #[test]
+    fn test_parse_opencode_history_session_uses_title_and_project() {
+        let value = serde_json::json!({
+            "id": "opencode-session-1",
+            "cwd": "/tmp/opencode-workspace",
+            "title": "排查 OpenCode 集成",
+            "updatedAt": "2026-04-15T12:34:56.000Z"
+        });
+
+        let session = parse_opencode_history_session(&value).expect("session parsed");
+        assert_eq!(session.id, "opencode-session-1");
+        assert_eq!(session.source, "opencode");
+        assert_eq!(session.project, "/tmp/opencode-workspace");
+        assert_eq!(session.project_name, "opencode-workspace");
+        assert_eq!(session.display, "排查 OpenCode 集成");
+        assert_eq!(session.timestamp, 1_776_256_496_000);
+    }
+
+    #[test]
+    fn test_merge_opencode_history_session_promotes_local_ccem_metadata() {
+        let mut map = HashMap::new();
+        map.insert(
+            "opencode-session-1".to_string(),
+            HistorySession {
+                id: "opencode-session-1".to_string(),
+                source: "opencode".to_string(),
+                display: "".to_string(),
+                timestamp: 10,
+                project: "".to_string(),
+                project_name: "unknown".to_string(),
+                env_name: Some(super::opencode::OPENCODE_NATIVE_ENV_NAME.to_string()),
+                config_source: Some("native".to_string()),
+            },
+        );
+
+        merge_opencode_history_session(
+            &mut map,
+            HistorySession {
+                id: "opencode-session-1".to_string(),
+                source: "opencode".to_string(),
+                display: "补齐元数据".to_string(),
+                timestamp: 20,
+                project: "/tmp/demo".to_string(),
+                project_name: "demo".to_string(),
+                env_name: Some("Fixture Anthropic".to_string()),
+                config_source: Some("ccem".to_string()),
+            },
+        );
+
+        let merged = map.get("opencode-session-1").expect("merged session");
+        assert_eq!(merged.timestamp, 20);
+        assert_eq!(merged.project, "/tmp/demo");
+        assert_eq!(merged.project_name, "demo");
+        assert_eq!(merged.display, "补齐元数据");
+        assert_eq!(merged.env_name.as_deref(), Some("Fixture Anthropic"));
+        assert_eq!(merged.config_source.as_deref(), Some("ccem"));
+    }
+
+    #[test]
+    fn test_parse_opencode_conversation_export_reads_messages_and_usage() {
+        let export = serde_json::json!({
+            "messages": [
+                {
+                    "id": "msg-1",
+                    "role": "user",
+                    "timestamp": "2026-04-15T12:34:56.000Z",
+                    "content": [{"type": "text", "text": "请帮我检查 OpenCode 接入"}]
+                },
+                {
+                    "id": "msg-2",
+                    "role": "assistant",
+                    "timestamp": "2026-04-15T12:35:10.000Z",
+                    "model": "anthropic/claude-sonnet-4-5",
+                    "content": [{"type": "text", "text": "已经开始检查。"}],
+                    "usage": {
+                        "inputTokens": 1200,
+                        "outputTokens": 340,
+                        "cacheReadTokens": 80,
+                        "cacheCreationTokens": 20
+                    }
+                }
+            ]
+        });
+
+        let (messages, segments) =
+            parse_opencode_conversation_export(&export).expect("export parsed");
+
+        assert!(segments.is_empty());
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].msg_type, "user");
+        assert_eq!(messages[1].model.as_deref(), Some("anthropic/claude-sonnet-4-5"));
+        assert_eq!(messages[1].input_tokens, Some(1200));
+        assert_eq!(messages[1].output_tokens, Some(340));
+        assert_eq!(messages[1].cache_read_tokens, Some(80));
+        assert_eq!(messages[1].cache_creation_tokens, Some(20));
     }
 
     #[test]
