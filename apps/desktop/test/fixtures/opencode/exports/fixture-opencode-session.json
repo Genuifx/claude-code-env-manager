@@ -1,0 +1,35 @@
+{
+  "id": "fixture-opencode-session",
+  "messages": [
+    {
+      "id": "fixture-user-1",
+      "role": "user",
+      "timestamp": "2026-04-15T12:34:56.000Z",
+      "content": [
+        {
+          "type": "text",
+          "text": "请帮我检查 OpenCode 接入"
+        }
+      ]
+    },
+    {
+      "id": "fixture-assistant-1",
+      "role": "assistant",
+      "timestamp": "2026-04-15T12:35:10.000Z",
+      "model": "anthropic/claude-sonnet-4-5",
+      "content": [
+        {
+          "type": "text",
+          "text": "已经开始检查 OpenCode 接入。"
+        }
+      ],
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 340,
+        "cacheReadTokens": 80,
+        "cacheCreationTokens": 20,
+        "cost": 0.42
+      }
+    }
+  ]
+}

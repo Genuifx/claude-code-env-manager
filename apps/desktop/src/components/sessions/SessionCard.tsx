@@ -235,10 +235,12 @@ export function SessionCard({
   const projectDir = unifiedSession?.projectDir ?? session.workingDir;
   const envName = unifiedSession?.envName ?? session.envName;
   const permMode = unifiedSession?.permMode ?? session.permMode;
+  const showPermMode = session.client !== 'opencode' && !!permMode && permMode !== 'n/a';
   const startedAt = unifiedSession ? new Date(unifiedSession.createdAt) : session.startedAt;
   const pid = unifiedSession?.pid ?? session.pid;
   const sessionId = unifiedSession?.id ?? session.id;
   const isHeadless = unifiedSession?.runtimeKind === 'headless';
+  const allowChannelBinding = session.client !== 'opencode';
   const isRunning = unifiedSession
     ? ['running', 'ready', 'processing', 'waiting_permission', 'initializing'].includes(
         unifiedSession.status
@@ -348,14 +350,16 @@ export function SessionCard({
             )}
           </div>
           <div className="flex items-center gap-0.5">
-            <SessionMoreActionsDropdown
-              bindCopied={bindCopied}
-              copiedLabel={t('telegram.bindCopiedShort')}
-              copyLabel={t('telegram.copyBindShort')}
-              bindLabel={t('chat.bindToChannel')}
-              onCopyBind={handleCopyBind}
-              onOpenBindDialog={() => setBindDialogOpen(true)}
-            />
+            {allowChannelBinding && (
+              <SessionMoreActionsDropdown
+                bindCopied={bindCopied}
+                copiedLabel={t('telegram.bindCopiedShort')}
+                copyLabel={t('telegram.copyBindShort')}
+                bindLabel={t('chat.bindToChannel')}
+                onCopyBind={handleCopyBind}
+                onOpenBindDialog={() => setBindDialogOpen(true)}
+              />
+            )}
             {onRemove && (
               <SessionActionIconButton
                 icon={X}
@@ -384,14 +388,16 @@ export function SessionCard({
           />
           </div>
           <div className="flex items-center gap-0.5">
-            <SessionMoreActionsDropdown
-              bindCopied={bindCopied}
-              copiedLabel={t('telegram.bindCopiedShort')}
-              copyLabel={t('telegram.copyBindShort')}
-              bindLabel={t('chat.bindToChannel')}
-              onCopyBind={handleCopyBind}
-              onOpenBindDialog={() => setBindDialogOpen(true)}
-            />
+            {allowChannelBinding && (
+              <SessionMoreActionsDropdown
+                bindCopied={bindCopied}
+                copiedLabel={t('telegram.bindCopiedShort')}
+                copyLabel={t('telegram.copyBindShort')}
+                bindLabel={t('chat.bindToChannel')}
+                onCopyBind={handleCopyBind}
+                onOpenBindDialog={() => setBindDialogOpen(true)}
+              />
+            )}
             <SessionActionIconButton icon={X} onClick={() => onClose(sessionId)} tooltip={t('workspace.close')} variant="destructive" />
           </div>
         </div>
@@ -413,14 +419,16 @@ export function SessionCard({
           />
         </div>
         <div className="flex items-center gap-0.5">
-          <SessionMoreActionsDropdown
-            bindCopied={bindCopied}
-            copiedLabel={t('telegram.bindCopiedShort')}
-            copyLabel={t('telegram.copyBindShort')}
-            bindLabel={t('chat.bindToChannel')}
-            onCopyBind={handleCopyBind}
-            onOpenBindDialog={() => setBindDialogOpen(true)}
-          />
+          {allowChannelBinding && (
+            <SessionMoreActionsDropdown
+              bindCopied={bindCopied}
+              copiedLabel={t('telegram.bindCopiedShort')}
+              copyLabel={t('telegram.copyBindShort')}
+              bindLabel={t('chat.bindToChannel')}
+              onCopyBind={handleCopyBind}
+              onOpenBindDialog={() => setBindDialogOpen(true)}
+            />
+          )}
           <Tooltip delayDuration={200}>
             <TooltipTrigger asChild>
               <Button
@@ -483,6 +491,9 @@ export function SessionCard({
     <TooltipProvider delayDuration={200}>
       <>
         <div
+          data-testid="session-card"
+          data-session-id={sessionId}
+          data-client={session.client}
           className={cn(
             'group relative glass-card glass-noise rounded-xl overflow-hidden',
             cardIsSelectable && 'cursor-pointer',
@@ -528,7 +539,7 @@ export function SessionCard({
               <ModelIcon model={envName} size={12} />
               <span className="font-medium text-foreground/70">{envName}</span>
 
-              {permMode && (
+              {showPermMode && (
                 <>
                   <span className="text-muted-foreground/25">·</span>
                   <Tooltip delayDuration={200}>
@@ -567,7 +578,7 @@ export function SessionCard({
           </div>
         </div>
 
-        {bindDialogOpen ? (
+        {allowChannelBinding && bindDialogOpen ? (
           <Suspense fallback={null}>
             <LazyBindToChatDialog
               open={bindDialogOpen}

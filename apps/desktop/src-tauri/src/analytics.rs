@@ -1,10 +1,12 @@
 // apps/desktop/src-tauri/src/analytics.rs
 //
-// Native JSONL scanner for Claude + Codex usage.
+// Native JSONL scanner for Claude, Codex, and OpenCode usage.
 
 use crate::config;
+use crate::opencode;
 use chrono::{Datelike, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -12,7 +14,9 @@ use std::path::PathBuf;
 
 const SOURCE_CLAUDE: &str = "claude";
 const SOURCE_CODEX: &str = "codex";
+const SOURCE_OPENCODE: &str = "opencode";
 const USAGE_CACHE_VERSION: u32 = 2;
+const OPENCODE_NATIVE_ENV_NAME: &str = opencode::OPENCODE_NATIVE_ENV_NAME;
 
 // ============================================================================
 // Output types — sent to frontend (must use camelCase)
@@ -140,6 +144,8 @@ struct CacheStats {
 struct CacheEntry {
     timestamp: String,
     model: String,
+    #[serde(default)]
+    environment: Option<String>,
     usage: CacheUsage,
 }
 
@@ -545,6 +551,7 @@ fn parse_claude_jsonl_reader<R: BufRead>(
         entries.push(CacheEntry {
             timestamp,
             model,
+            environment: None,
             usage: CacheUsage {
                 input_tokens,
                 output_tokens,
@@ -734,6 +741,7 @@ fn parse_codex_jsonl_reader<R: BufRead>(
                 entries.push(CacheEntry {
                     timestamp,
                     model,
+                    environment: None,
                     usage: CacheUsage {
                         input_tokens,
                         output_tokens,
@@ -821,8 +829,392 @@ fn refresh_usage_cache() -> CacheFile {
             .insert(path_str, CacheFileEntry { meta, stats });
     }
 
+    for (path_key, entry) in load_opencode_cache_entries(&prices, &existing_cache) {
+        new_cache.files.insert(path_key, entry);
+    }
+
     write_usage_cache(&new_cache);
     new_cache
+}
+
+fn load_opencode_cache_entries(
+    prices: &HashMap<String, ModelPrice>,
+    existing_cache: &CacheFile,
+) -> HashMap<String, CacheFileEntry> {
+    let local_sessions = opencode::list_local_sessions()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|session| (session.id.clone(), session))
+        .collect::<HashMap<_, _>>();
+
+    let Some(session_list) = opencode::load_session_list_value_from_cli_or_fixture()
+        .ok()
+        .flatten()
+    else {
+        return build_local_opencode_cache_entries(&local_sessions, existing_cache);
+    };
+
+    let Some(items) = parse_opencode_session_items(&session_list) else {
+        return build_local_opencode_cache_entries(&local_sessions, existing_cache);
+    };
+
+    let mut entries = HashMap::new();
+    for session in items {
+        let path_key = format!("opencode://session/{}", session.id);
+        let local_session = local_sessions.get(&session.id);
+        let meta = CacheMeta {
+            mtime: session
+                .updated_at
+                .or_else(|| local_session.map(|item| item.updated_at))
+                .unwrap_or(0) as f64,
+            size: 0,
+        };
+
+        let cache_valid = existing_cache.files.get(&path_key).is_some_and(|cached| {
+            (cached.meta.mtime - meta.mtime).abs() < 1.0 && cached.meta.size == meta.size
+        });
+
+        let stats = if cache_valid {
+            existing_cache.files[&path_key].stats.clone()
+        } else {
+            opencode::load_export_from_cli_or_fixture(&session.id)
+                .ok()
+                .flatten()
+                .map(|value| parse_opencode_export_stats(&value, &session.environment, prices))
+                .or_else(|| local_session.map(local_opencode_session_to_cache_stats))
+                .unwrap_or_default()
+        };
+
+        entries.insert(path_key, CacheFileEntry { meta, stats });
+    }
+
+    for (session_id, session) in &local_sessions {
+        let path_key = format!("opencode://session/{session_id}");
+        if entries.contains_key(&path_key) {
+            continue;
+        }
+
+        let meta = CacheMeta {
+            mtime: session.updated_at as f64,
+            size: 0,
+        };
+
+        let cache_valid = existing_cache.files.get(&path_key).is_some_and(|cached| {
+            (cached.meta.mtime - meta.mtime).abs() < 1.0 && cached.meta.size == meta.size
+        });
+
+        let stats = if cache_valid {
+            existing_cache.files[&path_key].stats.clone()
+        } else {
+            local_opencode_session_to_cache_stats(session)
+        };
+
+        entries.insert(path_key, CacheFileEntry { meta, stats });
+    }
+
+    entries
+}
+
+#[derive(Debug, Clone)]
+struct OpenCodeSessionItem {
+    id: String,
+    updated_at: Option<u64>,
+    environment: String,
+}
+
+fn build_local_opencode_cache_entries(
+    local_sessions: &HashMap<String, opencode::LocalOpenCodeSession>,
+    existing_cache: &CacheFile,
+) -> HashMap<String, CacheFileEntry> {
+    let mut entries = HashMap::new();
+
+    for session in local_sessions.values() {
+        let path_key = format!("opencode://session/{}", session.id);
+        let meta = CacheMeta {
+            mtime: session.updated_at as f64,
+            size: 0,
+        };
+
+        let cache_valid = existing_cache.files.get(&path_key).is_some_and(|cached| {
+            (cached.meta.mtime - meta.mtime).abs() < 1.0 && cached.meta.size == meta.size
+        });
+
+        let stats = if cache_valid {
+            existing_cache.files[&path_key].stats.clone()
+        } else {
+            local_opencode_session_to_cache_stats(session)
+        };
+
+        entries.insert(path_key, CacheFileEntry { meta, stats });
+    }
+
+    entries
+}
+
+fn local_opencode_session_to_cache_stats(session: &opencode::LocalOpenCodeSession) -> CacheStats {
+    let timestamp_ms = session.updated_at.max(session.created_at);
+    let timestamp = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(timestamp_ms as i64)
+        .map(|value| value.to_rfc3339())
+        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+
+    CacheStats {
+        entries: vec![CacheEntry {
+            timestamp,
+            model: session
+                .model
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string()),
+            environment: session.env_name.clone(),
+            usage: CacheUsage {
+                input_tokens: session.prompt_tokens,
+                output_tokens: session.completion_tokens,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                cost: session.cost,
+            },
+        }],
+    }
+}
+
+fn parse_opencode_session_items(value: &Value) -> Option<Vec<OpenCodeSessionItem>> {
+    let items = if let Some(array) = value.as_array() {
+        array
+    } else {
+        value.get("sessions")?.as_array()?
+    };
+
+    let mut sessions = Vec::new();
+    for item in items {
+        let Some(id) = extract_opencode_string(item, &["id", "sessionId", "session_id"]) else {
+            continue;
+        };
+
+        let metadata = opencode::read_session_metadata(&id);
+        let environment = extract_opencode_string(item, &["envName", "environment", "env"])
+            .or_else(|| metadata.as_ref().map(|entry| entry.env_name.clone()))
+            .or_else(|| {
+                extract_opencode_string(item, &["configSource"]).and_then(|source| {
+                    if source.eq_ignore_ascii_case("native") {
+                        Some(OPENCODE_NATIVE_ENV_NAME.to_string())
+                    } else {
+                        metadata.as_ref().map(|entry| entry.env_name.clone())
+                    }
+                })
+            })
+            .unwrap_or_else(|| OPENCODE_NATIVE_ENV_NAME.to_string());
+
+        sessions.push(OpenCodeSessionItem {
+            id,
+            updated_at: extract_opencode_timestamp(item),
+            environment,
+        });
+    }
+
+    Some(sessions)
+}
+
+fn parse_opencode_export_stats(
+    value: &Value,
+    environment: &str,
+    prices: &HashMap<String, ModelPrice>,
+) -> CacheStats {
+    let mut entries = Vec::new();
+    let mut seen = HashSet::new();
+    collect_opencode_usage_entries(value, None, environment, prices, &mut seen, &mut entries);
+    CacheStats { entries }
+}
+
+fn collect_opencode_usage_entries(
+    value: &Value,
+    current_model: Option<String>,
+    environment: &str,
+    prices: &HashMap<String, ModelPrice>,
+    seen: &mut HashSet<String>,
+    entries: &mut Vec<CacheEntry>,
+) {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                collect_opencode_usage_entries(
+                    item,
+                    current_model.clone(),
+                    environment,
+                    prices,
+                    seen,
+                    entries,
+                );
+            }
+        }
+        Value::Object(object) => {
+            let next_model = extract_opencode_string(value, &["model"]).or(current_model.clone());
+            if let Some(entry) =
+                build_opencode_cache_entry(value, next_model.as_deref(), environment, prices)
+            {
+                let fingerprint = format!(
+                    "{}|{}|{}|{}|{}|{}|{}",
+                    entry.timestamp,
+                    entry.model,
+                    entry.usage.input_tokens,
+                    entry.usage.output_tokens,
+                    entry.usage.cache_read_tokens,
+                    entry.usage.cache_creation_tokens,
+                    entry.usage.cost
+                );
+                if seen.insert(fingerprint) {
+                    entries.push(entry);
+                }
+            }
+
+            for child in object.values() {
+                collect_opencode_usage_entries(
+                    child,
+                    next_model.clone(),
+                    environment,
+                    prices,
+                    seen,
+                    entries,
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+fn build_opencode_cache_entry(
+    value: &Value,
+    fallback_model: Option<&str>,
+    environment: &str,
+    prices: &HashMap<String, ModelPrice>,
+) -> Option<CacheEntry> {
+    let usage_node = value
+        .get("usage")
+        .or_else(|| value.get("tokens"))
+        .or_else(|| value.get("stats"))?;
+    let usage = parse_opencode_cache_usage(usage_node)?;
+    if usage.input_tokens == 0
+        && usage.output_tokens == 0
+        && usage.cache_read_tokens == 0
+        && usage.cache_creation_tokens == 0
+        && usage.cost == 0.0
+    {
+        return None;
+    }
+
+    let timestamp = extract_opencode_timestamp(value)
+        .map(|timestamp| chrono::DateTime::<chrono::Utc>::from_timestamp_millis(timestamp as i64))
+        .flatten()
+        .map(|timestamp| timestamp.to_rfc3339())
+        .or_else(|| extract_opencode_string(value, &["timestamp", "createdAt", "updatedAt"]))?;
+
+    let model = extract_opencode_string(value, &["model"])
+        .or_else(|| fallback_model.map(|model| model.to_string()))
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let cost = if usage.cost > 0.0 {
+        usage.cost
+    } else {
+        calculate_cost_or_zero(
+            &model,
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cache_read_tokens,
+            usage.cache_creation_tokens,
+            prices,
+        )
+    };
+
+    Some(CacheEntry {
+        timestamp,
+        model,
+        environment: Some(environment.to_string()),
+        usage: CacheUsage {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            cache_read_tokens: usage.cache_read_tokens,
+            cache_creation_tokens: usage.cache_creation_tokens,
+            cost,
+        },
+    })
+}
+
+fn parse_opencode_cache_usage(value: &Value) -> Option<CacheUsage> {
+    let object = value.as_object()?;
+
+    Some(CacheUsage {
+        input_tokens: object
+            .get("inputTokens")
+            .or_else(|| object.get("input_tokens"))
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0),
+        output_tokens: object
+            .get("outputTokens")
+            .or_else(|| object.get("output_tokens"))
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0),
+        cache_read_tokens: object
+            .get("cacheReadTokens")
+            .or_else(|| object.get("cache_read_tokens"))
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0),
+        cache_creation_tokens: object
+            .get("cacheCreationTokens")
+            .or_else(|| object.get("cache_creation_tokens"))
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0),
+        cost: object
+            .get("cost")
+            .and_then(|value| value.as_f64())
+            .unwrap_or(0.0),
+    })
+}
+
+fn extract_opencode_string(value: &Value, keys: &[&str]) -> Option<String> {
+    let object = value.as_object()?;
+    for key in keys {
+        let Some(raw) = object.get(*key) else {
+            continue;
+        };
+        if let Some(text) = raw.as_str().filter(|text| !text.trim().is_empty()) {
+            return Some(text.to_string());
+        }
+        if let Some(path) = raw
+            .as_object()
+            .and_then(|nested| nested.get("path"))
+            .and_then(|nested| nested.as_str())
+            .filter(|text| !text.trim().is_empty())
+        {
+            return Some(path.to_string());
+        }
+    }
+    None
+}
+
+fn extract_opencode_timestamp(value: &Value) -> Option<u64> {
+    for key in ["timestamp", "updatedAt", "createdAt", "lastUpdated"] {
+        let Some(raw) = value.get(key) else {
+            continue;
+        };
+        if let Some(number) = raw.as_u64() {
+            return Some(normalize_unix_timestamp(number));
+        }
+        if let Some(text) = raw.as_str().filter(|text| !text.trim().is_empty()) {
+            if let Ok(number) = text.parse::<u64>() {
+                return Some(normalize_unix_timestamp(number));
+            }
+            if let Ok(timestamp) = chrono::DateTime::parse_from_rfc3339(text) {
+                return Some(timestamp.timestamp_millis() as u64);
+            }
+        }
+    }
+    None
+}
+
+fn normalize_unix_timestamp(timestamp: u64) -> u64 {
+    if timestamp > 10_000_000_000 {
+        timestamp
+    } else {
+        timestamp.saturating_mul(1000)
+    }
 }
 
 // ============================================================================
@@ -931,6 +1323,9 @@ fn detect_source_from_path(path: &str) -> Option<&'static str> {
     if path.contains("/.codex/sessions/") || path.contains("\\.codex\\sessions\\") {
         return Some(SOURCE_CODEX);
     }
+    if path.starts_with("opencode://") {
+        return Some(SOURCE_OPENCODE);
+    }
     None
 }
 
@@ -948,8 +1343,9 @@ fn normalize_usage_source(source: Option<&str>) -> Result<Option<&'static str>, 
     match lowered.as_str() {
         SOURCE_CLAUDE => Ok(Some(SOURCE_CLAUDE)),
         SOURCE_CODEX => Ok(Some(SOURCE_CODEX)),
+        SOURCE_OPENCODE => Ok(Some(SOURCE_OPENCODE)),
         _ => Err(format!(
-            "Unsupported source '{}'. Use claude, codex, or all.",
+            "Unsupported source '{}'. Use claude, codex, opencode, or all.",
             raw
         )),
     }
@@ -995,6 +1391,17 @@ fn aggregate_cache(cache: &CacheFile, source_filter: Option<&'static str>) -> Us
                 .entry(entry.model.clone())
                 .or_default()
                 .add(&token_usage);
+            if let Some(environment) = entry
+                .environment
+                .as_ref()
+                .filter(|value| !value.trim().is_empty())
+            {
+                stats
+                    .by_environment
+                    .entry(environment.clone())
+                    .or_default()
+                    .add(&token_usage);
+            }
 
             if let Some(date_str) = extract_date(&entry.timestamp) {
                 stats
@@ -1172,9 +1579,10 @@ pub async fn get_continuous_usage_days(source: Option<String>) -> Result<u32, St
 mod tests {
     use super::{
         aggregate_model_breakdown, default_prices, extract_model_breakdown_bucket,
-        format_week_bucket, normalize_usage_source, parse_codex_jsonl_reader, CacheEntry,
-        CacheFile, CacheFileEntry, CacheMeta, CacheStats, CacheUsage, ModelBreakdownGranularity,
-        ModelPrice, SOURCE_CLAUDE,
+        format_week_bucket, normalize_usage_source, parse_codex_jsonl_reader,
+        parse_opencode_export_stats, parse_opencode_session_items, CacheEntry, CacheFile,
+        CacheFileEntry, CacheMeta, CacheStats, CacheUsage, ModelBreakdownGranularity, ModelPrice,
+        OPENCODE_NATIVE_ENV_NAME, SOURCE_CLAUDE,
     };
     use chrono::{Local, TimeZone};
     use std::collections::HashMap;
@@ -1288,7 +1696,67 @@ mod tests {
             normalize_usage_source(Some("CODEX")).unwrap(),
             Some("codex")
         );
+        assert_eq!(
+            normalize_usage_source(Some("OpenCode")).unwrap(),
+            Some("opencode")
+        );
         assert!(normalize_usage_source(Some("other")).is_err());
+    }
+
+    #[test]
+    fn test_parse_opencode_session_items_prefers_env_name_and_native_fallback() {
+        let value = serde_json::json!({
+            "sessions": [
+                {
+                    "id": "opencode-session-1",
+                    "envName": "Fixture Anthropic",
+                    "updatedAt": "2026-04-15T12:34:56.000Z"
+                },
+                {
+                    "id": "opencode-session-2",
+                    "configSource": "native",
+                    "updatedAt": "2026-04-15T12:35:56.000Z"
+                }
+            ]
+        });
+
+        let sessions = parse_opencode_session_items(&value).expect("sessions parsed");
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(sessions[0].environment, "Fixture Anthropic");
+        assert_eq!(sessions[1].environment, OPENCODE_NATIVE_ENV_NAME);
+    }
+
+    #[test]
+    fn test_parse_opencode_export_stats_collects_usage_and_environment() {
+        let export = serde_json::json!({
+            "messages": [
+                {
+                    "id": "msg-1",
+                    "role": "assistant",
+                    "timestamp": "2026-04-15T12:35:10.000Z",
+                    "model": "anthropic/claude-sonnet-4-5",
+                    "usage": {
+                        "inputTokens": 1200,
+                        "outputTokens": 340,
+                        "cacheReadTokens": 80,
+                        "cacheCreationTokens": 20,
+                        "cost": 0.42
+                    }
+                }
+            ]
+        });
+
+        let stats = parse_opencode_export_stats(&export, "Fixture Anthropic", &default_prices());
+
+        assert_eq!(stats.entries.len(), 1);
+        let entry = &stats.entries[0];
+        assert_eq!(entry.model, "anthropic/claude-sonnet-4-5");
+        assert_eq!(entry.environment.as_deref(), Some("Fixture Anthropic"));
+        assert_eq!(entry.usage.input_tokens, 1200);
+        assert_eq!(entry.usage.output_tokens, 340);
+        assert_eq!(entry.usage.cache_read_tokens, 80);
+        assert_eq!(entry.usage.cache_creation_tokens, 20);
+        assert_eq!(entry.usage.cost, 0.42);
     }
 
     fn usage_bucket(tokens: u64, cost: f64) -> CacheUsage {
@@ -1354,17 +1822,20 @@ mod tests {
                 CacheEntry {
                     timestamp: "2026-03-06T10:00:00+08:00".to_string(),
                     model: "claude-sonnet-4-5".to_string(),
+                    environment: None,
                     usage: usage_bucket(120, 1.2),
                 },
                 CacheEntry {
                     timestamp: "2026-03-05T09:00:00+08:00".to_string(),
                     model: "claude-opus-4-5".to_string(),
+                    environment: None,
                     usage: usage_bucket(90, 0.9),
                 },
             ],
             vec![CacheEntry {
                 timestamp: "2026-03-06T11:00:00+08:00".to_string(),
                 model: "gpt-5.3-codex".to_string(),
+                environment: None,
                 usage: usage_bucket(75, 0.75),
             }],
         );
@@ -1394,41 +1865,49 @@ mod tests {
                 CacheEntry {
                     timestamp: "2026-02-27T10:00:00+08:00".to_string(),
                     model: "claude-sonnet-4-5".to_string(),
+                    environment: None,
                     usage: usage_bucket(10, 0.1),
                 },
                 CacheEntry {
                     timestamp: "2026-02-28T10:00:00+08:00".to_string(),
                     model: "claude-sonnet-4-5".to_string(),
+                    environment: None,
                     usage: usage_bucket(20, 0.2),
                 },
                 CacheEntry {
                     timestamp: "2026-03-01T10:00:00+08:00".to_string(),
                     model: "claude-opus-4-5".to_string(),
+                    environment: None,
                     usage: usage_bucket(30, 0.3),
                 },
                 CacheEntry {
                     timestamp: "2026-03-02T10:00:00+08:00".to_string(),
                     model: "claude-opus-4-5".to_string(),
+                    environment: None,
                     usage: usage_bucket(40, 0.4),
                 },
                 CacheEntry {
                     timestamp: "2026-03-03T10:00:00+08:00".to_string(),
                     model: "claude-opus-4-5".to_string(),
+                    environment: None,
                     usage: usage_bucket(50, 0.5),
                 },
                 CacheEntry {
                     timestamp: "2026-03-04T10:00:00+08:00".to_string(),
                     model: "claude-opus-4-5".to_string(),
+                    environment: None,
                     usage: usage_bucket(60, 0.6),
                 },
                 CacheEntry {
                     timestamp: "2026-03-05T10:00:00+08:00".to_string(),
                     model: "claude-opus-4-5".to_string(),
+                    environment: None,
                     usage: usage_bucket(70, 0.7),
                 },
                 CacheEntry {
                     timestamp: "2026-03-06T10:00:00+08:00".to_string(),
                     model: "claude-opus-4-5".to_string(),
+                    environment: None,
                     usage: usage_bucket(80, 0.8),
                 },
             ],

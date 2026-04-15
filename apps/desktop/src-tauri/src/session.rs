@@ -28,6 +28,8 @@ pub struct Session {
     pub client: String, // "claude" | "codex"
     #[serde(alias = "env_name")] // 兼容旧的 snake_case
     pub env_name: String,
+    #[serde(default, alias = "config_source")]
+    pub config_source: Option<String>,
     #[serde(alias = "perm_mode")]
     pub perm_mode: String,
     #[serde(alias = "working_dir")]

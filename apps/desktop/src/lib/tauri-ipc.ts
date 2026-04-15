@@ -94,7 +94,7 @@ export interface TauriCommands {
       permMode?: string;
       workingDir?: string;
       resumeSessionId?: string;
-      client?: 'claude' | 'codex' | null;
+      client?: 'claude' | 'codex' | 'opencode' | null;
     },
     Session
   ];
@@ -104,7 +104,7 @@ export interface TauriCommands {
       permMode?: string | null;
       workingDir?: string | null;
       resumeSessionId?: string | null;
-      client?: 'claude' | 'codex' | null;
+      client?: 'claude' | 'codex' | 'opencode' | null;
     },
     Session
   ];
@@ -240,6 +240,7 @@ export interface TauriCommands {
   check_ccem_installed: [void, boolean];
   check_claude_installed: [void, boolean];
   check_codex_installed: [void, boolean];
+  check_opencode_installed: [void, boolean];
   check_tmux_installed: [void, boolean];
 
   // 历史记录

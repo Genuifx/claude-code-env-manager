@@ -69,6 +69,7 @@ function NavButton({
   const Icon = item.icon;
   return (
     <button
+      data-testid={`nav-${item.id}`}
       onClick={onClick}
       onMouseEnter={onPrefetch}
       onFocus={onPrefetch}

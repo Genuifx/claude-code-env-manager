@@ -143,7 +143,13 @@ function unifiedToLegacySession(u: UnifiedSession): Session {
   };
   return {
     id: u.id,
-    client: (u.client?.toLowerCase() === 'codex' ? 'codex' : 'claude') as Session['client'],
+    client: (
+      u.client?.toLowerCase() === 'codex'
+        ? 'codex'
+        : u.client?.toLowerCase() === 'opencode'
+          ? 'opencode'
+          : 'claude'
+    ) as Session['client'],
     envName: u.envName,
     workingDir: u.projectDir,
     pid: u.pid,
