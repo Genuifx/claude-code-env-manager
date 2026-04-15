@@ -1,6 +1,7 @@
 use crate::crypto;
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::path::PathBuf; // 文件锁支持
@@ -67,6 +68,15 @@ pub struct ResolvedClaudeEnv {
     pub env_vars: HashMap<String, String>,
     pub upstream_base_url: Option<String>,
 }
+
+#[derive(Debug, Clone)]
+pub struct ResolvedOpenCodeRuntime {
+    pub env_name: String,
+    pub env_vars: HashMap<String, String>,
+    pub config_source: String,
+}
+
+pub const OPENCODE_NATIVE_ENV_NAME: &str = "OpenCode Native";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CcemConfig {
@@ -595,8 +605,119 @@ pub fn resolve_claude_env(env_name: &str) -> Result<ResolvedClaudeEnv, String> {
     })
 }
 
+pub fn resolve_opencode_runtime(env_name: &str) -> Result<ResolvedOpenCodeRuntime, String> {
+    if env_name.trim().is_empty() || env_name == OPENCODE_NATIVE_ENV_NAME {
+        return Ok(ResolvedOpenCodeRuntime {
+            env_name: OPENCODE_NATIVE_ENV_NAME.to_string(),
+            env_vars: HashMap::new(),
+            config_source: "native".to_string(),
+        });
+    }
+
+    let cfg = read_config()?;
+    let env_config = cfg
+        .registries
+        .get(env_name)
+        .ok_or_else(|| format!("Environment '{}' does not exist", env_name))?;
+    let env = get_env_with_decrypted_key(env_config);
+
+    if let Some(config_content) = build_opencode_config_content(&env) {
+        let mut env_vars = HashMap::new();
+        env_vars.insert("OPENCODE_CONFIG_CONTENT".to_string(), config_content);
+        return Ok(ResolvedOpenCodeRuntime {
+            env_name: env_name.to_string(),
+            env_vars,
+            config_source: "ccem".to_string(),
+        });
+    }
+
+    Ok(ResolvedOpenCodeRuntime {
+        env_name: OPENCODE_NATIVE_ENV_NAME.to_string(),
+        env_vars: HashMap::new(),
+        config_source: "native".to_string(),
+    })
+}
+
 fn env_config_to_process_env(env: &EnvConfig) -> (HashMap<String, String>, Option<String>) {
     (build_claude_env_vars(env), env.base_url.clone())
+}
+
+fn build_opencode_config_content(env: &EnvConfig) -> Option<String> {
+    let mut root = serde_json::Map::new();
+    root.insert(
+        "$schema".to_string(),
+        json!("https://opencode.ai/config.json"),
+    );
+
+    let mut provider_options = serde_json::Map::new();
+    if let Some(base_url) = env.base_url.as_ref().filter(|value| !value.trim().is_empty()) {
+        provider_options.insert("baseURL".to_string(), json!(base_url));
+    }
+    if let Some(api_key) = env.auth_token.as_ref().filter(|value| !value.trim().is_empty()) {
+        provider_options.insert("apiKey".to_string(), json!(api_key));
+    }
+    if !provider_options.is_empty() {
+        root.insert(
+            "provider".to_string(),
+            json!({
+                "anthropic": {
+                    "options": provider_options
+                }
+            }),
+        );
+    }
+
+    if let Some(model) = resolve_opencode_primary_model(env) {
+        root.insert("model".to_string(), json!(format_opencode_model_ref(&model)));
+    }
+    if let Some(model) = env
+        .default_haiku_model
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        root.insert(
+            "small_model".to_string(),
+            json!(format_opencode_model_ref(model)),
+        );
+    }
+
+    if root.len() <= 1 {
+        return None;
+    }
+
+    serde_json::to_string(&root).ok()
+}
+
+fn resolve_opencode_primary_model(env: &EnvConfig) -> Option<String> {
+    match env.model.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+        Some("haiku") => env
+            .default_haiku_model
+            .clone()
+            .or_else(|| env.default_sonnet_model.clone())
+            .or_else(|| env.default_opus_model.clone()),
+        Some("sonnet") => env
+            .default_sonnet_model
+            .clone()
+            .or_else(|| env.default_opus_model.clone()),
+        Some("opus") => env
+            .default_opus_model
+            .clone()
+            .or_else(|| env.default_sonnet_model.clone()),
+        Some(model) => Some(model.to_string()),
+        None => env
+            .default_sonnet_model
+            .clone()
+            .or_else(|| env.default_opus_model.clone()),
+    }
+}
+
+fn format_opencode_model_ref(model: &str) -> String {
+    let trimmed = model.trim();
+    if trimmed.contains('/') {
+        trimmed.to_string()
+    } else {
+        format!("anthropic/{trimmed}")
+    }
 }
 
 /// Get default working directory from app config (validated)
@@ -757,7 +878,11 @@ pub fn create_env_with_encrypted_key(
 
 #[cfg(test)]
 mod tests {
-    use super::{env_config_to_process_env, recover_config_from_legacy, CcemConfig, EnvConfig};
+    use super::{
+        build_opencode_config_content, env_config_to_process_env, recover_config_from_legacy,
+        resolve_opencode_primary_model, resolve_opencode_runtime, CcemConfig, EnvConfig,
+        OPENCODE_NATIVE_ENV_NAME,
+    };
     use std::collections::HashMap;
 
     #[test]
@@ -856,6 +981,71 @@ mod tests {
         assert_eq!(
             recovered.default_haiku_model.as_deref(),
             Some("glm-4.5-air")
+        );
+    }
+
+    #[test]
+    fn build_opencode_config_content_maps_claude_env_to_anthropic_overlay() {
+        let env = EnvConfig {
+            base_url: Some("https://example.com/anthropic".to_string()),
+            auth_token: Some("auth-token-123".to_string()),
+            default_opus_model: Some("claude-opus-test".to_string()),
+            default_sonnet_model: Some("claude-sonnet-test".to_string()),
+            default_haiku_model: Some("claude-haiku-test".to_string()),
+            model: Some("sonnet".to_string()),
+            subagent_model: None,
+        };
+
+        let content = build_opencode_config_content(&env).expect("overlay content");
+        let value: serde_json::Value = serde_json::from_str(&content).expect("valid json");
+
+        assert_eq!(
+            value.get("$schema").and_then(|raw| raw.as_str()),
+            Some("https://opencode.ai/config.json")
+        );
+        assert_eq!(
+            value.pointer("/provider/anthropic/options/baseURL")
+                .and_then(|raw| raw.as_str()),
+            Some("https://example.com/anthropic")
+        );
+        assert_eq!(
+            value.pointer("/provider/anthropic/options/apiKey")
+                .and_then(|raw| raw.as_str()),
+            Some("auth-token-123")
+        );
+        assert_eq!(
+            value.get("model").and_then(|raw| raw.as_str()),
+            Some("anthropic/claude-sonnet-test")
+        );
+        assert_eq!(
+            value.get("small_model").and_then(|raw| raw.as_str()),
+            Some("anthropic/claude-haiku-test")
+        );
+    }
+
+    #[test]
+    fn resolve_opencode_runtime_accepts_native_sentinel() {
+        let runtime = resolve_opencode_runtime(OPENCODE_NATIVE_ENV_NAME).expect("native runtime");
+        assert_eq!(runtime.env_name, OPENCODE_NATIVE_ENV_NAME);
+        assert_eq!(runtime.config_source, "native");
+        assert!(runtime.env_vars.is_empty());
+    }
+
+    #[test]
+    fn resolve_opencode_primary_model_prefers_alias_defaults() {
+        let env = EnvConfig {
+            base_url: None,
+            auth_token: None,
+            default_opus_model: Some("claude-opus-test".to_string()),
+            default_sonnet_model: Some("claude-sonnet-test".to_string()),
+            default_haiku_model: Some("claude-haiku-test".to_string()),
+            model: Some("haiku".to_string()),
+            subagent_model: None,
+        };
+
+        assert_eq!(
+            resolve_opencode_primary_model(&env).as_deref(),
+            Some("claude-haiku-test")
         );
     }
 }

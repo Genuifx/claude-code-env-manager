@@ -14,7 +14,7 @@ import { useCountUp } from '@/hooks/useCountUp';
 import type { DailyActivity, UsageStats } from '@/types/analytics';
 import { shallow } from 'zustand/shallow';
 
-type UsageSourceFilter = 'all' | 'claude' | 'codex';
+type UsageSourceFilter = 'all' | 'claude' | 'codex' | 'opencode';
 const ANALYTICS_CACHE_TTL_MS = 60_000;
 
 interface AnalyticsCacheResult {
@@ -409,9 +409,10 @@ export function Analytics() {
       <div className="stat-card glass-noise px-5 py-4">
         <div className="mb-3 flex items-center justify-between">
           <div className="glass-subtle flex items-center gap-0.5 rounded-lg p-0.5">
-            {(['all', 'claude', 'codex'] as UsageSourceFilter[]).map((source) => (
+            {(['all', 'claude', 'codex', 'opencode'] as UsageSourceFilter[]).map((source) => (
               <button
                 key={source}
+                data-testid={`analytics-filter-${source}`}
                 type="button"
                 onClick={() => startTransition(() => setUsageSource(source))}
                 className={cn(
@@ -424,6 +425,7 @@ export function Analytics() {
                 {source === 'all' && t('analytics.sourceAll')}
                 {source === 'claude' && t('analytics.sourceClaude')}
                 {source === 'codex' && t('analytics.sourceCodex')}
+                {source === 'opencode' && t('analytics.sourceOpencode')}
               </button>
             ))}
           </div>
@@ -439,6 +441,7 @@ export function Analytics() {
 
         <div className="mb-3 flex items-baseline gap-3">
           <div
+            data-testid="analytics-total-tokens"
             className="text-4xl font-bold tabular-nums"
             style={{
               background: 'linear-gradient(135deg, hsl(var(--chart-1)), hsl(var(--chart-2)))',
@@ -467,7 +470,10 @@ export function Analytics() {
         <div className="flex items-end justify-between gap-4">
           <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
             <div className="flex flex-col">
-              <span className="text-lg font-semibold tabular-nums text-foreground">
+              <span
+                data-testid="analytics-total-cost"
+                className="text-lg font-semibold tabular-nums text-foreground"
+              >
                 ${(animatedTotalCostCents / 100).toFixed(2)}
               </span>
               <span className="text-xs text-muted-foreground">

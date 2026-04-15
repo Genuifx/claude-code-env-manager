@@ -32,7 +32,14 @@ export function toSessionKey(session: Pick<HistorySessionItem, 'id' | 'source'>)
 }
 
 function normalizeHistorySource(value: unknown): HistorySource {
-  return typeof value === 'string' && value.toLowerCase() === 'codex' ? 'codex' : 'claude';
+  switch (typeof value === 'string' ? value.toLowerCase() : '') {
+    case 'codex':
+      return 'codex';
+    case 'opencode':
+      return 'opencode';
+    default:
+      return 'claude';
+  }
 }
 
 function normalizeHistorySessions(data: HistorySessionItem[]): HistorySessionItem[] {
@@ -188,7 +195,12 @@ export function History() {
   const handleResume = useCallback(async () => {
     if (!selectedSession) return;
     try {
-      await launchClaudeCode(selectedSession.project, selectedSession.id, selectedSession.source);
+      await launchClaudeCode(
+        selectedSession.project || undefined,
+        selectedSession.id,
+        selectedSession.source,
+        selectedSession.envName,
+      );
       setLaunched(true);
       setTimeout(() => setLaunched(false), 1200);
     } catch (err) {
@@ -329,9 +341,10 @@ export function History() {
       <div className="w-[300px] shrink-0 flex flex-col glass-subtle glass-noise border-r border-white/[0.06]">
         <div className="border-b border-white/[0.06] px-4 pt-3 pb-1">
           <div className="flex items-center gap-4">
-            {(['all', 'claude', 'codex'] as HistorySourceFilter[]).map((source) => (
+            {(['all', 'claude', 'codex', 'opencode'] as HistorySourceFilter[]).map((source) => (
               <button
                 key={source}
+                data-testid={`history-filter-${source}`}
                 type="button"
                 onClick={() => startTransition(() => setSourceFilter(source))}
                 className={cn(
@@ -344,6 +357,7 @@ export function History() {
                 {source === 'all' && t('history.sourceAll')}
                 {source === 'claude' && t('history.sourceClaude')}
                 {source === 'codex' && t('history.sourceCodex')}
+                {source === 'opencode' && t('history.sourceOpencode')}
               </button>
             ))}
           </div>

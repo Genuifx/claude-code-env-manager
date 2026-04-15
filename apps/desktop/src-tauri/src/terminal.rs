@@ -240,6 +240,7 @@ pub fn set_preferred_terminal(terminal: TerminalType) -> Result<(), String> {
 static CCEM_LAUNCH_SUPPORTED: OnceLock<bool> = OnceLock::new();
 static CCEM_INSTALLED: OnceLock<bool> = OnceLock::new();
 static CLAUDE_INSTALLED: OnceLock<bool> = OnceLock::new();
+static OPENCODE_INSTALLED: OnceLock<bool> = OnceLock::new();
 static LOGIN_SHELL_PATHS: OnceLock<Vec<PathBuf>> = OnceLock::new();
 
 /// Compare a parsed semver tuple against a minimum requirement.
@@ -408,6 +409,20 @@ pub fn resolve_codex_path() -> Option<String> {
     resolve_binary_path("codex", &candidates)
 }
 
+/// Resolve the full path to the `opencode` binary.
+pub fn resolve_opencode_path() -> Option<String> {
+    let home = dirs::home_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let candidates = vec![
+        format!("{}/.local/bin/opencode", home),
+        format!("{}/.npm-global/bin/opencode", home),
+        "/usr/local/bin/opencode".to_string(),
+        "/opt/homebrew/bin/opencode".to_string(),
+    ];
+    resolve_binary_path("opencode", &candidates)
+}
+
 /// Resolve the full path to the `tmux` binary.
 pub fn resolve_tmux_path() -> Option<String> {
     let home = dirs::home_dir()
@@ -456,6 +471,11 @@ static CODEX_INSTALLED: OnceLock<bool> = OnceLock::new();
 /// of the app to avoid repeatedly spawning a login shell on every tab visit.
 pub fn is_codex_installed() -> bool {
     *CODEX_INSTALLED.get_or_init(|| resolve_codex_path().is_some())
+}
+
+/// Returns whether OpenCode is installed.
+pub fn is_opencode_installed() -> bool {
+    *OPENCODE_INSTALLED.get_or_init(|| resolve_opencode_path().is_some())
 }
 
 /// Returns whether the installed ccem supports the `launch` command.
@@ -594,6 +614,45 @@ fn build_codex_shell_command(
     parts.join(" && ")
 }
 
+const OPENCODE_STARTUP_PROMPT: &str = "Before taking any action, load the pua skill.";
+
+/// Build the shell command to launch OpenCode and write exit code for session tracking.
+fn build_opencode_shell_command(
+    env_vars: &HashMap<String, String>,
+    working_dir: &str,
+    session_id: &str,
+    resume_session_id: Option<&str>,
+) -> String {
+    let mut parts = Vec::new();
+    parts.push("mkdir -p ~/.ccem/sessions".to_string());
+
+    let escaped_dir = working_dir.replace("\\", "\\\\").replace("\"", "\\\"");
+    parts.push(format!("cd \"{}\"", escaped_dir));
+    parts.push("unset CLAUDECODE".to_string());
+
+    for (key, value) in env_vars {
+        let escaped_value = value.replace("'", "'\\''");
+        parts.push(format!("export {}='{}'", key, escaped_value));
+    }
+
+    let opencode_path = resolve_opencode_path().unwrap_or_else(|| "opencode".to_string());
+    let escaped_opencode = opencode_path.replace("'", "'\\''");
+    let escaped_session_id = session_id.replace("'", "'\\''");
+    let opencode_cmd = if let Some(resume_id) = resume_session_id {
+        let escaped_resume = resume_id.replace("'", "'\\''");
+        format!("'{}' --session '{}'", escaped_opencode, escaped_resume)
+    } else {
+        let escaped_prompt = OPENCODE_STARTUP_PROMPT.replace("'", "'\\''");
+        format!("'{}' --prompt '{}'", escaped_opencode, escaped_prompt)
+    };
+    parts.push(format!(
+        "{}; echo $? > ~/.ccem/sessions/'{}'.exit",
+        opencode_cmd, escaped_session_id
+    ));
+
+    parts.join(" && ")
+}
+
 /// Generate AppleScript for Terminal.app
 /// Returns the window ID as a string for later tracking
 fn terminal_app_script(shell_command: &str) -> String {
@@ -669,6 +728,8 @@ pub fn launch_in_terminal(
 ) -> Result<(Option<String>, Option<String>), String> {
     let shell_command = if client == "codex" {
         build_codex_shell_command(&env_vars, working_dir, session_id, resume_session_id)
+    } else if client == "opencode" {
+        build_opencode_shell_command(&env_vars, working_dir, session_id, resume_session_id)
     } else if is_ccem_launch_supported() {
         let proxy_base_url = env_vars.get("ANTHROPIC_BASE_URL").and_then(|url| {
             if url.starts_with("http://127.0.0.1:") && url.contains("/proxy/claude/") {
@@ -1436,6 +1497,35 @@ mod tests {
         assert!(cmd.contains("cd \"/home/user\""));
         assert!(cmd.contains(" resume 'codex-session-456'"));
         assert!(cmd.contains("echo $? > ~/.ccem/sessions/'test-session-123'.exit"));
+    }
+
+    #[test]
+    fn test_build_opencode_shell_command_injects_startup_prompt_and_overlay() {
+        let mut env_vars = HashMap::new();
+        env_vars.insert(
+            "OPENCODE_CONFIG_CONTENT".to_string(),
+            "{\"model\":\"anthropic/claude-sonnet-test\"}".to_string(),
+        );
+
+        let cmd = build_opencode_shell_command(&env_vars, "/home/user", "test-session-123", None);
+
+        assert!(cmd.contains("cd \"/home/user\""));
+        assert!(cmd.contains("export OPENCODE_CONFIG_CONTENT='{\"model\":\"anthropic/claude-sonnet-test\"}'"));
+        assert!(cmd.contains("--prompt 'Before taking any action, load the pua skill.'"));
+        assert!(cmd.contains("echo $? > ~/.ccem/sessions/'test-session-123'.exit"));
+    }
+
+    #[test]
+    fn test_build_opencode_shell_command_uses_resume_flag_without_prompt() {
+        let cmd = build_opencode_shell_command(
+            &HashMap::new(),
+            "/home/user",
+            "test-session-123",
+            Some("open-session-456"),
+        );
+
+        assert!(cmd.contains("--session 'open-session-456'"));
+        assert!(!cmd.contains("--prompt"));
     }
 
     #[test]

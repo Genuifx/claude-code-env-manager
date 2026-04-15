@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fixture_dir="${CCEM_OPENCODE_FIXTURE_DIR:-$(cd "${script_dir}/.." && pwd)}"
+log_path="${fixture_dir}/invocations.log"
+
+printf '%s | cwd=%s | args=%s | has_config=%s\n' \
+  "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+  "$PWD" \
+  "$*" \
+  "${OPENCODE_CONFIG_CONTENT:+yes}" >>"$log_path"
+
+if [[ "${1:-}" == "session" && "${2:-}" == "list" ]]; then
+  cat "${fixture_dir}/sessions.json"
+  exit 0
+fi
+
+if [[ "${1:-}" == "export" && -n "${2:-}" ]]; then
+  cat "${fixture_dir}/exports/${2}.json"
+  exit 0
+fi
+
+if [[ "${1:-}" == "--session" && -n "${2:-}" ]]; then
+  printf 'Resumed OpenCode fixture session %s\n' "$2"
+else
+  printf 'Started OpenCode fixture session\n'
+fi
+
+trap 'exit 0' INT TERM
+
+while true; do
+  sleep 1
+done

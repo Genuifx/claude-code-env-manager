@@ -1,12 +1,12 @@
 import { useDeferredValue, useState, useMemo, useRef, useEffect, type KeyboardEvent } from 'react';
 import { Search, MessageSquare } from 'lucide-react';
-import { Claude, Codex } from '@lobehub/icons';
+import { Claude, Codex, OpenCode } from '@lobehub/icons';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getHistorySessionDisplay } from './historySession';
 
-export type HistorySource = 'claude' | 'codex';
+export type HistorySource = 'claude' | 'codex' | 'opencode';
 
 export interface HistorySessionItem {
   id: string;
@@ -15,6 +15,8 @@ export interface HistorySessionItem {
   timestamp: number;
   project: string;
   projectName: string;
+  envName?: string;
+  configSource?: 'ccem' | 'native';
 }
 
 interface HistoryListProps {
@@ -33,6 +35,9 @@ function getSessionKey(session: HistorySessionItem): string {
 function SourceIcon({ source }: { source: HistorySource }) {
   if (source === 'codex') {
     return <Codex.Color size={12} />;
+  }
+  if (source === 'opencode') {
+    return <OpenCode size={12} className="h-3 w-3" />;
   }
   return <Claude size={12} style={{ color: '#D97757' }} />;
 }
@@ -201,7 +206,9 @@ export function HistoryList({
                 {group.sessions.map(session => (
                   <button
                     key={getSessionKey(session)}
+                    data-testid="history-session-item"
                     data-session-id={getSessionKey(session)}
+                    data-source={session.source}
                     onClick={() => onSelect(session)}
                     className={cn(
                       'w-full text-left px-4 py-2.5 transition-all duration-[var(--duration-fast)] group history-item-virtualized active:scale-[0.998]',
@@ -222,8 +229,20 @@ export function HistoryList({
                       {sourceFilter === 'all' && (
                         <span
                           className="shrink-0"
-                          title={session.source === 'codex' ? 'Codex (OpenAI)' : 'Claude'}
-                          aria-label={session.source === 'codex' ? 'Codex (OpenAI)' : 'Claude'}
+                          title={
+                            session.source === 'codex'
+                              ? 'Codex (OpenAI)'
+                              : session.source === 'opencode'
+                                ? 'OpenCode'
+                                : 'Claude'
+                          }
+                          aria-label={
+                            session.source === 'codex'
+                              ? 'Codex (OpenAI)'
+                              : session.source === 'opencode'
+                                ? 'OpenCode'
+                                : 'Claude'
+                          }
                         >
                           <SourceIcon source={session.source} />
                         </span>

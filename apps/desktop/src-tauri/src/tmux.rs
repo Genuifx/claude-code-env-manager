@@ -1,6 +1,6 @@
-use crate::terminal::{resolve_claude_path, resolve_codex_path, resolve_tmux_path};
+use crate::terminal::{resolve_claude_path, resolve_codex_path, resolve_opencode_path, resolve_tmux_path};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
 use std::process::Stdio;
@@ -680,10 +680,10 @@ fn build_tmux_launch_command(
     client_args: &[String],
     env_vars: &HashMap<String, String>,
 ) -> String {
-    let client_binary = if client == "codex" {
-        resolve_codex_path().unwrap_or_else(|| "codex".to_string())
-    } else {
-        resolve_claude_path().unwrap_or_else(|| "claude".to_string())
+    let client_binary = match client {
+        "codex" => resolve_codex_path().unwrap_or_else(|| "codex".to_string()),
+        "opencode" => resolve_opencode_path().unwrap_or_else(|| "opencode".to_string()),
+        _ => resolve_claude_path().unwrap_or_else(|| "claude".to_string()),
     };
     let mut exports = vec![
         format!("export PATH={}", shell_quote(get_user_path())),
@@ -736,17 +736,38 @@ fn tmux_command() -> Result<Command, String> {
 
 fn get_user_path() -> &'static str {
     USER_PATH.get_or_init(|| {
+        let current_path = std::env::var("PATH").unwrap_or_default();
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-        match Command::new(&shell)
+        let login_path = match Command::new(&shell)
             .args(["-li", "-c", "echo $PATH"])
             .output()
         {
             Ok(output) if output.status.success() => {
                 String::from_utf8_lossy(&output.stdout).trim().to_string()
             }
-            _ => std::env::var("PATH").unwrap_or_default(),
-        }
+            _ => current_path.clone(),
+        };
+
+        merge_path_entries(&current_path, &login_path)
     })
+}
+
+fn merge_path_entries(primary: &str, secondary: &str) -> String {
+    let mut merged = Vec::new();
+    let mut seen = HashSet::new();
+
+    for candidate in primary.split(':').chain(secondary.split(':')) {
+        if candidate.is_empty() {
+            continue;
+        }
+
+        let entry = candidate.to_string();
+        if seen.insert(entry.clone()) {
+            merged.push(entry);
+        }
+    }
+
+    merged.join(":")
 }
 
 fn sanitize_target_for_filename(target: &str) -> String {
@@ -786,8 +807,9 @@ mod tests {
     use super::{
         build_status_left_format, build_status_right_format, build_tmux_launch_command,
         compact_model_label, detect_state_from_capture, is_managed_session_name,
-        is_missing_tmux_session_error, is_tmux_session_create_race_error, session_name_for_runtime,
-        target_candidates_for_runtime, window_name_for_runtime, ClaudeTerminalState,
+        is_missing_tmux_session_error, is_tmux_session_create_race_error, merge_path_entries,
+        session_name_for_runtime, target_candidates_for_runtime, window_name_for_runtime,
+        ClaudeTerminalState,
     };
     use std::collections::HashMap;
 
@@ -886,6 +908,17 @@ mod tests {
         );
         assert!(command.contains("exec "));
         assert!(command.contains("'resume' 'session-123'"));
+    }
+
+    #[test]
+    fn merge_path_entries_keeps_runtime_overrides_first() {
+        assert_eq!(
+            merge_path_entries(
+                "/tmp/fixture/bin:/usr/bin:/bin",
+                "/opt/homebrew/bin:/usr/bin:/bin"
+            ),
+            "/tmp/fixture/bin:/usr/bin:/bin:/opt/homebrew/bin"
+        );
     }
 
     #[test]
