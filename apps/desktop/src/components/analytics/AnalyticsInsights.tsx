@@ -15,7 +15,7 @@ import type {
 } from '@/types/analytics';
 
 type TimeGranularity = 'hour' | 'day' | 'week' | 'month';
-type AnalyticsUsageSource = 'all' | 'claude' | 'codex';
+type AnalyticsUsageSource = 'all' | 'claude' | 'codex' | 'opencode';
 const MODEL_BREAKDOWN_CACHE_TTL_MS = 60_000;
 
 interface ModelBreakdownCacheEntry {

@@ -28,6 +28,7 @@ pub struct InteractiveSessionOptions {
     pub session_id: String,
     pub client: String,
     pub env_name: String,
+    pub config_source: Option<String>,
     pub perm_mode: String,
     pub working_dir: String,
     pub resume_session_id: Option<String>,
@@ -153,6 +154,7 @@ impl InteractiveRuntimeManager {
             pid: window.pane_pid,
             client: options.client.clone(),
             env_name: options.env_name.clone(),
+            config_source: options.config_source.clone(),
             perm_mode: options.perm_mode.clone(),
             working_dir: options.working_dir.clone(),
             start_time: Utc::now().to_rfc3339(),
@@ -635,19 +637,24 @@ impl InteractiveRuntimeManager {
             .lock()
             .map_err(|_| "Failed to lock interactive event store".to_string())?;
 
+        let client_name = handle
+            .session
+            .lock()
+            .ok()
+            .map(|session| session.client.clone())
+            .unwrap_or_else(|| "claude".to_string());
+
+        if client_name == "opencode" {
+            *last_state = state;
+            return Ok(());
+        }
+
         if state == ClaudeTerminalState::WaitingApproval {
-            let client_name = handle
-                .session
-                .lock()
-                .ok()
-                .map(|session| {
-                    if session.client == "codex" {
-                        "Codex"
-                    } else {
-                        "Claude"
-                    }
-                })
-                .unwrap_or("Interactive agent");
+            let client_name = if client_name == "codex" {
+                "Codex"
+            } else {
+                "Claude"
+            };
             let record = store.append(SessionEventPayload::TerminalPromptRequired {
                 prompt_kind: TerminalPromptKind::Permission,
                 prompt_text: format!("{client_name} is waiting for approval."),
@@ -753,6 +760,18 @@ fn build_client_args(
         if let Some(resume_session_id) = resume_session_id {
             args.push("resume".to_string());
             args.push(resume_session_id.to_string());
+        }
+        return args;
+    }
+
+    if client == "opencode" {
+        let mut args = Vec::new();
+        if let Some(resume_session_id) = resume_session_id {
+            args.push("--session".to_string());
+            args.push(resume_session_id.to_string());
+        } else {
+            args.push("--prompt".to_string());
+            args.push("Before taking any action, load the pua skill.".to_string());
         }
         return args;
     }

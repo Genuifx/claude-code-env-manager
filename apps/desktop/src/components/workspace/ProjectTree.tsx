@@ -16,6 +16,7 @@ interface ProjectTreeProps {
   onNewSession: (client?: LaunchClient) => void;
   onRefresh: () => void;
   codexInstalled?: boolean;
+  opencodeInstalled?: boolean;
   /** Save a title override. Returns a promise so callers can await it. */
   onSaveTitle?: (session: HistorySessionItem, title: string) => Promise<void>;
   onSessionsChanged?: () => Promise<void>;
@@ -81,6 +82,7 @@ export function ProjectTree({
   onNewSession,
   onRefresh,
   codexInstalled = false,
+  opencodeInstalled = false,
   onSaveTitle,
   onSessionsChanged,
 }: ProjectTreeProps) {
@@ -191,10 +193,13 @@ export function ProjectTree({
           newSessionLabel={t('workspace.newSession')}
           claudeLabel={t('workspace.newSessionClaude')}
           codexLabel={t('workspace.newSessionCodex')}
+          opencodeLabel={t('workspace.newSessionOpenCode')}
           codexUnavailableLabel={t('settings.cliNotInstalled')}
           codexInstalled={codexInstalled}
+          opencodeInstalled={opencodeInstalled}
           onLaunchClaude={() => onNewSession('claude')}
           onLaunchCodex={() => onNewSession('codex')}
+          onLaunchOpenCode={() => onNewSession('opencode')}
         />
         <div className="flex items-center gap-2">
           <div className="relative flex-1">

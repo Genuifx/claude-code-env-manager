@@ -72,9 +72,13 @@ export function SessionList({
         const isEmbedded = session.terminalType === 'embedded';
         const isSelectableEmbedded = isEmbedded && Boolean(onSelectEmbedded);
         const isSelectedEmbedded = isSelectableEmbedded && session.id === selectedEmbeddedSessionId;
+        const showPermMode = session.client !== 'opencode' && !!session.permMode && session.permMode !== 'n/a';
         return (
           <div
             key={session.id}
+            data-testid="session-card"
+            data-session-id={session.id}
+            data-client={session.client}
             className={cn(
               'flex items-center gap-4 p-3 rounded-lg glass-subtle glass-ghost-hover transition-all duration-150',
               isSelectedEmbedded && 'ring-1 ring-cyan-300/40 bg-cyan-300/[0.05]'
@@ -111,9 +115,11 @@ export function SessionList({
                   <span className="text-xs px-1.5 py-0.5 glass-subtle rounded-md font-medium uppercase tracking-wide">
                     embedded
                   </span>
-                  <span className="text-xs px-1.5 py-0.5 glass-subtle rounded-md font-medium">
-                    {session.permMode}
-                  </span>
+                  {showPermMode && (
+                    <span className="text-xs px-1.5 py-0.5 glass-subtle rounded-md font-medium">
+                      {session.permMode}
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-3 text-xs text-muted-foreground/80">
                   <span className="flex items-center gap-1">
@@ -137,9 +143,11 @@ export function SessionList({
                   <span className="text-xs px-1.5 py-0.5 glass-subtle rounded-md font-medium">
                     {session.envName}
                   </span>
-                  <span className="text-xs px-1.5 py-0.5 glass-subtle rounded-md font-medium">
-                    {session.permMode}
-                  </span>
+                  {showPermMode && (
+                    <span className="text-xs px-1.5 py-0.5 glass-subtle rounded-md font-medium">
+                      {session.permMode}
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-3 text-xs text-muted-foreground/80">
                   <span className="flex items-center gap-1">

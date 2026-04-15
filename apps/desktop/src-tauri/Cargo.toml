@@ -27,6 +27,7 @@ base64 = "0.22"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 urlencoding = "2"
 quick-xml = "0.31"
+rusqlite = { version = "0.32", features = ["bundled"] }
 tauri-plugin-mcp-bridge = "0.8"
 tauri-plugin-decorum = "1.1.1"
 tauri-plugin-autostart = "2"
