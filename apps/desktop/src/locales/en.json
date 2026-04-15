@@ -66,6 +66,8 @@
     "runtimeRecovery": "Recovery",
     "runtimeTelegram": "Telegram",
     "tmuxMissing": "tmux missing",
+    "tmuxOptionalTitle": "tmux is optional for launching",
+    "tmuxOptionalNotice": "You can still launch agents in a normal terminal without tmux. Install it to unlock enhanced flows like cron jobs, remote control, and multi-terminal attach.",
     "telegramOnline": "Online",
     "telegramOffline": "Offline",
     "telegramOpenAccess": "Open access",
@@ -489,7 +491,7 @@
     "cliNotInstalled": "Not Installed",
     "cliInstallHint": "Install the CLI to unlock terminal commands and faster server sync",
     "cliInstallCmd": "npm install -g ccem",
-    "tmuxInstallHint": "tmux is required for tmux-backed interactive sessions and multi-terminal attach.",
+    "tmuxInstallHint": "You can still launch sessions in a normal terminal without tmux. Install it to unlock enhanced features like cron, remote control, and multi-terminal attach.",
     "tmuxInstallCmd": "brew install tmux",
     "checkUpdate": "Check for Updates",
     "feedback": "Report Issue",
@@ -709,7 +711,9 @@
     "telegram": "Telegram",
     "weixin": "Weixin",
     "feishu": "Feishu / Lark",
-    "feishuComingSoon": "Feishu integration coming soon"
+    "feishuComingSoon": "Feishu integration coming soon",
+    "tmuxOptionalTitle": "Remote control works better with tmux",
+    "tmuxOptionalNotice": "Basic bridge setup still works without tmux, but install it for the fuller remote control, resume, and multi-terminal experience."
   },
   "proxyDebug": {
     "subtitle": "Transparent reverse proxy, SSE stream, and request log debugging",
@@ -787,6 +791,8 @@
     "profileConservativeDesc": "Read/search/edit/write only, lower budget, no shell or web tools.",
     "profileStandardDesc": "Balanced preset with Bash and web tools for typical automation tasks.",
     "profileAutonomousDesc": "Higher budget and bypass permissions. Use only for trusted tasks.",
+    "tmuxOptionalTitle": "Cron works best with tmux",
+    "tmuxOptionalNotice": "Normal terminal launches still work without tmux. Install it if you want the smoother cron and remote-control enhancement path.",
     "profileBudget": "Budget Cap",
     "profileBudgetPlaceholder": "Blank = preset default",
     "customToolPolicy": "Custom Tool Policy",

@@ -814,6 +814,23 @@ async fn create_interactive_session(
         return Err(format!("Unsupported client '{}'", client_name));
     }
 
+    if tmux::TmuxManager::check_tmux_installed().is_err() {
+        println!(
+            "tmux unavailable, falling back to external terminal launch for {}",
+            client_name
+        );
+        return launch_claude_code(
+            state,
+            proxy_state,
+            env_name,
+            perm_mode,
+            working_dir,
+            resume_session_id,
+            Some(client_name),
+        )
+        .await;
+    }
+
     if client_name == "codex"
         && !resume_session_id
             .as_ref()

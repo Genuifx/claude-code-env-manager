@@ -66,6 +66,8 @@
     "runtimeRecovery": "恢复队列",
     "runtimeTelegram": "Telegram",
     "tmuxMissing": "缺少 tmux",
+    "tmuxOptionalTitle": "tmux 现在是增强能力，不再是启动前置",
+    "tmuxOptionalNotice": "未安装 tmux 也可以照常用普通终端启动 agent；若要获得定时任务、远程控制、多终端 attach 等增强体验，建议安装 tmux。",
     "telegramOnline": "在线",
     "telegramOffline": "离线",
     "telegramOpenAccess": "开放访问",
@@ -489,7 +491,7 @@
     "cliNotInstalled": "未安装",
     "cliInstallHint": "安装 CLI 可解锁终端命令和服务器同步加速",
     "cliInstallCmd": "npm install -g ccem",
-    "tmuxInstallHint": "tmux-backed interactive 会话和多终端 attach 现在都依赖 tmux。",
+    "tmuxInstallHint": "未安装 tmux 时仍可用普通终端启动会话；安装后可解锁定时任务、远程控制、多终端 attach 等增强能力。",
     "tmuxInstallCmd": "brew install tmux",
     "checkUpdate": "检查更新",
     "feedback": "反馈问题",
@@ -709,7 +711,9 @@
     "telegram": "Telegram",
     "weixin": "微信",
     "feishu": "飞书",
-    "feishuComingSoon": "飞书集成即将推出"
+    "feishuComingSoon": "飞书集成即将推出",
+    "tmuxOptionalTitle": "远程控制建议安装 tmux",
+    "tmuxOptionalNotice": "当前仍可完成基础桥接配置，但如果要拿到更完整的远程控制、续接和多终端协同体验，建议先安装 tmux。"
   },
   "proxyDebug": {
     "subtitle": "透明反代、SSE 流与请求日志调试",
@@ -787,6 +791,8 @@
     "profileConservativeDesc": "仅允许读写/搜索/编辑，预算较低，不开放 Shell 和网页工具。",
     "profileStandardDesc": "适合日常自动化任务，开放 Bash 和网页工具，预算中等。",
     "profileAutonomousDesc": "更高预算并绕过权限检查，仅建议用于完全信任的任务。",
+    "tmuxOptionalTitle": "定时任务建议安装 tmux",
+    "tmuxOptionalNotice": "普通终端会话启动不受影响；如果你要重点体验定时任务以及后续远程控制等增强能力，建议先安装 tmux。",
     "profileBudget": "预算上限",
     "profileBudgetPlaceholder": "留空则使用预设默认值",
     "customToolPolicy": "自定义工具策略",
