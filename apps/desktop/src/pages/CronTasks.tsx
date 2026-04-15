@@ -449,7 +449,7 @@ export function CronTasks() {
   );
   const {
     loadCronTasks, addCronTask, updateCronTask,
-    deleteCronTask, toggleCronTask, listCronTemplates,
+    deleteCronTask, toggleCronTask, listCronTemplates, checkTmuxInstalled,
   } = useTauriCommands();
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -458,11 +458,18 @@ export function CronTasks() {
   const [pendingDelete, setPendingDelete] = useState<CronTask | null>(null);
   const [templates, setTemplates] = useState<CronTemplate[]>([]);
   const [showAiPanel, setShowAiPanel] = useState(false);
+  const [tmuxInstalled, setTmuxInstalled] = useState(true);
 
   useEffect(() => {
     loadCronTasks();
     listCronTemplates().then(setTemplates).catch(() => {});
   }, [loadCronTasks, listCronTemplates]);
+
+  useEffect(() => {
+    checkTmuxInstalled()
+      .then(setTmuxInstalled)
+      .catch(() => setTmuxInstalled(false));
+  }, [checkTmuxInstalled]);
 
   useEffect(() => {
     const unsubs: (() => void)[] = [];
@@ -546,6 +553,18 @@ export function CronTasks() {
 
   return (
     <div className="space-y-4">
+      {!tmuxInstalled && (
+        <div className="rounded-xl border border-warning/25 bg-warning/8 px-4 py-3">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+            <div>
+              <p className="text-sm font-medium text-foreground">{t('cron.tmuxOptionalTitle')}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{t('cron.tmuxOptionalNotice')}</p>
+              <p className="mt-2 font-mono text-2xs text-muted-foreground">{t('settings.tmuxInstallCmd')}</p>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-start gap-2 pb-3 border-b border-black/[0.06] dark:border-white/[0.06]">
         <button onClick={() => setShowAiPanel(!showAiPanel)} className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors', showAiPanel ? 'bg-primary/20 text-primary' : 'glass-outline-btn text-foreground hover:bg-white/[0.06]')}>
           <Sparkles className="w-4 h-4" />

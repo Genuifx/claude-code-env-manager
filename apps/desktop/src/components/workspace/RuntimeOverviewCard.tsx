@@ -153,9 +153,8 @@ export function RuntimeOverviewCard({ onNavigate }: RuntimeOverviewCardProps) {
         <RuntimeStat
           icon={TerminalSquare}
           label={t('workspace.runtimeInteractive')}
-          value={snapshot.tmuxInstalled ? interactiveCount : t('workspace.tmuxMissing')}
+          value={interactiveCount}
           highlight={!snapshot.tmuxInstalled}
-          isText={!snapshot.tmuxInstalled}
         />
         <RuntimeStat
           icon={Bot}
@@ -199,6 +198,14 @@ export function RuntimeOverviewCard({ onNavigate }: RuntimeOverviewCardProps) {
           {t('workspace.runtimeOpenTelegram')}
         </Button>
       </div>
+
+      {!snapshot.tmuxInstalled && (
+        <div className="mt-4 rounded-xl border border-warning/25 bg-warning/8 px-3.5 py-3">
+          <p className="text-xs font-medium text-foreground">{t('workspace.tmuxOptionalTitle')}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t('workspace.tmuxOptionalNotice')}</p>
+          <p className="mt-2 font-mono text-2xs text-muted-foreground">{t('settings.tmuxInstallCmd')}</p>
+        </div>
+      )}
     </Card>
   );
 }
