@@ -1,5 +1,12 @@
 import { ReactNode } from 'react';
 import { SideRail } from './SideRail';
+import {
+  Sidebar,
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+  useSidebar,
+} from '@/components/ui/sidebar';
 import { useLocale } from '@/locales';
 
 interface AppLayoutProps {
@@ -19,8 +26,33 @@ export function AppLayout({
   pageActions,
   fullBleed = false,
 }: AppLayoutProps) {
+  return (
+    <SidebarProvider className="h-screen flex overflow-hidden relative">
+      <AppLayoutBody
+        activeTab={activeTab}
+        onTabChange={onTabChange}
+        onTabPrefetch={onTabPrefetch}
+        pageActions={pageActions}
+        fullBleed={fullBleed}
+      >
+        {children}
+      </AppLayoutBody>
+    </SidebarProvider>
+  );
+}
+
+function AppLayoutBody({
+  children,
+  activeTab,
+  onTabChange,
+  onTabPrefetch,
+  pageActions,
+  fullBleed = false,
+}: AppLayoutProps) {
   const { t } = useLocale();
+  const { open, state } = useSidebar();
   const isWorkspace = activeTab === 'workspace';
+  const sidebarToggleLabel = state === 'collapsed' ? t('sideRail.expand') : t('sideRail.collapse');
   const titleKeyMap: Record<string, string> = {
     'proxy-debug': 'sideRail.proxyDebug',
     'chat-app': 'sideRail.chatApp',
@@ -43,14 +75,17 @@ export function AppLayout({
   const subtitle = subtitleKeyMap[activeTab] && !isWorkspace ? t(subtitleKeyMap[activeTab]) : undefined;
 
   return (
-    <div className="h-screen flex overflow-hidden relative">
-      {/* Sidebar wrapper — adds inset padding around the floating panel */}
-      <div className="p-2 pr-0 shrink-0 relative z-20">
-        <SideRail activeTab={activeTab} onTabChange={onTabChange} onTabPrefetch={onTabPrefetch} glassMuted={isWorkspace} />
-      </div>
+    <>
+      <AppSidebarToggleAnchor label={sidebarToggleLabel} />
+
+      <Sidebar>
+        {open && (
+          <SideRail activeTab={activeTab} onTabChange={onTabChange} onTabPrefetch={onTabPrefetch} glassMuted={isWorkspace} />
+        )}
+      </Sidebar>
 
       {/* Main content area — semi-transparent so ambient orbs bleed through glass panels */}
-      <div className="app-content-shell flex-1 flex flex-col min-w-0 relative z-10 overflow-hidden">
+      <SidebarInset className="app-content-shell flex-1 flex flex-col min-w-0 relative z-10 overflow-hidden">
         {/* Ambient background — lives inside content area only */}
         <div className="ambient-bg" aria-hidden="true">
           <div className="ambient-orb-3" />
@@ -59,13 +94,13 @@ export function AppLayout({
 
         {/* Titlebar spacer + page title — also serves as drag region for non-workspace pages */}
         {!isWorkspace && (
-          <div data-tauri-drag-region className="h-[52px] shrink-0 flex items-end px-8 pb-2 relative z-10">
-            <div className="flex items-baseline gap-3">
+          <div data-tauri-drag-region className="app-titlebar-row h-[52px] shrink-0 flex items-end gap-3 pb-2 pr-8 relative z-10">
+            <div className="flex items-baseline gap-3 min-w-0">
               {pageTitle && (
-                <h1 className="text-lg font-semibold text-foreground">{pageTitle}</h1>
+                <h1 className="text-lg font-semibold text-foreground truncate">{pageTitle}</h1>
               )}
               {subtitle && (
-                <span className="text-sm text-muted-foreground">{subtitle}</span>
+                <span className="text-sm text-muted-foreground truncate">{subtitle}</span>
               )}
             </div>
             {pageActions && (
@@ -84,7 +119,18 @@ export function AppLayout({
             {children}
           </div>
         </main>
-      </div>
+      </SidebarInset>
+    </>
+  );
+}
+
+function AppSidebarToggleAnchor({ label }: { label: string }) {
+  return (
+    <div className="app-sidebar-toggle-anchor absolute z-[120]">
+      <SidebarTrigger
+        aria-label={label}
+        title={`${label} (⌘B)`}
+      />
     </div>
   );
 }

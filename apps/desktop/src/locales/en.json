@@ -695,6 +695,8 @@
     "proxyDebug": "Proxy Debug",
     "settings": "Settings",
     "chatApp": "Remote Control",
+    "collapse": "Collapse Sidebar",
+    "expand": "Expand Sidebar",
     "groupWorkspace": "Workspace",
     "groupInsights": "Insights"
   },
