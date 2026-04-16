@@ -444,6 +444,52 @@
     hsl(40 25% 97% / var(--content-bg-opacity, 1));
 }
 
+.app-titlebar-row,
+.workspace-status-strip {
+  transition: padding-left var(--duration-normal) var(--ease-decelerate);
+}
+
+:root {
+  --ccem-sidebar-toggle-size: 28px;
+  --ccem-sidebar-toggle-gap: 4px;
+  --ccem-sidebar-toggle-clearance: 10px;
+  --ccem-sidebar-toggle-leading-space: calc(
+    var(--ccem-window-controls-width, 0px)
+    + var(--ccem-sidebar-toggle-gap)
+    + var(--ccem-sidebar-toggle-size)
+    + var(--ccem-sidebar-toggle-clearance)
+  );
+}
+
+.app-sidebar-toggle-anchor {
+  top: 11px;
+  left: calc(var(--ccem-window-controls-width, 0px) + var(--ccem-sidebar-toggle-gap));
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+
+.app-sidebar-toggle-anchor * {
+  -webkit-app-region: no-drag;
+}
+
+.app-titlebar-row {
+  padding-left: 2rem;
+}
+
+.workspace-status-strip {
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+[data-sidebar-state='collapsed'] .app-titlebar-row,
+[data-sidebar-state='collapsed'] .workspace-status-strip {
+  padding-left: var(--ccem-sidebar-toggle-leading-space);
+}
+
+.sidebar-top-drag-region {
+  padding-left: var(--ccem-sidebar-toggle-leading-space);
+}
+
 /* === Workspace Reading Surface — Medium-style elevated content area === */
 .workspace-reading-surface {
   background:
@@ -2169,7 +2215,8 @@
 
 /* === Tauri window control bar — match sidebar width === */
 div[data-tauri-decorum-tb] {
-  width: 200px !important;
+  width: var(--ccem-window-controls-width, 78px) !important;
+  transition: width var(--duration-normal) var(--ease-decelerate);
 }
 
 /* === Pet widget — pixel RPG game card === */

@@ -695,6 +695,8 @@
     "proxyDebug": "Proxy 调试",
     "settings": "设置",
     "chatApp": "远程控制",
+    "collapse": "收起侧边栏",
+    "expand": "展开侧边栏",
     "groupWorkspace": "工作区",
     "groupInsights": "洞察"
   },

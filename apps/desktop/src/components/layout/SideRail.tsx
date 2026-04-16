@@ -69,7 +69,9 @@ function NavButton({
   const Icon = item.icon;
   return (
     <button
+      type="button"
       data-testid={`nav-${item.id}`}
+      aria-label={label}
       onClick={onClick}
       onMouseEnter={onPrefetch}
       onFocus={onPrefetch}
@@ -84,8 +86,7 @@ function NavButton({
     >
       <Icon className="w-[18px] h-[18px] shrink-0" strokeWidth={isActive ? 2 : 1.8} />
       <span className="text-[13px] leading-none truncate">{label}</span>
-      <span className="ml-auto text-[11px] font-mono opacity-0 group-hover:opacity-100 transition-opacity duration-[var(--duration-fast)] text-muted-foreground"
-      >
+      <span className="ml-auto text-[11px] font-mono opacity-0 group-hover:opacity-100 transition-opacity duration-[var(--duration-fast)] text-muted-foreground">
         ⌘{item.shortcut}
       </span>
     </button>
@@ -94,13 +95,17 @@ function NavButton({
 
 export function SideRail({ activeTab, onTabChange, onTabPrefetch, glassMuted }: SideRailProps) {
   const { t } = useLocale();
+
   return (
     <aside className={cn(
-      "w-[200px] h-full shrink-0 flex flex-col glass-sidebar-panel glass-noise relative rounded-xl overflow-hidden",
+      'h-full shrink-0 flex flex-col glass-sidebar-panel glass-noise relative rounded-xl overflow-hidden',
+      'w-[200px] transition-[opacity,transform,background,border-color,box-shadow] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]',
       glassMuted && "glass-sidebar-muted"
     )}>
-      {/* Traffic light region */}
-      <div className="h-[52px] shrink-0" />
+      {/* Traffic light + sidebar toggle spacer; remaining area stays draggable */}
+      <div className="sidebar-top-drag-region h-[52px] shrink-0 flex items-end pb-2 pr-3">
+        <div data-tauri-drag-region className="h-9 flex-1 rounded-full" />
+      </div>
 
       {/* Nav groups */}
       <nav className="flex-1 flex flex-col gap-4 overflow-y-auto px-3">

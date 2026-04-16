@@ -10,7 +10,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 
 interface WorkspaceStatusStripProps {
@@ -84,7 +83,7 @@ export function WorkspaceStatusStrip({ onNavigate }: WorkspaceStatusStripProps) 
   const activeCronTasks = cronTasks.filter((t) => t.enabled !== false);
 
   return (
-    <div data-tauri-drag-region className="h-12 flex items-center gap-2.5 px-4 shrink-0">
+    <div data-tauri-drag-region className="workspace-status-strip h-12 flex items-center gap-2.5 shrink-0">
       <StatusChip
         icon={Radio}
         label={
