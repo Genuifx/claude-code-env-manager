@@ -1,37 +1,17 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { Check, Download, Play } from 'lucide-react';
-import { MessageBubble, type ConversationMessageData } from './MessageBubble';
-import type { HistorySessionItem } from './HistoryList';
+import { MessageBubble } from './MessageBubble';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { getPerformanceMode } from '@/lib/performance';
+import { getSessionTokenUsage, mergeToolResults } from '@/features/conversations/messageState';
+import type {
+  ConversationMessageData,
+  HistorySegment,
+  HistorySessionItem,
+} from '@/features/conversations/types';
 import { getHistorySessionDisplay } from './historySession';
-
-interface ContentBlock {
-  type: string;
-  id?: string;
-  content?: unknown;
-  is_error?: boolean;
-  tool_use_id?: string;
-  _result?: unknown;
-  _resultError?: boolean;
-  [key: string]: unknown;
-}
-
-export interface HistorySegment {
-  segmentIndex: number;
-  timestamp: number;
-  trigger?: string;
-  preTokens?: number;
-  messageCount: number;
-}
-
-interface SessionTokenUsage {
-  input: number;
-  output: number;
-  total: number;
-}
 
 interface HistoryDetailProps {
   selectedSession: HistorySessionItem;
@@ -58,76 +38,6 @@ function formatHeaderDate(timestamp: number): string {
 
 function isNearBottom(container: HTMLDivElement): boolean {
   return container.scrollHeight - container.clientHeight - container.scrollTop <= 48;
-}
-
-function mergeToolResults(msgs: ConversationMessageData[]): ConversationMessageData[] {
-  const toolUseMap = new Map<string, ContentBlock>();
-  const prepared = msgs.map((msg) => {
-    if ((msg.msgType === 'assistant' || msg.msgType === 'ai') && Array.isArray(msg.content)) {
-      const blocks = msg.content as ContentBlock[];
-      let nextBlocks: ContentBlock[] | null = null;
-
-      blocks.forEach((block, index) => {
-        if (block.type !== 'tool_use' || !block.id) return;
-
-        if (!nextBlocks) {
-          nextBlocks = [...blocks];
-        }
-
-        const clonedBlock = { ...block };
-        nextBlocks[index] = clonedBlock;
-        toolUseMap.set(block.id, clonedBlock);
-      });
-
-      if (nextBlocks) {
-        return {
-          ...msg,
-          content: nextBlocks as ConversationMessageData['content'],
-        };
-      }
-    }
-
-    return msg;
-  });
-
-  const result: ConversationMessageData[] = [];
-  for (const msg of prepared) {
-    if ((msg.msgType === 'user' || msg.msgType === 'human') && Array.isArray(msg.content)) {
-      const blocks = msg.content as ContentBlock[];
-      let remaining: ContentBlock[] | null = null;
-
-      for (let index = 0; index < blocks.length; index += 1) {
-        const block = blocks[index];
-        if (block.type === 'tool_result' && block.tool_use_id) {
-          const target = toolUseMap.get(block.tool_use_id);
-          if (target) {
-            target._result = block.content;
-            target._resultError = block.is_error === true;
-            if (!remaining) {
-              remaining = blocks.slice(0, index);
-            }
-            continue;
-          }
-        }
-
-        if (remaining) {
-          remaining.push(block);
-        }
-      }
-
-      if (remaining) {
-        if (remaining.length === 0) continue;
-        result.push({
-          ...msg,
-          content: remaining as ConversationMessageData['content'],
-        });
-        continue;
-      }
-    }
-    result.push(msg);
-  }
-
-  return result;
 }
 
 export function HistoryDetail({
@@ -159,21 +69,7 @@ export function HistoryDetail({
   const sessionTitle = getHistorySessionDisplay(selectedSession, t('history.untitledSession'));
 
   const mergedMessages = useMemo(() => mergeToolResults(messages), [messages]);
-  const sessionUsage = useMemo<SessionTokenUsage>(() => {
-    const usage = mergedMessages.reduce(
-      (acc, msg) => {
-        acc.input += msg.inputTokens ?? 0;
-        acc.output += msg.outputTokens ?? 0;
-        return acc;
-      },
-      { input: 0, output: 0 }
-    );
-
-    return {
-      ...usage,
-      total: usage.input + usage.output,
-    };
-  }, [mergedMessages]);
+  const sessionUsage = useMemo(() => getSessionTokenUsage(mergedMessages), [mergedMessages]);
 
   const visibleMessages = useMemo(() => {
     if (activeSegment === null) return mergedMessages;

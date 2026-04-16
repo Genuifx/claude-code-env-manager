@@ -2,109 +2,33 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useState, useTransitio
 import { MessageSquare } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
-import { HistoryList, type HistorySessionItem, type HistorySource } from '@/components/history/HistoryList';
-import type { ConversationMessageData } from '@/components/history/MessageBubble';
-import type { HistorySegment } from '@/components/history/HistoryDetail';
+import { HistoryList } from '@/components/history/HistoryList';
 import { getHistorySessionDisplay } from '@/components/history/historySession';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
+import {
+  fetchConversationDetail,
+  fetchHistorySessions,
+  getCachedHistorySessions,
+  invalidateHistoryCache,
+  isHistoryCacheFresh,
+  primeHistoryPage,
+} from '@/features/conversations/historyData';
+import type {
+  ConversationMessageData,
+  HistorySegment,
+  HistorySessionItem,
+  HistorySourceFilter,
+} from '@/features/conversations/types';
+import { toSessionKey } from '@/features/conversations/types';
 
 const LazyHistoryDetail = lazy(async () =>
   import('@/components/history/HistoryDetail').then((m) => ({ default: m.HistoryDetail }))
 );
 
-export type HistorySourceFilter = 'all' | HistorySource;
-
-const HISTORY_CACHE_TTL_MS = 60_000;
-
-interface HistorySessionCacheEntry {
-  data: HistorySessionItem[];
-  fetchedAt: number;
-  promise?: Promise<HistorySessionItem[]>;
-}
-
-const historySessionCache = new Map<HistorySourceFilter, HistorySessionCacheEntry>();
-
-export function toSessionKey(session: Pick<HistorySessionItem, 'id' | 'source'>): string {
-  return `${session.source}:${session.id}`;
-}
-
-function normalizeHistorySource(value: unknown): HistorySource {
-  switch (typeof value === 'string' ? value.toLowerCase() : '') {
-    case 'codex':
-      return 'codex';
-    case 'opencode':
-      return 'opencode';
-    default:
-      return 'claude';
-  }
-}
-
-function normalizeHistorySessions(data: HistorySessionItem[]): HistorySessionItem[] {
-  return data.map((session) => ({
-    ...session,
-    source: normalizeHistorySource(session.source),
-  }));
-}
-
-function getCachedHistorySessions(sourceFilter: HistorySourceFilter): HistorySessionItem[] | null {
-  return historySessionCache.get(sourceFilter)?.data ?? null;
-}
-
-function isHistoryCacheFresh(sourceFilter: HistorySourceFilter): boolean {
-  const entry = historySessionCache.get(sourceFilter);
-  return !!entry && Date.now() - entry.fetchedAt < HISTORY_CACHE_TTL_MS;
-}
-
-export async function fetchHistorySessions(sourceFilter: HistorySourceFilter, force = false): Promise<HistorySessionItem[]> {
-  const cached = historySessionCache.get(sourceFilter);
-
-  if (!force && cached?.data && isHistoryCacheFresh(sourceFilter)) {
-    return cached.data;
-  }
-
-  if (!force && cached?.promise) {
-    return cached.promise;
-  }
-
-  const request = invoke<HistorySessionItem[]>('get_conversation_history', {
-    source: sourceFilter === 'all' ? null : sourceFilter,
-  })
-    .then((data) => {
-      const normalized = normalizeHistorySessions(data);
-      historySessionCache.set(sourceFilter, {
-        data: normalized,
-        fetchedAt: Date.now(),
-      });
-      return normalized;
-    })
-    .catch((err) => {
-      if (cached?.data) {
-        historySessionCache.set(sourceFilter, cached);
-      } else {
-        historySessionCache.delete(sourceFilter);
-      }
-      throw err;
-    });
-
-  historySessionCache.set(sourceFilter, {
-    data: cached?.data ?? [],
-    fetchedAt: cached?.fetchedAt ?? 0,
-    promise: request,
-  });
-
-  return request;
-}
-
-export function primeHistoryPage() {
-  void fetchHistorySessions('all').catch(() => {});
-}
-
-export function invalidateHistoryCache() {
-  historySessionCache.clear();
-}
+export { primeHistoryPage };
 
 function HistoryDetailFallback() {
   return (
@@ -257,16 +181,7 @@ export function History() {
     setMessages([]);
     setSegments([]);
     try {
-      const [msgs, segs] = await Promise.all([
-        invoke<ConversationMessageData[]>('get_conversation_messages', {
-          sessionId: session.id,
-          source: session.source,
-        }),
-        invoke<HistorySegment[]>('get_conversation_segments', {
-          sessionId: session.id,
-          source: session.source,
-        }),
-      ]);
+      const { messages: msgs, segments: segs } = await fetchConversationDetail(session);
       setMessages(msgs);
       setSegments(segs);
     } catch (err) {

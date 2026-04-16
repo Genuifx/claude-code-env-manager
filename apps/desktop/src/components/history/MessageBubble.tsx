@@ -3,197 +3,19 @@ import { ChevronRight, Brain, CheckCircle2, XCircle, Circle, Scissors, ChevronsU
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
-
-/** Parse and sanitize Claude Code internal XML tags from message text. */
-interface TeammateMessage {
-  id: string;
-  color: string;
-  summary?: string;
-  content: string;
-  /** Parsed JSON notification, if content is JSON */
-  notification?: { type: string; idleReason?: string; failureReason?: string };
-}
-
-interface ParsedText {
-  /** Cleaned text with all internal tags removed */
-  cleanText: string;
-  /** Extracted slash command info, if present */
-  command?: { name: string; output?: string; message?: string; args?: string };
-  /** Extracted teammate messages */
-  teammateMessages: TeammateMessage[];
-}
-
-const TEAMMATE_RE = /<teammate-message\s+teammate_id="([^"]*)"(?:\s+color="([^"]*)")?(?:\s+summary="([^"]*)")?\s*>([\s\S]*?)<\/teammate-message>/g;
-const PARSED_TEXT_CACHE_LIMIT = 500;
-const parsedTextCache = new Map<string, ParsedText>();
-
-function rememberParsedText(raw: string, parsed: ParsedText): ParsedText {
-  if (parsedTextCache.has(raw)) {
-    parsedTextCache.delete(raw);
-  }
-
-  parsedTextCache.set(raw, parsed);
-  if (parsedTextCache.size > PARSED_TEXT_CACHE_LIMIT) {
-    const oldestKey = parsedTextCache.keys().next().value;
-    if (oldestKey) {
-      parsedTextCache.delete(oldestKey);
-    }
-  }
-
-  return parsed;
-}
-
-function parseMessageText(raw: string): ParsedText {
-  const cached = parsedTextCache.get(raw);
-  if (cached) {
-    parsedTextCache.delete(raw);
-    parsedTextCache.set(raw, cached);
-    return cached;
-  }
-
-  let text = raw;
-
-  // Extract command info before stripping
-  const cmdMatch = text.match(/<command-name>\/?([\s\S]*?)<\/command-name>/);
-  const cmdMessageMatch = text.match(/<command-message>([\s\S]*?)<\/command-message>/);
-  const cmdArgsMatch = text.match(/<command-args>([\s\S]*?)<\/command-args>/);
-  const stdoutMatch = text.match(/<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/);
-
-  const commandName = cmdMatch?.[1]?.trim() || cmdMessageMatch?.[1]?.trim();
-  const command = commandName
-    ? {
-      name: commandName,
-      output: stdoutMatch?.[1]?.trim(),
-      message: cmdMessageMatch?.[1]?.trim(),
-      args: cmdArgsMatch?.[1]?.trim(),
-    }
-    : undefined;
-
-  // Extract teammate messages before stripping
-  const teammateMessages: TeammateMessage[] = [];
-  TEAMMATE_RE.lastIndex = 0;
-  for (const match of text.matchAll(TEAMMATE_RE)) {
-    const [, id, color, summary, content] = match;
-    const trimmed = content.trim();
-    let notification: TeammateMessage['notification'];
-    try {
-      const parsed = JSON.parse(trimmed);
-      if (parsed && typeof parsed === 'object' && parsed.type) {
-        notification = parsed;
-      }
-    } catch { /* not JSON, it's markdown content */ }
-    teammateMessages.push({ id, color: color || 'blue', summary, content: trimmed, notification });
-  }
-  text = text.replace(TEAMMATE_RE, '');
-
-  // Strip all known internal XML tags (and their content)
-  const tagPatterns = [
-    /<system-reminder>[\s\S]*?<\/system-reminder>/g,
-    /<local-command-caveat>[\s\S]*?<\/local-command-caveat>/g,
-    /<local-command-stdout>[\s\S]*?<\/local-command-stdout>/g,
-    /<command-name>[\s\S]*?<\/command-name>/g,
-    /<command-message>[\s\S]*?<\/command-message>/g,
-    /<command-args>[\s\S]*?<\/command-args>/g,
-    /<synthetic>[\s\S]*?<\/synthetic>/g,
-    /<synthetic\s*\/?>/g,
-    /<task-notification>[\s\S]*?<\/task-notification>/g,
-    /<task-id>[\s\S]*?<\/task-id>/g,
-    /<tool_use_error>[\s\S]*?<\/tool_use_error>/g,
-    /<local-command>[\s\S]*?<\/local-command>/g,
-    /<direct-parameter>[\s\S]*?<\/direct-parameter>/g,
-    /<responds-to>[\s\S]*?<\/responds-to>/g,
-    /<retrieval_status>[\s\S]*?<\/retrieval_status>/g,
-  ];
-  for (const pattern of tagPatterns) {
-    text = text.replace(pattern, '');
-  }
-
-  // Strip "Caveat: ..." lines injected by Claude Code
-  text = text.replace(/^Caveat:.*$/gm, '');
-
-  // Collapse excessive blank lines left after stripping
-  text = text.replace(/\n{3,}/g, '\n\n').trim();
-
-  return rememberParsedText(raw, { cleanText: text, command, teammateMessages });
-}
-
-function isCommandOnlyText(text: string): boolean {
-  const { cleanText, command } = parseMessageText(text);
-  const args = command?.args?.trim() || '';
-  return !!(command && !cleanText && !args);
-}
-
-function stringifyUnknown(value: unknown): string {
-  if (value == null) return '';
-  if (typeof value === 'string') return value;
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function extractTextForCopy(raw: string): string {
-  const { cleanText, command } = parseMessageText(raw);
-  if (!command) return cleanText;
-
-  const lines: string[] = [`/${command.name}`];
-  const args = command.args?.trim() || '';
-  const body = (cleanText || args).trim();
-  if (body) lines.push(body);
-  return lines.join('\n');
-}
-
-function blockToCopyText(block: ContentBlock): string {
-  if (block.type === 'text') {
-    return extractTextForCopy(block.text || '');
-  }
-  if (block.type === 'thinking') {
-    return block.thinking || block.text || '';
-  }
-  if (block.type === 'tool_use') {
-    const parts: string[] = [`[Tool] ${block.name || 'Tool'}`];
-    const input = stringifyUnknown(block.input);
-    if (input) parts.push(`Input:\n${input}`);
-    if ('_result' in block) {
-      const output = stringifyUnknown(block._result);
-      if (output) parts.push(`Output:\n${output}`);
-    }
-    return parts.join('\n\n');
-  }
-  return '';
-}
-
-function getMessageCopyText(
-  message: ConversationMessageData,
-  t: (key: string) => string,
-): string {
-  if (message.planContent) {
-    return message.planContent;
-  }
-  if (message.isCompactBoundary) {
-    return t('history.compactBoundary');
-  }
-  if (message.msgType === 'summary') {
-    return message.summary || t('history.summaryLabel');
-  }
-
-  const content = message.content;
-  if (typeof content === 'string') {
-    return extractTextForCopy(content);
-  }
-  if (Array.isArray(content)) {
-    return content
-      .map(blockToCopyText)
-      .map(s => s.trim())
-      .filter(Boolean)
-      .join('\n\n');
-  }
-  if (content && typeof content === 'object') {
-    return blockToCopyText(content as ContentBlock).trim();
-  }
-  return '';
-}
+import {
+  extractToolSummary,
+  getMessageCopyText,
+  isCommandOnlyText,
+  parseMessageText,
+  splitThinkBlocks,
+  stringifyUnknown,
+  type TeammateMessage,
+} from '@/components/conversation/messageContentUtils';
+import type {
+  ConversationContentBlock as ContentBlock,
+  ConversationMessageData,
+} from '@/features/conversations/types';
 
 /** Inline chip for slash commands — adapts to bubble background via isUser */
 function CommandChip({ name, output, isUser, standalone }: { name: string; output?: string; isUser?: boolean; standalone?: boolean }) {
@@ -238,37 +60,6 @@ function CommandChip({ name, output, isUser, standalone }: { name: string; outpu
       )}
     </div>
   );
-}
-
-interface ContentBlock {
-  type: string;
-  text?: string;
-  thinking?: string;
-  name?: string;
-  id?: string;
-  input?: unknown;
-  content?: unknown;
-  is_error?: boolean;
-  tool_use_id?: string;
-  // Injected by mergeToolResults in History.tsx
-  _result?: unknown;
-  _resultError?: boolean;
-}
-
-export interface ConversationMessageData {
-  msgType: string;
-  uuid?: string;
-  content: ContentBlock[] | string | null;
-  model?: string;
-  summary?: string;
-  timestamp?: number;
-  inputTokens?: number;
-  outputTokens?: number;
-  cacheCreationTokens?: number;
-  cacheReadTokens?: number;
-  segmentIndex: number;
-  isCompactBoundary: boolean;
-  planContent?: string;
 }
 
 interface MessageBubbleProps {
@@ -327,49 +118,6 @@ function CollapsibleBlock({
       )}
     </div>
   );
-}
-
-/** Extract a concise summary string from tool input based on tool name. */
-function extractToolSummary(name: string | undefined, input: unknown): string {
-  if (!input || typeof input !== 'object') return '';
-  const obj = input as Record<string, unknown>;
-
-  switch (name) {
-    case 'Read':
-    case 'Write':
-    case 'Edit': {
-      const fp = obj.file_path as string | undefined;
-      if (!fp) return '';
-      // Show last 2 path segments for context
-      const parts = fp.split('/');
-      return parts.length > 2 ? parts.slice(-2).join('/') : fp;
-    }
-    case 'Bash': {
-      const cmd = (obj.command as string) || '';
-      return cmd.length > 60 ? cmd.slice(0, 57) + '...' : cmd;
-    }
-    case 'Glob':
-    case 'Grep': {
-      return (obj.pattern as string) || '';
-    }
-    case 'Task': {
-      const desc = (obj.description as string) || (obj.prompt as string) || '';
-      return desc.length > 50 ? desc.slice(0, 47) + '...' : desc;
-    }
-    case 'WebFetch': {
-      const url = (obj.url as string) || '';
-      return url.length > 50 ? url.slice(0, 47) + '...' : url;
-    }
-    default: {
-      // First string value, truncated
-      for (const val of Object.values(obj)) {
-        if (typeof val === 'string' && val.length > 0) {
-          return val.length > 50 ? val.slice(0, 47) + '...' : val;
-        }
-      }
-      return '';
-    }
-  }
 }
 
 function ToolCallBlock({ block, t }: { block: ContentBlock; t: (key: string) => string }) {
@@ -546,8 +294,6 @@ function PlanCard({ content, t, spacingClass }: { content: string; t: (key: stri
 
 /** Matches insight blocks: backtick-wrapped ★ header line, content, backtick-wrapped closing line */
 const INSIGHT_RE = /`★\s*Insight\s*─+`\n([\s\S]*?)\n`─+`/g;
-/** Matches think tags in text payloads from desktop history snapshots. */
-const THINK_RE = /<think>([\s\S]*?)<\/think>/gi;
 
 /** Render an insight block as a frosted glass callout card */
 function InsightBlock({ content }: { content: string }) {
@@ -701,24 +447,6 @@ function splitInsightBlocks(text: string): Array<{ type: 'md' | 'insight'; conte
     const before = text.slice(lastIndex, match.index);
     if (before.trim()) parts.push({ type: 'md', content: before });
     parts.push({ type: 'insight', content: match[1] });
-    lastIndex = match.index! + match[0].length;
-  }
-
-  const after = text.slice(lastIndex);
-  if (after.trim()) parts.push({ type: 'md', content: after });
-
-  return parts;
-}
-
-function splitThinkBlocks(text: string): Array<{ type: 'md' | 'think'; content: string }> {
-  const parts: Array<{ type: 'md' | 'think'; content: string }> = [];
-  let lastIndex = 0;
-
-  THINK_RE.lastIndex = 0;
-  for (const match of text.matchAll(THINK_RE)) {
-    const before = text.slice(lastIndex, match.index);
-    if (before.trim()) parts.push({ type: 'md', content: before });
-    parts.push({ type: 'think', content: match[1] || '' });
     lastIndex = match.index! + match[0].length;
   }
 

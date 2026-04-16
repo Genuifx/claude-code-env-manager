@@ -4,20 +4,8 @@ import { Claude, Codex, OpenCode } from '@lobehub/icons';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import type { HistorySessionItem, HistorySource } from '@/features/conversations/types';
 import { getHistorySessionDisplay } from './historySession';
-
-export type HistorySource = 'claude' | 'codex' | 'opencode';
-
-export interface HistorySessionItem {
-  id: string;
-  source: HistorySource;
-  display: string;
-  timestamp: number;
-  project: string;
-  projectName: string;
-  envName?: string;
-  configSource?: 'ccem' | 'native';
-}
 
 interface HistoryListProps {
   sessions: HistorySessionItem[];

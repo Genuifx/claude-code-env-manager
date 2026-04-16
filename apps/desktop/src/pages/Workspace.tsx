@@ -1,6 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MessageSquare } from 'lucide-react';
-import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { WorkspaceStatusStrip } from '@/components/workspace/WorkspaceStatusStrip';
 import { ProjectTree } from '@/components/workspace/ProjectTree';
@@ -18,14 +17,23 @@ import {
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useLocale } from '@/locales';
 import { scheduleAfterFirstPaint } from '@/lib/idle';
-import { fetchHistorySessions, invalidateHistoryCache, toSessionKey } from '@/pages/History';
-import type { HistorySessionItem } from '@/components/history/HistoryList';
-import type { ConversationMessageData } from '@/components/history/MessageBubble';
-import type { HistorySegment } from '@/components/history/HistoryDetail';
+import {
+  fetchConversationDetail,
+  fetchHistorySessions,
+  invalidateHistoryCache,
+} from '@/features/conversations/historyData';
+import type {
+  ConversationMessageData,
+  HistorySegment,
+  HistorySessionItem,
+} from '@/features/conversations/types';
+import { toSessionKey } from '@/features/conversations/types';
 import { shallow } from 'zustand/shallow';
 
 const LazyHistoryDetail = lazy(async () =>
-  import('@/components/history/HistoryDetail').then((m) => ({ default: m.HistoryDetail }))
+  import('@/components/workspace/WorkspaceConversationDetail').then((m) => ({
+    default: m.WorkspaceConversationDetail,
+  }))
 );
 
 function DetailFallback() {
@@ -140,16 +148,7 @@ export function Workspace({ isActive = true, onNavigate, onLaunchWithDir }: Work
       }
 
       try {
-        const [msgs, segs] = await Promise.all([
-          invoke<ConversationMessageData[]>('get_conversation_messages', {
-            sessionId: session.id,
-            source: session.source,
-          }),
-          invoke<HistorySegment[]>('get_conversation_segments', {
-            sessionId: session.id,
-            source: session.source,
-          }),
-        ]);
+        const { messages: msgs, segments: segs } = await fetchConversationDetail(session);
 
         if (requestSeq !== conversationRequestSeqRef.current) {
           return;
@@ -364,10 +363,6 @@ export function Workspace({ isActive = true, onNavigate, onLaunchWithDir }: Work
     }
   }, [openDirectoryPicker, onLaunchWithDir, scheduleWorkspaceRefresh]);
 
-  const handleExport = useCallback(() => {
-    toast.info('Use History page for full export');
-  }, []);
-
   const shortcuts = useMemo(
     () => ({
       'meta+o': () => void handleNewSession(),
@@ -422,16 +417,6 @@ export function Workspace({ isActive = true, onNavigate, onLaunchWithDir }: Work
                 activeSegment={activeSegment}
                 onActiveSegmentChange={setActiveSegment}
                 isLoadingMessages={isLoadingMessages}
-                onExport={handleExport}
-                onResume={handleResume}
-                launched={launched}
-                scrollToBottomOnLoad
-                onSessionTitleChange={async (source, sessionId, newTitle) => {
-                  await setSessionTitle(source, sessionId, newTitle);
-                  invalidateHistoryCache();
-                  const refreshed = await fetchHistorySessions('all', true);
-                  setSessions(refreshed);
-                }}
               />
             </Suspense>
           ) : (
