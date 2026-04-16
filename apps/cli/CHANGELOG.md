@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.16
+
+### Patch Changes
+
+- Release the sidebar collapse, window control spacing, and titlebar toggle polish in the next beta.
+
 ## 2.0.0-beta.15
 
 ### Patch Changes
