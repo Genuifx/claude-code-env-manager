@@ -76,7 +76,7 @@ use weixin::{WeixinBridgeManager, WeixinBridgeStatus, WeixinLoginSession, Weixin
 
 /// Global flag: when true, CloseRequested should NOT be intercepted.
 static FORCE_QUIT: AtomicBool = AtomicBool::new(false);
-use tauri::{window::Color, Manager, RunEvent, State, WindowEvent};
+use tauri::{window::Color, Listener, Manager, RunEvent, State, WindowEvent};
 use terminal::{
     ArrangeLayout, ArrangeSessionInfo, TerminalInfo, TerminalType, TmuxAttachTerminalInfo,
     TmuxAttachTerminalType,
@@ -97,6 +97,12 @@ struct LoadResult {
 }
 
 #[cfg(target_os = "macos")]
+const MACOS_TRAFFIC_LIGHT_INSET_X: f32 = 24.0;
+
+#[cfg(target_os = "macos")]
+const MACOS_TRAFFIC_LIGHT_INSET_Y: f32 = 30.0;
+
+#[cfg(target_os = "macos")]
 fn should_use_reduced_window_effects(settings: &DesktopSettings) -> bool {
     settings.performance_mode == "reduced"
         || matches!(
@@ -111,6 +117,16 @@ fn reduced_window_background_color(settings: &DesktopSettings) -> Color {
         "light" => Color(242, 245, 249, 255),
         _ => Color(22, 24, 29, 255),
     }
+}
+
+#[cfg(target_os = "macos")]
+fn sync_macos_traffic_lights(main_window: &tauri::WebviewWindow) -> Result<(), String> {
+    use tauri_plugin_decorum::WebviewWindowExt;
+
+    main_window
+        .set_traffic_lights_inset(MACOS_TRAFFIC_LIGHT_INSET_X, MACOS_TRAFFIC_LIGHT_INSET_Y)
+        .map_err(|error| format!("Failed to position traffic lights: {}", error))?;
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -134,6 +150,16 @@ fn sync_macos_window_appearance(
         .map_err(|error| format!("Failed to enable window transparency: {}", error))?;
     apply_vibrancy(main_window, NSVisualEffectMaterial::Sidebar, None, None)
         .map_err(|error| format!("Failed to apply vibrancy: {}", error))?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn sync_macos_window_chrome(
+    main_window: &tauri::WebviewWindow,
+    settings: &DesktopSettings,
+) -> Result<(), String> {
+    sync_macos_window_appearance(main_window, settings)?;
+    sync_macos_traffic_lights(main_window)?;
     Ok(())
 }
 
@@ -2001,7 +2027,7 @@ fn save_settings(app: tauri::AppHandle, settings: DesktopSettings) -> Result<(),
     #[cfg(target_os = "macos")]
     {
         if let Some(main_window) = app.get_webview_window("main") {
-            if let Err(error) = sync_macos_window_appearance(&main_window, &merged_settings) {
+            if let Err(error) = sync_macos_window_chrome(&main_window, &merged_settings) {
                 errors.push(format!("window appearance: {}", error));
             }
         }
@@ -2604,17 +2630,32 @@ fn main() {
             quit_app
         ])
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                // Only intercept the main window, and never when force-quit is requested
-                if window.label() == "main" && !FORCE_QUIT.load(Ordering::SeqCst) {
-                    let close_to_tray = config::read_settings()
-                        .map(|s| s.close_to_tray)
-                        .unwrap_or(true);
-                    if close_to_tray {
-                        api.prevent_close();
-                        let _ = window.hide();
+            if window.label() != "main" {
+                return;
+            }
+
+            match event {
+                WindowEvent::CloseRequested { api, .. } => {
+                    // Only intercept the main window, and never when force-quit is requested
+                    if !FORCE_QUIT.load(Ordering::SeqCst) {
+                        let close_to_tray = config::read_settings()
+                            .map(|s| s.close_to_tray)
+                            .unwrap_or(true);
+                        if close_to_tray {
+                            api.prevent_close();
+                            let _ = window.hide();
+                        }
                     }
                 }
+                #[cfg(target_os = "macos")]
+                WindowEvent::Resized(_) => {
+                    if let Some(main_window) = window.app_handle().get_webview_window("main") {
+                        if let Err(error) = sync_macos_traffic_lights(&main_window) {
+                            eprintln!("Traffic lights resize sync warning: {}", error);
+                        }
+                    }
+                }
+                _ => {}
             }
         })
         .setup(move |app| {
@@ -2660,11 +2701,23 @@ fn main() {
                 use tauri_plugin_decorum::WebviewWindowExt;
                 let main_window = app.get_webview_window("main").unwrap();
                 main_window.create_overlay_titlebar().unwrap();
-                // Position traffic lights — offset to align inside the inset sidebar panel
-                main_window.set_traffic_lights_inset(24.0, 28.0).unwrap();
-                if let Err(error) = sync_macos_window_appearance(&main_window, &startup_settings) {
+                if let Err(error) = sync_macos_window_chrome(&main_window, &startup_settings) {
                     eprintln!("Window appearance warning: {}", error);
                 }
+
+                let fullscreen_window = main_window.clone();
+                main_window.listen("did-enter-fullscreen", move |_| {
+                    if let Err(error) = sync_macos_traffic_lights(&fullscreen_window) {
+                        eprintln!("Traffic lights fullscreen sync warning: {}", error);
+                    }
+                });
+
+                let fullscreen_exit_window = main_window.clone();
+                main_window.listen("did-exit-fullscreen", move |_| {
+                    if let Err(error) = sync_macos_traffic_lights(&fullscreen_exit_window) {
+                        eprintln!("Traffic lights fullscreen exit sync warning: {}", error);
+                    }
+                });
             }
 
             // startMinimized: hide window immediately after setup (platform-independent)
@@ -2736,6 +2789,10 @@ fn main() {
                 if let Some(window) = app_handle.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.set_focus();
+                    #[cfg(target_os = "macos")]
+                    if let Err(error) = sync_macos_traffic_lights(&window) {
+                        eprintln!("Traffic lights reopen sync warning: {}", error);
+                    }
                 }
             } else if let RunEvent::Exit = event {
                 telegram_manager_for_run.stop();
