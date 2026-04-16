@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.17
+
+### Patch Changes
+
+- Ship the workspace/history view split and the new minimal workspace transcript in the next beta release.
+
 ## 2.0.0-beta.16
 
 ### Patch Changes
