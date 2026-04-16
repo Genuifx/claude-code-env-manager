@@ -572,10 +572,16 @@ fn build_shell_command(
 
 /// Build the shell command to attach a new terminal window to an existing tmux target.
 fn build_tmux_attach_command(target: &str) -> String {
-    let escaped_target = target.replace("'", "'\\''");
     let tmux = resolve_tmux_path().unwrap_or_else(|| "tmux".to_string());
-    let escaped_tmux = tmux.replace("'", "'\\''");
-    format!("'{}' attach-session -t '{}'", escaped_tmux, escaped_target)
+    build_tmux_attach_command_with_binary(&tmux, target)
+}
+
+fn build_tmux_attach_command_with_binary(tmux: &str, target: &str) -> String {
+    let escaped_target = target.replace("'", "'\\''");
+    // This command is injected into Terminal/iTerm with AppleScript. Keeping the
+    // executable path unquoted avoids unmatched-leading-quote glitches observed
+    // when some shells receive the text keystroke-by-keystroke.
+    format!("{} attach-session -t '{}'", tmux, escaped_target)
 }
 
 /// Build the shell command to launch Codex and write exit code for session tracking.
@@ -658,48 +664,91 @@ fn build_opencode_shell_command(
 fn terminal_app_script(shell_command: &str) -> String {
     // IMPORTANT: Escape backslashes FIRST, then double quotes
     let escaped = shell_command.replace("\\", "\\\\").replace("\"", "\\\"");
+    terminal_app_window_id_script(&escaped)
+}
+
+fn terminal_app_window_id_script(escaped_shell_command: &str) -> String {
     format!(
         r#"tell application "Terminal"
-    set theTab to do script "{}"
+    do script "{}"
     activate
-    return (id of window of theTab) as text
+    return (id of front window) as text
 end tell"#,
-        escaped
+        escaped_shell_command
     )
 }
 
 /// Generate AppleScript for Terminal.app and return the created window ID.
 fn terminal_app_attach_script(shell_command: &str) -> String {
     let escaped = shell_command.replace("\\", "\\\\").replace("\"", "\\\"");
-    format!(
-        r#"tell application "Terminal"
-    set theTab to do script "{}"
-    activate
-    return (id of window of theTab) as text
-end tell"#,
-        escaped
-    )
+    terminal_app_window_id_script(&escaped)
 }
 
 /// Generate AppleScript for iTerm2 with tab title
 /// Returns "windowId|sessionId" for later operations (arrange needs session unique ID)
-fn iterm2_script(shell_command: &str) -> String {
-    // IMPORTANT: Escape backslashes FIRST, then double quotes
+fn iterm2_script() -> String {
+    r#"tell application "iTerm"
+    set newWindow to (create window with default profile)
+    set theSession to current session of current tab of newWindow
+    set windowId to id of newWindow
+    set sessionId to unique id of theSession
+    activate
+    return (windowId as string) & "|" & sessionId
+end tell"#
+        .to_string()
+}
+
+fn iterm2_write_text_script(session_id: &str, shell_command: &str) -> String {
+    let escaped_session_id = session_id.replace("\\", "\\\\").replace("\"", "\\\"");
     let escaped_cmd = shell_command.replace("\\", "\\\\").replace("\"", "\\\"");
     format!(
         r#"tell application "iTerm"
-    set newWindow to (create window with default profile)
-    set theSession to current session of current tab of newWindow
-    tell theSession
-        write text "{}"
-    end tell
-    activate
-    set windowId to id of newWindow
-    set sessionId to unique id of theSession
-    return (windowId as string) & "|" & sessionId
+    repeat with aWindow in windows
+        set aSession to current session of current tab of aWindow
+        if unique id of aSession is "{}" then
+            tell aSession
+                write text "{}"
+            end tell
+            activate
+            return "ok"
+        end if
+    end repeat
+    return "not_found"
 end tell"#,
-        escaped_cmd
+        escaped_session_id, escaped_cmd
     )
+}
+
+fn dispatch_iterm2_command(session_id: String, shell_command: String) {
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+        let script = iterm2_write_text_script(&session_id, &shell_command);
+        match Command::new("osascript").arg("-e").arg(&script).output() {
+            Ok(output) if output.status.success() => {
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if stdout != "ok" {
+                    eprintln!(
+                        "Failed to send delayed command to iTerm2 session {}: {}",
+                        session_id, stdout
+                    );
+                }
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                eprintln!(
+                    "Failed to send delayed command to iTerm2 session {}: {}",
+                    session_id,
+                    stderr.trim()
+                );
+            }
+            Err(error) => {
+                eprintln!(
+                    "Failed to execute delayed iTerm2 AppleScript for session {}: {}",
+                    session_id, error
+                );
+            }
+        }
+    });
 }
 
 /// Launch Claude Code in the specified terminal
@@ -752,7 +801,7 @@ pub fn launch_in_terminal(
 
     let script = match terminal {
         TerminalType::TerminalApp => terminal_app_script(&shell_command),
-        TerminalType::ITerm2 => iterm2_script(&shell_command),
+        TerminalType::ITerm2 => iterm2_script(),
     };
 
     // Execute the AppleScript
@@ -772,10 +821,18 @@ pub fn launch_in_terminal(
         TerminalType::ITerm2 => {
             let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if let Some((window_id, session_id)) = raw.split_once('|') {
+                dispatch_iterm2_command(session_id.to_string(), shell_command.clone());
                 Ok((Some(window_id.to_string()), Some(session_id.to_string())))
             } else {
-                // Fallback: old format (just window ID)
-                Ok((Some(raw), None))
+                let session_id = if raw.is_empty() {
+                    None
+                } else {
+                    get_iterm_session_id(&raw).ok()
+                };
+                if let Some(session_id) = session_id.as_ref() {
+                    dispatch_iterm2_command(session_id.clone(), shell_command.clone());
+                }
+                Ok((Some(raw), session_id))
             }
         }
         TerminalType::TerminalApp => {
@@ -798,7 +855,7 @@ pub fn open_tmux_target_in_terminal(
     let shell_command = build_tmux_attach_command(target);
     let script = match terminal {
         TerminalType::TerminalApp => terminal_app_attach_script(&shell_command),
-        TerminalType::ITerm2 => iterm2_script(&shell_command),
+        TerminalType::ITerm2 => iterm2_script(),
     };
 
     let output = Command::new("osascript")
@@ -816,11 +873,16 @@ pub fn open_tmux_target_in_terminal(
         TerminalType::ITerm2 => {
             let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if let Some((window_id, session_id)) = raw.split_once('|') {
+                dispatch_iterm2_command(session_id.to_string(), shell_command.clone());
                 Ok((Some(window_id.to_string()), Some(session_id.to_string())))
             } else if raw.is_empty() {
                 Err("iTerm2 did not return a window identifier".to_string())
             } else {
-                Ok((Some(raw), None))
+                let session_id = get_iterm_session_id(&raw).ok();
+                if let Some(session_id) = session_id.as_ref() {
+                    dispatch_iterm2_command(session_id.clone(), shell_command.clone());
+                }
+                Ok((Some(raw), session_id))
             }
         }
         TerminalType::TerminalApp => {
@@ -1530,15 +1592,35 @@ mod tests {
 
     #[test]
     fn test_build_tmux_attach_command() {
-        let cmd = build_tmux_attach_command("ccem:ccem-1234abcd");
-        assert!(cmd.ends_with("attach-session -t 'ccem:ccem-1234abcd'"));
+        let cmd = build_tmux_attach_command_with_binary("tmux", "ccem:ccem-1234abcd");
+        assert_eq!(cmd, "tmux attach-session -t 'ccem:ccem-1234abcd'");
+    }
+
+    #[test]
+    fn test_build_tmux_attach_command_escapes_single_quotes_in_target() {
+        let cmd = build_tmux_attach_command_with_binary("tmux", "ccem:team's-session");
+        assert_eq!(cmd, "tmux attach-session -t 'ccem:team'\\''s-session'");
     }
 
     #[test]
     fn test_terminal_app_attach_script_reads_window_id() {
         let script = terminal_app_attach_script("tmux attach-session -t test");
         assert!(script.contains("do script"));
-        assert!(script.contains("id of window"));
+        assert!(script.contains("id of front window"));
+    }
+
+    #[test]
+    fn test_iterm2_script_returns_window_and_session_ids() {
+        let script = iterm2_script();
+        assert!(script.contains("create window with default profile"));
+        assert!(script.contains("return (windowId as string) & \"|\" & sessionId"));
+    }
+
+    #[test]
+    fn test_iterm2_write_text_script_targets_unique_session() {
+        let script = iterm2_write_text_script("session-123", "tmux attach-session -t test");
+        assert!(script.contains("unique id of aSession is \"session-123\""));
+        assert!(script.contains("write text \"tmux attach-session -t test\""));
     }
 
     #[test]
