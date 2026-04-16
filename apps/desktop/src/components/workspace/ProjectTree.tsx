@@ -1,10 +1,10 @@
 import { useMemo, useState, useDeferredValue, useCallback } from 'react';
 import { ChevronRight, FolderOpen, FolderClosed, MessageSquare, RefreshCw, Search } from 'lucide-react';
-import type { HistorySessionItem } from '@/components/history/HistoryList';
 import { cn } from '@/lib/utils';
 import { getHistorySessionDisplay } from '@/components/history/historySession';
 import { useLocale } from '@/locales';
 import type { LaunchClient } from '@/store';
+import type { HistorySessionItem } from '@/features/conversations/types';
 import { AgentLaunchSplitButton } from './AgentLaunchSplitButton';
 
 interface ProjectTreeProps {

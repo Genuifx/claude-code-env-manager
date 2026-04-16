@@ -114,7 +114,17 @@
     "noHistoryHint": "启动 Claude Code 开始你的第一个对话",
     "projectSessions": "个会话",
     "loadMore": "加载更多",
-    "manageEnvs": "管理环境..."
+    "manageEnvs": "管理环境...",
+    "focusSession": "当前会话",
+    "processedLabel": "已处理",
+    "toolTrace": "工具轨迹",
+    "agentNotes": "Agent 动态",
+    "toolCalls": "个调用",
+    "thinkingNotes": "段思考",
+    "toolSucceeded": "成功",
+    "toolDone": "完成",
+    "toolFailedState": "错误",
+    "tokensUnit": "tokens"
   },
   "sessions": {
     "subtitle": "管理运行中的 Claude Code 会话",

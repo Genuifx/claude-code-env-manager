@@ -114,7 +114,17 @@
     "noHistoryHint": "Launch Claude Code to start your first conversation",
     "projectSessions": "sessions",
     "loadMore": "Load more",
-    "manageEnvs": "Manage environments..."
+    "manageEnvs": "Manage environments...",
+    "focusSession": "Focused session",
+    "processedLabel": "Processed",
+    "toolTrace": "Tool activity",
+    "agentNotes": "Agent notes",
+    "toolCalls": "calls",
+    "thinkingNotes": "thoughts",
+    "toolSucceeded": "ok",
+    "toolDone": "done",
+    "toolFailedState": "error",
+    "tokensUnit": "tokens"
   },
   "sessions": {
     "subtitle": "Manage running Claude Code sessions",
