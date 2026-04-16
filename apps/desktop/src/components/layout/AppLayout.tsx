@@ -94,7 +94,7 @@ function AppLayoutBody({
 
         {/* Titlebar spacer + page title — also serves as drag region for non-workspace pages */}
         {!isWorkspace && (
-          <div data-tauri-drag-region className="app-titlebar-row h-[52px] shrink-0 flex items-end gap-3 pb-2 pr-8 relative z-10">
+          <div data-tauri-drag-region className="app-titlebar-row h-12 shrink-0 flex items-center gap-3 relative z-10">
             <div className="flex items-baseline gap-3 min-w-0">
               {pageTitle && (
                 <h1 className="text-lg font-semibold text-foreground truncate">{pageTitle}</h1>

@@ -473,7 +473,8 @@
 }
 
 .app-titlebar-row {
-  padding-left: 2rem;
+  padding-left: 1rem;
+  padding-right: 1rem;
 }
 
 .workspace-status-strip {
@@ -1931,29 +1932,6 @@
 
 .history-item-virtualized {
   contain-intrinsic-size: 56px;
-}
-
-.workspace-msg-virtualized,
-.workspace-tool-digest-virtualized,
-.workspace-tool-row-virtualized,
-.workspace-tool-payload-virtualized {
-  content-visibility: auto;
-}
-
-.workspace-msg-virtualized {
-  contain-intrinsic-size: auto 260px;
-}
-
-.workspace-tool-digest-virtualized {
-  contain-intrinsic-size: auto 132px;
-}
-
-.workspace-tool-row-virtualized {
-  contain-intrinsic-size: auto 48px;
-}
-
-.workspace-tool-payload-virtualized {
-  contain-intrinsic-size: auto 120px;
 }
 
 /* === Reduced Performance Mode === */
