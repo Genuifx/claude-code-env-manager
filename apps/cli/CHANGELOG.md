@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.18
+
+### Patch Changes
+
+- Release the workspace session icon upgrade, loading indicators, provenance tracking, and fullscreen window chrome fixes in the next beta.
+
 ## 2.0.0-beta.17
 
 ### Patch Changes
