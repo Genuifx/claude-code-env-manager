@@ -2,8 +2,8 @@
 //
 // Conversation history support for both Claude and Codex sources.
 
+use crate::{opencode, runtime, session_provenance};
 use rusqlite::{Connection, OpenFlags};
-use crate::opencode;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
@@ -384,7 +384,133 @@ fn load_claude_history_from_paths(
     }
 
     supplement_claude_history_from_projects(projects_dir, &mut session_map)?;
+    supplement_claude_history_from_runtime_state(&mut session_map);
+    supplement_history_from_provenance(&mut session_map, SOURCE_CLAUDE);
     Ok(session_map.into_values().collect())
+}
+
+fn supplement_claude_history_from_runtime_state(session_map: &mut HashMap<String, HistorySession>) {
+    let state = match runtime::read_runtime_state() {
+        Ok(state) => state,
+        Err(_) => return,
+    };
+
+    for entry in state.sessions {
+        let Some(session_id) = entry
+            .claude_session_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+
+        let Some(existing) = session_map.get_mut(session_id) else {
+            continue;
+        };
+
+        if existing.source != SOURCE_CLAUDE {
+            continue;
+        }
+
+        if existing
+            .env_name
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            existing.env_name = Some(entry.env_name.clone());
+        }
+
+        if existing.config_source.is_none() {
+            existing.config_source = Some("ccem".to_string());
+        }
+
+        if existing.project.is_empty() && !entry.project_dir.trim().is_empty() {
+            existing.project = entry.project_dir.clone();
+            existing.project_name = entry
+                .project_dir
+                .split(['/', '\\'])
+                .next_back()
+                .filter(|value| !value.is_empty())
+                .unwrap_or("unknown")
+                .to_string();
+        }
+    }
+}
+
+fn supplement_history_from_provenance(
+    session_map: &mut HashMap<String, HistorySession>,
+    source: &str,
+) {
+    let records = match session_provenance::list_records_by_client(source) {
+        Ok(records) => records,
+        Err(_) => return,
+    };
+
+    for (source_session_id, record) in records {
+        let Some(existing) = session_map.get_mut(&source_session_id) else {
+            continue;
+        };
+
+        if existing.source != source {
+            continue;
+        }
+
+        apply_provenance_to_history_session(existing, &record);
+    }
+}
+
+fn supplement_history_list_from_provenance(sessions: &mut [HistorySession], source: &str) {
+    let records = match session_provenance::list_records_by_client(source) {
+        Ok(records) => records,
+        Err(_) => return,
+    };
+
+    for session in sessions.iter_mut() {
+        if session.source != source {
+            continue;
+        }
+
+        let Some(record) = records.get(&session.id) else {
+            continue;
+        };
+
+        apply_provenance_to_history_session(session, record);
+    }
+}
+
+fn apply_provenance_to_history_session(
+    session: &mut HistorySession,
+    record: &session_provenance::SessionProvenanceRecord,
+) {
+    let record_config_source = record
+        .config_source
+        .clone()
+        .unwrap_or_else(|| session_provenance::DEFAULT_CONFIG_SOURCE.to_string());
+    let should_replace_env = session
+        .env_name
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty())
+        || session.config_source.as_deref() == Some("native");
+
+    if should_replace_env && !record.env_name.trim().is_empty() {
+        session.env_name = Some(record.env_name.clone());
+    }
+
+    if session.config_source.is_none() || session.config_source.as_deref() == Some("native") {
+        session.config_source = Some(record_config_source);
+    }
+
+    if session.project.is_empty() && !record.working_dir.trim().is_empty() {
+        session.project = record.working_dir.clone();
+        session.project_name = record
+            .working_dir
+            .split(['/', '\\'])
+            .next_back()
+            .filter(|value| !value.is_empty())
+            .unwrap_or("unknown")
+            .to_string();
+    }
 }
 
 fn merge_claude_history_session(
@@ -868,8 +994,7 @@ fn read_codex_sqlite_home_from_config(codex_home: &Path) -> Option<String> {
 
 fn load_codex_history_from_config(config: &CodexPathConfig) -> Result<Vec<HistorySession>, String> {
     let session_map = build_codex_session_records(config)?;
-
-    Ok(session_map
+    let mut sessions = session_map
         .into_values()
         .filter_map(|record| {
             let rollout_path = record.rollout_path?;
@@ -895,7 +1020,10 @@ fn load_codex_history_from_config(config: &CodexPathConfig) -> Result<Vec<Histor
                 config_source: None,
             })
         })
-        .collect())
+        .collect::<Vec<_>>();
+
+    supplement_history_list_from_provenance(&mut sessions, SOURCE_CODEX);
+    Ok(sessions)
 }
 
 fn build_codex_session_records(
@@ -1075,7 +1203,10 @@ fn list_codex_state_db_candidates(sqlite_home: &Path) -> Vec<PathBuf> {
             continue;
         }
 
-        let Some(name) = path.file_name().map(|name| name.to_string_lossy().to_string()) else {
+        let Some(name) = path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+        else {
             continue;
         };
         candidates.push((file_modified_at_millis(&path), name, path));
@@ -1083,10 +1214,7 @@ fn list_codex_state_db_candidates(sqlite_home: &Path) -> Vec<PathBuf> {
 
     candidates.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
 
-    candidates
-        .into_iter()
-        .map(|(_, _, path)| path)
-        .collect()
+    candidates.into_iter().map(|(_, _, path)| path).collect()
 }
 
 fn is_codex_state_db(path: &Path) -> bool {
@@ -1801,7 +1929,9 @@ fn load_opencode_history() -> Result<Vec<HistorySession>, String> {
         );
     }
 
-    Ok(session_map.into_values().collect())
+    let mut sessions = session_map.into_values().collect::<Vec<_>>();
+    supplement_history_list_from_provenance(&mut sessions, SOURCE_OPENCODE);
+    Ok(sessions)
 }
 
 fn parse_opencode_history_session(value: &serde_json::Value) -> Option<HistorySession> {
@@ -1818,13 +1948,17 @@ fn parse_opencode_history_session(value: &serde_json::Value) -> Option<HistorySe
         .to_string();
     let timestamp = extract_opencode_timestamp(value)
         .or_else(|| {
-            extract_opencode_string(value, &["updatedAt", "createdAt", "timestamp", "lastUpdated"])
-                .map(|text| parse_string_timestamp(&text))
+            extract_opencode_string(
+                value,
+                &["updatedAt", "createdAt", "timestamp", "lastUpdated"],
+            )
+            .map(|text| parse_string_timestamp(&text))
         })
         .unwrap_or(0);
-    let display = normalize_history_display(
-        extract_opencode_string(value, &["title", "display", "summary", "preview", "name"]),
-    );
+    let display = normalize_history_display(extract_opencode_string(
+        value,
+        &["title", "display", "summary", "preview", "name"],
+    ));
 
     Some(HistorySession {
         id,
@@ -1833,12 +1967,14 @@ fn parse_opencode_history_session(value: &serde_json::Value) -> Option<HistorySe
         timestamp,
         project,
         project_name,
-        env_name: extract_opencode_string(value, &["envName", "environment", "env"]).or_else(|| {
-            metadata
-                .as_ref()
-                .map(|item| item.env_name.clone())
-                .or_else(|| Some(opencode::OPENCODE_NATIVE_ENV_NAME.to_string()))
-        }),
+        env_name: extract_opencode_string(value, &["envName", "environment", "env"]).or_else(
+            || {
+                metadata
+                    .as_ref()
+                    .map(|item| item.env_name.clone())
+                    .or_else(|| Some(opencode::OPENCODE_NATIVE_ENV_NAME.to_string()))
+            },
+        ),
         config_source: extract_opencode_string(value, &["configSource"]).or_else(|| {
             metadata
                 .as_ref()
@@ -1867,8 +2003,7 @@ fn merge_opencode_history_session(
         {
             existing.env_name = candidate.env_name.clone();
         }
-        if (existing.config_source.is_none()
-            || existing.config_source.as_deref() == Some("native"))
+        if (existing.config_source.is_none() || existing.config_source.as_deref() == Some("native"))
             && candidate.config_source.as_deref() == Some("ccem")
         {
             existing.config_source = candidate.config_source.clone();
@@ -2048,7 +2183,9 @@ fn extract_opencode_content_text(value: &serde_json::Value) -> Option<String> {
     }
 
     let object = value.as_object()?;
-    for key in ["content", "text", "body", "message", "input", "output", "result"] {
+    for key in [
+        "content", "text", "body", "message", "input", "output", "result",
+    ] {
         if let Some(text) = object.get(key).and_then(extract_opencode_content_text) {
             return Some(text);
         }
@@ -2620,11 +2757,11 @@ fn extract_usage_fields(
 mod tests {
     use super::{
         find_codex_session_file_with_config, is_noise_display, load_claude_history_from_paths,
-        load_codex_history_from_config, normalize_history_display, normalize_history_source,
-        parse_codex_history_timestamp, resolve_codex_path_config_from,
-        upsert_codex_history_session, CodexHistoryLine, CodexPathConfig,
-        merge_opencode_history_session, parse_opencode_conversation_export,
-        parse_opencode_history_session, HistorySession,
+        load_codex_history_from_config, merge_opencode_history_session, normalize_history_display,
+        normalize_history_source, parse_codex_history_timestamp,
+        parse_opencode_conversation_export, parse_opencode_history_session,
+        resolve_codex_path_config_from, upsert_codex_history_session, CodexHistoryLine,
+        CodexPathConfig, HistorySession,
     };
     use rusqlite::Connection;
     use std::collections::HashMap;
@@ -2931,7 +3068,10 @@ mod tests {
         assert!(segments.is_empty());
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].msg_type, "user");
-        assert_eq!(messages[1].model.as_deref(), Some("anthropic/claude-sonnet-4-5"));
+        assert_eq!(
+            messages[1].model.as_deref(),
+            Some("anthropic/claude-sonnet-4-5")
+        );
         assert_eq!(messages[1].input_tokens, Some(1200));
         assert_eq!(messages[1].output_tokens, Some(340));
         assert_eq!(messages[1].cache_read_tokens, Some(80));

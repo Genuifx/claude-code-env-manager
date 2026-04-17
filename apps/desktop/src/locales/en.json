@@ -124,7 +124,12 @@
     "toolSucceeded": "ok",
     "toolDone": "done",
     "toolFailedState": "error",
-    "tokensUnit": "tokens"
+    "tokensUnit": "tokens",
+    "sessionClientLabel": "{client} session",
+    "sessionStateGenerating": "Generating",
+    "sessionStateInputRequired": "Input required",
+    "sessionStateApprovalRequired": "Approval required",
+    "sessionStatePlanReview": "Plan review required"
   },
   "sessions": {
     "subtitle": "Manage running Claude Code sessions",

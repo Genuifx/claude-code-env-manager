@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { Bot } from 'lucide-react';
-import { Claude, Codex, OpenAI, DeepSeek, Minimax, Moonshot, Zhipu, Gemini, Ollama, Qwen } from '@lobehub/icons';
+import { Claude, Codex, OpenAI, DeepSeek, Minimax, Moonshot, Zhipu, Gemini, Ollama, OpenRouter as OpenRouterIcon, Qwen } from '@lobehub/icons';
 
 interface ModelIconProps {
   model?: string;
@@ -12,7 +12,7 @@ interface ModelIconProps {
   withBg?: boolean;
 }
 
-type IconEntry = {
+export type IconEntry = {
   icon: any;
   color?: string;
   variant?: 'color';
@@ -21,13 +21,14 @@ type IconEntry = {
 };
 
 /** Map a model ID string to the corresponding lobe-icons component + brand color */
-function resolveIcon(model: string | undefined): IconEntry | null {
+export function resolveIcon(model: string | undefined): IconEntry | null {
   if (!model) return null;
   const m = model.toLowerCase();
 
   if (m.includes('codex')) return { icon: Codex, variant: 'color' };
   if (m.includes('claude') || m.includes('anthropic') || m.includes('opus') || m.includes('sonnet') || m.includes('haiku')) return { icon: Claude, color: '#D97757' };
   if (m.includes('gpt') || m.includes('openai') || m.includes('o1-') || m.includes('o3-') || m.includes('o4-')) return { icon: OpenAI, color: '#10A37F' };
+  if (m.includes('openrouter')) return { icon: OpenRouterIcon, color: '#6467F2' };
   if (m.includes('deepseek')) return { icon: DeepSeek, color: '#4D6BFE' };
   if (m.includes('minimax') || m.includes('abab')) return { icon: Minimax, color: '#F23F5D' };
   if (m.includes('moonshot') || m.includes('kimi')) return { icon: Moonshot, color: '#fff', needsContrastBg: true };

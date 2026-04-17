@@ -3,6 +3,7 @@
 
 mod analytics;
 mod channel;
+mod companion;
 mod config;
 mod cron;
 mod crypto;
@@ -18,10 +19,10 @@ mod proxy_debug;
 mod remote;
 mod runtime;
 mod session;
+mod session_provenance;
 mod skills;
 mod telegram;
 mod terminal;
-mod companion;
 mod title_overrides;
 
 mod tmux;
@@ -36,8 +37,7 @@ use analytics::{
 use channel::ChannelKind;
 use config::{
     create_env_with_encrypted_key, resolve_claude_env, resolve_opencode_runtime, AppConfig,
-    DesktopSettings, EnvConfig, FavoriteProject, JetBrainsProject, RecentProject,
-    VSCodeProject,
+    DesktopSettings, EnvConfig, FavoriteProject, JetBrainsProject, RecentProject, VSCodeProject,
 };
 use cron::{start_cron_scheduler, CronScheduler};
 use event_dispatcher::EventDispatcher;
@@ -59,6 +59,10 @@ use runtime::{
 use session::{
     cleanup_exit_file, cleanup_stale_exit_files_except, start_session_monitor, Session,
     SessionManager,
+};
+use session_provenance::{
+    register_launch, spawn_claude_source_binding, spawn_codex_source_binding,
+    SessionProvenanceUpsert, DEFAULT_CONFIG_SOURCE,
 };
 use std::collections::HashMap;
 use std::fs;
@@ -439,7 +443,7 @@ async fn launch_claude_code(
     let mut env_vars: HashMap<String, String> = HashMap::new();
     let mut claude_upstream_base_url: Option<String> = None;
     let mut resolved_env_name = env_name.clone();
-    let mut config_source = None;
+    let mut config_source = Some(DEFAULT_CONFIG_SOURCE.to_string());
     if client_name == "claude" {
         let resolved = resolve_claude_env(&env_name)?;
         claude_upstream_base_url = resolved.upstream_base_url;
@@ -540,8 +544,11 @@ async fn launch_claude_code(
                 .unwrap_or_else(|| "native".to_string()),
             work_dir.clone(),
             resume_session_id.clone(),
+            Some(session_id.clone()),
         );
     }
+
+    let started_at = chrono::Utc::now();
 
     // Determine terminal type string for session metadata
     let terminal_type_str = match preferred_terminal {
@@ -566,6 +573,40 @@ async fn launch_claude_code(
     };
 
     state.add_session(session.clone());
+
+    if let Err(error) = register_launch(SessionProvenanceUpsert {
+        ccem_session_id: session.id.clone(),
+        client: session.client.clone(),
+        env_name: session.env_name.clone(),
+        config_source: session.config_source.clone(),
+        working_dir: session.working_dir.clone(),
+        perm_mode: Some(session.perm_mode.clone()),
+        launch_mode: "external_terminal".to_string(),
+        started_via: "desktop".to_string(),
+        source_session_id: resume_session_id.clone(),
+    }) {
+        eprintln!(
+            "Failed to register desktop external launch provenance for {}: {}",
+            session.id, error
+        );
+    }
+
+    if session.client == "claude" {
+        spawn_claude_source_binding(
+            session.id.clone(),
+            session.working_dir.clone(),
+            started_at,
+            resume_session_id.clone(),
+        );
+    } else if session.client == "codex" {
+        spawn_codex_source_binding(
+            session.id.clone(),
+            session.working_dir.clone(),
+            started_at,
+            resume_session_id.clone(),
+        );
+    }
+
     Ok(session)
 }
 
@@ -618,6 +659,23 @@ async fn create_managed_session(
                 session_id, error
             );
         }
+    }
+
+    if let Err(error) = register_launch(SessionProvenanceUpsert {
+        ccem_session_id: summary.runtime_id.clone(),
+        client: "claude".to_string(),
+        env_name: summary.env_name.clone(),
+        config_source: Some(DEFAULT_CONFIG_SOURCE.to_string()),
+        working_dir: summary.project_dir.clone(),
+        perm_mode: Some(summary.perm_mode.clone()),
+        launch_mode: "headless".to_string(),
+        started_via: "desktop".to_string(),
+        source_session_id: resume_target.clone(),
+    }) {
+        eprintln!(
+            "Failed to register desktop headless launch provenance for {}: {}",
+            summary.runtime_id, error
+        );
     }
 
     Ok(summary)
@@ -867,6 +925,7 @@ async fn create_interactive_session(
         let effective_working_dir = resolve_headless_working_dir(working_dir);
         let mut env_vars = HashMap::new();
         let resume_target = resume_session_id.clone();
+        let started_at = chrono::Utc::now();
 
         if proxy_state.is_enabled() {
             let proxy_route_base_url = proxy_state
@@ -888,7 +947,7 @@ async fn create_interactive_session(
                 session_id: session_id.clone(),
                 client: client_name.clone(),
                 env_name,
-                config_source: None,
+                config_source: Some(DEFAULT_CONFIG_SOURCE.to_string()),
                 perm_mode: "n/a".to_string(),
                 working_dir: effective_working_dir,
                 resume_session_id,
@@ -901,6 +960,28 @@ async fn create_interactive_session(
         }
 
         let session = create_result?;
+        if let Err(error) = register_launch(SessionProvenanceUpsert {
+            ccem_session_id: session.id.clone(),
+            client: session.client.clone(),
+            env_name: session.env_name.clone(),
+            config_source: session.config_source.clone(),
+            working_dir: session.working_dir.clone(),
+            perm_mode: Some(session.perm_mode.clone()),
+            launch_mode: "interactive".to_string(),
+            started_via: "desktop".to_string(),
+            source_session_id: resume_target.clone(),
+        }) {
+            eprintln!(
+                "Failed to register desktop interactive launch provenance for {}: {}",
+                session.id, error
+            );
+        }
+        spawn_codex_source_binding(
+            session.id.clone(),
+            session.working_dir.clone(),
+            started_at,
+            resume_target.clone(),
+        );
         if let Some(session_id) = resume_target.as_deref() {
             if let Err(error) = clear_runtime_recovery_candidates_by_claude_session_id(session_id) {
                 eprintln!(
@@ -957,12 +1038,29 @@ async fn create_interactive_session(
         );
 
         let session = create_result?;
+        if let Err(error) = register_launch(SessionProvenanceUpsert {
+            ccem_session_id: session.id.clone(),
+            client: session.client.clone(),
+            env_name: session.env_name.clone(),
+            config_source: session.config_source.clone(),
+            working_dir: session.working_dir.clone(),
+            perm_mode: Some(session.perm_mode.clone()),
+            launch_mode: "interactive".to_string(),
+            started_via: "desktop".to_string(),
+            source_session_id: resume_target.clone(),
+        }) {
+            eprintln!(
+                "Failed to register desktop interactive launch provenance for {}: {}",
+                session.id, error
+            );
+        }
         track_launched_session(
             before_session_ids,
             resolved_env_name,
             resolved_config_source,
             effective_working_dir.clone(),
             resume_target.clone(),
+            Some(session.id.clone()),
         );
         if let Some(session_id) = resume_target.as_deref() {
             if let Err(error) = clear_runtime_recovery_candidates_by_claude_session_id(session_id) {
@@ -1007,7 +1105,7 @@ async fn create_interactive_session(
             session_id: session_id.clone(),
             client: client_name.clone(),
             env_name: resolved.env_name,
-            config_source: Some("ccem".to_string()),
+            config_source: Some(DEFAULT_CONFIG_SOURCE.to_string()),
             perm_mode: effective_perm_mode,
             working_dir: effective_working_dir,
             resume_session_id,
@@ -1020,6 +1118,22 @@ async fn create_interactive_session(
     }
 
     let session = create_result?;
+    if let Err(error) = register_launch(SessionProvenanceUpsert {
+        ccem_session_id: session.id.clone(),
+        client: session.client.clone(),
+        env_name: session.env_name.clone(),
+        config_source: session.config_source.clone(),
+        working_dir: session.working_dir.clone(),
+        perm_mode: Some(session.perm_mode.clone()),
+        launch_mode: "interactive".to_string(),
+        started_via: "desktop".to_string(),
+        source_session_id: resume_target.clone(),
+    }) {
+        eprintln!(
+            "Failed to register desktop interactive launch provenance for {}: {}",
+            session.id, error
+        );
+    }
     if let Some(session_id) = resume_target.as_deref() {
         if let Err(error) = clear_runtime_recovery_candidates_by_claude_session_id(session_id) {
             eprintln!(
