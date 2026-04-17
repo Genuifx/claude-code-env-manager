@@ -376,7 +376,7 @@ PERMISSION_MODES.forEach(mode => {
       const registries = getRegistries();
       const current = config.get('current') as string;
       const envConfig = registries[current];
-      await runWithTempPermissions(mode, envConfig);
+      await runWithTempPermissions(mode, envConfig, current);
     });
 });
 
@@ -1158,6 +1158,7 @@ program
       : envConfig;
 
     await launchClaude({
+      envName,
       envConfig: launchEnvConfig,
       permMode: opts.perm as PermissionModeName | undefined,
       workingDir: opts.workingDir,
@@ -1243,7 +1244,11 @@ program
           process.exit(1);
         }
 
-        await launchClaude({ envConfig, permMode: defaultMode || undefined });
+        await launchClaude({
+          envName: current,
+          envConfig,
+          permMode: defaultMode || undefined,
+        });
         return;
       } else if (action === 'usage') {
         // 显示详细 usage 统计
@@ -1383,7 +1388,7 @@ program
         ]);
 
         if (permMode !== 'back') {
-          await runWithTempPermissions(permMode as PermissionModeName, envConfig);
+          await runWithTempPermissions(permMode as PermissionModeName, envConfig, current);
           return;
         }
       } else if (action === 'setDefault') {

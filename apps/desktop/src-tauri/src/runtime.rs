@@ -8,6 +8,7 @@ use crate::event_bus::{ReplayBatch, SessionEventPayload, SessionStore};
 use crate::event_dispatcher::EventDispatcher;
 use crate::notifications::{self, NotificationContext};
 use crate::remote::{RemotePeerRef, RemotePlatform};
+use crate::session_provenance::bind_source_session_id;
 use crate::terminal::resolve_claude_path;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -692,7 +693,13 @@ impl RuntimeManager {
     fn update_claude_session_id(&self, runtime_id: &str, claude_session_id: String) {
         if let Ok(handle) = self.get_handle(runtime_id) {
             if let Ok(mut record) = handle.record.lock() {
-                record.claude_session_id = Some(claude_session_id);
+                record.claude_session_id = Some(claude_session_id.clone());
+            }
+            if let Err(error) = bind_source_session_id("claude", runtime_id, &claude_session_id) {
+                eprintln!(
+                    "Failed to bind headless Claude provenance for {}: {}",
+                    runtime_id, error
+                );
             }
             self.persist_state_best_effort();
         }
