@@ -65,6 +65,7 @@ use std::fs;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use telegram::{
     TelegramBridgeManager, TelegramBridgeStatus, TelegramForumTopic, TelegramSettings,
     TelegramTopicBinding,
@@ -94,6 +95,15 @@ struct LoadedEnv {
 struct LoadResult {
     count: usize,
     environments: Vec<LoadedEnv>,
+}
+
+#[derive(Debug, serde::Deserialize, Clone, Copy)]
+#[serde(rename_all = "kebab-case")]
+enum WindowControlAction {
+    Close,
+    Minimize,
+    ToggleFullscreen,
+    ExitFullscreen,
 }
 
 #[cfg(target_os = "macos")]
@@ -163,6 +173,23 @@ fn sync_macos_window_chrome(
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+fn schedule_macos_traffic_light_sync(
+    main_window: tauri::WebviewWindow,
+    delay_ms: u64,
+    reason: &'static str,
+) {
+    tauri::async_runtime::spawn_blocking(move || {
+        if delay_ms > 0 {
+            std::thread::sleep(Duration::from_millis(delay_ms));
+        }
+
+        if let Err(error) = sync_macos_traffic_lights(&main_window) {
+            eprintln!("Traffic lights {} sync warning: {}", reason, error);
+        }
+    });
+}
+
 fn generate_session_id() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let timestamp = SystemTime::now()
@@ -182,6 +209,40 @@ fn get_system_username() -> String {
     std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))
         .unwrap_or_else(|_| "developer".to_string())
+}
+
+#[tauri::command]
+fn window_control(
+    app: tauri::AppHandle,
+    action: WindowControlAction,
+) -> Result<(), String> {
+    let main_window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "Main window not available".to_string())?;
+
+    match action {
+        WindowControlAction::Close => main_window
+            .close()
+            .map_err(|error| format!("Failed to close window: {}", error))?,
+        WindowControlAction::Minimize => main_window
+            .minimize()
+            .map_err(|error| format!("Failed to minimize window: {}", error))?,
+        WindowControlAction::ToggleFullscreen => {
+            let is_fullscreen = main_window
+                .is_fullscreen()
+                .map_err(|error| format!("Failed to inspect fullscreen state: {}", error))?;
+            main_window
+                .set_fullscreen(!is_fullscreen)
+                .map_err(|error| format!("Failed to toggle fullscreen: {}", error))?;
+        }
+        WindowControlAction::ExitFullscreen => {
+            main_window
+                .set_fullscreen(false)
+                .map_err(|error| format!("Failed to exit fullscreen: {}", error))?;
+        }
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -2627,6 +2688,7 @@ fn main() {
             save_file_dialog,
             save_image_dialog,
             copy_image_to_clipboard,
+            window_control,
             quit_app
         ])
         .on_window_event(|window, event| {
@@ -2707,16 +2769,20 @@ fn main() {
 
                 let fullscreen_window = main_window.clone();
                 main_window.listen("did-enter-fullscreen", move |_| {
-                    if let Err(error) = sync_macos_traffic_lights(&fullscreen_window) {
-                        eprintln!("Traffic lights fullscreen sync warning: {}", error);
-                    }
+                    schedule_macos_traffic_light_sync(
+                        fullscreen_window.clone(),
+                        240,
+                        "fullscreen",
+                    );
                 });
 
                 let fullscreen_exit_window = main_window.clone();
                 main_window.listen("did-exit-fullscreen", move |_| {
-                    if let Err(error) = sync_macos_traffic_lights(&fullscreen_exit_window) {
-                        eprintln!("Traffic lights fullscreen exit sync warning: {}", error);
-                    }
+                    schedule_macos_traffic_light_sync(
+                        fullscreen_exit_window.clone(),
+                        320,
+                        "fullscreen exit",
+                    );
                 });
             }
 
@@ -2790,9 +2856,7 @@ fn main() {
                     let _ = window.show();
                     let _ = window.set_focus();
                     #[cfg(target_os = "macos")]
-                    if let Err(error) = sync_macos_traffic_lights(&window) {
-                        eprintln!("Traffic lights reopen sync warning: {}", error);
-                    }
+                    schedule_macos_traffic_light_sync(window, 0, "reopen");
                 }
             } else if let RunEvent::Exit = event {
                 telegram_manager_for_run.stop();

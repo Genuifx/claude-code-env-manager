@@ -7,6 +7,10 @@
     "confirm": "Confirm",
     "retry": "Retry",
     "loading": "Loading...",
+    "close": "Close",
+    "minimize": "Minimize",
+    "exitFullscreen": "Exit Full Screen",
+    "windowControls": "Window Controls",
     "protected": "Protected",
     "local": "Local",
     "default": "Default"

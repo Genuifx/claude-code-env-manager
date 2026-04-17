@@ -86,6 +86,12 @@ export interface TauriCommands {
   get_proxy_traffic_detail: [{ id: string }, ProxyTrafficDetail];
   clear_proxy_traffic: [void, void];
   open_text_in_vscode: [{ content: string; suggestedName?: string | null }, string];
+  window_control: [
+    {
+      action: 'close' | 'minimize' | 'toggle-fullscreen' | 'exit-fullscreen';
+    },
+    void
+  ];
 
   // 会话管理
   launch_claude_code: [
