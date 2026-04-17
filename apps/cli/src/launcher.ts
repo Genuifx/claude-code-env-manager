@@ -5,8 +5,10 @@ import chalk from 'chalk';
 import type { EnvConfig, PermissionModeName } from '@ccem/core';
 import { decrypt, PERMISSION_PRESETS, ensureCcemDir } from '@ccem/core';
 import { renderStarting } from './ui.js';
+import { startCliClaudeProvenanceTracking, type CliProvenanceTrackingHandle } from './sessionProvenance.js';
 
 export interface LaunchOptions {
+  envName?: string;
   envConfig?: EnvConfig;
   permMode?: PermissionModeName;
   workingDir?: string;
@@ -86,7 +88,7 @@ function ensureSessionsDir(): string {
  * - `ccem launch` hidden command (called by Desktop app)
  */
 export async function launchClaude(options: LaunchOptions): Promise<void> {
-  const { envConfig, permMode, workingDir, sessionId, resumeSessionId, silent } = options;
+  const { envName, envConfig, permMode, workingDir, sessionId, resumeSessionId, silent } = options;
 
   // Build env
   const env = { ...process.env };
@@ -122,6 +124,7 @@ export async function launchClaude(options: LaunchOptions): Promise<void> {
   if (workingDir) {
     process.chdir(workingDir);
   }
+  const effectiveWorkingDir = process.cwd();
 
   if (!silent && !permMode) {
     console.log(renderStarting());
@@ -131,13 +134,28 @@ export async function launchClaude(options: LaunchOptions): Promise<void> {
   const sessionsDir = ensureSessionsDir();
 
   return new Promise((resolve) => {
+    let provenanceTracking: CliProvenanceTrackingHandle | null = null;
     const child = spawn('claude', args, {
       stdio: 'inherit',
       shell: false,  // 直接执行二进制，避免 shell 注入风险
       env,
     });
 
+    child.once('spawn', () => {
+      if (sessionId) {
+        return;
+      }
+
+      provenanceTracking = startCliClaudeProvenanceTracking({
+        envName: envName ?? 'unknown',
+        workingDir: effectiveWorkingDir,
+        permMode,
+        resumeSessionId,
+      });
+    });
+
     child.on('exit', (code) => {
+      provenanceTracking?.stop();
       // Write exit code file if sessionId provided (Desktop tracking)
       if (sessionId) {
         try {
@@ -153,6 +171,7 @@ export async function launchClaude(options: LaunchOptions): Promise<void> {
     });
 
     child.on('error', (err: NodeJS.ErrnoException) => {
+      provenanceTracking?.stop();
       if (err.code === 'ENOENT') {
         console.error('');
         console.error(chalk.red.bold('✘ 未找到 Claude Code'));

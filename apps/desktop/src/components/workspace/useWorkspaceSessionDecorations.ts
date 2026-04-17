@@ -1,0 +1,415 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { scheduleAfterFirstPaint } from '@/lib/idle';
+import { useTauriCommands } from '@/hooks/useTauriCommands';
+import type { SessionEventRecord, UnifiedSessionInfo } from '@/lib/tauri-ipc';
+import type { HistorySessionItem } from '@/features/conversations/types';
+import type { Session } from '@/store';
+
+export type WorkspaceSessionVisualState = 'identity' | 'processing' | 'attention';
+export type WorkspaceAttentionKind = 'input_required' | 'plan_review' | 'permission_required';
+
+export interface WorkspaceSessionDecoration {
+  sessionKey: string;
+  runtimeId?: string;
+  client?: 'claude' | 'codex' | 'opencode';
+  envName?: string;
+  visualState: WorkspaceSessionVisualState;
+  attentionKind?: WorkspaceAttentionKind;
+}
+
+type WorkspaceRuntimeDescriptor =
+  | {
+      kind: 'unified';
+      id: string;
+      client: 'claude' | 'codex' | 'opencode';
+      status: string;
+      envName: string;
+      projectDir: string;
+      createdAt: number;
+      historySessionId?: string | null;
+    }
+  | {
+      kind: 'legacyInteractive';
+      id: string;
+      client: 'claude' | 'codex' | 'opencode';
+      status: Session['status'];
+      envName: string;
+      projectDir: string;
+      createdAt: number;
+    };
+
+const POLL_INTERVAL_MS = 3000;
+
+function toSessionKey(session: Pick<HistorySessionItem, 'id' | 'source'>): string {
+  return `${session.source}:${session.id}`;
+}
+
+function normalizePath(path: string | undefined): string {
+  return (path ?? '')
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '')
+    .trim()
+    .toLowerCase();
+}
+
+function basename(path: string | undefined): string {
+  const normalized = normalizePath(path);
+  if (!normalized) {
+    return '';
+  }
+  const parts = normalized.split('/');
+  return parts[parts.length - 1] ?? '';
+}
+
+function normalizeRuntimeClient(client?: string | null): 'claude' | 'codex' | 'opencode' {
+  if (client === 'codex') {
+    return 'codex';
+  }
+  if (client === 'opencode') {
+    return 'opencode';
+  }
+  return 'claude';
+}
+
+function toUnifiedRuntime(runtime: UnifiedSessionInfo): WorkspaceRuntimeDescriptor {
+  return {
+    kind: 'unified',
+    id: runtime.id,
+    client: normalizeRuntimeClient(runtime.client),
+    status: runtime.status,
+    envName: runtime.env_name,
+    projectDir: runtime.project_dir,
+    createdAt: new Date(runtime.created_at).getTime(),
+    historySessionId: runtime.claude_session_id,
+  };
+}
+
+function toLegacyInteractiveRuntime(session: Session): WorkspaceRuntimeDescriptor {
+  return {
+    kind: 'legacyInteractive',
+    id: session.id,
+    client: session.client,
+    status: session.status,
+    envName: session.envName,
+    projectDir: session.workingDir,
+    createdAt: session.startedAt.getTime(),
+  };
+}
+
+function isUnifiedRuntime(runtime: WorkspaceRuntimeDescriptor): runtime is Extract<
+  WorkspaceRuntimeDescriptor,
+  { kind: 'unified' }
+> {
+  return runtime.kind === 'unified';
+}
+
+function runtimeClient(runtime: WorkspaceRuntimeDescriptor): 'claude' | 'codex' | 'opencode' {
+  return runtime.client;
+}
+
+function isRuntimeTerminalStatus(status: string): boolean {
+  return status === 'stopped' || status === 'completed' || status === 'error';
+}
+
+function isRuntimeProcessing(
+  runtime: WorkspaceRuntimeDescriptor,
+  attentionKind?: WorkspaceAttentionKind
+) {
+  if (attentionKind) {
+    return false;
+  }
+  if (runtime.kind === 'legacyInteractive') {
+    return runtime.status === 'running';
+  }
+  return runtime.status === 'processing' || runtime.status === 'initializing';
+}
+
+function lastEventSeq(events?: SessionEventRecord[]) {
+  if (!events?.length) {
+    return null;
+  }
+  return events[events.length - 1]?.seq ?? null;
+}
+
+function dedupeEvents(events: SessionEventRecord[]) {
+  return events.filter((event, index, all) =>
+    index === all.findIndex((candidate) =>
+      candidate.runtime_id === event.runtime_id && candidate.seq === event.seq
+    )
+  );
+}
+
+function resolveAttentionKind(events: SessionEventRecord[]): WorkspaceAttentionKind | undefined {
+  const pendingPermissions = new Set<string>();
+  const pendingResponses = new Map<string, WorkspaceAttentionKind>();
+  let terminalPromptPending = false;
+
+  for (const event of events) {
+    switch (event.payload.type) {
+      case 'permission_required':
+        pendingPermissions.add(event.payload.request_id);
+        break;
+      case 'permission_responded':
+        pendingPermissions.delete(event.payload.request_id);
+        break;
+      case 'terminal_prompt_required':
+        terminalPromptPending = true;
+        break;
+      case 'terminal_prompt_resolved':
+        terminalPromptPending = false;
+        break;
+      case 'tool_use_started':
+        if (event.payload.needs_response) {
+          pendingResponses.set(
+            event.payload.tool_use_id,
+            event.payload.prompt?.prompt_type === 'plan_exit'
+              ? 'plan_review'
+              : 'input_required'
+          );
+        }
+        break;
+      case 'tool_use_completed':
+        pendingResponses.delete(event.payload.tool_use_id);
+        break;
+      case 'session_completed':
+        pendingPermissions.clear();
+        pendingResponses.clear();
+        terminalPromptPending = false;
+        break;
+      default:
+        break;
+    }
+  }
+
+  if (pendingPermissions.size > 0 || terminalPromptPending) {
+    return 'permission_required';
+  }
+
+  const pendingValues = Array.from(pendingResponses.values());
+  if (pendingValues.includes('plan_review')) {
+    return 'plan_review';
+  }
+  if (pendingValues.includes('input_required')) {
+    return 'input_required';
+  }
+
+  return undefined;
+}
+
+function buildRuntimeMatchMap(
+  historySessions: HistorySessionItem[],
+  runtimes: WorkspaceRuntimeDescriptor[]
+) {
+  const matchedByKey = new Map<string, WorkspaceRuntimeDescriptor>();
+  const usedRuntimeIds = new Set<string>();
+
+  const historyByTimestamp = [...historySessions].sort((left, right) => right.timestamp - left.timestamp);
+  const runtimesByRecency = [...runtimes].sort(
+    (left, right) => right.createdAt - left.createdAt
+  );
+
+  for (const session of historyByTimestamp) {
+    const directMatch = runtimesByRecency.find((runtime) =>
+      !usedRuntimeIds.has(runtime.id)
+      && runtime.kind === 'unified'
+      && runtime.historySessionId === session.id
+    );
+
+    if (directMatch) {
+      matchedByKey.set(toSessionKey(session), directMatch);
+      usedRuntimeIds.add(directMatch.id);
+    }
+  }
+
+  for (const runtime of runtimesByRecency) {
+    if (usedRuntimeIds.has(runtime.id)) {
+      continue;
+    }
+
+    const client = runtimeClient(runtime);
+    const projectDir = normalizePath(runtime.projectDir);
+    const projectDirBase = basename(runtime.projectDir);
+    const candidate = historyByTimestamp.find((session) => {
+      if (matchedByKey.has(toSessionKey(session))) {
+        return false;
+      }
+      if (session.source !== client) {
+        return false;
+      }
+      if (session.envName && session.envName !== runtime.envName) {
+        return false;
+      }
+
+      const historyProject = normalizePath(session.project);
+      if (historyProject && projectDir) {
+        return historyProject === projectDir;
+      }
+
+      return basename(session.projectName) === projectDirBase;
+    });
+
+    if (candidate) {
+      matchedByKey.set(toSessionKey(candidate), runtime);
+      usedRuntimeIds.add(runtime.id);
+    }
+  }
+
+  return matchedByKey;
+}
+
+interface UseWorkspaceSessionDecorationsOptions {
+  sessions: HistorySessionItem[];
+  isActive?: boolean;
+}
+
+export function useWorkspaceSessionDecorations({
+  sessions,
+  isActive = true,
+}: UseWorkspaceSessionDecorationsOptions) {
+  const { listUnifiedSessions, getSessionEvents, listInteractiveSessions } = useTauriCommands();
+  const [unifiedSessions, setUnifiedSessions] = useState<UnifiedSessionInfo[]>([]);
+  const [legacyInteractiveSessions, setLegacyInteractiveSessions] = useState<Session[]>([]);
+  const [eventsByRuntime, setEventsByRuntime] = useState<Record<string, SessionEventRecord[]>>({});
+  const eventsByRuntimeRef = useRef<Record<string, SessionEventRecord[]>>({});
+
+  useEffect(() => {
+    eventsByRuntimeRef.current = eventsByRuntime;
+  }, [eventsByRuntime]);
+
+  const refreshRuntimeSources = useCallback(async () => {
+    const [nextUnifiedSessions, nextInteractiveSessions] = await Promise.all([
+      listUnifiedSessions(),
+      listInteractiveSessions(),
+    ]);
+    const unifiedRuntimeIds = new Set(nextUnifiedSessions.map((runtime) => runtime.id));
+    const nextLegacyInteractiveSessions = nextInteractiveSessions.filter((session) =>
+      !unifiedRuntimeIds.has(session.id)
+      && session.terminalType !== 'embedded'
+      && session.status === 'running'
+    );
+
+    setUnifiedSessions(nextUnifiedSessions);
+    setLegacyInteractiveSessions(nextLegacyInteractiveSessions);
+
+    return {
+      unifiedSessions: nextUnifiedSessions,
+      legacyInteractiveSessions: nextLegacyInteractiveSessions,
+    };
+  }, [listInteractiveSessions, listUnifiedSessions]);
+
+  const refreshRuntimeEvents = useCallback(async (nextSessions: UnifiedSessionInfo[]) => {
+    const activeSessions = nextSessions.filter((runtime) => !isRuntimeTerminalStatus(runtime.status));
+    await Promise.all(
+      activeSessions.map(async (runtime) => {
+        try {
+          const sinceSeq = lastEventSeq(eventsByRuntimeRef.current[runtime.id]);
+          const batch = await getSessionEvents(runtime.id, sinceSeq);
+          setEventsByRuntime((current) => {
+            const previous = sinceSeq && !batch.gap_detected ? current[runtime.id] ?? [] : [];
+            const next = dedupeEvents([...previous, ...batch.events]);
+            if (
+              previous.length === next.length
+              && previous.every((event, index) => next[index]?.seq === event.seq)
+            ) {
+              return current;
+            }
+            return {
+              ...current,
+              [runtime.id]: next,
+            };
+          });
+        } catch (error) {
+          console.error(`Failed to refresh workspace events for runtime ${runtime.id}:`, error);
+        }
+      })
+    );
+
+    const activeIds = new Set(activeSessions.map((runtime) => runtime.id));
+    setEventsByRuntime((current) => {
+      const nextEntries = Object.entries(current).filter(([runtimeId]) => activeIds.has(runtimeId));
+      if (nextEntries.length === Object.keys(current).length) {
+        return current;
+      }
+      return Object.fromEntries(nextEntries);
+    });
+  }, [getSessionEvents]);
+
+  useEffect(() => {
+    if (!isActive) {
+      return;
+    }
+
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const nextSessions = await refreshRuntimeSources();
+        if (!cancelled) {
+          await refreshRuntimeEvents(nextSessions.unifiedSessions);
+        }
+      } catch (error) {
+        console.error('Failed to refresh workspace session decorations:', error);
+      }
+    };
+
+    const cancelDeferred = scheduleAfterFirstPaint(() => {
+      void tick();
+    }, { delayMs: 180, timeoutMs: 1200 });
+
+    const intervalId = window.setInterval(() => {
+      void tick();
+    }, POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      cancelDeferred();
+      window.clearInterval(intervalId);
+    };
+  }, [isActive, refreshRuntimeEvents, refreshRuntimeSources]);
+
+  const runtimeDescriptors = useMemo(
+    () => [
+      ...unifiedSessions.map(toUnifiedRuntime),
+      ...legacyInteractiveSessions.map(toLegacyInteractiveRuntime),
+    ],
+    [legacyInteractiveSessions, unifiedSessions]
+  );
+
+  const matchedRuntimeBySessionKey = useMemo(
+    () => buildRuntimeMatchMap(sessions, runtimeDescriptors),
+    [runtimeDescriptors, sessions]
+  );
+
+  const decorationsBySessionKey = useMemo(() => {
+    const result: Record<string, WorkspaceSessionDecoration> = {};
+
+    for (const session of sessions) {
+      const sessionKey = toSessionKey(session);
+      const runtime = matchedRuntimeBySessionKey.get(sessionKey);
+      if (!runtime) {
+        continue;
+      }
+
+      const attentionKind = isUnifiedRuntime(runtime)
+        ? resolveAttentionKind(eventsByRuntime[runtime.id] ?? [])
+        : undefined;
+      result[sessionKey] = {
+        sessionKey,
+        runtimeId: runtime.id,
+        client: runtimeClient(runtime),
+        envName: runtime.envName,
+        visualState: attentionKind
+          ? 'attention'
+          : isRuntimeProcessing(runtime, attentionKind)
+            ? 'processing'
+            : 'identity',
+        attentionKind,
+      };
+    }
+
+    return result;
+  }, [eventsByRuntime, matchedRuntimeBySessionKey, sessions]);
+
+  return {
+    decorationsBySessionKey,
+  };
+}

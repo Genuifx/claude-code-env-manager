@@ -3,12 +3,16 @@ import { ChevronRight, FolderOpen, FolderClosed, MessageSquare, RefreshCw, Searc
 import { cn } from '@/lib/utils';
 import { getHistorySessionDisplay } from '@/components/history/historySession';
 import { useLocale } from '@/locales';
-import type { LaunchClient } from '@/store';
+import type { Environment, LaunchClient } from '@/store';
 import type { HistorySessionItem } from '@/features/conversations/types';
 import { AgentLaunchSplitButton } from './AgentLaunchSplitButton';
+import { SessionTreeItemIcon, resolveSessionClient } from './sessionTreeIcons';
+import type { WorkspaceSessionDecoration } from './useWorkspaceSessionDecorations';
 
 interface ProjectTreeProps {
   sessions: HistorySessionItem[];
+  environmentByName?: Record<string, Environment>;
+  decorationsBySessionKey?: Record<string, WorkspaceSessionDecoration>;
   isLoading: boolean;
   isRefreshing?: boolean;
   selectedKey: string | null;
@@ -75,6 +79,8 @@ const PAGE_SIZE = 10;
 
 export function ProjectTree({
   sessions,
+  environmentByName = {},
+  decorationsBySessionKey = {},
   isLoading,
   isRefreshing = false,
   selectedKey,
@@ -185,6 +191,42 @@ export function ProjectTree({
   const totalProjects = projectNodes.length;
   const totalSessions = sessions.length;
 
+  const resolveEnvironment = useCallback((session: HistorySessionItem) => {
+    const decoration = decorationsBySessionKey[toKey(session)];
+    const environmentName = session.envName ?? decoration?.envName;
+    return environmentName ? environmentByName[environmentName] : undefined;
+  }, [decorationsBySessionKey, environmentByName]);
+
+  const getIconTitle = useCallback((session: HistorySessionItem) => {
+    const decoration = decorationsBySessionKey[toKey(session)];
+    const client = resolveSessionClient(session, decoration);
+    const clientLabel = client === 'codex'
+      ? t('workspace.newSessionCodex')
+      : client === 'opencode'
+        ? t('workspace.newSessionOpenCode')
+        : t('workspace.newSessionClaude');
+
+    if (decoration?.attentionKind === 'plan_review') {
+      return t('workspace.sessionClientLabel').replace('{client}', clientLabel)
+        + ` · ${t('workspace.sessionStatePlanReview')}`;
+    }
+    if (decoration?.attentionKind === 'input_required') {
+      return t('workspace.sessionClientLabel').replace('{client}', clientLabel)
+        + ` · ${t('workspace.sessionStateInputRequired')}`;
+    }
+    if (decoration?.attentionKind === 'permission_required') {
+      return t('workspace.sessionClientLabel').replace('{client}', clientLabel)
+        + ` · ${t('workspace.sessionStateApprovalRequired')}`;
+    }
+    if (decoration?.visualState === 'processing') {
+      return t('workspace.sessionClientLabel').replace('{client}', clientLabel)
+        + ` · ${t('workspace.sessionStateGenerating')}`;
+    }
+
+    const environment = resolveEnvironment(session);
+    return environment?.name || clientLabel;
+  }, [decorationsBySessionKey, resolveEnvironment, t]);
+
   return (
     <div className="w-[280px] shrink-0 flex flex-col border-r border-border/40 bg-surface backdrop-blur-xl">
       {/* Header: Dual Launch Button + Search */}
@@ -288,7 +330,14 @@ export function ProjectTree({
                           key={key}
                           className="w-full flex items-center gap-2 pl-9 pr-3 py-1.5 mx-1 rounded-md bg-surface-raised"
                         >
-                          <MessageSquare className="w-3.5 h-3.5 shrink-0 text-primary" />
+                          <span title={getIconTitle(session)}>
+                            <SessionTreeItemIcon
+                              session={session}
+                              environment={resolveEnvironment(session)}
+                              decoration={decorationsBySessionKey[key]}
+                              isSelected
+                            />
+                          </span>
                           <input
                             autoFocus
                             value={editValue}
@@ -320,7 +369,14 @@ export function ProjectTree({
                               : 'hover:bg-muted/50 text-muted-foreground hover:text-foreground border-transparent'
                           )}
                         >
-                          <MessageSquare className={cn('w-3.5 h-3.5 shrink-0', isSelected ? 'text-primary' : 'text-muted-foreground')} />
+                          <span title={getIconTitle(session)}>
+                            <SessionTreeItemIcon
+                              session={session}
+                              environment={resolveEnvironment(session)}
+                              decoration={decorationsBySessionKey[key]}
+                              isSelected={isSelected}
+                            />
+                          </span>
                           <span className="text-[12px] truncate flex-1">{getHistorySessionDisplay(session, t('history.untitledSession'))}</span>
                           <span className="text-[10px] text-muted-foreground shrink-0">
                             {formatRelativeTime(session.timestamp)}

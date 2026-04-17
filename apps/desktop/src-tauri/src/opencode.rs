@@ -1,4 +1,5 @@
 use crate::config::read_app_config;
+use crate::session_provenance::bind_source_session_id;
 use crate::terminal;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -94,7 +95,9 @@ pub fn load_session_list_value_from_cli_or_fixture() -> Result<Option<Value>, St
 
 pub fn load_export_from_cli_or_fixture(session_id: &str) -> Result<Option<Value>, String> {
     if let Some(fixture_dir) = fixture_dir() {
-        let export_path = fixture_dir.join("exports").join(format!("{session_id}.json"));
+        let export_path = fixture_dir
+            .join("exports")
+            .join(format!("{session_id}.json"));
         if !export_path.exists() {
             return Ok(None);
         }
@@ -149,6 +152,7 @@ pub fn track_launched_session(
     config_source: String,
     project: String,
     resume_session_id: Option<String>,
+    ccem_session_id: Option<String>,
 ) {
     if let Some(session_id) = resume_session_id {
         let _ = upsert_session_metadata(
@@ -160,6 +164,9 @@ pub fn track_launched_session(
                 updated_at: current_timestamp_millis(),
             },
         );
+        if let Some(ccem_session_id) = ccem_session_id.as_deref() {
+            let _ = bind_source_session_id("opencode", ccem_session_id, &session_id);
+        }
         return;
     }
 
@@ -194,6 +201,10 @@ pub fn track_launched_session(
                                 updated_at: current_timestamp_millis(),
                             },
                         );
+                        if let Some(ccem_session_id) = ccem_session_id.as_deref() {
+                            let _ =
+                                bind_source_session_id("opencode", ccem_session_id, &session.id);
+                        }
                         return;
                     }
                 }
@@ -291,7 +302,9 @@ pub fn load_local_messages(session_id: &str) -> Result<Option<Vec<LocalOpenCodeM
                 "SELECT id, role, parts, model, COALESCE(finished_at, updated_at, created_at) \
                  FROM messages WHERE session_id = ?1 ORDER BY created_at ASC",
             )
-            .map_err(|error| format!("Failed to prepare OpenCode local message query: {}", error))?;
+            .map_err(|error| {
+                format!("Failed to prepare OpenCode local message query: {}", error)
+            })?;
 
         let rows = stmt
             .query_map([session_id], |row| {
@@ -401,9 +414,10 @@ fn parse_session_snapshots(value: &Value) -> Vec<OpenCodeSessionSnapshot> {
             sessions.push(OpenCodeSessionSnapshot {
                 id,
                 updated_at: extract_timestamp(item).unwrap_or(0),
-                project: normalize_optional_text(
-                    extract_string(item, &["cwd", "path", "projectPath", "project"]),
-                ),
+                project: normalize_optional_text(extract_string(
+                    item,
+                    &["cwd", "path", "projectPath", "project"],
+                )),
             });
         }
     }
@@ -437,7 +451,12 @@ fn discover_storage_db_paths() -> Vec<PathBuf> {
 
     for project_root in known_project_roots() {
         push(project_root.join(".opencode").join("opencode.db"));
-        push(project_root.join(".opencode").join("storage").join("opencode.db"));
+        push(
+            project_root
+                .join(".opencode")
+                .join("storage")
+                .join("opencode.db"),
+        );
     }
 
     discovered
@@ -568,7 +587,9 @@ fn extract_text_from_value(value: &Value) -> Option<String> {
     }
 
     let object = value.as_object()?;
-    for key in ["data", "text", "thinking", "content", "message", "body", "output", "input"] {
+    for key in [
+        "data", "text", "thinking", "content", "message", "body", "output", "input",
+    ] {
         if let Some(text) = object.get(key).and_then(extract_text_from_value) {
             return Some(text);
         }
@@ -752,22 +773,38 @@ mod tests {
     #[test]
     fn local_db_fallback_loads_sessions_and_messages() {
         let root = temp_root("db");
-        let db_path = root.join("project").join("demo").join("storage").join("opencode.db");
+        let db_path = root
+            .join("project")
+            .join("demo")
+            .join("storage")
+            .join("opencode.db");
         create_test_db(&db_path);
         std::env::set_var("CCEM_OPENCODE_DATA_DIR", &root);
 
         let sessions = list_local_sessions().expect("load local sessions");
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].id, "fixture-session");
-        assert_eq!(sessions[0].env_name.as_deref(), Some(OPENCODE_NATIVE_ENV_NAME));
-        assert_eq!(sessions[0].model.as_deref(), Some("anthropic/claude-sonnet-4-5"));
+        assert_eq!(
+            sessions[0].env_name.as_deref(),
+            Some(OPENCODE_NATIVE_ENV_NAME)
+        );
+        assert_eq!(
+            sessions[0].model.as_deref(),
+            Some("anthropic/claude-sonnet-4-5")
+        );
 
         let messages = load_local_messages("fixture-session")
             .expect("load local messages")
             .expect("messages present");
         assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].content.as_deref(), Some("检查 OpenCode fallback"));
-        assert_eq!(messages[1].content.as_deref(), Some("已经进入 fallback 路径"));
+        assert_eq!(
+            messages[0].content.as_deref(),
+            Some("检查 OpenCode fallback")
+        );
+        assert_eq!(
+            messages[1].content.as_deref(),
+            Some("已经进入 fallback 路径")
+        );
 
         std::env::remove_var("CCEM_OPENCODE_DATA_DIR");
         let _ = fs::remove_dir_all(root);
@@ -797,6 +834,7 @@ mod tests {
             "ccem".to_string(),
             "/tmp/project".to_string(),
             Some("resume-session".to_string()),
+            Some("ccem-session".to_string()),
         );
 
         let metadata = read_session_metadata("resume-session").expect("metadata");

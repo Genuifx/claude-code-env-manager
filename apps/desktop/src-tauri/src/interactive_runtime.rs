@@ -8,6 +8,7 @@ use crate::runtime::{
     replace_runtime_entries_for_kind, runtime_state_file_path, RuntimeKind, RuntimeStateEntry,
 };
 use crate::session::{Session, SessionManager};
+use crate::session_provenance::bind_source_session_id;
 use crate::tmux::{ClaudeTerminalState, TmuxManager, TmuxWindowInfo};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -113,6 +114,7 @@ pub struct InteractiveSessionSummary {
     pub env_name: String,
     pub perm_mode: String,
     pub status: String,
+    pub terminal_state: ClaudeTerminalState,
     pub is_active: bool,
 }
 
@@ -432,6 +434,7 @@ impl InteractiveRuntimeManager {
         let handle = self.get_handle(session_id).ok()?;
         let session = handle.session.lock().ok()?.clone();
         let claude_session_id = handle.claude_session_id.lock().ok()?.clone();
+        let terminal_state = handle.last_terminal_state.lock().ok()?.clone();
         Some(InteractiveSessionSummary {
             session_id: session.id,
             claude_session_id,
@@ -439,6 +442,7 @@ impl InteractiveRuntimeManager {
             env_name: session.env_name,
             perm_mode: session.perm_mode,
             status: session.status,
+            terminal_state,
             is_active: handle.alive.load(Ordering::SeqCst),
         })
     }
@@ -470,6 +474,7 @@ impl InteractiveRuntimeManager {
             }
 
             let claude_session_id = handle.claude_session_id.lock().ok()?.clone();
+            let terminal_state = handle.last_terminal_state.lock().ok()?.clone();
             Some(InteractiveSessionSummary {
                 session_id: session.id,
                 claude_session_id,
@@ -477,6 +482,7 @@ impl InteractiveRuntimeManager {
                 env_name: session.env_name,
                 perm_mode: session.perm_mode,
                 status: session.status,
+                terminal_state,
                 is_active: true,
             })
         })
@@ -552,9 +558,15 @@ impl InteractiveRuntimeManager {
                     .lock()
                     .map_err(|_| "Failed to lock interactive Claude session id".to_string())?;
                 if current.as_deref() != Some(claude_session_id.as_str()) {
-                    *current = Some(claude_session_id);
+                    *current = Some(claude_session_id.clone());
                     should_persist = true;
                 }
+            }
+            if let Err(error) = bind_source_session_id("claude", session_id, &claude_session_id) {
+                eprintln!(
+                    "Failed to bind interactive Claude provenance for {}: {}",
+                    session_id, error
+                );
             }
         }
 

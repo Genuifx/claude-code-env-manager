@@ -128,7 +128,12 @@
     "toolSucceeded": "成功",
     "toolDone": "完成",
     "toolFailedState": "错误",
-    "tokensUnit": "tokens"
+    "tokensUnit": "tokens",
+    "sessionClientLabel": "{client} 会话",
+    "sessionStateGenerating": "生成中",
+    "sessionStateInputRequired": "等待输入",
+    "sessionStateApprovalRequired": "等待审批",
+    "sessionStatePlanReview": "等待计划确认"
   },
   "sessions": {
     "subtitle": "管理运行中的 Claude Code 会话",
