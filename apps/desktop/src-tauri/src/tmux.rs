@@ -1,4 +1,6 @@
-use crate::terminal::{resolve_claude_path, resolve_codex_path, resolve_opencode_path, resolve_tmux_path};
+use crate::terminal::{
+    resolve_claude_path, resolve_codex_path, resolve_opencode_path, resolve_tmux_path,
+};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -617,6 +619,9 @@ pub fn detect_state_from_capture(captured: &str) -> ClaudeTerminalState {
     if contains_approval_pattern(&tail) {
         return ClaudeTerminalState::WaitingApproval;
     }
+    if contains_processing_pattern(&tail) {
+        return ClaudeTerminalState::Processing;
+    }
     if contains_prompt_pattern(&tail) {
         return ClaudeTerminalState::Idle;
     }
@@ -624,6 +629,21 @@ pub fn detect_state_from_capture(captured: &str) -> ClaudeTerminalState {
         return ClaudeTerminalState::Unknown;
     }
     ClaudeTerminalState::Processing
+}
+
+fn contains_processing_pattern(lines: &str) -> bool {
+    let lower = lines.to_ascii_lowercase();
+    if lower.contains("esc to interrupt") || lower.contains("ctrl+c to cancel") {
+        return true;
+    }
+
+    lines.lines().any(|line| {
+        let trimmed = line.trim();
+        matches!(
+            trimmed.chars().next(),
+            Some('✳' | '✶' | '✢' | '✻' | '✽' | '✺' | '✹' | '✷' | '◐' | '◓' | '◑' | '◒')
+        ) && (trimmed.contains('…') || trimmed.contains("..."))
+    })
 }
 
 fn contains_prompt_pattern(lines: &str) -> bool {
@@ -860,6 +880,25 @@ mod tests {
         assert_eq!(
             detect_state_from_capture(captured),
             ClaudeTerminalState::Idle
+        );
+    }
+
+    #[test]
+    fn detect_state_flags_processing_when_interrupt_hint_is_visible() {
+        let captured = "\
+❯ Reply with a short sentence in Chinese describing that you are processing\n\
+  this request.\n\
+\n\
+✳ Misting…\n\
+\n\
+────────────────────────────────────────────────────────────────────────────────\n\
+❯\u{a0}\n\
+────────────────────────────────────────────────────────────────────────────────\n\
+  esc to interrupt\n\
+";
+        assert_eq!(
+            detect_state_from_capture(captured),
+            ClaudeTerminalState::Processing
         );
     }
 

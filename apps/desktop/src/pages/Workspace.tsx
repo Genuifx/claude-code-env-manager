@@ -29,6 +29,7 @@ import type {
 } from '@/features/conversations/types';
 import { toSessionKey } from '@/features/conversations/types';
 import { shallow } from 'zustand/shallow';
+import { useWorkspaceSessionDecorations } from '@/components/workspace/useWorkspaceSessionDecorations';
 
 const LazyHistoryDetail = lazy(async () =>
   import('@/components/workspace/WorkspaceConversationDetail').then((m) => ({
@@ -55,6 +56,7 @@ export function Workspace({ isActive = true, onNavigate, onLaunchWithDir }: Work
     }),
     shallow
   );
+  const environments = useAppStore((state) => state.environments);
 
   const {
     launchClaudeCode,
@@ -315,6 +317,16 @@ export function Workspace({ isActive = true, onNavigate, onLaunchWithDir }: Work
     return sessions.find((s) => toSessionKey(s) === selectedKey) ?? null;
   }, [selectedKey, sessions]);
 
+  const environmentByName = useMemo(
+    () => Object.fromEntries(environments.map((environment) => [environment.name, environment])),
+    [environments]
+  );
+
+  const { decorationsBySessionKey } = useWorkspaceSessionDecorations({
+    sessions,
+    isActive,
+  });
+
   const handleSelect = useCallback(
     async (session: HistorySessionItem) => {
       const key = toSessionKey(session);
@@ -382,6 +394,8 @@ export function Workspace({ isActive = true, onNavigate, onLaunchWithDir }: Work
       <div className="workspace-main-container flex flex-1 min-h-0 mx-3 mb-3 overflow-hidden">
         <ProjectTree
           sessions={sessions}
+          environmentByName={environmentByName}
+          decorationsBySessionKey={decorationsBySessionKey}
           isLoading={isLoadingSessions}
           isRefreshing={isRefreshing}
           selectedKey={selectedKey}

@@ -5,6 +5,7 @@ use crate::interactive_runtime::InteractiveRuntimeManager;
 use crate::runtime::{
     HeadlessRuntimeManager, HeadlessSessionOptions, ManagedSessionSource, RuntimeKind,
 };
+use crate::tmux::ClaudeTerminalState;
 use crate::unified_session::{RuntimeInput, UnifiedSessionDebugComparison, UnifiedSessionInfo};
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
@@ -148,7 +149,11 @@ impl RuntimeBackend for TmuxBackend {
             id: session.id.clone(),
             runtime_kind: RuntimeKind::Interactive,
             source: ManagedSessionSource::Desktop,
-            status: normalize_interactive_status(&summary.status, summary.is_active),
+            status: normalize_interactive_status(
+                &summary.status,
+                &summary.terminal_state,
+                summary.is_active,
+            ),
             project_dir: session.working_dir.clone(),
             env_name: session.env_name.clone(),
             perm_mode: session.perm_mode.clone(),
@@ -236,6 +241,7 @@ impl UnifiedSessionManager {
                             source: ManagedSessionSource::Desktop,
                             status: normalize_interactive_status(
                                 &summary.status,
+                                &summary.terminal_state,
                                 summary.is_active,
                             ),
                             project_dir: session.working_dir.clone(),
@@ -388,13 +394,26 @@ fn parse_rfc3339_or_now(value: &str) -> DateTime<Utc> {
         .unwrap_or_else(|_| Utc::now())
 }
 
-fn normalize_interactive_status(status: &str, is_active: bool) -> String {
-    if is_active {
+fn normalize_interactive_status(
+    status: &str,
+    terminal_state: &ClaudeTerminalState,
+    is_active: bool,
+) -> String {
+    if !is_active {
+        return match status {
+            "running" => "stopped".to_string(),
+            other => other.to_string(),
+        };
+    }
+
+    if status != "running" {
         return status.to_string();
     }
 
-    match status {
-        "running" => "stopped".to_string(),
-        other => other.to_string(),
+    match terminal_state {
+        ClaudeTerminalState::Idle => "ready".to_string(),
+        ClaudeTerminalState::Processing => "processing".to_string(),
+        ClaudeTerminalState::WaitingApproval => "waiting_permission".to_string(),
+        ClaudeTerminalState::Unknown => status.to_string(),
     }
 }

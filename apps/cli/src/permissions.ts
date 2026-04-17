@@ -185,7 +185,8 @@ export const listAvailableModes = (): void => {
  */
 export const runWithTempPermissions = async (
   modeName: PermissionModeName,
-  envConfig?: EnvConfig
+  envConfig?: EnvConfig,
+  envName?: string,
 ): Promise<void> => {
   const preset = PERMISSION_PRESETS[modeName];
   if (!preset) {
@@ -194,5 +195,5 @@ export const runWithTempPermissions = async (
     process.exit(1);
   }
 
-  await launchClaude({ envConfig, permMode: modeName });
+  await launchClaude({ envConfig, envName, permMode: modeName });
 };
