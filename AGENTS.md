@@ -108,6 +108,15 @@ When visual or workflow evidence helps, save it under `.artifacts/`.
 - Screenshots, notes, or other local proof can live there
 - Leave artifacts untracked unless the user explicitly asks to commit them
 
+### F. Commit message format
+
+Use Conventional Commit style for all repo commits.
+
+- Preferred format: `<type>(<scope>): <summary>`
+- Desktop/Tauri/frontend work should usually use scope `desktop`
+- Example: `fix(desktop): stabilize terminal tmux attach flow`
+- If a commit is authored during the task and has not been pushed yet, fix the message before finishing the task if it does not follow this format
+
 ### Default implementation loop
 
 When there is no strong reason to do otherwise, follow this default loop:

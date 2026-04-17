@@ -1,5 +1,6 @@
 import { ReactNode } from 'react';
 import { SideRail } from './SideRail';
+import { MacFullscreenWindowControls } from './MacFullscreenWindowControls';
 import {
   Sidebar,
   SidebarInset,
@@ -28,6 +29,7 @@ export function AppLayout({
 }: AppLayoutProps) {
   return (
     <SidebarProvider className="h-screen flex overflow-hidden relative">
+      <MacFullscreenWindowControls />
       <AppLayoutBody
         activeTab={activeTab}
         onTabChange={onTabChange}

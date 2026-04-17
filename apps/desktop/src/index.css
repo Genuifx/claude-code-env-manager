@@ -453,6 +453,8 @@
   --ccem-sidebar-toggle-size: 28px;
   --ccem-sidebar-toggle-gap: 4px;
   --ccem-sidebar-toggle-clearance: 10px;
+  --ccem-window-controls-inset-left: 24px;
+  --ccem-window-controls-top: 11px;
   --ccem-sidebar-toggle-leading-space: calc(
     var(--ccem-window-controls-width, 0px)
     + var(--ccem-sidebar-toggle-gap)
@@ -470,6 +472,56 @@
 
 .app-sidebar-toggle-anchor * {
   -webkit-app-region: no-drag;
+}
+
+.mac-window-controls-overlay {
+  position: fixed;
+  top: var(--ccem-window-controls-top);
+  left: var(--ccem-window-controls-inset-left);
+  z-index: 130;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+
+.mac-window-controls-button {
+  width: 12px;
+  height: 12px;
+  border: none;
+  border-radius: 999px;
+  padding: 0;
+  cursor: default;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.35),
+    0 0 0 0.5px rgb(0 0 0 / 0.18);
+  transition:
+    transform 140ms var(--ease-decelerate),
+    filter 140ms var(--ease-decelerate),
+    opacity 140ms var(--ease-decelerate);
+}
+
+.mac-window-controls-button:hover {
+  transform: scale(1.05);
+  filter: saturate(1.06) brightness(0.97);
+}
+
+.mac-window-controls-button:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+.mac-window-controls-button[data-variant='close'] {
+  background: #ff5f57;
+}
+
+.mac-window-controls-button[data-variant='minimize'] {
+  background: #febc2e;
+}
+
+.mac-window-controls-button[data-variant='fullscreen'] {
+  background: #28c840;
 }
 
 .app-titlebar-row {
