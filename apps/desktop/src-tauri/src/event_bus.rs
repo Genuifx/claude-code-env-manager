@@ -114,6 +114,8 @@ pub enum SessionEventPayload {
     PermissionRequired {
         request_id: String,
         tool_name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input_summary: Option<String>,
     },
     PermissionResponded {
         request_id: String,

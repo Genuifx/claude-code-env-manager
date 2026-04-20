@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { scheduleAfterFirstPaint } from '@/lib/idle';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
-import type { SessionEventRecord, UnifiedSessionInfo } from '@/lib/tauri-ipc';
+import type {
+  NativeSessionSummary,
+  SessionEventRecord,
+  UnifiedSessionInfo,
+} from '@/lib/tauri-ipc';
 import type { HistorySessionItem } from '@/features/conversations/types';
 import type { Session } from '@/store';
 
@@ -27,6 +31,16 @@ type WorkspaceRuntimeDescriptor =
       projectDir: string;
       createdAt: number;
       historySessionId?: string | null;
+    }
+  | {
+      kind: 'native';
+      id: string;
+      client: 'claude' | 'codex';
+      status: string;
+      envName: string;
+      projectDir: string;
+      createdAt: number;
+      providerSessionId?: string | null;
     }
   | {
       kind: 'legacyInteractive';
@@ -96,6 +110,19 @@ function toLegacyInteractiveRuntime(session: Session): WorkspaceRuntimeDescripto
   };
 }
 
+function toNativeRuntime(session: NativeSessionSummary): WorkspaceRuntimeDescriptor {
+  return {
+    kind: 'native',
+    id: session.runtime_id,
+    client: session.provider,
+    status: session.status,
+    envName: session.env_name,
+    projectDir: session.project_dir,
+    createdAt: new Date(session.created_at).getTime(),
+    providerSessionId: session.provider_session_id,
+  };
+}
+
 function isUnifiedRuntime(runtime: WorkspaceRuntimeDescriptor): runtime is Extract<
   WorkspaceRuntimeDescriptor,
   { kind: 'unified' }
@@ -120,6 +147,9 @@ function isRuntimeProcessing(
   }
   if (runtime.kind === 'legacyInteractive') {
     return runtime.status === 'running';
+  }
+  if (runtime.kind === 'native') {
+    return runtime.status === 'processing' || runtime.status === 'initializing';
   }
   return runtime.status === 'processing' || runtime.status === 'initializing';
 }
@@ -211,8 +241,11 @@ function buildRuntimeMatchMap(
   for (const session of historyByTimestamp) {
     const directMatch = runtimesByRecency.find((runtime) =>
       !usedRuntimeIds.has(runtime.id)
-      && runtime.kind === 'unified'
-      && runtime.historySessionId === session.id
+      && runtime.client === session.source
+      && (
+        (runtime.kind === 'unified' && runtime.historySessionId === session.id)
+        || (runtime.kind === 'native' && runtime.providerSessionId === session.id)
+      )
     );
 
     if (directMatch) {
@@ -266,8 +299,15 @@ export function useWorkspaceSessionDecorations({
   sessions,
   isActive = true,
 }: UseWorkspaceSessionDecorationsOptions) {
-  const { listUnifiedSessions, getSessionEvents, listInteractiveSessions } = useTauriCommands();
+  const {
+    listUnifiedSessions,
+    getSessionEvents,
+    listInteractiveSessions,
+    listNativeSessions,
+    getNativeSessionEvents,
+  } = useTauriCommands();
   const [unifiedSessions, setUnifiedSessions] = useState<UnifiedSessionInfo[]>([]);
+  const [nativeSessions, setNativeSessions] = useState<NativeSessionSummary[]>([]);
   const [legacyInteractiveSessions, setLegacyInteractiveSessions] = useState<Session[]>([]);
   const [eventsByRuntime, setEventsByRuntime] = useState<Record<string, SessionEventRecord[]>>({});
   const eventsByRuntimeRef = useRef<Record<string, SessionEventRecord[]>>({});
@@ -277,9 +317,10 @@ export function useWorkspaceSessionDecorations({
   }, [eventsByRuntime]);
 
   const refreshRuntimeSources = useCallback(async () => {
-    const [nextUnifiedSessions, nextInteractiveSessions] = await Promise.all([
+    const [nextUnifiedSessions, nextInteractiveSessions, nextNativeSessions] = await Promise.all([
       listUnifiedSessions(),
       listInteractiveSessions(),
+      listNativeSessions(),
     ]);
     const unifiedRuntimeIds = new Set(nextUnifiedSessions.map((runtime) => runtime.id));
     const nextLegacyInteractiveSessions = nextInteractiveSessions.filter((session) =>
@@ -289,18 +330,29 @@ export function useWorkspaceSessionDecorations({
     );
 
     setUnifiedSessions(nextUnifiedSessions);
+    setNativeSessions(nextNativeSessions);
     setLegacyInteractiveSessions(nextLegacyInteractiveSessions);
 
     return {
       unifiedSessions: nextUnifiedSessions,
+      nativeSessions: nextNativeSessions,
       legacyInteractiveSessions: nextLegacyInteractiveSessions,
     };
-  }, [listInteractiveSessions, listUnifiedSessions]);
+  }, [listInteractiveSessions, listNativeSessions, listUnifiedSessions]);
 
-  const refreshRuntimeEvents = useCallback(async (nextSessions: UnifiedSessionInfo[]) => {
-    const activeSessions = nextSessions.filter((runtime) => !isRuntimeTerminalStatus(runtime.status));
+  const refreshRuntimeEvents = useCallback(async (
+    nextUnifiedSessions: UnifiedSessionInfo[],
+    nextNativeSessions: NativeSessionSummary[],
+  ) => {
+    const activeUnifiedSessions = nextUnifiedSessions.filter(
+      (runtime) => !isRuntimeTerminalStatus(runtime.status),
+    );
+    const activeNativeSessions = nextNativeSessions.filter(
+      (runtime) => !isRuntimeTerminalStatus(runtime.status),
+    );
+
     await Promise.all(
-      activeSessions.map(async (runtime) => {
+      activeUnifiedSessions.map(async (runtime) => {
         try {
           const sinceSeq = lastEventSeq(eventsByRuntimeRef.current[runtime.id]);
           const batch = await getSessionEvents(runtime.id, sinceSeq);
@@ -321,10 +373,43 @@ export function useWorkspaceSessionDecorations({
         } catch (error) {
           console.error(`Failed to refresh workspace events for runtime ${runtime.id}:`, error);
         }
-      })
+      }),
     );
 
-    const activeIds = new Set(activeSessions.map((runtime) => runtime.id));
+    await Promise.all(
+      activeNativeSessions.map(async (runtime) => {
+        try {
+          const sinceSeq = lastEventSeq(eventsByRuntimeRef.current[runtime.runtime_id]);
+          const batch = await getNativeSessionEvents(runtime.runtime_id, sinceSeq);
+          setEventsByRuntime((current) => {
+            const previous = sinceSeq && !batch.gap_detected
+              ? current[runtime.runtime_id] ?? []
+              : [];
+            const next = dedupeEvents([...previous, ...batch.events]);
+            if (
+              previous.length === next.length
+              && previous.every((event, index) => next[index]?.seq === event.seq)
+            ) {
+              return current;
+            }
+            return {
+              ...current,
+              [runtime.runtime_id]: next,
+            };
+          });
+        } catch (error) {
+          console.error(
+            `Failed to refresh workspace events for native runtime ${runtime.runtime_id}:`,
+            error,
+          );
+        }
+      }),
+    );
+
+    const activeIds = new Set([
+      ...activeUnifiedSessions.map((runtime) => runtime.id),
+      ...activeNativeSessions.map((runtime) => runtime.runtime_id),
+    ]);
     setEventsByRuntime((current) => {
       const nextEntries = Object.entries(current).filter(([runtimeId]) => activeIds.has(runtimeId));
       if (nextEntries.length === Object.keys(current).length) {
@@ -332,7 +417,7 @@ export function useWorkspaceSessionDecorations({
       }
       return Object.fromEntries(nextEntries);
     });
-  }, [getSessionEvents]);
+  }, [getNativeSessionEvents, getSessionEvents]);
 
   useEffect(() => {
     if (!isActive) {
@@ -344,7 +429,10 @@ export function useWorkspaceSessionDecorations({
       try {
         const nextSessions = await refreshRuntimeSources();
         if (!cancelled) {
-          await refreshRuntimeEvents(nextSessions.unifiedSessions);
+          await refreshRuntimeEvents(
+            nextSessions.unifiedSessions,
+            nextSessions.nativeSessions,
+          );
         }
       } catch (error) {
         console.error('Failed to refresh workspace session decorations:', error);
@@ -369,9 +457,10 @@ export function useWorkspaceSessionDecorations({
   const runtimeDescriptors = useMemo(
     () => [
       ...unifiedSessions.map(toUnifiedRuntime),
+      ...nativeSessions.map(toNativeRuntime),
       ...legacyInteractiveSessions.map(toLegacyInteractiveRuntime),
     ],
-    [legacyInteractiveSessions, unifiedSessions]
+    [legacyInteractiveSessions, nativeSessions, unifiedSessions]
   );
 
   const matchedRuntimeBySessionKey = useMemo(

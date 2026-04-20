@@ -6,6 +6,25 @@
     "core:default",
     "core:window:allow-start-dragging",
     "shell:allow-open",
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "binaries/ccem-node",
+          "sidecar": true,
+          "args": true
+        }
+      ]
+    },
+    {
+      "identifier": "shell:allow-stdin-write",
+      "allow": [
+        {
+          "name": "binaries/ccem-node",
+          "sidecar": true
+        }
+      ]
+    },
     "dialog:default",
     "notification:default",
     "mcp-bridge:default",

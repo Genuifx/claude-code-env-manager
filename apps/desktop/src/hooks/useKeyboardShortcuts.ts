@@ -7,6 +7,16 @@ interface ShortcutMap {
 export function useKeyboardShortcuts(shortcuts: ShortcutMap) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Skip if the event originates from an input, textarea, or contenteditable element
+      // — those elements handle their own keyboard shortcuts.
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      ) {
+        return;
+      }
+
       // Build key string: "meta+1", "meta+enter", "meta+shift+m", etc.
       const parts: string[] = [];
       if (e.metaKey || e.ctrlKey) parts.push('meta');

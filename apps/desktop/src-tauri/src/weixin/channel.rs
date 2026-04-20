@@ -159,6 +159,7 @@ impl WeixinChannel {
                 SessionEventPayload::PermissionRequired {
                     request_id,
                     tool_name,
+                    ..
                 } => {
                     self.manager.remember_permission_request(
                         request_id,

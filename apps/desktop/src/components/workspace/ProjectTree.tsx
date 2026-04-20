@@ -1,5 +1,5 @@
 import { useMemo, useState, useDeferredValue, useCallback } from 'react';
-import { ChevronRight, FolderOpen, FolderClosed, MessageSquare, RefreshCw, Search } from 'lucide-react';
+import { ChevronRight, FolderOpen, FolderClosed, MessageSquare, RefreshCw, Search, SquarePen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getHistorySessionDisplay } from '@/components/history/historySession';
 import { useLocale } from '@/locales';
@@ -24,6 +24,7 @@ interface ProjectTreeProps {
   /** Save a title override. Returns a promise so callers can await it. */
   onSaveTitle?: (session: HistorySessionItem, title: string) => Promise<void>;
   onSessionsChanged?: () => Promise<void>;
+  onCreateForProject?: (projectPath: string) => void;
 }
 
 interface ProjectNode {
@@ -91,6 +92,7 @@ export function ProjectTree({
   opencodeInstalled = false,
   onSaveTitle,
   onSessionsChanged,
+  onCreateForProject,
 }: ProjectTreeProps) {
   const { t } = useLocale();
   const [search, setSearch] = useState('');
@@ -290,33 +292,55 @@ export function ProjectTree({
             return (
               <div key={node.project} className="mb-0.5">
                 {/* Project header */}
-                <button
-                  type="button"
-                  onClick={() => toggleProject(node.project)}
+                <div
                   className={cn(
-                    'w-full flex items-center gap-2 px-3 py-2 text-left transition-colors rounded-md mx-1',
+                    'group mx-1 flex items-center gap-2 rounded-md px-3 py-2 transition-colors',
                     'hover:bg-muted/60',
                     isExpanded && 'bg-muted/40'
                   )}
                 >
-                  <ChevronRight
-                    className={cn(
-                      'w-4 h-4 text-muted-foreground transition-transform shrink-0',
-                      isExpanded && 'rotate-90'
+                  <button
+                    type="button"
+                    onClick={() => toggleProject(node.project)}
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  >
+                    <ChevronRight
+                      className={cn(
+                        'w-4 h-4 text-muted-foreground transition-transform shrink-0',
+                        isExpanded && 'rotate-90'
+                      )}
+                    />
+                    {isExpanded ? (
+                      <FolderOpen className="w-4 h-4 text-primary shrink-0" />
+                    ) : (
+                      <FolderClosed className="w-4 h-4 text-muted-foreground shrink-0" />
                     )}
-                  />
-                  {isExpanded ? (
-                    <FolderOpen className="w-4 h-4 text-primary shrink-0" />
-                  ) : (
-                    <FolderClosed className="w-4 h-4 text-muted-foreground shrink-0" />
+                    <span className="text-[13px] font-medium text-foreground truncate flex-1">
+                      {node.projectName}
+                    </span>
+                  </button>
+                  {onCreateForProject && (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onCreateForProject(node.project);
+                      }}
+                      aria-label={t('workspace.createInProject')}
+                      title={t('workspace.createInProject')}
+                      className={cn(
+                        'flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent',
+                        'text-muted-foreground opacity-0 transition-all',
+                        'group-hover:opacity-100 hover:border-primary/30 hover:bg-primary/8 hover:text-primary'
+                      )}
+                    >
+                      <SquarePen className="h-3.5 w-3.5" />
+                    </button>
                   )}
-                  <span className="text-[13px] font-medium text-foreground truncate flex-1">
-                    {node.projectName}
-                  </span>
                   <span className="text-[10px] text-muted-foreground shrink-0 font-medium px-1.5 py-0.5 rounded-full bg-muted/60">
                     {node.sessions.length}
                   </span>
-                </button>
+                </div>
 
                 {/* Session list */}
                 {isExpanded && (

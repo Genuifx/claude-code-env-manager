@@ -76,6 +76,14 @@ pub struct ResolvedOpenCodeRuntime {
     pub config_source: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct ResolvedCodexRuntime {
+    pub env_name: String,
+    pub env_vars: HashMap<String, String>,
+    pub base_url: Option<String>,
+    pub api_key: Option<String>,
+}
+
 pub const OPENCODE_NATIVE_ENV_NAME: &str = "OpenCode Native";
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -562,6 +570,7 @@ pub fn build_claude_env_vars(env: &EnvConfig) -> HashMap<String, String> {
     }
     if let Some(token) = &env.auth_token {
         env_vars.insert("ANTHROPIC_AUTH_TOKEN".to_string(), token.clone());
+        env_vars.insert("ANTHROPIC_API_KEY".to_string(), token.clone());
     }
     if let Some(model) = &env.default_opus_model {
         env_vars.insert("ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(), model.clone());
@@ -635,6 +644,29 @@ pub fn resolve_opencode_runtime(env_name: &str) -> Result<ResolvedOpenCodeRuntim
         env_name: OPENCODE_NATIVE_ENV_NAME.to_string(),
         env_vars: HashMap::new(),
         config_source: "native".to_string(),
+    })
+}
+
+pub fn resolve_codex_runtime(env_name: &str) -> Result<ResolvedCodexRuntime, String> {
+    if env_name.trim().is_empty() {
+        return Ok(ResolvedCodexRuntime {
+            env_name: String::new(),
+            env_vars: HashMap::new(),
+            base_url: None,
+            api_key: None,
+        });
+    }
+
+    let cfg = read_config()?;
+    cfg.registries
+        .get(env_name)
+        .ok_or_else(|| format!("Environment '{}' does not exist", env_name))?;
+
+    Ok(ResolvedCodexRuntime {
+        env_name: env_name.to_string(),
+        env_vars: HashMap::new(),
+        base_url: None,
+        api_key: None,
     })
 }
 
@@ -941,6 +973,10 @@ mod tests {
         );
         assert_eq!(
             env_vars.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str),
+            Some("auth-token-123")
+        );
+        assert_eq!(
+            env_vars.get("ANTHROPIC_API_KEY").map(String::as_str),
             Some("auth-token-123")
         );
         assert_eq!(

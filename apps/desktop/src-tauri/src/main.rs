@@ -12,6 +12,7 @@ mod event_dispatcher;
 mod history;
 mod interactive_runtime;
 mod jsonl_watcher;
+mod native_runtime;
 mod notifications;
 mod opencode;
 mod permission;
@@ -21,6 +22,7 @@ mod runtime;
 mod session;
 mod session_provenance;
 mod skills;
+mod system_proxy;
 mod telegram;
 mod terminal;
 mod title_overrides;
@@ -36,14 +38,18 @@ use analytics::{
 };
 use channel::ChannelKind;
 use config::{
-    create_env_with_encrypted_key, resolve_claude_env, resolve_opencode_runtime, AppConfig,
-    DesktopSettings, EnvConfig, FavoriteProject, JetBrainsProject, RecentProject, VSCodeProject,
+    create_env_with_encrypted_key, resolve_claude_env, resolve_codex_runtime,
+    resolve_opencode_runtime, AppConfig, DesktopSettings, EnvConfig, FavoriteProject,
+    JetBrainsProject, RecentProject, VSCodeProject,
 };
 use cron::{start_cron_scheduler, CronScheduler};
 use event_dispatcher::EventDispatcher;
 use history::{get_conversation_history, get_conversation_messages, get_conversation_segments};
 use interactive_runtime::{
     InteractiveReplayBatch, InteractiveRuntimeManager, InteractiveSessionOptions,
+};
+use native_runtime::{
+    NativeProvider, NativeRuntimeManager, NativeSessionOptions, NativeSessionSummary,
 };
 use opencode::{snapshot_known_session_ids, track_launched_session};
 use proxy_debug::{
@@ -509,6 +515,8 @@ async fn launch_claude_code(
         let resolved = resolve_claude_env(&env_name)?;
         claude_upstream_base_url = resolved.upstream_base_url;
         env_vars = resolved.env_vars;
+    } else if client_name == "codex" {
+        env_vars = system_proxy::resolve_codex_proxy_env();
     } else if client_name == "opencode" {
         let resolved = resolve_opencode_runtime(&env_name)?;
         resolved_env_name = resolved.env_name;
@@ -677,6 +685,17 @@ fn resolve_headless_working_dir(working_dir: Option<String>) -> String {
         .or_else(config::get_default_working_dir)
         .or_else(|| dirs::home_dir().map(|path| path.to_string_lossy().to_string()))
         .unwrap_or_else(|| ".".to_string())
+}
+
+fn parse_native_provider(provider: &str) -> Result<NativeProvider, String> {
+    match provider.trim().to_lowercase().as_str() {
+        "claude" => Ok(NativeProvider::Claude),
+        "codex" => Ok(NativeProvider::Codex),
+        other => Err(format!(
+            "Unsupported native provider '{}'. Use claude or codex.",
+            other
+        )),
+    }
 }
 
 // ============================================
@@ -938,6 +957,165 @@ fn debug_compare_sessions(
     unified_state: State<'_, Arc<UnifiedSessionManager>>,
 ) -> UnifiedSessionDebugComparison {
     unified_state.debug_compare_sessions()
+}
+
+#[tauri::command]
+async fn create_native_session(
+    app: tauri::AppHandle,
+    native_state: State<'_, Arc<NativeRuntimeManager>>,
+    provider: String,
+    env_name: String,
+    perm_mode: Option<String>,
+    working_dir: Option<String>,
+    initial_prompt: String,
+    provider_session_id: Option<String>,
+) -> Result<NativeSessionSummary, String> {
+    let provider = parse_native_provider(&provider)?;
+    let effective_working_dir = resolve_headless_working_dir(working_dir);
+    let effective_perm_mode = perm_mode.unwrap_or_else(|| "dev".to_string());
+
+    let options = match provider {
+        NativeProvider::Claude => {
+            let resolved = resolve_claude_env(&env_name)?;
+            NativeSessionOptions {
+                provider,
+                env_name: resolved.env_name,
+                perm_mode: effective_perm_mode,
+                working_dir: effective_working_dir,
+                initial_prompt: Some(initial_prompt),
+                provider_session_id: provider_session_id.clone(),
+                helper_env_vars: resolved.env_vars.clone(),
+                terminal_env_vars: resolved.env_vars,
+                claude_path: terminal::resolve_claude_path(),
+                codex_path: None,
+                codex_base_url: None,
+                codex_api_key: None,
+            }
+        }
+        NativeProvider::Codex => {
+            let resolved = resolve_codex_runtime(&env_name)?;
+            let proxy_env_vars = system_proxy::resolve_codex_proxy_env();
+            NativeSessionOptions {
+                provider,
+                env_name: if resolved.env_name.is_empty() {
+                    env_name
+                } else {
+                    resolved.env_name
+                },
+                perm_mode: effective_perm_mode,
+                working_dir: effective_working_dir,
+                initial_prompt: Some(initial_prompt),
+                provider_session_id: provider_session_id.clone(),
+                helper_env_vars: proxy_env_vars.clone(),
+                terminal_env_vars: proxy_env_vars,
+                claude_path: None,
+                codex_path: terminal::resolve_codex_path(),
+                codex_base_url: None,
+                codex_api_key: None,
+            }
+        }
+    };
+
+    let summary = native_state.create_session(app, options)?;
+
+    if let Err(error) = register_launch(SessionProvenanceUpsert {
+        ccem_session_id: summary.runtime_id.clone(),
+        client: summary.provider.as_str().to_string(),
+        env_name: summary.env_name.clone(),
+        config_source: Some(DEFAULT_CONFIG_SOURCE.to_string()),
+        working_dir: summary.project_dir.clone(),
+        perm_mode: Some(summary.perm_mode.clone()),
+        launch_mode: "native_sdk".to_string(),
+        started_via: "desktop".to_string(),
+        source_session_id: summary.provider_session_id.clone(),
+    }) {
+        eprintln!(
+            "Failed to register native runtime launch provenance for {}: {}",
+            summary.runtime_id, error
+        );
+    }
+
+    Ok(summary)
+}
+
+#[tauri::command]
+fn list_native_sessions(
+    native_state: State<'_, Arc<NativeRuntimeManager>>,
+) -> Vec<NativeSessionSummary> {
+    native_state.list_sessions()
+}
+
+#[tauri::command]
+fn send_native_session_input(
+    app: tauri::AppHandle,
+    native_state: State<'_, Arc<NativeRuntimeManager>>,
+    runtime_id: String,
+    text: String,
+) -> Result<(), String> {
+    native_state.send_user_message(&app, &runtime_id, &text)
+}
+
+#[tauri::command]
+fn respond_native_session_permission(
+    app: tauri::AppHandle,
+    native_state: State<'_, Arc<NativeRuntimeManager>>,
+    runtime_id: String,
+    request_id: String,
+    approved: bool,
+) -> Result<(), String> {
+    native_state.respond_to_permission(&app, &runtime_id, &request_id, approved)
+}
+
+#[tauri::command]
+fn get_native_session_events(
+    native_state: State<'_, Arc<NativeRuntimeManager>>,
+    runtime_id: String,
+    since_seq: Option<u64>,
+) -> Result<event_bus::ReplayBatch, String> {
+    native_state.replay_events(&runtime_id, since_seq)
+}
+
+#[tauri::command]
+fn stop_native_session(
+    native_state: State<'_, Arc<NativeRuntimeManager>>,
+    runtime_id: String,
+) -> Result<(), String> {
+    native_state.stop_session(&runtime_id)
+}
+
+#[tauri::command]
+fn handoff_native_session_to_terminal(
+    native_state: State<'_, Arc<NativeRuntimeManager>>,
+    runtime_id: String,
+    terminal_type: Option<TerminalType>,
+) -> Result<(), String> {
+    native_state.handoff_to_terminal(&runtime_id, terminal_type)
+}
+
+#[tauri::command]
+fn launch_opencode_web(
+    working_dir: Option<String>,
+    env_name: Option<String>,
+) -> Result<(), String> {
+    let effective_working_dir = resolve_headless_working_dir(working_dir);
+    let opencode_path = terminal::resolve_opencode_path()
+        .ok_or_else(|| "OpenCode CLI is not installed".to_string())?;
+    let resolved = env_name
+        .as_deref()
+        .filter(|name| !name.trim().is_empty())
+        .map(resolve_opencode_runtime)
+        .transpose()?;
+
+    let mut command = Command::new(opencode_path);
+    command.arg("web").current_dir(&effective_working_dir);
+    if let Some(runtime) = resolved {
+        command.envs(runtime.env_vars);
+    }
+
+    command
+        .spawn()
+        .map_err(|error| format!("Failed to launch OpenCode Web UI: {}", error))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -2632,6 +2810,7 @@ fn main() {
     let session_manager = Arc::new(SessionManager::load_from_disk());
     let interactive_runtime_manager = Arc::new(InteractiveRuntimeManager::default());
     let headless_runtime_manager = Arc::new(HeadlessRuntimeManager::default());
+    let native_runtime_manager = Arc::new(NativeRuntimeManager::default());
     let event_dispatcher = Arc::new(EventDispatcher::default());
     let unified_session_manager = Arc::new(UnifiedSessionManager::new(
         headless_runtime_manager.clone(),
@@ -2671,6 +2850,7 @@ fn main() {
         .manage(session_manager.clone())
         .manage(interactive_runtime_manager.clone())
         .manage(headless_runtime_manager.clone())
+        .manage(native_runtime_manager.clone())
         .manage(event_dispatcher.clone())
         .manage(unified_session_manager.clone())
         .manage(telegram_bridge_manager.clone())
@@ -2725,6 +2905,14 @@ fn main() {
             stop_headless_session,
             remove_headless_session,
             respond_headless_permission,
+            create_native_session,
+            list_native_sessions,
+            send_native_session_input,
+            respond_native_session_permission,
+            get_native_session_events,
+            stop_native_session,
+            handoff_native_session_to_terminal,
+            launch_opencode_web,
             list_unified_sessions,
             get_session_events,
             send_session_input,

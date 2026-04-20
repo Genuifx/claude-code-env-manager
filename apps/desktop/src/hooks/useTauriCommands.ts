@@ -8,6 +8,8 @@ import type {
   HeadlessSessionSummary,
   InteractiveReplayBatch,
   ManagedSessionSummary,
+  NativeSessionSummary,
+  NativeTerminalType,
   ReplayBatch,
   RuntimeInput,
   RuntimeRecoveryCandidate,
@@ -674,6 +676,79 @@ export function useTauriCommands() {
     await removeHeadlessSession(runtimeId);
   }, [removeHeadlessSession]);
 
+  const createNativeSession = useCallback(async (options: {
+    provider: 'claude' | 'codex';
+    envName?: string;
+    permMode?: string;
+    workingDir?: string | null;
+    initialPrompt: string;
+    providerSessionId?: string | null;
+  }): Promise<NativeSessionSummary> => {
+    const { currentEnv, permissionMode, selectedWorkingDir } = getSessionDefaults();
+    return invoke<NativeSessionSummary>('create_native_session', {
+      provider: options.provider,
+      envName: options.envName ?? currentEnv,
+      permMode: options.permMode ?? permissionMode,
+      workingDir: options.workingDir ?? selectedWorkingDir ?? null,
+      initialPrompt: options.initialPrompt,
+      providerSessionId: options.providerSessionId ?? null,
+    });
+  }, [getSessionDefaults]);
+
+  const listNativeSessions = useCallback(async (): Promise<NativeSessionSummary[]> => {
+    return invoke<NativeSessionSummary[]>('list_native_sessions');
+  }, []);
+
+  const sendNativeSessionInput = useCallback(async (runtimeId: string, text: string): Promise<void> => {
+    await invoke('send_native_session_input', { runtimeId, text });
+  }, []);
+
+  const respondNativeSessionPermission = useCallback(async (
+    runtimeId: string,
+    requestId: string,
+    approved: boolean,
+  ): Promise<void> => {
+    await invoke('respond_native_session_permission', {
+      runtimeId,
+      requestId,
+      approved,
+    });
+  }, []);
+
+  const getNativeSessionEvents = useCallback(async (
+    runtimeId: string,
+    sinceSeq?: number | null,
+  ): Promise<ReplayBatch> => {
+    return invoke<ReplayBatch>('get_native_session_events', {
+      runtimeId,
+      sinceSeq: sinceSeq ?? null,
+    });
+  }, []);
+
+  const stopNativeSession = useCallback(async (runtimeId: string): Promise<void> => {
+    await invoke('stop_native_session', { runtimeId });
+  }, []);
+
+  const handoffNativeSessionToTerminal = useCallback(async (
+    runtimeId: string,
+    terminalType?: NativeTerminalType,
+  ): Promise<void> => {
+    await invoke('handoff_native_session_to_terminal', {
+      runtimeId,
+      terminalType: terminalType ?? null,
+    });
+  }, []);
+
+  const launchOpenCodeWeb = useCallback(async (
+    workingDir?: string | null,
+    envName?: string | null,
+  ): Promise<void> => {
+    await invoke('launch_opencode_web', {
+      workingDir: workingDir ?? null,
+      envName: envName ?? null,
+    });
+  }, []);
+
   const minimizeSession = useCallback(async (sessionId: string) => {
     try {
       await invoke('minimize_interactive_session', { sessionId });
@@ -1057,6 +1132,14 @@ export function useTauriCommands() {
     respondHeadlessPermission,
     removeHeadlessSession,
     removeManagedSession,
+    createNativeSession,
+    listNativeSessions,
+    sendNativeSessionInput,
+    respondNativeSessionPermission,
+    getNativeSessionEvents,
+    stopNativeSession,
+    handoffNativeSessionToTerminal,
+    launchOpenCodeWeb,
     loadAppConfig,
     addFavoriteProject,
     removeFavoriteProject,

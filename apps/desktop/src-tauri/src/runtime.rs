@@ -861,6 +861,7 @@ impl RuntimeManager {
                 SessionEventPayload::PermissionRequired {
                     request_id: request.request_id,
                     tool_name: request.tool_name,
+                    input_summary: None,
                 },
             );
         }

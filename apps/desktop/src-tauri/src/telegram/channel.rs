@@ -180,6 +180,7 @@ impl TelegramChannel {
                 SessionEventPayload::PermissionRequired {
                     request_id,
                     tool_name,
+                    ..
                 } => {
                     if state.announced_requests.insert(request_id.clone()) {
                         if let Ok(sent_message) = send_permission_request_message(

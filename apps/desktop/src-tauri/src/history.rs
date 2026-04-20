@@ -15,6 +15,7 @@ use std::time::UNIX_EPOCH;
 const SOURCE_CLAUDE: &str = "claude";
 const SOURCE_CODEX: &str = "codex";
 const SOURCE_OPENCODE: &str = "opencode";
+const HISTORY_NEAR_DUPLICATE_WINDOW_MS: u64 = 1_500;
 
 // ============================================================================
 // Output types — sent to frontend (camelCase for TypeScript)
@@ -216,6 +217,7 @@ pub async fn get_conversation_history(
             sessions.extend(load_opencode_history()?);
         }
 
+        sessions = dedupe_near_duplicate_history_sessions(sessions);
         sessions.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
 
         // Overlay user-edited title overrides
@@ -510,6 +512,130 @@ fn apply_provenance_to_history_session(
             .filter(|value| !value.is_empty())
             .unwrap_or("unknown")
             .to_string();
+    }
+}
+
+fn dedupe_near_duplicate_history_sessions(sessions: Vec<HistorySession>) -> Vec<HistorySession> {
+    let mut deduped = Vec::with_capacity(sessions.len());
+    let mut indexes_by_key: HashMap<(String, String, String), Vec<usize>> = HashMap::new();
+
+    for session in sessions {
+        let Some(key) = history_dedupe_key(&session) else {
+            deduped.push(session);
+            continue;
+        };
+
+        let duplicate_index = indexes_by_key.get(&key).and_then(|indexes| {
+            indexes.iter().copied().find(|index| {
+                deduped[*index]
+                    .timestamp
+                    .abs_diff(session.timestamp)
+                    <= HISTORY_NEAR_DUPLICATE_WINDOW_MS
+            })
+        });
+
+        if let Some(index) = duplicate_index {
+            deduped[index] = merge_near_duplicate_history_sessions(&deduped[index], &session);
+            continue;
+        }
+
+        let next_index = deduped.len();
+        deduped.push(session);
+        indexes_by_key.entry(key).or_default().push(next_index);
+    }
+
+    deduped
+}
+
+fn history_dedupe_key(session: &HistorySession) -> Option<(String, String, String)> {
+    let project = session.project.trim();
+    let display = clean_display_title(&session.display);
+
+    if project.is_empty() || display.is_empty() {
+        return None;
+    }
+
+    Some((
+        session.source.trim().to_lowercase(),
+        project.replace('\\', "/").to_lowercase(),
+        display.to_lowercase(),
+    ))
+}
+
+fn history_session_preference_score(session: &HistorySession) -> (u8, u8, u8, u64) {
+    let config_score = match session.config_source.as_deref() {
+        Some("ccem") => 2,
+        Some(source) if !source.trim().is_empty() && source != "native" => 1,
+        _ => 0,
+    };
+    let env_score = u8::from(
+        session
+            .env_name
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty()),
+    );
+    let project_score = u8::from(!session.project.trim().is_empty());
+
+    (config_score, env_score, project_score, session.timestamp)
+}
+
+fn merge_near_duplicate_history_sessions(
+    left: &HistorySession,
+    right: &HistorySession,
+) -> HistorySession {
+    let (mut winner, donor) = if history_session_preference_score(right)
+        > history_session_preference_score(left)
+    {
+        (right.clone(), left)
+    } else {
+        (left.clone(), right)
+    };
+
+    merge_history_session_metadata(&mut winner, donor);
+    winner
+}
+
+fn merge_history_session_metadata(winner: &mut HistorySession, donor: &HistorySession) {
+    winner.timestamp = winner.timestamp.max(donor.timestamp);
+
+    if (winner.project.is_empty() || winner.project_name == "unknown") && !donor.project.is_empty()
+    {
+        winner.project = donor.project.clone();
+        winner.project_name = donor.project_name.clone();
+    } else if winner.project_name == "unknown" && donor.project_name != "unknown" {
+        winner.project_name = donor.project_name.clone();
+    }
+
+    if is_noise_display(&winner.display) && !is_noise_display(&donor.display) {
+        winner.display = donor.display.clone();
+    }
+
+    if winner
+        .env_name
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        if let Some(env_name) = donor
+            .env_name
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+        {
+            winner.env_name = Some(env_name);
+        }
+    }
+
+    if winner
+        .config_source
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty() || value == "native")
+    {
+        if let Some(config_source) = donor
+            .config_source
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+        {
+            winner.config_source = Some(config_source);
+        }
     }
 }
 
@@ -2756,12 +2882,12 @@ fn extract_usage_fields(
 #[cfg(test)]
 mod tests {
     use super::{
-        find_codex_session_file_with_config, is_noise_display, load_claude_history_from_paths,
-        load_codex_history_from_config, merge_opencode_history_session, normalize_history_display,
-        normalize_history_source, parse_codex_history_timestamp,
-        parse_opencode_conversation_export, parse_opencode_history_session,
-        resolve_codex_path_config_from, upsert_codex_history_session, CodexHistoryLine,
-        CodexPathConfig, HistorySession,
+        dedupe_near_duplicate_history_sessions, find_codex_session_file_with_config,
+        is_noise_display, load_claude_history_from_paths, load_codex_history_from_config,
+        merge_opencode_history_session, normalize_history_display, normalize_history_source,
+        parse_codex_history_timestamp, parse_opencode_conversation_export,
+        parse_opencode_history_session, resolve_codex_path_config_from, upsert_codex_history_session,
+        CodexHistoryLine, CodexPathConfig, HistorySession, SOURCE_CLAUDE,
     };
     use rusqlite::Connection;
     use std::collections::HashMap;
@@ -3195,6 +3321,56 @@ mod tests {
         assert_eq!(session.display, "");
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_dedupe_near_duplicate_history_sessions_prefers_ccem_metadata() {
+        let sessions = vec![
+            HistorySession {
+                id: "session-ccem".to_string(),
+                source: SOURCE_CLAUDE.to_string(),
+                display: "9.9-9.11=？".to_string(),
+                timestamp: 1_776_489_728_117,
+                project: "/Users/g/baymax".to_string(),
+                project_name: "baymax".to_string(),
+                env_name: Some("3891".to_string()),
+                config_source: Some("ccem".to_string()),
+            },
+            HistorySession {
+                id: "session-plain".to_string(),
+                source: SOURCE_CLAUDE.to_string(),
+                display: "9.9-9.11=？".to_string(),
+                timestamp: 1_776_489_728_586,
+                project: "/Users/g/baymax".to_string(),
+                project_name: "baymax".to_string(),
+                env_name: None,
+                config_source: None,
+            },
+            HistorySession {
+                id: "session-later".to_string(),
+                source: SOURCE_CLAUDE.to_string(),
+                display: "9.9-9.11=？".to_string(),
+                timestamp: 1_776_489_735_000,
+                project: "/Users/g/baymax".to_string(),
+                project_name: "baymax".to_string(),
+                env_name: Some("3891".to_string()),
+                config_source: Some("ccem".to_string()),
+            },
+        ];
+
+        let deduped = dedupe_near_duplicate_history_sessions(sessions);
+
+        assert_eq!(deduped.len(), 2);
+
+        let merged = deduped
+            .iter()
+            .find(|session| session.id == "session-ccem")
+            .expect("near duplicate should keep the ccem session");
+        assert_eq!(merged.timestamp, 1_776_489_728_586);
+        assert_eq!(merged.env_name.as_deref(), Some("3891"));
+        assert_eq!(merged.config_source.as_deref(), Some("ccem"));
+
+        assert!(deduped.iter().any(|session| session.id == "session-later"));
     }
 
     #[test]

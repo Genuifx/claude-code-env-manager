@@ -1,0 +1,18 @@
+{
+  "name": "@ccem/native-runtime-helper",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/native-runtime-helper.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.112",
+    "@openai/codex-sdk": "^0.121.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.11",
+    "typescript": "^5.9.3"
+  }
+}

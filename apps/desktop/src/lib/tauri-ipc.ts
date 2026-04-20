@@ -230,6 +230,60 @@ export interface TauriCommands {
     },
     void
   ];
+  create_native_session: [
+    {
+      provider: 'claude' | 'codex';
+      envName: string;
+      permMode?: string | null;
+      workingDir?: string | null;
+      initialPrompt: string;
+      providerSessionId?: string | null;
+    },
+    NativeSessionSummary
+  ];
+  list_native_sessions: [void, NativeSessionSummary[]];
+  send_native_session_input: [
+    {
+      runtimeId: string;
+      text: string;
+    },
+    void
+  ];
+  respond_native_session_permission: [
+    {
+      runtimeId: string;
+      requestId: string;
+      approved: boolean;
+    },
+    void
+  ];
+  get_native_session_events: [
+    {
+      runtimeId: string;
+      sinceSeq?: number | null;
+    },
+    ReplayBatch
+  ];
+  stop_native_session: [
+    {
+      runtimeId: string;
+    },
+    void
+  ];
+  handoff_native_session_to_terminal: [
+    {
+      runtimeId: string;
+      terminalType?: NativeTerminalType | null;
+    },
+    void
+  ];
+  launch_opencode_web: [
+    {
+      workingDir?: string | null;
+      envName?: string | null;
+    },
+    void
+  ];
   list_sessions: [void, Session[]];
   stop_session: [{ sessionId: string }, void];  // 修正：后端参数是 session_id
   remove_session: [{ id: string }, void];
@@ -486,6 +540,32 @@ export interface ManagedSessionSummary {
   last_event_seq?: number | null;
 }
 
+export type NativeProvider = 'claude' | 'codex';
+
+export type NativeTransport =
+  | 'native_sdk'
+  | 'interactive_terminal'
+  | 'external_web'
+  | 'headless';
+
+export type NativeTerminalType = 'terminalapp' | 'iterm2';
+
+export interface NativeSessionSummary {
+  runtime_id: string;
+  provider: NativeProvider;
+  transport: NativeTransport;
+  provider_session_id?: string | null;
+  project_dir: string;
+  env_name: string;
+  perm_mode: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  is_active: boolean;
+  last_event_seq?: number | null;
+  can_handoff_to_terminal: boolean;
+}
+
 export type ManagedSessionSource =
   | { type: 'desktop' }
   | { type: 'telegram'; chat_id: number; thread_id: number }
@@ -629,7 +709,12 @@ export type SessionEventPayload =
       result_summary: string;
       success: boolean;
     }
-  | { type: 'permission_required'; request_id: string; tool_name: string }
+  | {
+      type: 'permission_required';
+      request_id: string;
+      tool_name: string;
+      input_summary?: string | null;
+    }
   | { type: 'permission_responded'; request_id: string; approved: boolean; responder: string }
   | { type: 'terminal_prompt_required'; prompt_kind: TerminalPromptKind; prompt_text: string }
   | { type: 'terminal_prompt_resolved'; prompt_kind: TerminalPromptKind; approved: boolean }

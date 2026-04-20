@@ -1,10 +1,11 @@
-import { memo, startTransition, useMemo, useState } from 'react';
+import { memo, startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   Brain,
   ChevronDown,
   Circle,
   ClipboardList,
+  LoaderCircle,
   Scissors,
   Terminal,
   Wrench,
@@ -33,6 +34,7 @@ interface WorkspaceMessageBubbleProps {
 export interface WorkspaceThinkingEntry {
   key: string;
   content: string;
+  segmentCount?: number;
 }
 
 function toContentBlocks(content: ConversationMessageData['content']): ConversationContentBlock[] {
@@ -346,10 +348,17 @@ const ThinkingEntryPanel = memo(function ThinkingEntryPanel({
   index: number;
   label: string;
 }) {
+  const segmentCount = entry.segmentCount ?? 1;
+  const headerLabel = segmentCount > 1
+    ? `${index === 0 ? label : `${label} ${index + 1}`} · ${segmentCount}`
+    : index === 0
+      ? label
+      : `${label} ${index + 1}`;
+
   return (
     <div className="workspace-tool-payload-virtualized rounded-lg bg-surface/80 px-3 py-2">
       <p className="mb-1 text-[10px] uppercase tracking-[0.22em] text-muted-foreground/55">
-        {index === 0 ? label : `${label} ${index + 1}`}
+        {headerLabel}
       </p>
       <pre className="max-h-[160px] overflow-y-auto whitespace-pre-wrap font-mono text-[11px] leading-5 text-muted-foreground/80">
         {entry.content}
@@ -420,14 +429,17 @@ function WorkspaceToolDigestComponent({
   blocks,
   thinkingEntries = [],
   className,
+  autoExpanded = false,
 }: {
   blocks: ConversationContentBlock[];
   thinkingEntries?: WorkspaceThinkingEntry[];
   className?: string;
+  autoExpanded?: boolean;
 }) {
   const { t } = useLocale();
   const [open, setOpen] = useState(false);
   const [hasRenderedBody, setHasRenderedBody] = useState(false);
+  const previousAutoExpandedRef = useRef(autoExpanded);
   const { completedCount, summary } = useMemo(() => {
     const completed = blocks.filter((block) => '_result' in block && block._resultError !== true).length;
     const toolNames = Array.from(new Set(blocks.map((block) => block.name || 'Tool')));
@@ -453,6 +465,17 @@ function WorkspaceToolDigestComponent({
       summary: summaryParts.join(' · '),
     };
   }, [blocks, t, thinkingEntries.length]);
+
+  useEffect(() => {
+    if (autoExpanded && (thinkingEntries.length > 0 || blocks.length > 0)) {
+      setHasRenderedBody(true);
+      setOpen(true);
+    } else if (previousAutoExpandedRef.current && !autoExpanded) {
+      setOpen(false);
+    }
+
+    previousAutoExpandedRef.current = autoExpanded;
+  }, [autoExpanded, blocks.length, thinkingEntries.length]);
 
   return (
     <div className={cn('max-w-[760px]', className)}>
@@ -497,9 +520,11 @@ function WorkspaceToolDigestComponent({
                     {thinkingEntries.length} {t('workspace.thinkingNotes')}
                   </span>
                 ) : null}
-                <span className="rounded-full border border-border/40 bg-surface-raised px-2 py-0.5">
-                  {completedCount} {t('workspace.toolSucceeded')}
-                </span>
+                {blocks.length > 0 ? (
+                  <span className="rounded-full border border-border/40 bg-surface-raised px-2 py-0.5">
+                    {completedCount} {t('workspace.toolSucceeded')}
+                  </span>
+                ) : null}
               </div>
               {thinkingEntries.length > 0 ? (
                 <div className="space-y-2">
@@ -535,8 +560,20 @@ export const WorkspaceToolDigest = memo(
     prevProps.className === nextProps.className
     && prevProps.blocks === nextProps.blocks
     && prevProps.thinkingEntries === nextProps.thinkingEntries
+    && prevProps.autoExpanded === nextProps.autoExpanded
   )
 );
+
+export const WorkspacePendingResponse = memo(function WorkspacePendingResponse() {
+  const { t } = useLocale();
+
+  return (
+    <div className="flex items-center gap-2.5 py-1 text-[12px] text-muted-foreground/72">
+      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+      <span>{t('workspace.nativeThinking')}</span>
+    </div>
+  );
+});
 
 function AgentNoteBlock({ msg, label }: { msg: TeammateMessage; label: string }) {
   const notification = msg.notification;

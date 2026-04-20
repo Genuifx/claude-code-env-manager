@@ -33,6 +33,12 @@
   },
   "bundle": {
     "active": true,
+    "externalBin": [
+      "binaries/ccem-node"
+    ],
+    "resources": [
+      "resources/native-runtime-helper.mjs"
+    ],
     "targets": [
       "dmg",
       "app"
