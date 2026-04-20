@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.19
+
+### Patch Changes
+
+- Ship the redesigned workspace native sessions, live tool call rendering fixes, and supporting desktop workflow polish in the next beta release.
+
 ## 2.0.0-beta.18
 
 ### Patch Changes

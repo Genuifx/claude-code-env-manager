@@ -4,13 +4,15 @@
   "initialVersions": {
     "ccem": "2.0.0-beta.3",
     "@ccem/desktop": "2.0.0-beta.3",
-    "@ccem/core": "2.0.0-beta.3"
+    "@ccem/core": "2.0.0-beta.3",
+    "@ccem/native-runtime-helper": "0.0.0"
   },
   "changesets": [
     "afraid-toes-think",
     "bright-buckets-talk",
     "cold-doors-study",
     "fair-cooks-happen",
+    "fifty-emus-knock",
     "fresh-shrimps-applaud",
     "green-hounds-draw",
     "hip-moments-brush",
