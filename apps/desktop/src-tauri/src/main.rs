@@ -32,6 +32,7 @@ mod tray;
 mod unified_runtime;
 mod unified_session;
 mod weixin;
+mod workspace_search;
 
 use analytics::{
     get_continuous_usage_days, get_usage_history, get_usage_model_breakdown, get_usage_stats,
@@ -84,6 +85,7 @@ use tmux::ClaudeTerminalState;
 use unified_runtime::UnifiedSessionManager;
 use unified_session::{RuntimeInput, UnifiedSessionDebugComparison, UnifiedSessionInfo};
 use weixin::{WeixinBridgeManager, WeixinBridgeStatus, WeixinLoginSession, WeixinSettings};
+use workspace_search::search_workspace_files;
 
 /// Global flag: when true, CloseRequested should NOT be intercepted.
 static FORCE_QUIT: AtomicBool = AtomicBool::new(false);
@@ -2950,6 +2952,7 @@ fn main() {
             skills::get_curated_skills,
             skills::install_skill,
             skills::uninstall_skill,
+            search_workspace_files,
             cron::list_cron_tasks,
             cron::add_cron_task,
             cron::update_cron_task,

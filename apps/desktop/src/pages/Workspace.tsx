@@ -20,18 +20,23 @@ import { WorkspaceStatusStrip } from '@/components/workspace/WorkspaceStatusStri
 import { ProjectTree } from '@/components/workspace/ProjectTree';
 import { WorkspaceNativeSessionView } from '@/components/workspace/WorkspaceNativeSessionView';
 import { WorkspaceSessionComposer } from '@/components/workspace/WorkspaceSessionComposer';
+import { ModelIcon } from '@/components/history/ModelIcon';
+import {
+  buildComposerPromptPreview,
+  buildComposerPromptText,
+  type ComposerSubmitPayload,
+} from '@/components/workspace/composerAttachments';
 import { WorkspaceSkeleton } from '@/components/ui/skeleton-states';
 import { Button } from '@/components/ui/button';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAppStore } from '@/store';
-import type { LaunchClient } from '@/store';
+import type { InstalledSkill, LaunchClient } from '@/store';
 import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
@@ -57,6 +62,7 @@ import type {
 } from '@/features/conversations/types';
 import { toSessionKey } from '@/features/conversations/types';
 import { useWorkspaceSessionDecorations } from '@/components/workspace/useWorkspaceSessionDecorations';
+import { resolveEnvironmentIconHint } from '@/components/workspace/sessionTreeIcons';
 import type { NativeSessionSummary } from '@/lib/tauri-ipc';
 
 const MODE_DISPLAY_NAMES: Record<PermissionModeName, string> = {
@@ -86,6 +92,33 @@ function ProviderIcon({ client, size = 16 }: { client: string; size?: number }) 
   return <Claude.Color size={size} />;
 }
 
+function providerDisplayName(client: string) {
+  if (client === 'codex') return 'Codex';
+  if (client === 'opencode') return 'OpenCode';
+  return 'Claude';
+}
+
+function EnvironmentLobeIcon({
+  hint,
+  size = 14,
+}: {
+  hint?: string;
+  size?: number;
+}) {
+  return <ModelIcon model={hint} size={size} className="shrink-0" disableContrastBg />;
+}
+
+function permissionCopy(t: ReturnType<typeof useLocale>['t'], mode: PermissionModeName) {
+  return {
+    desc: t(`environments.permMode_${mode}_desc`),
+    detail: t(`environments.permMode_${mode}_detail`),
+  };
+}
+
+function isRiskyPermissionMode(mode: PermissionModeName) {
+  return mode === 'yolo';
+}
+
 const LazyHistoryDetail = lazy(async () =>
   import('@/components/workspace/WorkspaceConversationDetail').then((m) => ({
     default: m.WorkspaceConversationDetail,
@@ -98,6 +131,35 @@ interface WorkspaceLiveSessionEntry {
   session: NativeSessionSummary;
   initialPrompt: string | null;
   seedMessages: ConversationMessageData[];
+}
+
+function resolveComposerDispatch(options: {
+  provider: 'claude' | 'codex';
+  prompt: string;
+  permissionMode: string;
+  planModeEnabled: boolean;
+}) {
+  const trimmedPrompt = options.prompt.trim();
+  if (!options.planModeEnabled) {
+    return {
+      prompt: trimmedPrompt,
+      permMode: options.permissionMode,
+    };
+  }
+
+  if (options.provider === 'claude') {
+    return {
+      prompt: trimmedPrompt,
+      permMode: 'plan',
+    };
+  }
+
+  return {
+    prompt: trimmedPrompt.startsWith('/plan')
+      ? trimmedPrompt
+      : `/plan ${trimmedPrompt}`,
+    permMode: options.permissionMode,
+  };
 }
 
 const ACTIVE_LIVE_RUNTIME_STORAGE_KEY = 'ccem-workspace-live-runtime';
@@ -165,6 +227,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     selectedWorkingDir,
     defaultWorkingDir,
     launchClient,
+    installedSkills,
     setSelectedWorkingDir,
     setLaunchClient,
     setPermissionMode,
@@ -178,6 +241,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
       selectedWorkingDir: state.selectedWorkingDir,
       defaultWorkingDir: state.defaultWorkingDir,
       launchClient: state.launchClient,
+      installedSkills: state.installedSkills,
       setSelectedWorkingDir: state.setSelectedWorkingDir,
       setLaunchClient: state.setLaunchClient,
       setPermissionMode: state.setPermissionMode,
@@ -189,6 +253,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     switchEnvironment,
     openDirectoryPicker,
     loadCronTasks,
+    loadInstalledSkills,
     checkCodexInstalled,
     checkOpenCodeInstalled,
     setSessionTitle,
@@ -196,6 +261,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     listNativeSessions,
     launchOpenCodeWeb,
     launchClaudeCode,
+    searchWorkspaceFiles,
   } = useTauriCommands();
 
   const [sessions, setSessions] = useState<HistorySessionItem[]>([]);
@@ -213,8 +279,13 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     launchClient === 'codex' ? 'codex' : 'claude'
   );
   const [composePrompt, setComposePrompt] = useState('');
+  const [composePlanModeEnabled, setComposePlanModeEnabled] = useState(false);
   const [historyComposerText, setHistoryComposerText] = useState('');
+  const [historyPlanModeEnabled, setHistoryPlanModeEnabled] = useState(false);
+  const [permissionSelectOpen, setPermissionSelectOpen] = useState(false);
+  const [permissionPreviewMode, setPermissionPreviewMode] = useState<PermissionModeName>(permissionMode);
   const [composeDir, setComposeDir] = useState<string | null>(selectedWorkingDir || defaultWorkingDir || null);
+  const [workspaceInstalledSkills, setWorkspaceInstalledSkills] = useState<InstalledSkill[]>([]);
   const [liveSessionsByRuntimeId, setLiveSessionsByRuntimeId] = useState<
     Record<string, WorkspaceLiveSessionEntry>
   >({});
@@ -223,6 +294,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
   const [isResumingHistorySession, setIsResumingHistorySession] = useState(false);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshRequestSeqRef = useRef(0);
+  const skillsBootstrapAttemptedRef = useRef(false);
   const conversationRequestSeqRef = useRef(0);
   const hydratingLiveRuntimeIdsRef = useRef(new Set<string>());
   const pendingRefreshRef = useRef(false);
@@ -250,6 +322,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
 
   useEffect(() => {
     setHistoryComposerText('');
+    setHistoryPlanModeEnabled(false);
   }, [selectedKey]);
 
   const upsertLiveSessionEntry = useCallback((
@@ -333,8 +406,22 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
   }, [listNativeSessions, setSelectedWorkingDir]);
 
   useEffect(() => {
+    if (installedSkills.length === 0) {
+      return;
+    }
+    setWorkspaceInstalledSkills(installedSkills);
+  }, [installedSkills]);
+
+  useEffect(() => {
     const cancelDeferred = scheduleAfterFirstPaint(() => {
       void loadCronTasks().catch(() => {});
+      void loadInstalledSkills()
+        .then((skills) => {
+          if (skills.length > 0) {
+            setWorkspaceInstalledSkills(skills);
+          }
+        })
+        .catch(() => {});
       checkCodexInstalled().then(setCodexInstalled).catch(() => {});
       checkOpenCodeInstalled().then(setOpenCodeInstalled).catch(() => {});
       void restoreNativeSessions();
@@ -343,7 +430,24 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     return () => {
       cancelDeferred();
     };
-  }, [checkCodexInstalled, checkOpenCodeInstalled, loadCronTasks, restoreNativeSessions]);
+  }, [checkCodexInstalled, checkOpenCodeInstalled, loadCronTasks, loadInstalledSkills, restoreNativeSessions]);
+
+  useEffect(() => {
+    if (installedSkills.length > 0 || skillsBootstrapAttemptedRef.current) {
+      return;
+    }
+
+    skillsBootstrapAttemptedRef.current = true;
+    void loadInstalledSkills()
+      .then((skills) => {
+        if (skills.length > 0) {
+          setWorkspaceInstalledSkills(skills);
+        }
+      })
+      .catch(() => {
+        skillsBootstrapAttemptedRef.current = false;
+      });
+  }, [installedSkills.length, loadInstalledSkills]);
 
   const syncSessionState = useCallback((nextSessions: HistorySessionItem[]) => {
     setSessions(nextSessions);
@@ -603,6 +707,10 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     () => Object.fromEntries(environments.map((environment) => [environment.name, environment])),
     [environments]
   );
+  const permissionModes = useMemo(
+    () => Object.keys(PERMISSION_PRESETS) as PermissionModeName[],
+    [],
+  );
 
   const { decorationsBySessionKey } = useWorkspaceSessionDecorations({
     sessions,
@@ -728,7 +836,15 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
 
   const effectiveComposeDir = composeDir || selectedWorkingDir || defaultWorkingDir || null;
   const effectiveComposeDirLabel = effectiveComposeDir ? getProjectName(effectiveComposeDir) : null;
-  const envColor = getEnvColorVar(currentEnv);
+  const currentEnvironment = currentEnv ? environmentByName[currentEnv] : undefined;
+  const currentEnvironmentIconHint = resolveEnvironmentIconHint(currentEnvironment);
+  const permissionPreview = permissionCopy(t, permissionPreviewMode);
+
+  useEffect(() => {
+    if (!permissionSelectOpen) {
+      setPermissionPreviewMode(permissionMode);
+    }
+  }, [permissionMode, permissionSelectOpen]);
 
   const handleSelect = useCallback(
     async (session: HistorySessionItem) => {
@@ -807,41 +923,57 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     openComposer(composeProvider, projectPath);
   }, [composeProvider, openComposer]);
 
-  const handleCreateNativeConversation = useCallback(async () => {
-    const prompt = composePrompt.trim();
+  const handleCreateNativeConversation = useCallback(async (payload?: ComposerSubmitPayload) => {
+    const rawPrompt = payload?.text ?? composePrompt;
+    const attachments = payload?.attachments ?? [];
+    const prompt = buildComposerPromptText(rawPrompt, attachments);
     const workingDir = effectiveComposeDir;
     if (!prompt || !workingDir) {
-      return;
+      return false;
     }
+    const previewPrompt = buildComposerPromptPreview(rawPrompt, attachments);
+
+    const dispatch = resolveComposerDispatch({
+      provider: composeProvider,
+      prompt,
+      permissionMode,
+      planModeEnabled: composePlanModeEnabled,
+    });
 
     setIsCreatingNativeSession(true);
     try {
       const summary = await createNativeSession({
         provider: composeProvider,
         envName: currentEnv,
-        permMode: permissionMode,
+        permMode: dispatch.permMode,
         workingDir,
-        initialPrompt: prompt,
+        initialPrompt: dispatch.prompt,
       });
 
       upsertLiveSessionEntry(summary, {
-        initialPrompt: prompt,
+        initialPrompt: previewPrompt,
         seedMessages: [],
       });
       setActiveLiveRuntimeId(summary.runtime_id);
       setWorkspaceMode('live');
       setComposePrompt('');
+      setComposePlanModeEnabled(false);
       setSelectedWorkingDir(workingDir);
       scheduleWorkspaceRefresh(1200);
+      return true;
     } catch (error) {
       console.error('Failed to create native workspace session:', error);
       toast.error(t('workspace.nativeCreateFailed'));
+      return false;
     } finally {
       setIsCreatingNativeSession(false);
     }
   }, [
+    buildComposerPromptPreview,
+    buildComposerPromptText,
     composePrompt,
     composeProvider,
+    composePlanModeEnabled,
     createNativeSession,
     currentEnv,
     effectiveComposeDir,
@@ -852,9 +984,9 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     t,
   ]);
 
-  const handleContinueHistorySession = useCallback(async () => {
+  const handleContinueHistorySession = useCallback(async (payload?: ComposerSubmitPayload) => {
     if (!selectedSession) {
-      return;
+      return false;
     }
 
     if (selectedSession.source === 'opencode') {
@@ -864,46 +996,61 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
         console.error('Failed to launch OpenCode Web UI from history:', error);
         toast.error(t('workspace.openCodeLaunchFailed'));
       }
-      return;
+      return false;
     }
 
-    const prompt = historyComposerText.trim();
+    const rawPrompt = payload?.text ?? historyComposerText;
+    const attachments = payload?.attachments ?? [];
+    const prompt = buildComposerPromptText(rawPrompt, attachments);
     if (!prompt || !selectedSession.project) {
-      return;
+      return false;
     }
 
     const provider = selectedSession.source;
+    const previewPrompt = buildComposerPromptPreview(rawPrompt, attachments);
+    const dispatch = resolveComposerDispatch({
+      provider,
+      prompt,
+      permissionMode,
+      planModeEnabled: historyPlanModeEnabled,
+    });
     setIsResumingHistorySession(true);
 
     try {
       const summary = await createNativeSession({
         provider,
         envName: selectedSession.envName ?? currentEnv,
-        permMode: permissionMode,
+        permMode: dispatch.permMode,
         workingDir: selectedSession.project,
-        initialPrompt: prompt,
+        initialPrompt: dispatch.prompt,
         providerSessionId: selectedSession.id,
       });
 
       setLaunchClient(provider);
       upsertLiveSessionEntry(summary, {
-        initialPrompt: prompt,
+        initialPrompt: previewPrompt,
         seedMessages: messages,
       });
       setActiveLiveRuntimeId(summary.runtime_id);
       setWorkspaceMode('live');
       setHistoryComposerText('');
+      setHistoryPlanModeEnabled(false);
       setSelectedWorkingDir(selectedSession.project);
       scheduleWorkspaceRefresh(1200);
+      return true;
     } catch (error) {
       console.error('Failed to continue workspace history session:', error);
       toast.error(t('workspace.nativeCreateFailed'));
+      return false;
     } finally {
       setIsResumingHistorySession(false);
     }
   }, [
+    buildComposerPromptPreview,
+    buildComposerPromptText,
     createNativeSession,
     currentEnv,
+    historyPlanModeEnabled,
     historyComposerText,
     launchOpenCodeWeb,
     messages,
@@ -1021,66 +1168,149 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
       <WorkspaceSessionComposer
         value={composePrompt}
         onValueChange={setComposePrompt}
-        onSubmit={() => void handleCreateNativeConversation()}
+        onSubmit={handleCreateNativeConversation}
         placeholder={t('workspace.composePlaceholder')}
         canSubmit={!!composePrompt.trim() && !!effectiveComposeDir && !isCreatingNativeSession}
         isSubmitting={isCreatingNativeSession}
         submitLabel={t('workspace.composeSend')}
         loadingLabel={t('common.loading')}
+        provider={composeProvider}
+        installedSkills={workspaceInstalledSkills}
+        workingDir={effectiveComposeDir}
+        searchWorkspaceFiles={searchWorkspaceFiles}
+        planModeEnabled={composePlanModeEnabled}
+        onPlanModeEnabledChange={setComposePlanModeEnabled}
         controls={(
           <>
-            <ProviderIcon client={composeProvider} />
+            <div className="flex items-center gap-1.5 pr-1 text-[12px] font-medium text-muted-foreground">
+              <ProviderIcon client={composeProvider} size={15} />
+              <span>{providerDisplayName(composeProvider)}</span>
+            </div>
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-2 rounded-full bg-muted/55 px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                >
-                  <Globe className="h-3.5 w-3.5" style={{ color: envColor }} />
-                  <span>{currentEnv}</span>
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuRadioGroup value={currentEnv} onValueChange={(value) => void switchEnvironment(value)}>
-                  {environments.map((environment) => (
-                    <DropdownMenuRadioItem key={environment.name} value={environment.name}>
-                      {environment.name}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <Select value={currentEnv} onValueChange={(value) => void switchEnvironment(value)}>
+              <SelectTrigger variant="plain" className="h-8 w-auto min-w-[144px] rounded-xl px-2.5 text-[12px] text-foreground">
+                <span className="flex min-w-0 items-center gap-2">
+                  <EnvironmentLobeIcon hint={currentEnvironmentIconHint} />
+                  <span className="truncate">{currentEnv}</span>
+                </span>
+              </SelectTrigger>
+              <SelectContent align="start">
+                {environments.map((environment) => (
+                  <SelectItem key={environment.name} value={environment.name}>
+                    <span className="flex items-center gap-2">
+                      <EnvironmentLobeIcon
+                        hint={resolveEnvironmentIconHint(environment)}
+                        size={13}
+                      />
+                      <span>{environment.name}</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+            <Select
+              value={permissionMode}
+              open={permissionSelectOpen}
+              onOpenChange={(open) => {
+                setPermissionSelectOpen(open);
+                if (open) {
+                  setPermissionPreviewMode(permissionMode);
+                }
+              }}
+              onValueChange={(value) => {
+                const mode = value as PermissionModeName;
+                setPermissionMode(mode);
+                setPermissionPreviewMode(mode);
+              }}
+            >
+              <SelectTrigger
+                variant="plain"
+                className={cn(
+                  'h-8 w-auto min-w-[146px] rounded-xl px-2.5 text-[12px] text-foreground',
+                  isRiskyPermissionMode(permissionMode) && 'text-destructive',
+                )}
+              >
                 {(() => {
                   const ModeIcon = getModeIcon(permissionMode);
                   return (
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-2 rounded-full bg-muted/55 px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                    >
-                      <ModeIcon className="h-3.5 w-3.5" />
-                      <span>{MODE_DISPLAY_NAMES[permissionMode]}</span>
-                    </button>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <ModeIcon
+                        className={cn(
+                          'h-3.5 w-3.5 shrink-0 text-muted-foreground',
+                          isRiskyPermissionMode(permissionMode) && 'text-destructive',
+                        )}
+                      />
+                      <span className="truncate">{MODE_DISPLAY_NAMES[permissionMode]}</span>
+                    </span>
                   );
                 })()}
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuRadioGroup value={permissionMode} onValueChange={(value) => setPermissionMode(value as PermissionModeName)}>
-                  {Object.keys(PERMISSION_PRESETS).map((key) => {
-                    const Icon = getModeIcon(key as PermissionModeName);
-                    return (
-                      <DropdownMenuRadioItem key={key} value={key}>
-                        <Icon className="mr-2 h-3.5 w-3.5" />
-                        {MODE_DISPLAY_NAMES[key as PermissionModeName]}
-                      </DropdownMenuRadioItem>
-                    );
-                  })}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
+              </SelectTrigger>
+              <SelectContent
+                align="start"
+                className="overflow-visible"
+                viewportClassName="w-auto min-w-0 p-0"
+              >
+                <div className="flex items-stretch gap-3 p-1.5">
+                  <div className="min-w-[220px]">
+                    {permissionModes.map((mode) => (
+                      <SelectItem
+                        key={mode}
+                        value={mode}
+                        className={cn(
+                          'min-w-[220px]',
+                          isRiskyPermissionMode(mode) && 'text-destructive focus:text-destructive',
+                        )}
+                        onFocus={() => setPermissionPreviewMode(mode)}
+                        onPointerMove={() => setPermissionPreviewMode(mode)}
+                      >
+                        {MODE_DISPLAY_NAMES[mode]}
+                      </SelectItem>
+                    ))}
+                  </div>
+                  <div className="w-px self-stretch bg-white/[0.08]" />
+                  <div className="flex w-[248px] flex-col justify-center px-3 py-2 text-left">
+                    <div
+                      className={cn(
+                        'flex items-center gap-2 text-foreground',
+                        isRiskyPermissionMode(permissionPreviewMode) && 'text-destructive',
+                      )}
+                    >
+                      {(() => {
+                        const ModeIcon = getModeIcon(permissionPreviewMode);
+                        return (
+                          <ModeIcon
+                            className={cn(
+                              'h-4 w-4 shrink-0 text-muted-foreground',
+                              isRiskyPermissionMode(permissionPreviewMode) && 'text-destructive',
+                            )}
+                          />
+                        );
+                      })()}
+                      <span className="text-[15px] font-semibold">
+                        {MODE_DISPLAY_NAMES[permissionPreviewMode]}
+                      </span>
+                    </div>
+                    <p
+                      className={cn(
+                        'mt-3 text-[12px] font-medium leading-5 text-foreground/88',
+                        isRiskyPermissionMode(permissionPreviewMode) && 'text-destructive/90',
+                      )}
+                    >
+                      {permissionPreview.desc}
+                    </p>
+                    <p
+                      className={cn(
+                        'mt-2 text-[11px] leading-5 text-muted-foreground',
+                        isRiskyPermissionMode(permissionPreviewMode) && 'text-destructive/75',
+                      )}
+                    >
+                      {permissionPreview.detail}
+                    </p>
+                  </div>
+                </div>
+              </SelectContent>
+            </Select>
           </>
         )}
       />
@@ -1114,7 +1344,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
         <WorkspaceSessionComposer
           value={historyComposerText}
           onValueChange={setHistoryComposerText}
-          onSubmit={() => void handleContinueHistorySession()}
+          onSubmit={handleContinueHistorySession}
           placeholder={
             selectedHistorySupportsInline
               ? t('workspace.composePlaceholder')
@@ -1125,18 +1355,33 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
           isSubmitting={isResumingHistorySession}
           submitLabel={selectedHistorySupportsInline ? t('workspace.composeSend') : t('workspace.openCodeWeb')}
           loadingLabel={t('common.loading')}
+          provider={historyProvider}
+          installedSkills={workspaceInstalledSkills}
+          workingDir={selectedSession.project || null}
+          searchWorkspaceFiles={searchWorkspaceFiles}
+          planModeEnabled={historyPlanModeEnabled}
+          onPlanModeEnabledChange={selectedHistorySupportsInline ? setHistoryPlanModeEnabled : undefined}
+          planModeAvailable={selectedHistorySupportsInline}
           controls={(
             <>
-              <ProviderIcon client={historyProvider} />
+              <div className="flex items-center gap-1.5 pr-1 text-[12px] font-medium text-muted-foreground">
+                <ProviderIcon client={historyProvider} size={15} />
+                <span>{providerDisplayName(historyProvider)}</span>
+              </div>
 
               {historyEnvName ? (
-                <div className="inline-flex items-center gap-2 rounded-full bg-muted/55 px-3 py-1.5 text-sm text-muted-foreground">
+                <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
                   <Globe className="h-3.5 w-3.5" style={{ color: historyEnvColor }} />
                   <span>{historyEnvName}</span>
                 </div>
               ) : null}
 
-              <div className="inline-flex items-center gap-2 rounded-full bg-muted/55 px-3 py-1.5 text-sm text-muted-foreground">
+              <div
+                className={cn(
+                  'flex items-center gap-1.5 text-[12px] text-muted-foreground',
+                  isRiskyPermissionMode(permissionMode) && 'text-destructive',
+                )}
+              >
                 <HistoryModeIcon className="h-3.5 w-3.5" />
                 <span>{MODE_DISPLAY_NAMES[permissionMode]}</span>
               </div>
@@ -1241,6 +1486,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
                       session={entry.session}
                       initialPrompt={entry.initialPrompt}
                       seedMessages={entry.seedMessages}
+                      installedSkills={workspaceInstalledSkills}
                       isVisible={isActiveLiveEntry}
                       onSessionUpdate={handleLiveSessionUpdate}
                       onStartNew={() => {

@@ -10,6 +10,7 @@ interface ModelIconProps {
    * 为浅色图标添加背景衬托，确保在亮色模式下可见
    */
   withBg?: boolean;
+  disableContrastBg?: boolean;
 }
 
 export type IconEntry = {
@@ -40,7 +41,13 @@ export function resolveIcon(model: string | undefined): IconEntry | null {
   return null;
 }
 
-export const ModelIcon = memo(function ModelIcon({ model, size = 14, className, withBg }: ModelIconProps) {
+export const ModelIcon = memo(function ModelIcon({
+  model,
+  size = 14,
+  className,
+  withBg,
+  disableContrastBg,
+}: ModelIconProps) {
   const entry = resolveIcon(model);
 
   if (!entry) {
@@ -56,7 +63,7 @@ export const ModelIcon = memo(function ModelIcon({ model, size = 14, className, 
 
   // 为需要对比背景的图标添加自适应背景容器
   // 亮色模式：深色背景衬托白色图标；暗色模式：透明背景（白色图标在暗色背景上自然可见）
-  if (entry.needsContrastBg || withBg) {
+  if (!disableContrastBg && (entry.needsContrastBg || withBg)) {
     const padding = Math.max(2, Math.floor(size * 0.15));
     const borderRadius = Math.max(4, Math.floor(size * 0.25));
     return (

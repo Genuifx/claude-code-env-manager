@@ -12,7 +12,7 @@ const SelectValue = SelectPrimitive.Value;
 const SelectTrigger = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Trigger>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger> & {
-    variant?: 'default' | 'badge';
+    variant?: 'default' | 'badge' | 'plain';
     badgeColor?: string;
   }
 >(({ className, children, variant = 'default', badgeColor, ...props }, ref) => (
@@ -26,6 +26,10 @@ const SelectTrigger = React.forwardRef<
         'flex h-9 w-full items-center justify-between whitespace-nowrap rounded-lg',
         'px-3 py-2 text-sm',
         'glass-select',
+      ],
+      variant === 'plain' && [
+        'flex h-9 w-full items-center justify-between whitespace-nowrap rounded-lg border-none',
+        'bg-transparent px-3 py-2 text-sm shadow-none backdrop-blur-none',
       ],
       variant === 'badge' && [
         'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold',
@@ -74,8 +78,10 @@ SelectScrollDownButton.displayName = SelectPrimitive.ScrollDownButton.displayNam
 
 const SelectContent = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
->(({ className, children, position = 'popper', ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content> & {
+    viewportClassName?: string;
+  }
+>(({ className, children, position = 'popper', viewportClassName, ...props }, ref) => (
   <SelectPrimitive.Portal>
     <SelectPrimitive.Content
       ref={ref}
@@ -99,7 +105,8 @@ const SelectContent = React.forwardRef<
         className={cn(
           'p-1.5',
           position === 'popper' &&
-            'h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]'
+            'h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]',
+          viewportClassName,
         )}
       >
         {children}

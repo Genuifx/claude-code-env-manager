@@ -86,6 +86,14 @@ export interface TauriCommands {
   get_proxy_traffic_detail: [{ id: string }, ProxyTrafficDetail];
   clear_proxy_traffic: [void, void];
   open_text_in_vscode: [{ content: string; suggestedName?: string | null }, string];
+  search_workspace_files: [
+    {
+      workingDir: string;
+      query?: string | null;
+      limit?: number | null;
+    },
+    WorkspaceFileSuggestion[]
+  ];
   window_control: [
     {
       action: 'close' | 'minimize' | 'toggle-fullscreen' | 'exit-fullscreen';
@@ -637,6 +645,13 @@ export interface UnifiedSessionDebugComparison {
   interactive_count: number;
   unified_count: number;
   matched: boolean;
+}
+
+export interface WorkspaceFileSuggestion {
+  absolute_path: string;
+  relative_path: string;
+  display_name: string;
+  is_dir: boolean;
 }
 
 export interface ReplayBatch {

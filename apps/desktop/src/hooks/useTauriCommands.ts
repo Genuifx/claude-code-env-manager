@@ -24,6 +24,7 @@ import type {
   TmuxAttachTerminalType,
   UnifiedSessionDebugComparison,
   UnifiedSessionInfo,
+  WorkspaceFileSuggestion,
 } from '@/lib/tauri-ipc';
 
 interface TauriEnvConfig {
@@ -786,6 +787,18 @@ export function useTauriCommands() {
     }
   }, [setError]);
 
+  const searchWorkspaceFiles = useCallback(async (
+    workingDir: string,
+    query?: string,
+    limit = 12,
+  ): Promise<WorkspaceFileSuggestion[]> => {
+    return invoke<WorkspaceFileSuggestion[]>('search_workspace_files', {
+      workingDir,
+      query: query ?? null,
+      limit,
+    });
+  }, []);
+
   const syncVSCodeProjects = useCallback(async () => {
     try {
       await invoke('sync_vscode_projects');
@@ -857,12 +870,14 @@ export function useTauriCommands() {
     }
   }, []);
 
-  const loadInstalledSkills = useCallback(async () => {
+  const loadInstalledSkills = useCallback(async (): Promise<InstalledSkill[]> => {
     try {
       const skills = await invoke<InstalledSkill[]>('list_installed_skills');
       setInstalledSkills(skills);
+      return skills;
     } catch (err) {
       console.error('Failed to load installed skills:', err);
+      return [];
     }
   }, [setInstalledSkills]);
 
@@ -1144,6 +1159,7 @@ export function useTauriCommands() {
     addFavoriteProject,
     removeFavoriteProject,
     openDirectoryPicker,
+    searchWorkspaceFiles,
     syncVSCodeProjects,
     syncJetBrainsProjects,
     loadFromRemote,
