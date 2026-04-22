@@ -62,16 +62,20 @@ export const ModelIcon = memo(function ModelIcon({
   const IconComponent = entry.icon;
 
   // 为需要对比背景的图标添加自适应背景容器
-  // 亮色模式：深色背景衬托白色图标；暗色模式：透明背景（白色图标在暗色背景上自然可见）
+  // 亮色模式：白色背景 + 黑色图标；暗色模式：透明背景 + 白色图标
   if (!disableContrastBg && (entry.needsContrastBg || withBg)) {
     const padding = Math.max(2, Math.floor(size * 0.15));
     const borderRadius = Math.max(4, Math.floor(size * 0.25));
     return (
       <span
-        className="inline-flex items-center justify-center bg-black/[0.75] dark:bg-transparent"
+        className="inline-flex items-center justify-center bg-white dark:bg-transparent"
         style={{ padding, borderRadius }}
       >
-        <IconComponent className={className} size={size} style={style} />
+        <IconComponent
+          className={entry.needsContrastBg ? 'text-black dark:text-white' : className}
+          size={size}
+          style={entry.needsContrastBg ? undefined : style}
+        />
       </span>
     );
   }
