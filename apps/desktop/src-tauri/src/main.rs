@@ -50,7 +50,8 @@ use interactive_runtime::{
     InteractiveReplayBatch, InteractiveRuntimeManager, InteractiveSessionOptions,
 };
 use native_runtime::{
-    NativeProvider, NativeRuntimeManager, NativeSessionOptions, NativeSessionSummary,
+    InteractivePromptAnnotation, NativeProvider, NativeRuntimeManager, NativeSessionOptions,
+    NativeSessionSummary,
 };
 use opencode::{snapshot_known_session_ids, track_launched_session};
 use proxy_debug::{
@@ -1066,6 +1067,26 @@ fn respond_native_session_permission(
     approved: bool,
 ) -> Result<(), String> {
     native_state.respond_to_permission(&app, &runtime_id, &request_id, approved)
+}
+
+#[tauri::command]
+fn respond_native_session_prompt(
+    app: tauri::AppHandle,
+    native_state: State<'_, Arc<NativeRuntimeManager>>,
+    runtime_id: String,
+    tool_use_id: String,
+    prompt_type: String,
+    answers: HashMap<String, String>,
+    annotations: Option<HashMap<String, InteractivePromptAnnotation>>,
+) -> Result<(), String> {
+    native_state.respond_to_prompt(
+        &app,
+        &runtime_id,
+        &tool_use_id,
+        &prompt_type,
+        &answers,
+        annotations.as_ref(),
+    )
 }
 
 #[tauri::command]
@@ -2911,6 +2932,7 @@ fn main() {
             list_native_sessions,
             send_native_session_input,
             respond_native_session_permission,
+            respond_native_session_prompt,
             get_native_session_events,
             stop_native_session,
             handoff_native_session_to_terminal,

@@ -95,6 +95,14 @@ pub struct NativeSessionOptions {
     pub codex_api_key: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InteractivePromptAnnotation {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum HelperInputCommand<'a> {
@@ -123,6 +131,13 @@ enum HelperInputCommand<'a> {
     PermissionResponse {
         request_id: &'a str,
         approved: bool,
+    },
+    InteractivePromptResponse {
+        tool_use_id: &'a str,
+        prompt_type: &'a str,
+        answers: &'a HashMap<String, String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        annotations: Option<&'a HashMap<String, InteractivePromptAnnotation>>,
     },
     Stop,
 }
@@ -357,6 +372,31 @@ impl NativeRuntimeManager {
             &HelperInputCommand::PermissionResponse {
                 request_id,
                 approved,
+            },
+        )
+    }
+
+    pub fn respond_to_prompt(
+        self: &Arc<Self>,
+        app: &AppHandle,
+        runtime_id: &str,
+        tool_use_id: &str,
+        prompt_type: &str,
+        answers: &HashMap<String, String>,
+        annotations: Option<&HashMap<String, InteractivePromptAnnotation>>,
+    ) -> Result<(), String> {
+        if answers.is_empty() {
+            return Err("Interactive prompt response requires at least one answer.".to_string());
+        }
+
+        let handle = self.ensure_handle(app.clone(), runtime_id)?;
+        self.write_to_child(
+            &handle,
+            &HelperInputCommand::InteractivePromptResponse {
+                tool_use_id,
+                prompt_type,
+                answers,
+                annotations,
             },
         )
     }

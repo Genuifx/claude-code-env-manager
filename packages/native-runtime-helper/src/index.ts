@@ -25,6 +25,17 @@ type PromptCommand = {
   text: string;
 };
 
+type InteractivePromptResponseCommand = {
+  type: 'interactive_prompt_response';
+  tool_use_id: string;
+  prompt_type: 'ask_user_question';
+  answers: Record<string, string>;
+  annotations?: Record<string, {
+    preview?: string;
+    notes?: string;
+  }>;
+};
+
 type PermissionResponseCommand = {
   type: 'permission_response';
   request_id: string;
@@ -35,7 +46,12 @@ type StopCommand = {
   type: 'stop';
 };
 
-type InputCommand = InitCommand | PromptCommand | PermissionResponseCommand | StopCommand;
+type InputCommand =
+  | InitCommand
+  | PromptCommand
+  | InteractivePromptResponseCommand
+  | PermissionResponseCommand
+  | StopCommand;
 
 type HelperOutput =
   | {
@@ -56,6 +72,19 @@ type PermissionResolver = {
   resolve: (approved: boolean) => void;
 };
 
+type ClaudeInteractivePromptResolver = {
+  input: Record<string, unknown>;
+  resolve: (result: {
+    behavior: 'allow';
+    updatedInput: Record<string, unknown>;
+    toolUseID: string;
+  } | {
+    behavior: 'deny';
+    message: string;
+    toolUseID: string;
+  }) => void;
+};
+
 let initCommand: InitCommand | null = null;
 let stopped = false;
 let activeTurn = false;
@@ -72,6 +101,7 @@ let codexClient: Codex | null = null;
 let codexThread: any = null;
 const promptQueue: string[] = [];
 const pendingPermissions = new Map<string, PermissionResolver>();
+const pendingClaudeInteractivePrompts = new Map<string, ClaudeInteractivePromptResolver>();
 const startedToolNames = new Map<string, string>();
 const completedToolUseIds = new Set<string>();
 
@@ -159,6 +189,10 @@ function userInputToolCategory(rawName: string, kind: 'question' | 'plan_entry' 
     kind,
     raw_name: rawName,
   };
+}
+
+function isClaudeInteractiveUserInputTool(name: string) {
+  return categorizeClaudeTool(name).category === 'user_input';
 }
 
 function summarizeUnknown(value: unknown): string {
@@ -581,6 +615,55 @@ function normalizeCodexSandboxMode(permMode: string) {
   };
 }
 
+function buildAllowedClaudeToolResult(
+  input: Record<string, unknown>,
+  toolUseId: string,
+) {
+  return {
+    behavior: 'allow' as const,
+    updatedInput: input,
+    toolUseID: toolUseId,
+  };
+}
+
+function isClaudeAskUserQuestionTool(name: string) {
+  const category = categorizeClaudeTool(name);
+  return category.category === 'user_input' && category.kind === 'question';
+}
+
+function buildAskUserQuestionUpdatedInput(
+  input: Record<string, unknown>,
+  answers: Record<string, string>,
+  annotations?: Record<string, { preview?: string; notes?: string }>,
+) {
+  const updatedInput: Record<string, unknown> = {
+    ...input,
+    answers,
+  };
+
+  if (annotations && Object.keys(annotations).length > 0) {
+    updatedInput.annotations = annotations;
+  }
+
+  return updatedInput;
+}
+
+async function waitForAskUserQuestionResponse(
+  input: Record<string, unknown>,
+  toolUseId: string,
+) {
+  return await new Promise<ReturnType<typeof buildAllowedClaudeToolResult> | {
+    behavior: 'deny';
+    message: string;
+    toolUseID: string;
+  }>((resolve) => {
+    pendingClaudeInteractivePrompts.set(toolUseId, {
+      input,
+      resolve,
+    });
+  });
+}
+
 async function waitForPermission(
   toolName: string,
   input: Record<string, unknown>,
@@ -626,7 +709,7 @@ async function waitForPermission(
   }
 
   return approved
-    ? { behavior: 'allow' as const, toolUseID: toolUseId }
+    ? buildAllowedClaudeToolResult(input, toolUseId)
     : { behavior: 'deny' as const, message: 'Permission denied in desktop workspace.', toolUseID: toolUseId };
 }
 
@@ -687,6 +770,12 @@ async function consumeClaudeMessages() {
       includeHookEvents: true,
       persistSession: true,
       canUseTool: async (toolName, input, options) => {
+        if (isClaudeAskUserQuestionTool(toolName)) {
+          return waitForAskUserQuestionResponse(input, options.toolUseID);
+        }
+        if (isClaudeInteractiveUserInputTool(toolName)) {
+          return buildAllowedClaudeToolResult(input, options.toolUseID);
+        }
         return waitForPermission(toolName, input, options);
       },
       ...permission,
@@ -1163,6 +1252,45 @@ async function handleCommand(command: InputCommand) {
     return;
   }
 
+  if (command.type === 'interactive_prompt_response') {
+    const pending = pendingClaudeInteractivePrompts.get(command.tool_use_id);
+    if (!pending) {
+      return;
+    }
+
+    pendingClaudeInteractivePrompts.delete(command.tool_use_id);
+
+    if (command.prompt_type !== 'ask_user_question') {
+      pending.resolve({
+        behavior: 'deny',
+        message: 'Unsupported interactive prompt response.',
+        toolUseID: command.tool_use_id,
+      });
+      return;
+    }
+
+    if (Object.keys(command.answers).length === 0) {
+      pending.resolve({
+        behavior: 'deny',
+        message: 'User did not answer the question prompt.',
+        toolUseID: command.tool_use_id,
+      });
+      return;
+    }
+
+    pending.resolve(
+      buildAllowedClaudeToolResult(
+        buildAskUserQuestionUpdatedInput(
+          pending.input,
+          command.answers,
+          command.annotations,
+        ),
+        command.tool_use_id,
+      ),
+    );
+    return;
+  }
+
   if (command.type === 'prompt') {
     if (!command.text.trim()) {
       return;
@@ -1180,6 +1308,14 @@ async function handleCommand(command: InputCommand) {
   if (command.type === 'stop') {
     stopped = true;
     currentAbortController?.abort();
+    for (const [toolUseId, pending] of pendingClaudeInteractivePrompts.entries()) {
+      pending.resolve({
+        behavior: 'deny',
+        message: 'Native runtime helper stopped before user responded.',
+        toolUseID: toolUseId,
+      });
+    }
+    pendingClaudeInteractivePrompts.clear();
     claudeInputQueue?.close();
     currentClaudeQuery?.close();
     emitStatus('stopped', 'Native runtime helper stopped.');
