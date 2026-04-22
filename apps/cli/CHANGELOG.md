@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.20
+
+### Patch Changes
+
+- Release the desktop AskUserQuestion parity work, including multi-select answers, inline custom feedback, and structured prompt submission.
+
 ## 2.0.0-beta.19
 
 ### Patch Changes
