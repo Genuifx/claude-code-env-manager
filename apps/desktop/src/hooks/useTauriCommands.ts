@@ -6,6 +6,7 @@ import { shallow } from 'zustand/shallow';
 import type {
   ChannelKind,
   HeadlessSessionSummary,
+  InteractivePromptAnnotation,
   InteractiveReplayBatch,
   ManagedSessionSummary,
   NativeSessionSummary,
@@ -716,6 +717,24 @@ export function useTauriCommands() {
     });
   }, []);
 
+  const respondNativeSessionPrompt = useCallback(async (
+    runtimeId: string,
+    payload: {
+      toolUseId: string;
+      promptType: 'ask_user_question';
+      answers: Record<string, string>;
+      annotations?: Record<string, InteractivePromptAnnotation>;
+    },
+  ): Promise<void> => {
+    await invoke('respond_native_session_prompt', {
+      runtimeId,
+      toolUseId: payload.toolUseId,
+      promptType: payload.promptType,
+      answers: payload.answers,
+      annotations: payload.annotations ?? null,
+    });
+  }, []);
+
   const getNativeSessionEvents = useCallback(async (
     runtimeId: string,
     sinceSeq?: number | null,
@@ -1151,6 +1170,7 @@ export function useTauriCommands() {
     listNativeSessions,
     sendNativeSessionInput,
     respondNativeSessionPermission,
+    respondNativeSessionPrompt,
     getNativeSessionEvents,
     stopNativeSession,
     handoffNativeSessionToTerminal,

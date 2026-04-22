@@ -265,6 +265,16 @@ export interface TauriCommands {
     },
     void
   ];
+  respond_native_session_prompt: [
+    {
+      runtimeId: string;
+      toolUseId: string;
+      promptType: 'ask_user_question';
+      answers: Record<string, string>;
+      annotations?: Record<string, InteractivePromptAnnotation> | null;
+    },
+    void
+  ];
   get_native_session_events: [
     {
       runtimeId: string;
@@ -682,6 +692,11 @@ export interface ToolQuestionOption {
   label: string;
   description?: string | null;
   preview?: string | null;
+}
+
+export interface InteractivePromptAnnotation {
+  preview?: string;
+  notes?: string;
 }
 
 export interface ToolQuestionPrompt {

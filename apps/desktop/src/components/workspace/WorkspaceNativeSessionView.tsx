@@ -1,6 +1,7 @@
 import {
   ArrowUp,
   Bot,
+  Check,
   ClipboardList,
   Globe,
   Layers3,
@@ -22,9 +23,11 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import type {
+  InteractivePromptAnnotation,
   InteractiveToolPrompt,
   NativeSessionSummary,
   SessionEventRecord,
+  ToolQuestionPrompt,
 } from '@/lib/tauri-ipc';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
@@ -117,6 +120,31 @@ interface NativeSessionAttentionState {
   prompts: PendingInteractivePrompt[];
   terminalPrompt: PendingTerminalPrompt | null;
 }
+
+interface InteractivePromptAnswer {
+  selectedOptions: string[];
+  customSelected: boolean;
+  customText: string;
+}
+
+interface InteractivePromptState {
+  currentQuestionIndex: number;
+  answers: Record<number, InteractivePromptAnswer>;
+}
+
+type InteractivePromptReplyPayload =
+  | {
+      kind: 'text';
+      text: string;
+      attachments?: ComposerAttachment[];
+    }
+  | {
+      kind: 'ask_user_question';
+      toolUseId: string;
+      text: string;
+      answers: Record<string, string>;
+      annotations?: Record<string, InteractivePromptAnnotation>;
+    };
 
 interface LocalUserPrompt {
   id: string;
@@ -399,6 +427,98 @@ function promptQuickReplies(prompt: InteractiveToolPrompt): string[] {
   }
 }
 
+function questionDisplayLabel(question: {
+  header?: string | null;
+  question: string;
+}) {
+  return question.header?.trim() || question.question.trim();
+}
+
+function createEmptyPromptAnswer(): InteractivePromptAnswer {
+  return {
+    selectedOptions: [],
+    customSelected: false,
+    customText: '',
+  };
+}
+
+function getPromptAnswerState(
+  question: ToolQuestionPrompt,
+  answer?: InteractivePromptAnswer | null,
+) {
+  const selectedLabels = new Set(answer?.selectedOptions ?? []);
+  const selectedOptions = question.options.filter((option) => selectedLabels.has(option.label));
+  const trimmedCustomText = answer?.customText.trim() ?? '';
+
+  return {
+    selectedOptions,
+    selectedLabels: selectedOptions.map((option) => option.label),
+    selectedPreviews: selectedOptions
+      .map((option) => option.preview?.trim())
+      .filter((value): value is string => Boolean(value)),
+    customSelected: Boolean(answer?.customSelected),
+    customText: answer?.customText ?? '',
+    trimmedCustomText,
+  };
+}
+
+function questionHasPromptAnswer(
+  question: ToolQuestionPrompt,
+  answer?: InteractivePromptAnswer | null,
+) {
+  const answerState = getPromptAnswerState(question, answer);
+  if (answerState.customSelected && !answerState.trimmedCustomText) {
+    return false;
+  }
+
+  return answerState.selectedLabels.length > 0 || answerState.customSelected;
+}
+
+function buildAskUserQuestionResponse(
+  questions: ToolQuestionPrompt[],
+  answers: Record<number, InteractivePromptAnswer>,
+) {
+  const collectedAnswers: Record<string, string> = {};
+  const annotations: Record<string, InteractivePromptAnnotation> = {};
+  const summaryLines: string[] = [];
+
+  for (const [index, question] of questions.entries()) {
+    const answer = answers[index];
+    const answerState = getPromptAnswerState(question, answer);
+    if (!questionHasPromptAnswer(question, answer)) {
+      return null;
+    }
+
+    const answerParts = [...answerState.selectedLabels];
+    if (answerState.customSelected && answerState.trimmedCustomText) {
+      answerParts.push(answerState.trimmedCustomText);
+    }
+    const answerValue = answerParts.join(', ');
+    collectedAnswers[question.question] = answerValue;
+    summaryLines.push(
+      questions.length === 1
+        ? answerValue
+        : `${index + 1}. ${questionDisplayLabel(question)}: ${answerValue}`,
+    );
+
+    const preview = answerState.selectedPreviews.join('\n\n').trim();
+    const notes = answerState.customSelected ? answerState.trimmedCustomText : undefined;
+
+    if (preview || notes) {
+      annotations[question.question] = {
+        ...(preview ? { preview } : {}),
+        ...(notes ? { notes } : {}),
+      };
+    }
+  }
+
+  return {
+    text: summaryLines.join('\n'),
+    answers: collectedAnswers,
+    annotations: Object.keys(annotations).length > 0 ? annotations : undefined,
+  };
+}
+
 function buildMessagesFromEvents(
   baseMessages: ConversationMessageData[],
   remainingPrompts: LocalUserPrompt[],
@@ -606,18 +726,56 @@ function buildMessagesFromEvents(
 }
 
 function WorkspaceAttentionPanel({
+  provider,
   attentionState,
   respondingRequestId,
+  isSubmittingPrompt,
   onPermission,
-  onUseQuickReply,
+  onSubmitPromptReply,
 }: {
+  provider: string;
   attentionState: NativeSessionAttentionState;
   respondingRequestId: string | null;
+  isSubmittingPrompt: boolean;
   onPermission: (requestId: string, approved: boolean) => void;
-  onUseQuickReply: (value: string) => void;
+  onSubmitPromptReply: (payload: InteractivePromptReplyPayload) => Promise<boolean>;
 }) {
   const { t } = useLocale();
-  const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>({});
+  const [promptStates, setPromptStates] = useState<Record<string, InteractivePromptState>>({});
+
+  useEffect(() => {
+    const activePromptIds = new Set(attentionState.prompts.map((prompt) => prompt.toolUseId));
+    setPromptStates((previous) => {
+      const nextEntries = Object.entries(previous)
+        .filter(([toolUseId]) => activePromptIds.has(toolUseId));
+
+      if (
+        nextEntries.length === Object.keys(previous).length
+        && nextEntries.every(([toolUseId]) => toolUseId in previous)
+      ) {
+        return previous;
+      }
+
+      return Object.fromEntries(nextEntries);
+    });
+  }, [attentionState.prompts]);
+
+  const updatePromptState = useCallback((
+    toolUseId: string,
+    updater: (current: InteractivePromptState) => InteractivePromptState,
+  ) => {
+    setPromptStates((previous) => {
+      const current = previous[toolUseId] ?? {
+        currentQuestionIndex: 0,
+        answers: {},
+      };
+
+      return {
+        ...previous,
+        [toolUseId]: updater(current),
+      };
+    });
+  }, []);
 
   if (
     attentionState.permissions.length === 0
@@ -677,29 +835,112 @@ function WorkspaceAttentionPanel({
       {attentionState.prompts.map((entry) => {
         const bodyLines = promptPanelBody(entry.prompt);
         const quickReplies = promptQuickReplies(entry.prompt);
-        const firstQuestion = entry.prompt.prompt_type === 'ask_user_question'
-          ? entry.prompt.questions[0] ?? null
+        const questionPrompt = entry.prompt.prompt_type === 'ask_user_question'
+          ? entry.prompt
           : null;
 
-        if (firstQuestion) {
+        if (questionPrompt?.questions.length) {
+          const providerName = providerDisplayName(provider);
+          const customOptionLabel = t('workspace.nativePromptAdjust')
+            .replace('{provider}', providerName);
+          const promptState = promptStates[entry.toolUseId] ?? {
+            currentQuestionIndex: 0,
+            answers: {},
+          };
+          const questionIndex = Math.min(
+            promptState.currentQuestionIndex,
+            questionPrompt.questions.length - 1,
+          );
+          const currentQuestion = questionPrompt.questions[questionIndex]!;
+          const currentAnswer = promptState.answers[questionIndex];
+          const currentAnswerState = getPromptAnswerState(currentQuestion, currentAnswer);
+          const questionOptions = [
+            ...currentQuestion.options.map((option) => ({
+              ...option,
+              optionKind: 'option' as const,
+            })),
+            {
+              label: customOptionLabel,
+              description: t('workspace.nativePromptAdjustHint'),
+              preview: undefined,
+              optionKind: 'custom' as const,
+            },
+          ];
+          const selectedPreview = currentAnswerState.selectedPreviews.join('\n\n').trim();
+          const selectedSummary = [
+            ...currentAnswerState.selectedLabels,
+            ...(currentAnswerState.customSelected && currentAnswerState.trimmedCustomText
+              ? [currentAnswerState.trimmedCustomText]
+              : []),
+          ].join(', ');
+          const selectedCount = currentAnswerState.selectedLabels.length
+            + (currentAnswerState.customSelected && currentAnswerState.trimmedCustomText ? 1 : 0);
+          const isLastQuestion = questionIndex === questionPrompt.questions.length - 1;
+          const canAdvance = isLastQuestion
+            ? questionPrompt.questions.every((question, index) =>
+              questionHasPromptAnswer(question, promptState.answers[index]))
+            : questionHasPromptAnswer(currentQuestion, currentAnswer);
+          const progressLabel = t('workspace.nativePromptProgress')
+            .replace('{current}', String(questionIndex + 1))
+            .replace('{total}', String(questionPrompt.questions.length));
+
           return (
             <div
               key={entry.toolUseId}
               className="rounded-2xl bg-muted/30 px-5 py-5"
             >
-              <h3 className="text-[17px] font-semibold leading-snug text-foreground">
-                {firstQuestion.question}
-              </h3>
+              <div className="flex items-start gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13px] font-medium text-muted-foreground/80">
+                    {progressLabel}
+                  </p>
+                  {currentQuestion.header ? (
+                    <p className="mt-1 text-[13px] font-medium text-muted-foreground/85">
+                      {currentQuestion.header}
+                    </p>
+                  ) : null}
+                  <h3 className="mt-1 text-[17px] font-semibold leading-snug text-foreground">
+                    {currentQuestion.question}
+                  </h3>
+                  {currentQuestion.multiSelect ? (
+                    <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground/80">
+                      {t('workspace.nativePromptMultiSelectHint')}
+                    </p>
+                  ) : null}
+                  {currentQuestion.multiSelect && selectedCount > 0 ? (
+                    <p className="mt-2 text-[12px] font-medium text-muted-foreground/75">
+                      {t('workspace.nativePromptSelectedCount').replace('{count}', String(selectedCount))}
+                    </p>
+                  ) : null}
+                </div>
+                <span className="rounded-md bg-muted/50 px-2 py-1 font-mono text-[11px] text-muted-foreground/80">
+                  {entry.rawName}
+                </span>
+              </div>
 
-              {firstQuestion.options.some((option) => option.preview) ? (
+              {selectedSummary || selectedPreview ? (
                 <div className="mt-4 rounded-lg bg-muted/40 px-4 py-3 font-mono text-[13px] text-muted-foreground">
-                  {firstQuestion.options[0]?.preview?.split('\n').slice(0, 3).join('\n')}
+                  {selectedSummary ? (
+                    <p className="whitespace-pre-wrap text-foreground/90">
+                      {selectedSummary}
+                    </p>
+                  ) : null}
+                  {selectedPreview ? (
+                    <p className={cn(
+                      'whitespace-pre-wrap',
+                      selectedSummary ? 'mt-2 text-muted-foreground' : 'text-muted-foreground',
+                    )}>
+                      {selectedPreview.split('\n').slice(0, 6).join('\n')}
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
 
               <div className="mt-5 space-y-2">
-                {firstQuestion.options.map((option, index) => {
-                  const isSelected = selectedOptions[entry.toolUseId] === option.label;
+                {questionOptions.map((option, index) => {
+                  const isSelected = option.optionKind === 'custom'
+                    ? currentAnswerState.customSelected
+                    : currentAnswerState.selectedLabels.includes(option.label);
                   return (
                     <button
                       key={`${entry.toolUseId}-${option.label}`}
@@ -711,15 +952,55 @@ function WorkspaceAttentionPanel({
                           : 'bg-muted/20 hover:bg-muted/40',
                       )}
                       onClick={() => {
-                        setSelectedOptions((prev) => ({
-                          ...prev,
-                          [entry.toolUseId]: option.label,
+                        const emptyAnswer = createEmptyPromptAnswer();
+                        updatePromptState(entry.toolUseId, (current) => ({
+                          ...current,
+                          answers: {
+                            ...current.answers,
+                            [questionIndex]: (() => {
+                              const answerForQuestion = current.answers[questionIndex] ?? emptyAnswer;
+                              if (option.optionKind === 'custom') {
+                                return currentQuestion.multiSelect
+                                  ? {
+                                    ...answerForQuestion,
+                                    customSelected: !answerForQuestion.customSelected,
+                                  }
+                                  : {
+                                    ...answerForQuestion,
+                                    selectedOptions: [],
+                                    customSelected: true,
+                                  };
+                              }
+
+                              if (!currentQuestion.multiSelect) {
+                                return {
+                                  ...answerForQuestion,
+                                  selectedOptions: [option.label],
+                                  customSelected: false,
+                                };
+                              }
+
+                              const nextSelectedOptions = answerForQuestion.selectedOptions.includes(option.label)
+                                ? answerForQuestion.selectedOptions.filter((value) => value !== option.label)
+                                : [...answerForQuestion.selectedOptions, option.label];
+
+                              return {
+                                ...answerForQuestion,
+                                selectedOptions: nextSelectedOptions,
+                              };
+                            })(),
+                          },
                         }));
                       }}
                     >
                       <div className="flex items-start gap-3">
-                        <span className="mt-0.5 text-[15px] font-medium text-muted-foreground/60">
-                          {index + 1}.
+                        <span className={cn(
+                          'mt-0.5 flex h-5 w-5 items-center justify-center rounded border text-[12px] transition-colors',
+                          isSelected
+                            ? 'border-foreground/60 bg-foreground/10 text-foreground'
+                            : 'border-border/70 text-muted-foreground/60',
+                        )}>
+                          {isSelected ? <Check className="h-3.5 w-3.5" /> : index + 1}
                         </span>
                         <div className="flex-1">
                           <p className="text-[15px] leading-relaxed text-foreground">
@@ -737,32 +1018,93 @@ function WorkspaceAttentionPanel({
                 })}
               </div>
 
+              {currentAnswerState.customSelected ? (
+                <div className="mt-4 space-y-2">
+                  <label
+                    htmlFor={`ask-user-custom-${entry.toolUseId}-${questionIndex}`}
+                    className="text-[12px] font-medium text-muted-foreground/80"
+                  >
+                    {t('workspace.nativePromptCustomLabel')}
+                  </label>
+                  <textarea
+                    id={`ask-user-custom-${entry.toolUseId}-${questionIndex}`}
+                    value={currentAnswerState.customText}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      updatePromptState(entry.toolUseId, (current) => ({
+                        ...current,
+                        answers: {
+                          ...current.answers,
+                          [questionIndex]: {
+                            ...(current.answers[questionIndex] ?? createEmptyPromptAnswer()),
+                            customSelected: true,
+                            customText: value,
+                          },
+                        },
+                      }));
+                    }}
+                    rows={4}
+                    placeholder={t('workspace.nativePromptCustomPlaceholder')}
+                    className="min-h-[112px] w-full resize-y rounded-xl border border-border/60 bg-background/70 px-3 py-2 text-[14px] leading-relaxed text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
+                  />
+                </div>
+              ) : null}
+
               <div className="mt-5 flex items-center justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="h-9 px-4 text-[13px]"
-                  onClick={() => onUseQuickReply('')}
-                >
-                  {t('common.skip')}
-                </Button>
+                {questionIndex > 0 ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="h-9 px-4 text-[13px]"
+                    disabled={isSubmittingPrompt}
+                    onClick={() => {
+                      updatePromptState(entry.toolUseId, (current) => ({
+                        ...current,
+                        currentQuestionIndex: Math.max(0, current.currentQuestionIndex - 1),
+                      }));
+                    }}
+                  >
+                    {t('workspace.nativePromptBack')}
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
                   className="h-9 rounded-lg bg-foreground px-5 text-[13px] font-medium text-background hover:bg-foreground/90"
-                  disabled={!selectedOptions[entry.toolUseId]}
-                  onClick={() => {
-                    const selected = selectedOptions[entry.toolUseId];
-                    if (selected) {
-                      onUseQuickReply(selected);
-                      setSelectedOptions((prev) => {
-                        const next = { ...prev };
-                        delete next[entry.toolUseId];
-                        return next;
-                      });
+                  disabled={!canAdvance || isSubmittingPrompt}
+                  onClick={async () => {
+                    if (!canAdvance) {
+                      return;
                     }
+
+                    if (!isLastQuestion) {
+                      updatePromptState(entry.toolUseId, (current) => ({
+                        ...current,
+                        currentQuestionIndex: Math.min(
+                          questionPrompt.questions.length - 1,
+                          current.currentQuestionIndex + 1,
+                        ),
+                      }));
+                      return;
+                    }
+
+                    const reply = buildAskUserQuestionResponse(
+                      questionPrompt.questions,
+                      promptState.answers,
+                    );
+                    if (!reply) {
+                      return;
+                    }
+
+                    await onSubmitPromptReply({
+                      kind: 'ask_user_question',
+                      toolUseId: entry.toolUseId,
+                      text: reply.text,
+                      answers: reply.answers,
+                      annotations: reply.annotations,
+                    });
                   }}
                 >
-                  {t('common.submit')}
+                  {isLastQuestion ? t('common.submit') : t('workspace.nativePromptContinue')}
                 </Button>
               </div>
             </div>
@@ -809,7 +1151,13 @@ function WorkspaceAttentionPanel({
                     size="sm"
                     variant="outline"
                     className="h-8 rounded-lg border-border/60 px-3.5 text-[13px] hover:bg-muted/50"
-                    onClick={() => onUseQuickReply(reply)}
+                    disabled={isSubmittingPrompt}
+                    onClick={() => {
+                      void onSubmitPromptReply({
+                        kind: 'text',
+                        text: reply,
+                      });
+                    }}
                   >
                     {reply}
                   </Button>
@@ -854,6 +1202,7 @@ export function WorkspaceNativeSessionView({
     getNativeSessionEvents,
     sendNativeSessionInput,
     respondNativeSessionPermission,
+    respondNativeSessionPrompt,
     stopNativeSession,
     handoffNativeSessionToTerminal,
     listNativeSessions,
@@ -1009,9 +1358,16 @@ export function WorkspaceNativeSessionView({
 
   const isProcessingTurn = session.status === 'initializing' || session.status === 'processing';
   const isAwaitingResponse = isSending || isProcessingTurn;
-  const hasBlockingAttention = attentionState.permissions.length > 0
-    || attentionState.prompts.length > 0
-    || Boolean(attentionState.terminalPrompt);
+  const hasAskUserQuestionPrompt = attentionState.prompts.some(
+    (entry) => entry.prompt.prompt_type === 'ask_user_question',
+  );
+  const hasQuickReplyPrompt = attentionState.prompts.some(
+    (entry) => entry.prompt.prompt_type !== 'ask_user_question',
+  );
+  const hasHardBlockingAttention = attentionState.permissions.length > 0
+    || Boolean(attentionState.terminalPrompt)
+    || hasAskUserQuestionPrompt;
+  const hasBlockingAttention = hasHardBlockingAttention || hasQuickReplyPrompt;
   const hasAttentionPanel = hasBlockingAttention;
   const canSend = !isSending
     && !isTerminalStatus(session.status)
@@ -1122,6 +1478,66 @@ export function WorkspaceNativeSessionView({
     }
   }, [buildQueuedBatchText, pollEvents, refreshSummary, sendNativeSessionInput, session.runtime_id]);
 
+  const sendInteractivePromptReply = useCallback(async (
+    payload: InteractivePromptReplyPayload,
+  ) => {
+    const promptEntry = {
+      id: `user-${Date.now()}`,
+      text: payload.kind === 'ask_user_question'
+        ? payload.text
+        : buildComposerPromptPreview(payload.text, payload.attachments ?? []),
+      timestamp: Date.now(),
+    };
+
+    let requestText = '';
+    if (payload.kind === 'text') {
+      requestText = buildComposerPromptText(payload.text, payload.attachments ?? []);
+      if (!requestText.trim()) {
+        return false;
+      }
+    }
+
+    setIsSending(true);
+    setLocalUserPrompts((previous) => [...previous, promptEntry]);
+    if (payload.kind === 'text') {
+      setComposerText('');
+      setComposerPlanModeEnabled(session.perm_mode === 'plan');
+    }
+
+    try {
+      if (payload.kind === 'ask_user_question') {
+        await respondNativeSessionPrompt(session.runtime_id, {
+          toolUseId: payload.toolUseId,
+          promptType: 'ask_user_question',
+          answers: payload.answers,
+          annotations: payload.annotations,
+        });
+      } else {
+        await sendNativeSessionInput(session.runtime_id, requestText);
+      }
+      await pollEvents();
+      await refreshSummary();
+      return true;
+    } catch (error) {
+      console.error('Failed to send interactive prompt reply:', error);
+      setLocalUserPrompts((previous) =>
+        previous.filter((prompt) => prompt.id !== promptEntry.id),
+      );
+      toast.error(t('workspace.nativeSendFailed'));
+      return false;
+    } finally {
+      setIsSending(false);
+    }
+  }, [
+    pollEvents,
+    refreshSummary,
+    respondNativeSessionPrompt,
+    sendNativeSessionInput,
+    session.perm_mode,
+    session.runtime_id,
+    t,
+  ]);
+
   const handleSend = useCallback(async (payload?: ComposerSubmitPayload) => {
     const text = payload?.text ?? composerText.trim();
     const attachments = payload?.attachments ?? [];
@@ -1138,7 +1554,15 @@ export function WorkspaceNativeSessionView({
     setComposerText('');
     setComposerPlanModeEnabled(session.perm_mode === 'plan');
 
-    if (isProcessingTurn || hasBlockingAttention) {
+    if (hasQuickReplyPrompt && !isProcessingTurn && !hasHardBlockingAttention) {
+      return sendInteractivePromptReply({
+        kind: 'text',
+        text,
+        attachments,
+      });
+    }
+
+    if (isProcessingTurn || hasHardBlockingAttention) {
       setQueuedMessages((previous) => [...previous, nextPrompt]);
       return true;
     }
@@ -1153,9 +1577,11 @@ export function WorkspaceNativeSessionView({
   }, [
     composerPlanModeEnabled,
     composerText,
-    hasBlockingAttention,
+    hasHardBlockingAttention,
+    hasQuickReplyPrompt,
     isProcessingTurn,
     sendPromptBatch,
+    sendInteractivePromptReply,
     session.perm_mode,
     t,
   ]);
@@ -1196,14 +1622,6 @@ export function WorkspaceNativeSessionView({
       setRespondingRequestId(null);
     }
   }, [pollEvents, refreshSummary, respondNativeSessionPermission, session.runtime_id, t]);
-
-  const handleUseQuickReply = useCallback((value: string) => {
-    const next = value.trim();
-    if (!next) {
-      return;
-    }
-    setComposerText(next);
-  }, []);
 
   const handleStop = useCallback(async () => {
     setIsStopping(true);
@@ -1315,12 +1733,16 @@ export function WorkspaceNativeSessionView({
         queueCanFlush={!isSending && !isProcessingTurn && !hasBlockingAttention}
         aboveComposer={hasAttentionPanel ? (
           <WorkspaceAttentionPanel
+            provider={session.provider}
             attentionState={attentionState}
             respondingRequestId={respondingRequestId}
+            isSubmittingPrompt={isSending}
             onPermission={(requestId, approved) => {
               void handlePermission(requestId, approved);
             }}
-            onUseQuickReply={handleUseQuickReply}
+            onSubmitPromptReply={async (payload) => {
+              return await sendInteractivePromptReply(payload);
+            }}
           />
         ) : null}
         controls={(() => {
