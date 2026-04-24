@@ -348,7 +348,7 @@
     "namePlaceholder": "my-environment",
     "baseUrlPlaceholder": "https://api.anthropic.com",
     "authTokenPlaceholder": "粘贴厂商提供的 Token 或 Key",
-    "defaultOpusModelPlaceholder": "例如: glm-5.1, deepseek-chat, kimi-k2.5",
+    "defaultOpusModelPlaceholder": "例如: glm-5.1, deepseek-v4-pro, kimi-k2.5",
     "defaultSonnetModelPlaceholder": "留空时默认与 Opus 模型保持一致",
     "defaultHaikuModelPlaceholder": "例如: glm-4.5-air, gemma4:e4b",
     "runtimeModelPlaceholder": "opus",

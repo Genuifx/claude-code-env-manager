@@ -40,9 +40,9 @@ export const ENV_PRESETS: Record<
   },
   'DeepSeek': {
     ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
-    ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-chat',
-    ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-chat',
-    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-chat',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-v4-pro',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-v4-pro',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-v4-flash',
     ANTHROPIC_MODEL: 'opus'
   },
   'Bailian': {
@@ -98,7 +98,7 @@ export const ENV_PRESET_METADATA: Record<string, EnvPresetMetadata> = {
   },
   'DeepSeek': {
     displayName: { zh: 'DeepSeek', en: 'DeepSeek' },
-    description: { zh: 'DeepSeek AI 深度求索', en: 'DeepSeek AI' },
+    description: { zh: 'DeepSeek V4 深度求索', en: 'DeepSeek V4' },
     credentialUrl: 'https://platform.deepseek.com/api_keys',
   },
   'Bailian': {
