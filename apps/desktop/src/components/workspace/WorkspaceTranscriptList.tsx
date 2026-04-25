@@ -1,16 +1,16 @@
 import { useMemo } from 'react';
 import { mergeToolResults } from '@/features/conversations/messageState';
 import type {
-  ConversationContentBlock,
   ConversationMessageData,
 } from '@/features/conversations/types';
 import { cn } from '@/lib/utils';
 import {
-  extractWorkspaceProcessData,
+  processMessageBlocks,
   WorkspaceMessageBubble,
   WorkspacePendingResponse,
   WorkspaceToolDigest,
-  type WorkspaceThinkingEntry,
+  type MessageSegment,
+  type ToolDigestEntry,
 } from './WorkspaceMessageBubble';
 
 export type WorkspaceTranscriptItem =
@@ -24,8 +24,7 @@ export type WorkspaceTranscriptItem =
     type: 'tool-digest';
     key: string;
     role: 'assistant';
-    blocks: ConversationContentBlock[];
-    thinkingEntries: WorkspaceThinkingEntry[];
+    entries: ToolDigestEntry[];
   }
   | {
     type: 'pending-response';
@@ -62,56 +61,58 @@ export function buildWorkspaceTranscriptItems(
 ): WorkspaceTranscriptItem[] {
   const items: WorkspaceTranscriptItem[] = [];
   let digestIndex = 0;
-  const pendingAssistantMessages: WorkspaceTranscriptItem[] = [];
-  let pendingToolBlocks: ConversationContentBlock[] = [];
-  let pendingThinkingEntries: WorkspaceThinkingEntry[] = [];
-  let pendingProcessKey: string | null = null;
+  const pendingSegments: MessageSegment[] = [];
 
-  const collapseThinkingEntries = (entries: WorkspaceThinkingEntry[]): WorkspaceThinkingEntry[] => {
-    if (entries.length <= 1) {
-      return entries;
-    }
-
-    const mergedContent = entries
-      .map((entry) => entry.content.trim())
-      .filter(Boolean)
-      .join('\n\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-
-    if (!mergedContent) {
-      return [];
-    }
-
-    return [{
-      key: `${entries[0]?.key ?? 'thinking'}-merged`,
-      content: mergedContent,
-      segmentCount: entries.reduce((sum, entry) => sum + (entry.segmentCount ?? 1), 0),
-    }];
-  };
-
-  const flushAssistantRun = () => {
-    const collapsedThinkingEntries = collapseThinkingEntries(pendingThinkingEntries);
-
-    if (pendingToolBlocks.length > 0 || collapsedThinkingEntries.length > 0) {
+  const pushToolDigest = (entries: ToolDigestEntry[]) => {
+    if (entries.length > 0) {
       items.push({
         type: 'tool-digest',
         role: 'assistant',
-        key: `tool-digest-${pendingProcessKey || `assistant-run-${digestIndex}`}-${digestIndex}`,
-        blocks: pendingToolBlocks,
-        thinkingEntries: collapsedThinkingEntries,
+        key: `tool-digest-${digestIndex}`,
+        entries,
       });
       digestIndex += 1;
     }
+  };
 
-    if (pendingAssistantMessages.length > 0) {
-      items.push(...pendingAssistantMessages);
+  const pushMessage = (message: ConversationMessageData) => {
+    items.push({
+      type: 'message',
+      role: 'assistant',
+      key: message.uuid || `assistant-msg-${digestIndex}`,
+      message,
+    });
+  };
+
+  const flushSegments = () => {
+    // Merge consecutive tool-group segments across messages
+    const merged: MessageSegment[] = [];
+    for (const seg of pendingSegments) {
+      if (
+        seg.type === 'tool-group'
+        && merged.length > 0
+        && merged[merged.length - 1].type === 'tool-group'
+      ) {
+        const prev = merged[merged.length - 1];
+        prev.entries.push(...seg.entries);
+      } else {
+        merged.push({
+          type: seg.type,
+          message: seg.message,
+          entries: [...seg.entries],
+        });
+      }
     }
 
-    pendingAssistantMessages.length = 0;
-    pendingToolBlocks = [];
-    pendingThinkingEntries = [];
-    pendingProcessKey = null;
+    for (const seg of merged) {
+      if (seg.type === 'text' && seg.message) {
+        pushMessage(seg.message);
+      } else {
+        pushToolDigest(seg.entries);
+      }
+    }
+
+    pendingSegments.length = 0;
   };
 
   messages.forEach((message, index) => {
@@ -119,7 +120,7 @@ export function buildWorkspaceTranscriptItems(
     const messageKey = message.uuid || `${message.segmentIndex}-${index}`;
 
     if (role === 'user') {
-      flushAssistantRun();
+      flushSegments();
       items.push({
         type: 'message',
         role,
@@ -129,29 +130,11 @@ export function buildWorkspaceTranscriptItems(
       return;
     }
 
-    const { visibleMessage, toolBlocks, thinkingEntries } = extractWorkspaceProcessData(message, messageKey);
-    if ((toolBlocks.length > 0 || thinkingEntries.length > 0) && pendingProcessKey == null) {
-      pendingProcessKey = messageKey;
-    }
-    if (toolBlocks.length > 0) {
-      pendingToolBlocks = pendingToolBlocks.concat(toolBlocks);
-    }
-    if (thinkingEntries.length > 0) {
-      pendingThinkingEntries = pendingThinkingEntries.concat(thinkingEntries);
-    }
-    if (!visibleMessage) {
-      return;
-    }
-
-    pendingAssistantMessages.push({
-      type: 'message',
-      role,
-      key: visibleMessage.uuid || messageKey,
-      message: visibleMessage,
-    });
+    const segments = processMessageBlocks(message, messageKey);
+    pendingSegments.push(...segments);
   });
 
-  flushAssistantRun();
+  flushSegments();
 
   return items;
 }
@@ -232,8 +215,7 @@ export function WorkspaceTranscriptList({
               )}
             >
               <WorkspaceToolDigest
-                blocks={item.blocks}
-                thinkingEntries={item.thinkingEntries}
+                entries={item.entries}
                 autoExpanded={item.key === activeDigestKey}
               />
             </div>

@@ -37,6 +37,18 @@ export interface WorkspaceThinkingEntry {
   segmentCount?: number;
 }
 
+export interface ToolDigestEntry {
+  type: 'tool_use' | 'thinking';
+  block?: ConversationContentBlock;
+  thinking?: WorkspaceThinkingEntry;
+}
+
+export interface MessageSegment {
+  type: 'text' | 'tool-group';
+  message?: ConversationMessageData;
+  entries: ToolDigestEntry[];
+}
+
 function toContentBlocks(content: ConversationMessageData['content']): ConversationContentBlock[] {
   if (Array.isArray(content)) {
     return content;
@@ -215,6 +227,114 @@ export function extractWorkspaceProcessData(
   };
 }
 
+
+export function processMessageBlocks(
+  message: ConversationMessageData,
+  messageKey: string,
+): MessageSegment[] {
+  if (message.isCompactBoundary || message.planContent || message.msgType === 'summary') {
+    return [{ type: 'text', message, entries: [] }];
+  }
+
+  const segments: MessageSegment[] = [];
+  const blocks = toContentBlocks(message.content);
+
+  const currentEntries: ToolDigestEntry[] = [];
+  let seenToolContent = false;
+
+  const flushToolGroup = () => {
+    if (currentEntries.length > 0) {
+      segments.push({ type: 'tool-group', entries: [...currentEntries] });
+      currentEntries.length = 0;
+    }
+  };
+
+  if (typeof message.content === 'string') {
+    const { visibleText, thinkingEntries } = extractThinkingFromText(message.content, messageKey);
+    if (thinkingEntries.length > 0) {
+      const entries: ToolDigestEntry[] = thinkingEntries.map((e) => ({
+        type: 'thinking',
+        thinking: e,
+      }));
+      segments.push({ type: 'tool-group', entries });
+    }
+    if (visibleText) {
+      segments.push({
+        type: 'text',
+        message: { ...message, content: visibleText },
+        entries: [],
+      });
+    }
+    return segments;
+  }
+
+  for (let index = 0; index < blocks.length; index += 1) {
+    const block = blocks[index];
+    const blockKey = `${messageKey}-${index}`;
+
+    if (block.type === 'tool_use') {
+      seenToolContent = true;
+      currentEntries.push({ type: 'tool_use', block });
+      continue;
+    }
+
+    if (block.type === 'tool_result') {
+      continue;
+    }
+
+    if (block.type === 'thinking') {
+      seenToolContent = true;
+      const content = (block.thinking || block.text || '').trim();
+      if (content) {
+        currentEntries.push({
+          type: 'thinking',
+          thinking: { key: `${blockKey}-thinking`, content },
+        });
+      }
+      continue;
+    }
+
+    if (block.type === 'text') {
+      const { visibleText, thinkingEntries: extractedThinking } = extractThinkingFromText(
+        block.text || '',
+        `${blockKey}-text`,
+      );
+      const hasEmbeddedThinking = extractedThinking.length > 0;
+
+      if (hasEmbeddedThinking) {
+        seenToolContent = true;
+        for (const e of extractedThinking) {
+          currentEntries.push({ type: 'thinking', thinking: e });
+        }
+      }
+
+      if (visibleText) {
+        if (seenToolContent && !hasEmbeddedThinking) {
+          flushToolGroup();
+        }
+        segments.push({
+          type: 'text',
+          message: { ...message, content: [{ ...block, text: visibleText }] },
+          entries: [],
+        });
+      }
+      continue;
+    }
+
+    if (seenToolContent) {
+      flushToolGroup();
+    }
+    segments.push({
+      type: 'text',
+      message: { ...message, content: [block] },
+      entries: [],
+    });
+  }
+
+  flushToolGroup();
+
+  return segments;
+}
 function DisclosureCard({
   icon: Icon,
   label,
@@ -426,13 +546,11 @@ const ToolCallRow = memo(function ToolCallRow({
 }, (prevProps, nextProps) => prevProps.block === nextProps.block);
 
 function WorkspaceToolDigestComponent({
-  blocks,
-  thinkingEntries = [],
+  entries,
   className,
   autoExpanded = false,
 }: {
-  blocks: ConversationContentBlock[];
-  thinkingEntries?: WorkspaceThinkingEntry[];
+  entries: ToolDigestEntry[];
   className?: string;
   autoExpanded?: boolean;
 }) {
@@ -440,18 +558,20 @@ function WorkspaceToolDigestComponent({
   const [open, setOpen] = useState(false);
   const [hasRenderedBody, setHasRenderedBody] = useState(false);
   const previousAutoExpandedRef = useRef(autoExpanded);
-  const { completedCount, summary } = useMemo(() => {
-    const completed = blocks.filter((block) => '_result' in block && block._resultError !== true).length;
-    const toolNames = Array.from(new Set(blocks.map((block) => block.name || 'Tool')));
+  const { completedCount, summary, toolCount, thinkingCount } = useMemo(() => {
+    const toolEntries = entries.filter((e) => e.type === 'tool_use');
+    const thinkingEntriesList = entries.filter((e) => e.type === 'thinking');
+    const completed = toolEntries.filter((e) => e.block && '_result' in e.block && e.block._resultError !== true).length;
+    const toolNames = Array.from(new Set(toolEntries.map((e) => e.block?.name || 'Tool')));
     const visibleToolNames = toolNames.slice(0, 3).join(' · ');
     const hiddenToolCount = Math.max(0, toolNames.length - 3);
 
     const summaryParts = [];
-    if (blocks.length > 0) {
-      summaryParts.push(`${blocks.length} ${t('workspace.toolCalls')}`);
+    if (toolEntries.length > 0) {
+      summaryParts.push(`${toolEntries.length} ${t('workspace.toolCalls')}`);
     }
-    if (thinkingEntries.length > 0) {
-      summaryParts.push(`${thinkingEntries.length} ${t('workspace.thinkingNotes')}`);
+    if (thinkingEntriesList.length > 0) {
+      summaryParts.push(`${thinkingEntriesList.length} ${t('workspace.thinkingNotes')}`);
     }
     if (visibleToolNames) {
       summaryParts.push(visibleToolNames);
@@ -463,11 +583,13 @@ function WorkspaceToolDigestComponent({
     return {
       completedCount: completed,
       summary: summaryParts.join(' · '),
+      toolCount: toolEntries.length,
+      thinkingCount: thinkingEntriesList.length,
     };
-  }, [blocks, t, thinkingEntries.length]);
+  }, [entries, t]);
 
   useEffect(() => {
-    if (autoExpanded && (thinkingEntries.length > 0 || blocks.length > 0)) {
+    if (autoExpanded && (thinkingCount > 0 || toolCount > 0)) {
       setHasRenderedBody(true);
       setOpen(true);
     } else if (previousAutoExpandedRef.current && !autoExpanded) {
@@ -475,7 +597,7 @@ function WorkspaceToolDigestComponent({
     }
 
     previousAutoExpandedRef.current = autoExpanded;
-  }, [autoExpanded, blocks.length, thinkingEntries.length]);
+  }, [autoExpanded, toolCount, thinkingCount]);
 
   return (
     <div className={cn('max-w-[760px]', className)}>
@@ -510,41 +632,44 @@ function WorkspaceToolDigestComponent({
           <div className="rounded-[26px] border border-border/45 bg-background/72 p-4 shadow-[0_16px_36px_rgba(15,23,42,0.04)]">
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground/70">
-                {blocks.length > 0 ? (
+                {toolCount > 0 ? (
                   <span className="rounded-full border border-border/40 bg-surface-raised px-2 py-0.5">
-                    {blocks.length} {t('workspace.toolCalls')}
+                    {toolCount} {t('workspace.toolCalls')}
                   </span>
                 ) : null}
-                {thinkingEntries.length > 0 ? (
+                {thinkingCount > 0 ? (
                   <span className="rounded-full border border-border/40 bg-surface-raised px-2 py-0.5">
-                    {thinkingEntries.length} {t('workspace.thinkingNotes')}
+                    {thinkingCount} {t('workspace.thinkingNotes')}
                   </span>
                 ) : null}
-                {blocks.length > 0 ? (
+                {toolCount > 0 ? (
                   <span className="rounded-full border border-border/40 bg-surface-raised px-2 py-0.5">
                     {completedCount} {t('workspace.toolSucceeded')}
                   </span>
                 ) : null}
               </div>
-              {thinkingEntries.length > 0 ? (
-                <div className="space-y-2">
-                  {thinkingEntries.map((entry, index) => (
-                    <ThinkingEntryPanel
-                      key={entry.key}
-                      entry={entry}
-                      index={index}
-                      label={t('history.thinking')}
-                    />
-                  ))}
-                </div>
-              ) : null}
               <div className="space-y-3">
-                {blocks.map((block, index) => (
-                  <ToolCallRow
-                    key={block.id || `${block.name || 'tool'}-${index}`}
-                    block={block}
-                  />
-                ))}
+                {entries.map((entry, entryIndex) => {
+                  if (entry.type === 'thinking' && entry.thinking) {
+                    return (
+                      <ThinkingEntryPanel
+                        key={entry.thinking.key}
+                        entry={entry.thinking}
+                        index={entryIndex}
+                        label={t('history.thinking')}
+                      />
+                    );
+                  }
+                  if (entry.type === 'tool_use' && entry.block) {
+                    return (
+                      <ToolCallRow
+                        key={entry.block.id || `${entry.block.name || 'tool'}-${entryIndex}`}
+                        block={entry.block}
+                      />
+                    );
+                  }
+                  return null;
+                })}
               </div>
             </div>
           </div>
@@ -558,8 +683,7 @@ export const WorkspaceToolDigest = memo(
   WorkspaceToolDigestComponent,
   (prevProps, nextProps) => (
     prevProps.className === nextProps.className
-    && prevProps.blocks === nextProps.blocks
-    && prevProps.thinkingEntries === nextProps.thinkingEntries
+    && prevProps.entries === nextProps.entries
     && prevProps.autoExpanded === nextProps.autoExpanded
   )
 );
@@ -694,7 +818,7 @@ function renderContentBlocks(
       result.push(
         <WorkspaceToolDigest
           key={`tool-group-${toolBlocks[0].id || index}`}
-          blocks={toolBlocks}
+          entries={toolBlocks.map((b) => ({ type: 'tool_use' as const, block: b }))}
         />
       );
       continue;
