@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.23
+
+### Patch Changes
+
+- Use an Intel macOS runner for desktop x64 release builds.
+
 ## 2.0.0-beta.22
 
 ### Patch Changes
