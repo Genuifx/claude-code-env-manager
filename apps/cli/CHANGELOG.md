@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.22
+
+### Patch Changes
+
+- Prefer the newest installed Claude CLI when launching desktop native workspace sessions.
+
 ## 2.0.0-beta.21
 
 ### Patch Changes
