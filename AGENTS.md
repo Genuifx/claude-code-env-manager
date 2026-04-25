@@ -41,6 +41,16 @@ Use this file to strengthen autonomous judgment, not to replace it. If the user 
 - Tooling guidance should describe capability boundaries, not micromanage every motion.
 - Repo facts should be concrete and testable.
 
+### Interaction design philosophy
+
+For UI work, default to thinking about the user's primary task, primary path, and decision burden before adding explanatory copy.
+
+- When the interface feels costly to understand, first solve it with information architecture, entry-point splitting, grouping, button naming, defaults, and progressive disclosure. Treat copy as the last tool, not the first.
+- Long explanatory blocks usually mean the flow has not yet been absorbed into the structure. If the UI needs text like “do this here, go there for that,” default to restructuring the interaction first.
+- Use explanatory copy only for necessary invisible boundaries: permissions, risks, external-system constraints, and irreversible consequences.
+- Explanations may be layered: a short primary sentence, nearby hints, tooltips, popovers, empty states, and error messages. Do not pile every explanation onto the main surface.
+- Before shipping UI, ask: if this explanation disappeared, would the interface become confusing? If yes, improve the structure before making the copy longer.
+
 ### Default delivery mindset for ccem
 
 Unless the user explicitly asks for a tiny local tweak, read-only analysis, or a different process, treat implementation work in this repo as:
