@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.21
+
+### Patch Changes
+
+- Fix production desktop native session creation by resolving the packaged native runtime helper resource path.
+
 ## 2.0.0-beta.20
 
 ### Patch Changes
