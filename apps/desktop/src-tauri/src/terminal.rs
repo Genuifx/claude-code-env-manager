@@ -1,7 +1,7 @@
 //! Terminal integration for launching Claude Code in Terminal.app or iTerm2
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -321,15 +321,18 @@ fn binary_exists(path: &std::path::Path) -> bool {
     path.exists() && path.is_file()
 }
 
-fn find_binary_in_paths(binary: &str, paths: impl IntoIterator<Item = PathBuf>) -> Option<String> {
-    paths.into_iter().find_map(|dir| {
-        let path = dir.join(binary);
-        if binary_exists(&path) {
-            Some(path.to_string_lossy().to_string())
-        } else {
-            None
-        }
-    })
+fn find_binaries_in_paths(binary: &str, paths: impl IntoIterator<Item = PathBuf>) -> Vec<String> {
+    paths
+        .into_iter()
+        .filter_map(|dir| {
+            let path = dir.join(binary);
+            if binary_exists(&path) {
+                Some(path.to_string_lossy().to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 fn login_shell_paths() -> &'static [PathBuf] {
@@ -340,30 +343,101 @@ fn login_shell_paths() -> &'static [PathBuf] {
             .output();
 
         match output {
-            Ok(out) if out.status.success() => std::env::split_paths(
-                std::ffi::OsStr::new(String::from_utf8_lossy(&out.stdout).trim()),
-            )
+            Ok(out) if out.status.success() => std::env::split_paths(std::ffi::OsStr::new(
+                String::from_utf8_lossy(&out.stdout).trim(),
+            ))
             .collect(),
             _ => Vec::new(),
         }
     })
 }
 
-/// Resolve a CLI binary path from shell + common fallback locations.
-fn resolve_binary_path(binary: &str, candidates: &[String]) -> Option<String> {
+fn collect_binary_candidates(binary: &str, candidates: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut paths = Vec::new();
+
     for candidate in candidates {
-        if binary_exists(std::path::Path::new(candidate)) {
-            return Some(candidate.clone());
+        if binary_exists(std::path::Path::new(candidate)) && seen.insert(candidate.clone()) {
+            paths.push(candidate.clone());
         }
     }
 
-    if let Some(path) = std::env::var_os("PATH").and_then(|value| {
-        find_binary_in_paths(binary, std::env::split_paths(&value).collect::<Vec<_>>())
-    }) {
-        return Some(path);
+    if let Some(value) = std::env::var_os("PATH") {
+        for path in
+            find_binaries_in_paths(binary, std::env::split_paths(&value).collect::<Vec<_>>())
+        {
+            if seen.insert(path.clone()) {
+                paths.push(path);
+            }
+        }
     }
 
-    find_binary_in_paths(binary, login_shell_paths().iter().cloned())
+    for path in find_binaries_in_paths(binary, login_shell_paths().iter().cloned()) {
+        if seen.insert(path.clone()) {
+            paths.push(path);
+        }
+    }
+
+    paths
+}
+
+/// Resolve a CLI binary path from shell + common fallback locations.
+fn resolve_binary_path(binary: &str, candidates: &[String]) -> Option<String> {
+    collect_binary_candidates(binary, candidates)
+        .into_iter()
+        .next()
+}
+
+fn parse_semver_triplet(output: &str) -> Option<(u32, u32, u32)> {
+    output.split_whitespace().find_map(|part| {
+        let version = part
+            .trim()
+            .trim_start_matches('v')
+            .split('-')
+            .next()
+            .unwrap_or_default();
+        let mut pieces = version.split('.');
+        let major = pieces.next()?.parse::<u32>().ok()?;
+        let minor = pieces.next()?.parse::<u32>().ok()?;
+        let patch = pieces.next()?.parse::<u32>().ok()?;
+        Some((major, minor, patch))
+    })
+}
+
+fn binary_version(path: &str) -> Option<(u32, u32, u32)> {
+    let output = Command::new(path).arg("--version").output().ok()?;
+    let text = [
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+    ]
+    .join(" ");
+    parse_semver_triplet(&text)
+}
+
+fn select_highest_versioned_binary_path(paths: Vec<String>) -> Option<String> {
+    let fallback = paths.first().cloned();
+    let mut best: Option<(String, (u32, u32, u32), usize)> = None;
+
+    for (index, path) in paths.into_iter().enumerate() {
+        let Some(version) = binary_version(&path) else {
+            continue;
+        };
+        let should_replace = best
+            .as_ref()
+            .map(|(_, best_version, best_index)| {
+                version > *best_version || (version == *best_version && index < *best_index)
+            })
+            .unwrap_or(true);
+        if should_replace {
+            best = Some((path, version, index));
+        }
+    }
+
+    best.map(|(path, _, _)| path).or(fallback)
+}
+
+fn resolve_highest_versioned_binary_path(binary: &str, candidates: &[String]) -> Option<String> {
+    select_highest_versioned_binary_path(collect_binary_candidates(binary, candidates))
 }
 
 /// Resolve the full path to the `ccem` binary.
@@ -388,10 +462,11 @@ pub fn resolve_claude_path() -> Option<String> {
     let candidates = vec![
         format!("{}/.local/bin/claude", home),
         format!("{}/.npm-global/bin/claude", home),
+        format!("{}/Library/pnpm/claude", home),
         "/usr/local/bin/claude".to_string(),
         "/opt/homebrew/bin/claude".to_string(),
     ];
-    resolve_binary_path("claude", &candidates)
+    resolve_highest_versioned_binary_path("claude", &candidates)
 }
 
 /// Resolve the full path to the `codex` binary.
@@ -1525,6 +1600,93 @@ pub fn arrange_sessions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_test_root(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "ccem-terminal-{}-{}",
+            name,
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock should be after unix epoch")
+                .as_nanos()
+        ))
+    }
+
+    fn write_fake_binary(path: &std::path::Path, version: &str) {
+        fs::create_dir_all(path.parent().expect("fake binary should have a parent"))
+            .expect("create fake binary directory");
+        fs::write(
+            path,
+            format!(
+                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo \"{} (Claude Code)\"; fi\n",
+                version
+            ),
+        )
+        .expect("write fake binary");
+        #[cfg(unix)]
+        {
+            let mut permissions = fs::metadata(path)
+                .expect("read fake binary metadata")
+                .permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(path, permissions).expect("mark fake binary executable");
+        }
+    }
+
+    #[test]
+    fn parse_semver_triplet_reads_claude_version_output() {
+        assert_eq!(
+            parse_semver_triplet("2.1.100 (Claude Code)"),
+            Some((2, 1, 100))
+        );
+        assert_eq!(
+            parse_semver_triplet("claude v2.0.0-beta.21"),
+            Some((2, 0, 0))
+        );
+        assert_eq!(parse_semver_triplet("not a version"), None);
+    }
+
+    #[test]
+    fn highest_versioned_binary_wins_over_path_order() {
+        let root = temp_test_root("highest-version");
+        let older = root.join("nvm").join("claude");
+        let newer = root.join("pnpm").join("claude");
+        write_fake_binary(&older, "2.1.37");
+        write_fake_binary(&newer, "2.1.100");
+
+        assert_eq!(
+            select_highest_versioned_binary_path(vec![
+                older.to_string_lossy().to_string(),
+                newer.to_string_lossy().to_string(),
+            ]),
+            Some(newer.to_string_lossy().to_string())
+        );
+
+        fs::remove_dir_all(root).expect("remove fake binary directory");
+    }
+
+    #[test]
+    fn highest_versioned_binary_falls_back_to_first_candidate_without_versions() {
+        let root = temp_test_root("fallback");
+        let first = root.join("first").join("claude");
+        let second = root.join("second").join("claude");
+        write_fake_binary(&first, "not-a-semver");
+        write_fake_binary(&second, "also-not-a-semver");
+
+        assert_eq!(
+            select_highest_versioned_binary_path(vec![
+                first.to_string_lossy().to_string(),
+                second.to_string_lossy().to_string(),
+            ]),
+            Some(first.to_string_lossy().to_string())
+        );
+
+        fs::remove_dir_all(root).expect("remove fake binary directory");
+    }
 
     #[test]
     fn test_build_shell_command() {
@@ -1572,7 +1734,9 @@ mod tests {
         let cmd = build_opencode_shell_command(&env_vars, "/home/user", "test-session-123", None);
 
         assert!(cmd.contains("cd \"/home/user\""));
-        assert!(cmd.contains("export OPENCODE_CONFIG_CONTENT='{\"model\":\"anthropic/claude-sonnet-test\"}'"));
+        assert!(cmd.contains(
+            "export OPENCODE_CONFIG_CONTENT='{\"model\":\"anthropic/claude-sonnet-test\"}'"
+        ));
         assert!(cmd.contains("--prompt 'Before taking any action, load the pua skill.'"));
         assert!(cmd.contains("echo $? > ~/.ccem/sessions/'test-session-123'.exit"));
     }
