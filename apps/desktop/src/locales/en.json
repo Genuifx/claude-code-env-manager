@@ -348,7 +348,7 @@
     "namePlaceholder": "my-environment",
     "baseUrlPlaceholder": "https://api.anthropic.com",
     "authTokenPlaceholder": "Paste provider token or key",
-    "defaultOpusModelPlaceholder": "e.g. glm-5.1, deepseek-chat, kimi-k2.5",
+    "defaultOpusModelPlaceholder": "e.g. glm-5.1, deepseek-v4-pro, kimi-k2.5",
     "defaultSonnetModelPlaceholder": "Defaults to the Opus model when left blank",
     "defaultHaikuModelPlaceholder": "e.g. glm-4.5-air, gemma4:e4b",
     "runtimeModelPlaceholder": "opus",
