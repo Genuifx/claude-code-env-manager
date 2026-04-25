@@ -1,5 +1,6 @@
 use crate::config::{resolve_claude_env, resolve_codex_runtime};
 use crate::event_bus::{ReplayBatch, SessionEventPayload, SessionStore};
+use crate::native_helper_resource::native_helper_script_path;
 use crate::session_provenance::bind_source_session_id;
 use crate::system_proxy::resolve_codex_proxy_env;
 use crate::terminal::{self, resolve_claude_path, resolve_codex_path, TerminalType};
@@ -12,7 +13,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::{path::BaseDirectory, AppHandle, Manager};
+use tauri::AppHandle;
 use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
     ShellExt,
@@ -920,25 +921,6 @@ fn persist_native_runtime_state(records: Vec<NativeSessionRecord>) -> Result<(),
         .map_err(|error| format!("Failed to write native runtime state: {}", error))?;
     fs::rename(&temp_path, &path)
         .map_err(|error| format!("Failed to finalize native runtime state: {}", error))
-}
-
-fn native_helper_script_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let manifest_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("resources")
-        .join("native-runtime-helper.mjs");
-    if manifest_path.exists() {
-        return Ok(manifest_path);
-    }
-
-    let resource_path = app
-        .path()
-        .resolve("native-runtime-helper.mjs", BaseDirectory::Resource)
-        .map_err(|error| format!("Failed to resolve helper resource path: {}", error))?;
-    if resource_path.exists() {
-        return Ok(resource_path);
-    }
-
-    Err("Native runtime helper resource was not found".to_string())
 }
 
 fn build_runtime_bootstrap_options(record: &NativeSessionRecord) -> Result<NativeSessionOptions, String> {

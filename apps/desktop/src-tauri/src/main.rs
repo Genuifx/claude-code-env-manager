@@ -12,6 +12,7 @@ mod event_dispatcher;
 mod history;
 mod interactive_runtime;
 mod jsonl_watcher;
+mod native_helper_resource;
 mod native_runtime;
 mod notifications;
 mod opencode;
