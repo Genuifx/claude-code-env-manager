@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.26
+
+### Patch Changes
+
+- Stabilize native workspace session terminal handling and clean up orphaned CCEM tmux sessions on startup.
+
 ## 2.0.0-beta.25
 
 ### Patch Changes
