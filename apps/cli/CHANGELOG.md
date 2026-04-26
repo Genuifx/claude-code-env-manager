@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.25
+
+### Patch Changes
+
+- Fix production desktop native Claude sessions by passing the user's shell PATH to the native runtime helper.
+
 ## 2.0.0-beta.24
 
 ### Patch Changes
