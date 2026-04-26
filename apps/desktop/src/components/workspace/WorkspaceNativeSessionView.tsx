@@ -523,10 +523,12 @@ function buildMessagesFromEvents(
   baseMessages: ConversationMessageData[],
   remainingPrompts: LocalUserPrompt[],
   events: SessionEventRecord[],
+  terminalError?: string | null,
 ): ConversationMessageData[] {
   const next = [...baseMessages];
   let pendingTurn: PendingAssistantTurn | null = null;
   const hiddenInteractiveToolUseIds = new Set<string>();
+  const emittedErrorTexts = new Set<string>();
   let promptQueue = [...remainingPrompts];
 
   const attachToolResultToBlocks = (
@@ -608,6 +610,16 @@ function buildMessagesFromEvents(
       next.push(assistantMessage);
     }
     pendingTurn = null;
+  };
+
+  const appendErrorMessage = (id: string, text?: string | null, occurredAt?: number) => {
+    const trimmedText = text?.trim();
+    if (!trimmedText || emittedErrorTexts.has(trimmedText)) {
+      return;
+    }
+    emittedErrorTexts.add(trimmedText);
+    flushPendingTurn();
+    next.push(createAssistantTextMessage(id, trimmedText, occurredAt));
   };
 
   for (const event of events) {
@@ -694,7 +706,15 @@ function buildMessagesFromEvents(
         }
         break;
       }
+      case 'stderr_line': {
+        appendErrorMessage(`runtime-error-${event.seq}`, event.payload.line, occurredAt);
+        break;
+      }
       case 'lifecycle': {
+        if (event.payload.stage === 'error') {
+          appendErrorMessage(`runtime-error-${event.seq}`, event.payload.detail, occurredAt);
+          break;
+        }
         if (event.payload.stage === 'turn_started' || event.payload.stage === 'turn_completed') {
           flushPendingTurn();
         }
@@ -707,6 +727,9 @@ function buildMessagesFromEvents(
       }
       case 'session_completed': {
         flushPendingTurn();
+        if (!event.payload.reason.includes('Stopped from desktop workspace')) {
+          appendErrorMessage(`runtime-completed-${event.seq}`, event.payload.reason, occurredAt);
+        }
         break;
       }
       default:
@@ -715,6 +738,7 @@ function buildMessagesFromEvents(
   }
 
   flushPendingTurn();
+  appendErrorMessage('runtime-error-terminal', terminalError);
 
   // Append any remaining user prompts that haven't been matched to a turn yet
   // (e.g. user just sent a message and the turn hasn't completed)
@@ -1253,8 +1277,9 @@ export function WorkspaceNativeSessionView({
       buildBaseMessages(seedMessages, localUserPrompts[0]),
       localUserPrompts.slice(1),
       events,
+      session.status === 'error' ? session.last_error : null,
     ),
-    [events, localUserPrompts, seedMessages],
+    [events, localUserPrompts, seedMessages, session.last_error, session.status],
   );
 
   const refreshSummary = useCallback(async () => {

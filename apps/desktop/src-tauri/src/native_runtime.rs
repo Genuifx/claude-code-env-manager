@@ -59,6 +59,8 @@ pub struct NativeSessionRecord {
     pub updated_at: DateTime<Utc>,
     pub is_active: bool,
     pub can_handoff_to_terminal: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -78,6 +80,8 @@ pub struct NativeSessionSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_event_seq: Option<u64>,
     pub can_handoff_to_terminal: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -179,11 +183,7 @@ impl NativeSessionHandle {
             .lock()
             .expect("native session record poisoned")
             .clone();
-        let last_event_seq = self
-            .events
-            .lock()
-            .ok()
-            .and_then(|store| store.newest_seq());
+        let last_event_seq = self.events.lock().ok().and_then(|store| store.newest_seq());
         NativeSessionSummary {
             runtime_id: record.runtime_id,
             provider: record.provider,
@@ -198,6 +198,7 @@ impl NativeSessionHandle {
             is_active: record.is_active,
             last_event_seq,
             can_handoff_to_terminal: record.can_handoff_to_terminal,
+            last_error: record.last_error,
         }
     }
 }
@@ -210,11 +211,13 @@ struct NativeRuntimeState {
 pub struct NativeRuntimeManager {
     records: Mutex<HashMap<String, NativeSessionRecord>>,
     handles: Mutex<HashMap<String, Arc<NativeSessionHandle>>>,
+    state_path: PathBuf,
 }
 
 impl Default for NativeRuntimeManager {
     fn default() -> Self {
-        let records = read_native_runtime_state_from(&native_runtime_state_file_path())
+        let state_path = native_runtime_state_file_path();
+        let records = read_native_runtime_state_from(&state_path)
             .unwrap_or_default()
             .sessions
             .into_iter()
@@ -223,6 +226,7 @@ impl Default for NativeRuntimeManager {
         Self {
             records: Mutex::new(records),
             handles: Mutex::new(HashMap::new()),
+            state_path,
         }
     }
 }
@@ -248,6 +252,7 @@ impl NativeRuntimeManager {
             updated_at: now,
             is_active: true,
             can_handoff_to_terminal: options.provider_session_id.is_some(),
+            last_error: None,
         };
 
         let handle = Arc::new(NativeSessionHandle {
@@ -310,6 +315,7 @@ impl NativeRuntimeManager {
                         is_active: record.is_active,
                         last_event_seq: None,
                         can_handoff_to_terminal: record.can_handoff_to_terminal,
+                        last_error: record.last_error,
                     }
                 }
             })
@@ -319,7 +325,11 @@ impl NativeRuntimeManager {
         sessions
     }
 
-    pub fn replay_events(&self, runtime_id: &str, since_seq: Option<u64>) -> Result<ReplayBatch, String> {
+    pub fn replay_events(
+        &self,
+        runtime_id: &str,
+        since_seq: Option<u64>,
+    ) -> Result<ReplayBatch, String> {
         let handles = self
             .handles
             .lock()
@@ -354,10 +364,7 @@ impl NativeRuntimeManager {
         }
 
         let handle = self.ensure_handle(app.clone(), runtime_id)?;
-        self.write_to_child(
-            &handle,
-            &HelperInputCommand::Prompt { text },
-        )
+        self.write_to_child(&handle, &HelperInputCommand::Prompt { text })
     }
 
     pub fn respond_to_permission(
@@ -589,33 +596,36 @@ impl NativeRuntimeManager {
         let manager = self.clone();
         let runtime = runtime_id.to_string();
         tauri::async_runtime::spawn(async move {
+            let mut stdout_buffer = Vec::new();
+            let mut stderr_buffer = Vec::new();
             while let Some(event) = rx.recv().await {
                 match event {
                     CommandEvent::Stdout(line) => {
-                        let text = String::from_utf8_lossy(&line).trim().to_string();
-                        if text.is_empty() {
-                            continue;
-                        }
-                        if let Err(error) = manager.process_helper_stdout(&runtime, &text) {
-                            let _ = manager.append_event(
-                                &runtime,
-                                SessionEventPayload::StdErrLine {
-                                    line: format!("Failed to process helper output: {}", error),
-                                },
-                            );
+                        for text in drain_helper_output_lines(&mut stdout_buffer, &line) {
+                            if let Err(error) = manager.process_helper_stdout(&runtime, &text) {
+                                let _ = manager.append_event(
+                                    &runtime,
+                                    SessionEventPayload::StdErrLine {
+                                        line: format!("Failed to process helper output: {}", error),
+                                    },
+                                );
+                            }
                         }
                     }
                     CommandEvent::Stderr(line) => {
-                        let text = String::from_utf8_lossy(&line).trim().to_string();
-                        if text.is_empty() {
-                            continue;
+                        for text in drain_helper_output_lines(&mut stderr_buffer, &line) {
+                            let _ = manager.append_event(
+                                &runtime,
+                                SessionEventPayload::StdErrLine { line: text },
+                            );
                         }
-                        let _ = manager.append_event(
-                            &runtime,
-                            SessionEventPayload::StdErrLine { line: text },
-                        );
                     }
                     CommandEvent::Error(error) => {
+                        manager.flush_helper_output_buffers(
+                            &runtime,
+                            &mut stdout_buffer,
+                            &mut stderr_buffer,
+                        );
                         let _ = manager.append_event(
                             &runtime,
                             SessionEventPayload::StdErrLine {
@@ -626,6 +636,11 @@ impl NativeRuntimeManager {
                         break;
                     }
                     CommandEvent::Terminated(payload) => {
+                        manager.flush_helper_output_buffers(
+                            &runtime,
+                            &mut stdout_buffer,
+                            &mut stderr_buffer,
+                        );
                         let _ = manager.mark_process_exit(&runtime, payload.code);
                         break;
                     }
@@ -638,11 +653,29 @@ impl NativeRuntimeManager {
     }
 
     fn process_helper_stdout(&self, runtime_id: &str, line: &str) -> Result<(), String> {
+        let mut processed = false;
+        for entry in line
+            .lines()
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty())
+        {
+            processed = true;
+            self.process_helper_stdout_line(runtime_id, entry)?;
+        }
+        if !processed {
+            return Ok(());
+        }
+        Ok(())
+    }
+
+    fn process_helper_stdout_line(&self, runtime_id: &str, line: &str) -> Result<(), String> {
         let output: HelperOutputEvent = serde_json::from_str(line)
             .map_err(|error| format!("Failed to parse helper event JSON: {}", error))?;
 
         match output {
-            HelperOutputEvent::SessionMeta { provider_session_id } => {
+            HelperOutputEvent::SessionMeta {
+                provider_session_id,
+            } => {
                 let provider = self
                     .records
                     .lock()
@@ -669,19 +702,43 @@ impl NativeRuntimeManager {
                 Ok(())
             }
             HelperOutputEvent::Status { status, detail } => {
+                let normalized_detail = detail
+                    .as_ref()
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty());
+                let mut applied = false;
                 self.update_record(runtime_id, |record| {
+                    if record.status == "error"
+                        && !matches!(status.as_str(), "error" | "stopped" | "handoff")
+                    {
+                        return;
+                    }
+                    applied = true;
                     record.status = status.clone();
                     record.is_active = !matches!(status.as_str(), "stopped" | "error" | "handoff");
                     record.updated_at = Utc::now();
+                    if status == "error" {
+                        record.last_error = normalized_detail.clone().or_else(|| {
+                            Some("Native runtime helper reported an error.".to_string())
+                        });
+                    } else if matches!(status.as_str(), "ready" | "processing" | "initializing") {
+                        record.last_error = None;
+                    }
                 })?;
-                if let Some(detail) = detail.filter(|value| !value.trim().is_empty()) {
+                if !applied {
+                    return Ok(());
+                }
+                if let Some(detail) = normalized_detail {
                     self.append_event(
                         runtime_id,
                         SessionEventPayload::Lifecycle {
-                            stage: status,
+                            stage: status.clone(),
                             detail,
                         },
                     )?;
+                }
+                if status == "error" {
+                    let _ = self.kill_child(runtime_id);
                 }
                 Ok(())
             }
@@ -699,24 +756,28 @@ impl NativeRuntimeManager {
             .lock()
             .map_err(|_| "Failed to lock native runtime records".to_string())?
             .get(runtime_id)
-            .map(|record| matches!(record.status.as_str(), "stopped" | "handoff"))
+            .map(|record| matches!(record.status.as_str(), "stopped" | "handoff" | "error"))
             .unwrap_or(false);
 
         if !expected_terminal {
+            let exit_reason = format!(
+                "Native runtime sidecar exited unexpectedly{}.",
+                exit_code
+                    .map(|code| format!(" with code {}", code))
+                    .unwrap_or_default()
+            );
             self.update_record(runtime_id, |record| {
                 record.status = "error".to_string();
                 record.is_active = false;
                 record.updated_at = Utc::now();
+                if record.last_error.is_none() {
+                    record.last_error = Some(exit_reason.clone());
+                }
             })?;
             self.append_event(
                 runtime_id,
                 SessionEventPayload::SessionCompleted {
-                    reason: format!(
-                        "Native runtime sidecar exited unexpectedly{}.",
-                        exit_code
-                            .map(|code| format!(" with code {}", code))
-                            .unwrap_or_default()
-                    ),
+                    reason: exit_reason,
                 },
             )?;
         }
@@ -744,6 +805,7 @@ impl NativeRuntimeManager {
     }
 
     fn append_event(&self, runtime_id: &str, payload: SessionEventPayload) -> Result<(), String> {
+        let last_error = payload_last_error(&payload);
         let handles = self
             .handles
             .lock()
@@ -751,11 +813,17 @@ impl NativeRuntimeManager {
         let Some(handle) = handles.get(runtime_id) else {
             return Ok(());
         };
-        let mut store = handle
-            .events
-            .lock()
-            .map_err(|_| "Failed to lock native session store".to_string())?;
-        store.append(payload);
+        {
+            let mut store = handle
+                .events
+                .lock()
+                .map_err(|_| "Failed to lock native session store".to_string())?;
+            store.append(payload);
+        }
+        drop(handles);
+        if let Some(message) = last_error {
+            self.set_last_error(runtime_id, message)?;
+        }
         Ok(())
     }
 
@@ -765,10 +833,14 @@ impl NativeRuntimeManager {
             .lock()
             .map_err(|_| "Failed to lock native runtime records".to_string())?;
         records.insert(record.runtime_id.clone(), record);
-        persist_native_runtime_state(records.values().cloned().collect())
+        persist_native_runtime_state_to(&self.state_path, records.values().cloned().collect())
     }
 
-    fn insert_handle(&self, runtime_id: String, handle: Arc<NativeSessionHandle>) -> Result<(), String> {
+    fn insert_handle(
+        &self,
+        runtime_id: String,
+        handle: Arc<NativeSessionHandle>,
+    ) -> Result<(), String> {
         self.handles
             .lock()
             .map_err(|_| "Failed to lock native runtime handles".to_string())?
@@ -835,7 +907,14 @@ impl NativeRuntimeManager {
             .records
             .lock()
             .map_err(|_| "Failed to lock native runtime records".to_string())?;
-        persist_native_runtime_state(records.values().cloned().collect())
+        persist_native_runtime_state_to(&self.state_path, records.values().cloned().collect())
+    }
+
+    fn set_last_error(&self, runtime_id: &str, message: String) -> Result<(), String> {
+        self.update_record(runtime_id, |record| {
+            record.last_error = Some(message);
+            record.updated_at = Utc::now();
+        })
     }
 
     fn has_record(&self, runtime_id: &str) -> Result<bool, String> {
@@ -875,8 +954,86 @@ impl NativeRuntimeManager {
                 is_active: record.is_active,
                 last_event_seq: None,
                 can_handoff_to_terminal: record.can_handoff_to_terminal,
+                last_error: record.last_error,
             })
             .ok_or_else(|| format!("Native runtime {} not found", runtime_id))
+    }
+
+    fn flush_helper_output_buffers(
+        &self,
+        runtime_id: &str,
+        stdout_buffer: &mut Vec<u8>,
+        stderr_buffer: &mut Vec<u8>,
+    ) {
+        if let Some(text) = take_remaining_helper_output_line(stdout_buffer) {
+            if let Err(error) = self.process_helper_stdout(runtime_id, &text) {
+                let _ = self.append_event(
+                    runtime_id,
+                    SessionEventPayload::StdErrLine {
+                        line: format!("Failed to process helper output: {}", error),
+                    },
+                );
+            }
+        }
+        if let Some(text) = take_remaining_helper_output_line(stderr_buffer) {
+            let _ = self.append_event(runtime_id, SessionEventPayload::StdErrLine { line: text });
+        }
+    }
+}
+
+fn trim_helper_output_line(bytes: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(bytes)
+        .trim_matches(['\r', '\n'])
+        .trim()
+        .to_string();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+fn drain_helper_output_lines(buffer: &mut Vec<u8>, chunk: &[u8]) -> Vec<String> {
+    buffer.extend_from_slice(chunk);
+    let mut lines = Vec::new();
+    while let Some(index) = buffer.iter().position(|byte| *byte == b'\n') {
+        let line = buffer.drain(..=index).collect::<Vec<_>>();
+        if let Some(text) = trim_helper_output_line(&line) {
+            lines.push(text);
+        }
+    }
+    lines
+}
+
+fn take_remaining_helper_output_line(buffer: &mut Vec<u8>) -> Option<String> {
+    if buffer.is_empty() {
+        return None;
+    }
+    let line = std::mem::take(buffer);
+    trim_helper_output_line(&line)
+}
+
+fn payload_last_error(payload: &SessionEventPayload) -> Option<String> {
+    match payload {
+        SessionEventPayload::StdErrLine { line } => non_empty_error(line),
+        SessionEventPayload::Lifecycle { stage, detail } if stage == "error" => {
+            non_empty_error(detail)
+        }
+        SessionEventPayload::SessionCompleted { reason }
+            if !reason.contains("Stopped from desktop workspace") =>
+        {
+            non_empty_error(reason)
+        }
+        _ => None,
+    }
+}
+
+fn non_empty_error(message: &str) -> Option<String> {
+    let trimmed = message.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
     }
 }
 
@@ -906,11 +1063,14 @@ fn read_native_runtime_state_from(path: &Path) -> io::Result<NativeRuntimeState>
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
-fn persist_native_runtime_state(records: Vec<NativeSessionRecord>) -> Result<(), String> {
-    let path = native_runtime_state_file_path();
+fn persist_native_runtime_state_to(
+    path: &Path,
+    records: Vec<NativeSessionRecord>,
+) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("Failed to create native runtime state directory: {}", error))?;
+        fs::create_dir_all(parent).map_err(|error| {
+            format!("Failed to create native runtime state directory: {}", error)
+        })?;
     }
 
     let state = NativeRuntimeState { sessions: records };
@@ -923,26 +1083,19 @@ fn persist_native_runtime_state(records: Vec<NativeSessionRecord>) -> Result<(),
         .map_err(|error| format!("Failed to finalize native runtime state: {}", error))
 }
 
-fn build_runtime_bootstrap_options(record: &NativeSessionRecord) -> Result<NativeSessionOptions, String> {
-    let (helper_env_vars, terminal_env_vars, codex_base_url, codex_api_key) = match record.provider {
+fn build_runtime_bootstrap_options(
+    record: &NativeSessionRecord,
+) -> Result<NativeSessionOptions, String> {
+    let (helper_env_vars, terminal_env_vars, codex_base_url, codex_api_key) = match record.provider
+    {
         NativeProvider::Claude => {
             let resolved = resolve_claude_env(&record.env_name)?;
-            (
-                resolved.env_vars.clone(),
-                resolved.env_vars,
-                None,
-                None,
-            )
+            (resolved.env_vars.clone(), resolved.env_vars, None, None)
         }
         NativeProvider::Codex => {
             resolve_codex_runtime(&record.env_name)?;
             let proxy_env_vars = resolve_codex_proxy_env();
-            (
-                proxy_env_vars.clone(),
-                proxy_env_vars,
-                None,
-                None,
-            )
+            (proxy_env_vars.clone(), proxy_env_vars, None, None)
         }
     };
 
@@ -960,4 +1113,137 @@ fn build_runtime_bootstrap_options(record: &NativeSessionRecord) -> Result<Nativ
         codex_base_url,
         codex_api_key,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        drain_helper_output_lines, NativeProvider, NativeRuntimeManager, NativeSessionHandle,
+        NativeSessionRecord, NativeTransport,
+    };
+    use crate::event_bus::{SessionEventPayload, SessionStore};
+    use chrono::Utc;
+    use std::collections::HashMap;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, Mutex};
+
+    fn manager_with_handle(runtime_id: &str) -> NativeRuntimeManager {
+        let record = NativeSessionRecord {
+            runtime_id: runtime_id.to_string(),
+            provider: NativeProvider::Claude,
+            transport: NativeTransport::NativeSdk,
+            provider_session_id: None,
+            project_dir: "/tmp/project".to_string(),
+            env_name: "DeepSeek".to_string(),
+            perm_mode: "dev".to_string(),
+            status: "processing".to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            is_active: true,
+            can_handoff_to_terminal: false,
+            last_error: None,
+        };
+        let handle = NativeSessionHandle {
+            record: Mutex::new(record.clone()),
+            child: Mutex::new(None),
+            events: Mutex::new(SessionStore::new(runtime_id)),
+            helper_env_vars: HashMap::new(),
+            terminal_env_vars: HashMap::new(),
+            claude_path: None,
+            codex_path: None,
+            codex_base_url: None,
+            codex_api_key: None,
+            alive: AtomicBool::new(true),
+        };
+        let manager = NativeRuntimeManager {
+            records: Mutex::new(HashMap::from([(runtime_id.to_string(), record)])),
+            handles: Mutex::new(HashMap::from([(runtime_id.to_string(), Arc::new(handle))])),
+            state_path: std::env::temp_dir()
+                .join(format!("ccem-native-runtime-test-{runtime_id}.json")),
+        };
+        manager
+    }
+
+    #[test]
+    fn helper_stdout_accepts_multiple_jsonl_events_in_one_chunk() {
+        let runtime_id = "native-jsonl";
+        let manager = manager_with_handle(runtime_id);
+        let chunk = concat!(
+            r#"{"type":"event","payload":{"type":"stderr_line","line":"first error"}}"#,
+            "\n",
+            r#"{"type":"event","payload":{"type":"session_completed","reason":"done"}}"#,
+            "\n",
+        );
+
+        manager
+            .process_helper_stdout(runtime_id, chunk)
+            .expect("process jsonl chunk");
+
+        let batch = manager
+            .replay_events(runtime_id, None)
+            .expect("replay events");
+
+        assert_eq!(batch.events.len(), 2);
+        assert_eq!(
+            batch.events[0].payload,
+            SessionEventPayload::StdErrLine {
+                line: "first error".to_string(),
+            }
+        );
+        assert_eq!(
+            batch.events[1].payload,
+            SessionEventPayload::SessionCompleted {
+                reason: "done".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn helper_output_buffers_partial_json_until_newline() {
+        let mut buffer = Vec::new();
+        let first = drain_helper_output_lines(&mut buffer, br#"{"type":"status","status":"ready""#);
+        assert!(first.is_empty());
+
+        let second = drain_helper_output_lines(
+            &mut buffer,
+            br#","detail":"ok"}
+{"type":"status","status":"processing","detail":"go"}
+"#,
+        );
+
+        assert_eq!(
+            second,
+            vec![
+                r#"{"type":"status","status":"ready","detail":"ok"}"#.to_string(),
+                r#"{"type":"status","status":"processing","detail":"go"}"#.to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn status_error_keeps_last_error_when_late_processing_arrives() {
+        let runtime_id = "native-status-error";
+        let manager = manager_with_handle(runtime_id);
+
+        manager
+            .process_helper_stdout(
+                runtime_id,
+                r#"{"type":"status","status":"error","detail":"Native CLI binary not found"}"#,
+            )
+            .expect("process error status");
+        manager
+            .process_helper_stdout(
+                runtime_id,
+                r#"{"type":"status","status":"processing","detail":"Claude is processing a turn."}"#,
+            )
+            .expect("ignore late processing");
+
+        let summary = manager.summary_for(runtime_id).expect("summary");
+        assert_eq!(summary.status, "error");
+        assert!(!summary.is_active);
+        assert_eq!(
+            summary.last_error.as_deref(),
+            Some("Native CLI binary not found")
+        );
+    }
 }

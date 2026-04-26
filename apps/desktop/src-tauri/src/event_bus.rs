@@ -90,6 +90,7 @@ pub enum SessionEventPayload {
         message_type: Option<String>,
         raw_json: String,
     },
+    #[serde(rename = "stderr_line", alias = "std_err_line")]
     StdErrLine {
         line: String,
     },
@@ -328,6 +329,27 @@ mod tests {
         let encoded = serde_json::to_string(&payload).expect("serialize");
         let decoded: SessionEventPayload = serde_json::from_str(&encoded).expect("deserialize");
         assert_eq!(decoded, payload);
+    }
+
+    #[test]
+    fn stderr_line_uses_helper_protocol_name_and_accepts_legacy_alias() {
+        let payload = SessionEventPayload::StdErrLine {
+            line: "Native CLI binary not found".to_string(),
+        };
+
+        let encoded = serde_json::to_value(&payload).expect("serialize");
+        assert_eq!(encoded["type"], "stderr_line");
+
+        let decoded: SessionEventPayload =
+            serde_json::from_str(r#"{"type":"std_err_line","line":"legacy"}"#)
+                .expect("deserialize legacy alias");
+
+        assert_eq!(
+            decoded,
+            SessionEventPayload::StdErrLine {
+                line: "legacy".to_string(),
+            }
+        );
     }
 
     #[test]

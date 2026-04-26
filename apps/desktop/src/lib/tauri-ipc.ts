@@ -582,6 +582,7 @@ export interface NativeSessionSummary {
   is_active: boolean;
   last_event_seq?: number | null;
   can_handoff_to_terminal: boolean;
+  last_error?: string | null;
 }
 
 export type ManagedSessionSource =
