@@ -781,17 +781,24 @@ fn extract_claude_project_display_candidate(value: &serde_json::Value) -> Option
 }
 
 fn extract_first_claude_message_text(message: &serde_json::Value) -> Option<&str> {
-    message
-        .get("content")
-        .and_then(|v| v.as_array())
-        .and_then(|blocks| {
-            blocks.iter().find_map(|block| {
-                block
-                    .get("text")
-                    .and_then(|v| v.as_str())
-                    .filter(|text| !text.trim().is_empty())
-            })
-        })
+    let content = message.get("content")?;
+
+    // Format 1: content is an array of content blocks (CLI sessions)
+    //   {content: [{type: "text", text: "hello"}]}
+    if let Some(blocks) = content.as_array() {
+        return blocks.iter().find_map(|block| {
+            block
+                .get("text")
+                .and_then(|v| v.as_str())
+                .filter(|text| !text.trim().is_empty())
+        });
+    }
+
+    // Format 2: content is a plain string (SDK shorthand, used by native runtime)
+    //   {content: "hello"}
+    content
+        .as_str()
+        .filter(|text| !text.trim().is_empty())
 }
 
 fn find_claude_session_file(projects_dir: &PathBuf, session_id: &str) -> Option<PathBuf> {

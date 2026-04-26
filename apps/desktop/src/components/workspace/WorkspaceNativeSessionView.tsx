@@ -175,7 +175,7 @@ const IDLE_POLL_INTERVAL_MS = 700;
 const TERMINAL_POLL_INTERVAL_MS = 1100;
 
 function isTerminalStatus(status: string) {
-  return status === 'stopped' || status === 'error' || status === 'handoff';
+  return status === 'stopped' || status === 'error' || status === 'handoff' || status === 'interrupted';
 }
 
 function parseOccurredAt(occurredAt: string): number | undefined {

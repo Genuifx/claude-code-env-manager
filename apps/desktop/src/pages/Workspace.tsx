@@ -207,7 +207,7 @@ function canRestoreWorkspaceLiveSession(session: NativeSessionSummary): boolean 
     return false;
   }
 
-  return !['stopped', 'error', 'handoff'].includes(session.status);
+  return !['stopped', 'error', 'handoff', 'interrupted'].includes(session.status);
 }
 
 interface WorkspaceProps {
