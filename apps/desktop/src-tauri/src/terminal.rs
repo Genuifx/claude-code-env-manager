@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsStr;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -352,6 +353,106 @@ fn login_shell_paths() -> &'static [PathBuf] {
     })
 }
 
+fn push_unique_path(paths: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>, path: PathBuf) {
+    if !path.as_os_str().is_empty() && seen.insert(path.clone()) {
+        paths.push(path);
+    }
+}
+
+fn nvm_node_bin_paths(home: &std::path::Path) -> Vec<PathBuf> {
+    let versions_dir = home.join(".nvm").join("versions").join("node");
+    let Ok(entries) = fs::read_dir(versions_dir) else {
+        return Vec::new();
+    };
+
+    let mut paths = entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.is_dir() {
+                Some(path.join("bin"))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    paths.sort_by(|left, right| {
+        nvm_node_bin_version(right)
+            .cmp(&nvm_node_bin_version(left))
+            .then_with(|| right.cmp(left))
+    });
+    paths
+}
+
+fn nvm_node_bin_version(path: &std::path::Path) -> Option<(u32, u32, u32)> {
+    path.parent()
+        .and_then(|version_dir| version_dir.file_name())
+        .and_then(|name| name.to_str())
+        .and_then(parse_semver_triplet)
+}
+
+fn common_user_path_candidates() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join("Library").join("pnpm"));
+        paths.push(home.join(".local").join("bin"));
+        paths.push(home.join(".npm-global").join("bin"));
+        paths.push(home.join(".cargo").join("bin"));
+        paths.extend(nvm_node_bin_paths(&home));
+    }
+    paths.extend([
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/opt/homebrew/sbin"),
+        PathBuf::from("/usr/local/bin"),
+        PathBuf::from("/usr/bin"),
+        PathBuf::from("/bin"),
+        PathBuf::from("/usr/sbin"),
+        PathBuf::from("/sbin"),
+    ]);
+    paths
+}
+
+fn build_user_path_from_sources(
+    current_path: Option<&OsStr>,
+    login_paths: &[PathBuf],
+    fallback_paths: &[PathBuf],
+) -> String {
+    let mut paths = Vec::new();
+    let mut seen = HashSet::new();
+
+    for path in login_paths {
+        push_unique_path(&mut paths, &mut seen, path.clone());
+    }
+
+    if let Some(value) = current_path {
+        for path in std::env::split_paths(value) {
+            push_unique_path(&mut paths, &mut seen, path);
+        }
+    }
+
+    for path in fallback_paths {
+        push_unique_path(&mut paths, &mut seen, path.clone());
+    }
+
+    std::env::join_paths(paths)
+        .ok()
+        .and_then(|value| value.into_string().ok())
+        .unwrap_or_default()
+}
+
+/// Resolve the user's full command PATH for macOS GUI-launched app processes.
+///
+/// GUI apps often inherit a minimal PATH, while pnpm/npm CLI wrappers rely on a
+/// discoverable `node` binary. Use the login shell path first, then add common
+/// package manager and system locations as a fallback.
+pub fn get_user_path() -> String {
+    build_user_path_from_sources(
+        std::env::var_os("PATH").as_deref(),
+        login_shell_paths(),
+        &common_user_path_candidates(),
+    )
+}
+
 fn collect_binary_candidates(binary: &str, candidates: &[String]) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut paths = Vec::new();
@@ -405,7 +506,11 @@ fn parse_semver_triplet(output: &str) -> Option<(u32, u32, u32)> {
 }
 
 fn binary_version(path: &str) -> Option<(u32, u32, u32)> {
-    let output = Command::new(path).arg("--version").output().ok()?;
+    let output = Command::new(path)
+        .arg("--version")
+        .env("PATH", get_user_path())
+        .output()
+        .ok()?;
     let text = [
         String::from_utf8_lossy(&output.stdout).to_string(),
         String::from_utf8_lossy(&output.stderr).to_string(),
@@ -1686,6 +1791,45 @@ mod tests {
         );
 
         fs::remove_dir_all(root).expect("remove fake binary directory");
+    }
+
+    #[test]
+    fn nvm_node_bin_paths_prefers_newest_semver_version() {
+        let root = temp_test_root("nvm-node-paths");
+        let node_versions = root.join(".nvm").join("versions").join("node");
+        fs::create_dir_all(node_versions.join("v16.20.2").join("bin"))
+            .expect("create old nvm node");
+        fs::create_dir_all(node_versions.join("v22.18.0").join("bin"))
+            .expect("create new nvm node");
+
+        let paths = nvm_node_bin_paths(&root);
+
+        assert_eq!(
+            paths.first(),
+            Some(&node_versions.join("v22.18.0").join("bin"))
+        );
+
+        fs::remove_dir_all(root).expect("remove fake nvm directory");
+    }
+
+    #[test]
+    fn user_path_prefers_login_shell_and_keeps_fallbacks_deduped() {
+        let login_paths = vec![PathBuf::from("/Users/test/.nvm/versions/node/v22.18.0/bin")];
+        let fallback_paths = vec![
+            PathBuf::from("/Users/test/Library/pnpm"),
+            PathBuf::from("/usr/bin"),
+        ];
+
+        let user_path = build_user_path_from_sources(
+            Some(OsStr::new("/usr/bin:/bin")),
+            &login_paths,
+            &fallback_paths,
+        );
+
+        assert_eq!(
+            user_path,
+            "/Users/test/.nvm/versions/node/v22.18.0/bin:/usr/bin:/bin:/Users/test/Library/pnpm"
+        );
     }
 
     #[test]

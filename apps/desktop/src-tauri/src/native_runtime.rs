@@ -237,6 +237,8 @@ impl NativeRuntimeManager {
         app: AppHandle,
         options: NativeSessionOptions,
     ) -> Result<NativeSessionSummary, String> {
+        let mut options = options;
+        merge_helper_env_path(&mut options.helper_env_vars, &terminal::get_user_path());
         let runtime_id = generate_runtime_id();
         let now = Utc::now();
         let record = NativeSessionRecord {
@@ -1028,6 +1030,35 @@ fn payload_last_error(payload: &SessionEventPayload) -> Option<String> {
     }
 }
 
+fn merge_colon_path_values(primary: &str, secondary: &str) -> String {
+    let mut parts = Vec::new();
+    for value in [primary, secondary] {
+        for part in value
+            .split(':')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+        {
+            if !parts.iter().any(|existing| existing == part) {
+                parts.push(part.to_string());
+            }
+        }
+    }
+    parts.join(":")
+}
+
+fn merge_helper_env_path(env_vars: &mut HashMap<String, String>, user_path: &str) {
+    let user_path = user_path.trim();
+    if user_path.is_empty() {
+        return;
+    }
+
+    let merged = env_vars
+        .get("PATH")
+        .map(|existing| merge_colon_path_values(user_path, existing))
+        .unwrap_or_else(|| user_path.to_string());
+    env_vars.insert("PATH".to_string(), merged);
+}
+
 fn non_empty_error(message: &str) -> Option<String> {
     let trimmed = message.trim();
     if trimmed.is_empty() {
@@ -1086,18 +1117,19 @@ fn persist_native_runtime_state_to(
 fn build_runtime_bootstrap_options(
     record: &NativeSessionRecord,
 ) -> Result<NativeSessionOptions, String> {
-    let (helper_env_vars, terminal_env_vars, codex_base_url, codex_api_key) = match record.provider
-    {
-        NativeProvider::Claude => {
-            let resolved = resolve_claude_env(&record.env_name)?;
-            (resolved.env_vars.clone(), resolved.env_vars, None, None)
-        }
-        NativeProvider::Codex => {
-            resolve_codex_runtime(&record.env_name)?;
-            let proxy_env_vars = resolve_codex_proxy_env();
-            (proxy_env_vars.clone(), proxy_env_vars, None, None)
-        }
-    };
+    let (mut helper_env_vars, terminal_env_vars, codex_base_url, codex_api_key) =
+        match record.provider {
+            NativeProvider::Claude => {
+                let resolved = resolve_claude_env(&record.env_name)?;
+                (resolved.env_vars.clone(), resolved.env_vars, None, None)
+            }
+            NativeProvider::Codex => {
+                resolve_codex_runtime(&record.env_name)?;
+                let proxy_env_vars = resolve_codex_proxy_env();
+                (proxy_env_vars.clone(), proxy_env_vars, None, None)
+            }
+        };
+    merge_helper_env_path(&mut helper_env_vars, &terminal::get_user_path());
 
     Ok(NativeSessionOptions {
         provider: record.provider,
@@ -1118,8 +1150,8 @@ fn build_runtime_bootstrap_options(
 #[cfg(test)]
 mod tests {
     use super::{
-        drain_helper_output_lines, NativeProvider, NativeRuntimeManager, NativeSessionHandle,
-        NativeSessionRecord, NativeTransport,
+        drain_helper_output_lines, merge_helper_env_path, NativeProvider, NativeRuntimeManager,
+        NativeSessionHandle, NativeSessionRecord, NativeTransport,
     };
     use crate::event_bus::{SessionEventPayload, SessionStore};
     use chrono::Utc;
@@ -1244,6 +1276,43 @@ mod tests {
         assert_eq!(
             summary.last_error.as_deref(),
             Some("Native CLI binary not found")
+        );
+    }
+
+    #[test]
+    fn helper_env_path_preserves_api_vars_and_adds_user_path() {
+        let mut env_vars = HashMap::from([(
+            "ANTHROPIC_AUTH_TOKEN".to_string(),
+            "secret-token".to_string(),
+        )]);
+
+        merge_helper_env_path(
+            &mut env_vars,
+            "/Users/test/.nvm/versions/node/v22/bin:/usr/bin",
+        );
+
+        assert_eq!(
+            env_vars.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str),
+            Some("secret-token")
+        );
+        assert_eq!(
+            env_vars.get("PATH").map(String::as_str),
+            Some("/Users/test/.nvm/versions/node/v22/bin:/usr/bin")
+        );
+    }
+
+    #[test]
+    fn helper_env_path_prepends_user_path_to_existing_path() {
+        let mut env_vars = HashMap::from([("PATH".to_string(), "/custom/bin".to_string())]);
+
+        merge_helper_env_path(
+            &mut env_vars,
+            "/Users/test/.nvm/versions/node/v22/bin:/usr/bin",
+        );
+
+        assert_eq!(
+            env_vars.get("PATH").map(String::as_str),
+            Some("/Users/test/.nvm/versions/node/v22/bin:/usr/bin:/custom/bin")
         );
     }
 }
