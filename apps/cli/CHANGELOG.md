@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.24
+
+### Patch Changes
+
+- Fix production desktop native workspace chat handling when helper output arrives as JSONL chunks or reports startup errors.
+
 ## 2.0.0-beta.23
 
 ### Patch Changes
