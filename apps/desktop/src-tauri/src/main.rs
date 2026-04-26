@@ -3063,6 +3063,17 @@ fn main() {
             {
                 eprintln!("Interactive tmux rehydrate warning: {}", error);
             }
+            match interactive_manager_for_setup.cleanup_orphaned_tmux_sessions() {
+                Ok(cleaned) if !cleaned.is_empty() => {
+                    eprintln!(
+                        "Cleaned {} orphaned CCEM tmux target(s): {}",
+                        cleaned.len(),
+                        cleaned.join(", ")
+                    );
+                }
+                Ok(_) => {}
+                Err(error) => eprintln!("Interactive tmux orphan cleanup warning: {}", error),
+            }
 
             proxy_manager_for_setup.set_app_handle(app.handle().clone());
 

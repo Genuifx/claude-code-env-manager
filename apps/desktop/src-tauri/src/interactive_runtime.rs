@@ -229,6 +229,7 @@ impl InteractiveRuntimeManager {
             let window = match self.tmux.get_window_info(&session.id) {
                 Ok(window) => window,
                 Err(error) => {
+                    session_manager.update_session_status(&session.id, "stopped");
                     eprintln!(
                         "Interactive rehydrate skipped for {}: {}",
                         session.id, error
@@ -295,6 +296,19 @@ impl InteractiveRuntimeManager {
 
         self.persist_state_best_effort();
         Ok(())
+    }
+
+    pub fn cleanup_orphaned_tmux_sessions(&self) -> Result<Vec<String>, String> {
+        let active_runtime_ids = self
+            .sessions
+            .lock()
+            .map_err(|_| "Failed to lock interactive session map".to_string())?
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        self.tmux
+            .cleanup_orphaned_managed_sessions(&active_runtime_ids)
     }
 
     pub fn write_input(&self, session_id: &str, data: &str) -> Result<(), String> {
