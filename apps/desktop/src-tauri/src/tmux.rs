@@ -25,6 +25,18 @@ pub struct TmuxWindowInfo {
     pub target: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TmuxLaunchSpec {
+    command: String,
+    environment: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ManagedTmuxTargetAction {
+    KillSession(String),
+    KillWindow(String),
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ClaudeTerminalState {
@@ -74,26 +86,28 @@ impl TmuxManager {
                 working_dir.display()
             )
         })?;
-        let launch_command = build_tmux_launch_command(client, client_args, env_vars);
+        let launch_spec = build_tmux_launch_spec(client, client_args, env_vars);
         let target = format!("{}:{}", session_name, window_name);
+        let mut create_args = vec![
+            "new-session".to_string(),
+            "-d".to_string(),
+            "-P".to_string(),
+            "-F".to_string(),
+            "#{window_index}".to_string(),
+            "-s".to_string(),
+            session_name.clone(),
+            "-n".to_string(),
+            window_name.clone(),
+            "-c".to_string(),
+            working_dir_str.to_string(),
+        ];
+        for entry in &launch_spec.environment {
+            create_args.push("-e".to_string());
+            create_args.push(entry.clone());
+        }
+        create_args.push(launch_spec.command.clone());
 
-        let window_index = match self.run_create_command(
-            &session_name,
-            &[
-                "new-session",
-                "-d",
-                "-P",
-                "-F",
-                "#{window_index}",
-                "-s",
-                &session_name,
-                "-n",
-                &window_name,
-                "-c",
-                working_dir_str,
-                &launch_command,
-            ],
-        ) {
+        let window_index = match self.run_create_command(&session_name, &create_args) {
             Ok(index) => index,
             Err(error) if is_tmux_session_create_race_error(&error) => {
                 self.inspect_target(&target)?.window_index
@@ -172,7 +186,7 @@ impl TmuxManager {
         Ok(())
     }
 
-    fn run_create_command(&self, target_name: &str, args: &[&str]) -> Result<u32, String> {
+    fn run_create_command(&self, target_name: &str, args: &[String]) -> Result<u32, String> {
         let output = tmux_command()?.args(args).output().map_err(|error| {
             format!("Failed to create tmux window '{}': {}", target_name, error)
         })?;
@@ -252,6 +266,35 @@ impl TmuxManager {
             );
         }
         Ok(windows)
+    }
+
+    pub fn cleanup_orphaned_managed_sessions(
+        &self,
+        active_runtime_ids: &[String],
+    ) -> Result<Vec<String>, String> {
+        if Self::check_tmux_installed().is_err() {
+            return Ok(Vec::new());
+        }
+
+        let windows = self.list_sessions()?;
+        let actions =
+            orphaned_managed_tmux_targets(&windows, active_runtime_ids, &self.session_prefix);
+        let mut cleaned = Vec::new();
+
+        for action in actions {
+            match action {
+                ManagedTmuxTargetAction::KillSession(session_name) => {
+                    self.kill_session_target(&session_name)?;
+                    cleaned.push(session_name);
+                }
+                ManagedTmuxTargetAction::KillWindow(target) => {
+                    self.kill_window_target(&target)?;
+                    cleaned.push(target);
+                }
+            }
+        }
+
+        Ok(cleaned)
     }
 
     pub fn get_window_info(&self, runtime_id: &str) -> Result<TmuxWindowInfo, String> {
@@ -435,6 +478,22 @@ impl TmuxManager {
         }
     }
 
+    fn kill_session_target(&self, session_name: &str) -> Result<(), String> {
+        let status = tmux_command()?
+            .args(["kill-session", "-t", session_name])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|error| format!("Failed to kill tmux session {}: {}", session_name, error))?;
+
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("tmux kill-session failed for {}", session_name))
+        }
+    }
+
     fn send_named_key_to_target(&self, target: &str, key: &str) -> Result<(), String> {
         let status = tmux_command()?
             .args(["send-keys", "-t", target, key])
@@ -604,6 +663,48 @@ fn target_candidates_for_runtime(runtime_id: &str, session_prefix: &str) -> Vec<
     targets
 }
 
+fn orphaned_managed_tmux_targets(
+    windows: &[TmuxWindowInfo],
+    active_runtime_ids: &[String],
+    session_prefix: &str,
+) -> Vec<ManagedTmuxTargetAction> {
+    let active_session_names = active_runtime_ids
+        .iter()
+        .map(|runtime_id| session_name_for_runtime(runtime_id, session_prefix))
+        .collect::<HashSet<_>>();
+    let active_targets = active_runtime_ids
+        .iter()
+        .flat_map(|runtime_id| target_candidates_for_runtime(runtime_id, session_prefix))
+        .collect::<HashSet<_>>();
+    let mut seen_dedicated_sessions = HashSet::new();
+    let mut actions = Vec::new();
+
+    for window in windows {
+        if !is_managed_session_name(&window.session_name, session_prefix) {
+            continue;
+        }
+
+        if window.session_name == session_prefix {
+            if !active_targets.contains(&window.target) {
+                actions.push(ManagedTmuxTargetAction::KillWindow(window.target.clone()));
+            }
+            continue;
+        }
+
+        if active_session_names.contains(&window.session_name) {
+            continue;
+        }
+
+        if seen_dedicated_sessions.insert(window.session_name.clone()) {
+            actions.push(ManagedTmuxTargetAction::KillSession(
+                window.session_name.clone(),
+            ));
+        }
+    }
+
+    actions
+}
+
 pub fn detect_state_from_capture(captured: &str) -> ClaudeTerminalState {
     let tail = captured
         .lines()
@@ -700,26 +801,34 @@ fn build_tmux_launch_command(
     client_args: &[String],
     env_vars: &HashMap<String, String>,
 ) -> String {
+    build_tmux_launch_spec(client, client_args, env_vars).command
+}
+
+fn build_tmux_launch_spec(
+    client: &str,
+    client_args: &[String],
+    env_vars: &HashMap<String, String>,
+) -> TmuxLaunchSpec {
     let client_binary = match client {
         "codex" => resolve_codex_path().unwrap_or_else(|| "codex".to_string()),
         "opencode" => resolve_opencode_path().unwrap_or_else(|| "opencode".to_string()),
         _ => resolve_claude_path().unwrap_or_else(|| "claude".to_string()),
     };
-    let mut exports = vec![
-        format!("export PATH={}", shell_quote(get_user_path())),
-        "unset CLAUDECODE".to_string(),
-    ];
+    let mut environment = vec![format!("PATH={}", get_user_path())];
 
     let mut env_entries = env_vars.iter().collect::<Vec<_>>();
     env_entries.sort_by(|left, right| left.0.cmp(right.0));
     for (key, value) in env_entries {
-        exports.push(format!("export {}={}", key, shell_quote(value)));
+        environment.push(format!("{}={}", key, value));
     }
 
     let mut command_parts = vec![shell_quote(&client_binary)];
     command_parts.extend(client_args.iter().map(|arg| shell_quote(arg)));
 
-    format!("{}; exec {}", exports.join("; "), command_parts.join(" "))
+    TmuxLaunchSpec {
+        command: format!("unset CLAUDECODE; exec {}", command_parts.join(" ")),
+        environment,
+    }
 }
 
 fn should_use_paste_buffer(text: &str) -> bool {
@@ -825,11 +934,12 @@ fn is_tmux_session_create_race_error(error: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_status_left_format, build_status_right_format, build_tmux_launch_command,
+        ClaudeTerminalState, ManagedTmuxTargetAction, TmuxWindowInfo, build_status_left_format,
+        build_status_right_format, build_tmux_launch_command, build_tmux_launch_spec,
         compact_model_label, detect_state_from_capture, is_managed_session_name,
         is_missing_tmux_session_error, is_tmux_session_create_race_error, merge_path_entries,
-        session_name_for_runtime, target_candidates_for_runtime, window_name_for_runtime,
-        ClaudeTerminalState,
+        orphaned_managed_tmux_targets, session_name_for_runtime, target_candidates_for_runtime,
+        window_name_for_runtime,
     };
     use std::collections::HashMap;
 
@@ -947,6 +1057,54 @@ mod tests {
         );
         assert!(command.contains("exec "));
         assert!(command.contains("'resume' 'session-123'"));
+    }
+
+    #[test]
+    fn launch_spec_keeps_secret_env_values_out_of_shell_command() {
+        let mut env_vars = HashMap::new();
+        env_vars.insert(
+            "ANTHROPIC_AUTH_TOKEN".to_string(),
+            "sk-ant-secret-value".to_string(),
+        );
+
+        let spec = build_tmux_launch_spec("claude", &[], &env_vars);
+
+        assert!(!spec.command.contains("sk-ant-secret-value"));
+        assert!(!spec.command.contains("ANTHROPIC_AUTH_TOKEN"));
+        assert!(
+            spec.environment
+                .iter()
+                .any(|entry| entry == "ANTHROPIC_AUTH_TOKEN=sk-ant-secret-value")
+        );
+    }
+
+    #[test]
+    fn orphan_detection_marks_untracked_dedicated_sessions_for_cleanup() {
+        let windows = vec![
+            TmuxWindowInfo {
+                session_name: "ccem-session111".to_string(),
+                window_name: "main".to_string(),
+                window_index: 0,
+                pane_pid: Some(101),
+                target: "ccem-session111:main".to_string(),
+            },
+            TmuxWindowInfo {
+                session_name: "ccem-session222".to_string(),
+                window_name: "main".to_string(),
+                window_index: 0,
+                pane_pid: Some(202),
+                target: "ccem-session222:main".to_string(),
+            },
+        ];
+
+        let actions = orphaned_managed_tmux_targets(&windows, &["session-111".to_string()], "ccem");
+
+        assert_eq!(
+            actions,
+            vec![ManagedTmuxTargetAction::KillSession(
+                "ccem-session222".to_string()
+            )]
+        );
     }
 
     #[test]

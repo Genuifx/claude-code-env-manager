@@ -1810,16 +1810,22 @@ mod tests {
     use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;
-    use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn unique_temp_file() -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time before unix epoch")
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("ccem-runtime-tests-{nanos}"));
+        let counter = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "ccem-runtime-tests-{}-{nanos}-{counter}",
+            std::process::id()
+        ));
         let _ = fs::create_dir_all(&dir);
         dir.join("state.json")
     }

@@ -311,8 +311,7 @@ impl SessionManager {
             // Validate each remaining running session
             for session in sessions.iter_mut() {
                 if session.is_tmux_backed() {
-                    let is_alive = session.pid.is_some_and(is_process_alive);
-                    if !is_alive {
+                    if !tmux_session_has_recoverable_target(session) {
                         session.status = "stopped".to_string();
                     }
                     continue;
@@ -356,6 +355,13 @@ fn is_process_alive(pid: u32) -> bool {
     }
 
     std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+fn tmux_session_has_recoverable_target(session: &Session) -> bool {
+    session.pid.is_some_and(is_process_alive)
+        || session
+            .resolved_tmux_target()
+            .is_some_and(|target| !target.trim().is_empty())
 }
 
 #[cfg(windows)]
@@ -527,4 +533,30 @@ fn project_label(working_dir: &str) -> String {
         .filter(|value| !value.trim().is_empty())
         .map(ToString::to_string)
         .unwrap_or_else(|| working_dir.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Session, tmux_session_has_recoverable_target};
+
+    #[test]
+    fn tmux_backed_session_with_target_survives_pidless_startup_reconcile() {
+        let session = Session {
+            id: "session-1777215516640".to_string(),
+            pid: None,
+            client: "claude".to_string(),
+            env_name: "DeepSeek".to_string(),
+            config_source: Some("ccem".to_string()),
+            perm_mode: "dev".to_string(),
+            working_dir: "/tmp/project".to_string(),
+            start_time: "2026-04-26T00:00:00Z".to_string(),
+            status: "running".to_string(),
+            terminal_type: Some("iterm2".to_string()),
+            window_id: Some("54783".to_string()),
+            iterm_session_id: None,
+            tmux_target: Some("ccem-session1777215516640:main".to_string()),
+        };
+
+        assert!(tmux_session_has_recoverable_target(&session));
+    }
 }
