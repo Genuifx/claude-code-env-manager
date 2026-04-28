@@ -27,6 +27,8 @@ dist
 
 .review-state
 
+.artifacts/
+
 .worktrees/
 
 # Rust build artifacts
