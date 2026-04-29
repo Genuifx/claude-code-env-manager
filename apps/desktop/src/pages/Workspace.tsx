@@ -3,24 +3,17 @@ import {
   ChevronDown,
   ExternalLink,
   FolderOpen,
-  Globe,
   MonitorUp,
-  Search,
-  Shield,
-  ShieldAlert,
-  ShieldBan,
-  ShieldCheck,
-  ShieldOff,
   Sparkles,
 } from 'lucide-react';
-import { Claude, Codex, OpenCode } from '@lobehub/icons';
 import { toast } from 'sonner';
 import { shallow } from 'zustand/shallow';
 import { WorkspaceStatusStrip } from '@/components/workspace/WorkspaceStatusStrip';
 import { ProjectTree } from '@/components/workspace/ProjectTree';
 import { WorkspaceNativeSessionView } from '@/components/workspace/WorkspaceNativeSessionView';
 import { WorkspaceSessionComposer } from '@/components/workspace/WorkspaceSessionComposer';
-import { ModelIcon } from '@/components/history/ModelIcon';
+import { ComposerControls } from '@/components/workspace/ComposerControls';
+import type { PermissionModeName } from '@ccem/core/browser';
 import {
   buildComposerPromptPreview,
   buildComposerPromptText,
@@ -28,17 +21,9 @@ import {
 } from '@/components/workspace/composerAttachments';
 import { WorkspaceSkeleton } from '@/components/ui/skeleton-states';
 import { Button } from '@/components/ui/button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-} from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAppStore } from '@/store';
 import type { InstalledSkill, LaunchClient } from '@/store';
-import { PERMISSION_PRESETS } from '@ccem/core/browser';
-import type { PermissionModeName } from '@ccem/core/browser';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import {
   useSessionInterruptedEvent,
@@ -49,7 +34,7 @@ import {
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useLocale } from '@/locales';
 import { scheduleAfterFirstPaint } from '@/lib/idle';
-import { cn, getEnvColorVar, getProjectName } from '@/lib/utils';
+import { cn, getProjectName } from '@/lib/utils';
 import {
   fetchConversationDetail,
   fetchHistorySessions,
@@ -62,62 +47,7 @@ import type {
 } from '@/features/conversations/types';
 import { toSessionKey } from '@/features/conversations/types';
 import { useWorkspaceSessionDecorations } from '@/components/workspace/useWorkspaceSessionDecorations';
-import { resolveEnvironmentIconHint } from '@/components/workspace/sessionTreeIcons';
 import type { NativeSessionSummary } from '@/lib/tauri-ipc';
-
-const MODE_DISPLAY_NAMES: Record<PermissionModeName, string> = {
-  yolo: 'YOLO',
-  dev: 'Developer',
-  readonly: 'Read Only',
-  safe: 'Safe',
-  ci: 'CI / CD',
-  audit: 'Audit',
-};
-
-function getModeIcon(mode: PermissionModeName): typeof Shield {
-  const iconMap: Record<PermissionModeName, typeof Shield> = {
-    yolo: ShieldOff,
-    dev: ShieldCheck,
-    readonly: ShieldBan,
-    safe: ShieldAlert,
-    ci: ShieldCheck,
-    audit: Search,
-  };
-  return iconMap[mode] || Shield;
-}
-
-function ProviderIcon({ client, size = 16 }: { client: string; size?: number }) {
-  if (client === 'codex') return <Codex.Color size={size} />;
-  if (client === 'opencode') return <OpenCode size={size} />;
-  return <Claude.Color size={size} />;
-}
-
-function providerDisplayName(client: string) {
-  if (client === 'codex') return 'Codex';
-  if (client === 'opencode') return 'OpenCode';
-  return 'Claude';
-}
-
-function EnvironmentLobeIcon({
-  hint,
-  size = 14,
-}: {
-  hint?: string;
-  size?: number;
-}) {
-  return <ModelIcon model={hint} size={size} className="shrink-0" disableContrastBg />;
-}
-
-function permissionCopy(t: ReturnType<typeof useLocale>['t'], mode: PermissionModeName) {
-  return {
-    desc: t(`environments.permMode_${mode}_desc`),
-    detail: t(`environments.permMode_${mode}_detail`),
-  };
-}
-
-function isRiskyPermissionMode(mode: PermissionModeName) {
-  return mode === 'yolo';
-}
 
 const LazyHistoryDetail = lazy(async () =>
   import('@/components/workspace/WorkspaceConversationDetail').then((m) => ({
@@ -282,8 +212,8 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
   const [composePlanModeEnabled, setComposePlanModeEnabled] = useState(false);
   const [historyComposerText, setHistoryComposerText] = useState('');
   const [historyPlanModeEnabled, setHistoryPlanModeEnabled] = useState(false);
-  const [permissionSelectOpen, setPermissionSelectOpen] = useState(false);
-  const [permissionPreviewMode, setPermissionPreviewMode] = useState<PermissionModeName>(permissionMode);
+  const [historyEnv, setHistoryEnv] = useState('');
+  const [historyPermMode, setHistoryPermMode] = useState<PermissionModeName>(permissionMode);
   const [composeDir, setComposeDir] = useState<string | null>(selectedWorkingDir || defaultWorkingDir || null);
   const [workspaceInstalledSkills, setWorkspaceInstalledSkills] = useState<InstalledSkill[]>([]);
   const [liveSessionsByRuntimeId, setLiveSessionsByRuntimeId] = useState<
@@ -323,6 +253,8 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
   useEffect(() => {
     setHistoryComposerText('');
     setHistoryPlanModeEnabled(false);
+    setHistoryEnv(selectedSession?.envName || currentEnv || '');
+    setHistoryPermMode(permissionMode);
   }, [selectedKey]);
 
   const upsertLiveSessionEntry = useCallback((
@@ -707,10 +639,6 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     () => Object.fromEntries(environments.map((environment) => [environment.name, environment])),
     [environments]
   );
-  const permissionModes = useMemo(
-    () => Object.keys(PERMISSION_PRESETS) as PermissionModeName[],
-    [],
-  );
 
   const { decorationsBySessionKey } = useWorkspaceSessionDecorations({
     sessions,
@@ -836,15 +764,6 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
 
   const effectiveComposeDir = composeDir || selectedWorkingDir || defaultWorkingDir || null;
   const effectiveComposeDirLabel = effectiveComposeDir ? getProjectName(effectiveComposeDir) : null;
-  const currentEnvironment = currentEnv ? environmentByName[currentEnv] : undefined;
-  const currentEnvironmentIconHint = resolveEnvironmentIconHint(currentEnvironment);
-  const permissionPreview = permissionCopy(t, permissionPreviewMode);
-
-  useEffect(() => {
-    if (!permissionSelectOpen) {
-      setPermissionPreviewMode(permissionMode);
-    }
-  }, [permissionMode, permissionSelectOpen]);
 
   const handleSelect = useCallback(
     async (session: HistorySessionItem) => {
@@ -1011,7 +930,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     const dispatch = resolveComposerDispatch({
       provider,
       prompt,
-      permissionMode,
+      permissionMode: historyPermMode,
       planModeEnabled: historyPlanModeEnabled,
     });
     setIsResumingHistorySession(true);
@@ -1019,7 +938,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     try {
       const summary = await createNativeSession({
         provider,
-        envName: selectedSession.envName ?? currentEnv,
+        envName: historyEnv,
         permMode: dispatch.permMode,
         workingDir: selectedSession.project,
         initialPrompt: dispatch.prompt,
@@ -1049,12 +968,12 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     buildComposerPromptPreview,
     buildComposerPromptText,
     createNativeSession,
-    currentEnv,
+    historyEnv,
+    historyPermMode,
     historyPlanModeEnabled,
     historyComposerText,
     launchOpenCodeWeb,
     messages,
-    permissionMode,
     scheduleWorkspaceRefresh,
     selectedSession,
     setLaunchClient,
@@ -1181,137 +1100,14 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
         planModeEnabled={composePlanModeEnabled}
         onPlanModeEnabledChange={setComposePlanModeEnabled}
         controls={(
-          <>
-            <div className="flex items-center gap-1.5 pr-1 text-[12px] font-medium text-muted-foreground">
-              <ProviderIcon client={composeProvider} size={15} />
-              <span>{providerDisplayName(composeProvider)}</span>
-            </div>
-
-            <Select value={currentEnv} onValueChange={(value) => void switchEnvironment(value)}>
-              <SelectTrigger variant="plain" className="h-8 w-auto min-w-[144px] rounded-xl px-2.5 text-[12px] text-foreground">
-                <span className="flex min-w-0 items-center gap-2">
-                  <EnvironmentLobeIcon hint={currentEnvironmentIconHint} />
-                  <span className="truncate">{currentEnv}</span>
-                </span>
-              </SelectTrigger>
-              <SelectContent align="start">
-                {environments.map((environment) => (
-                  <SelectItem key={environment.name} value={environment.name}>
-                    <span className="flex items-center gap-2">
-                      <EnvironmentLobeIcon
-                        hint={resolveEnvironmentIconHint(environment)}
-                        size={13}
-                      />
-                      <span>{environment.name}</span>
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select
-              value={permissionMode}
-              open={permissionSelectOpen}
-              onOpenChange={(open) => {
-                setPermissionSelectOpen(open);
-                if (open) {
-                  setPermissionPreviewMode(permissionMode);
-                }
-              }}
-              onValueChange={(value) => {
-                const mode = value as PermissionModeName;
-                setPermissionMode(mode);
-                setPermissionPreviewMode(mode);
-              }}
-            >
-              <SelectTrigger
-                variant="plain"
-                className={cn(
-                  'h-8 w-auto min-w-[146px] rounded-xl px-2.5 text-[12px] text-foreground',
-                  isRiskyPermissionMode(permissionMode) && 'text-destructive',
-                )}
-              >
-                {(() => {
-                  const ModeIcon = getModeIcon(permissionMode);
-                  return (
-                    <span className="flex min-w-0 items-center gap-2">
-                      <ModeIcon
-                        className={cn(
-                          'h-3.5 w-3.5 shrink-0 text-muted-foreground',
-                          isRiskyPermissionMode(permissionMode) && 'text-destructive',
-                        )}
-                      />
-                      <span className="truncate">{MODE_DISPLAY_NAMES[permissionMode]}</span>
-                    </span>
-                  );
-                })()}
-              </SelectTrigger>
-              <SelectContent
-                align="start"
-                className="overflow-visible"
-                viewportClassName="w-auto min-w-0 p-0"
-              >
-                <div className="flex items-stretch gap-3 p-1.5">
-                  <div className="min-w-[220px]">
-                    {permissionModes.map((mode) => (
-                      <SelectItem
-                        key={mode}
-                        value={mode}
-                        className={cn(
-                          'min-w-[220px]',
-                          isRiskyPermissionMode(mode) && 'text-destructive focus:text-destructive',
-                        )}
-                        onFocus={() => setPermissionPreviewMode(mode)}
-                        onPointerMove={() => setPermissionPreviewMode(mode)}
-                      >
-                        {MODE_DISPLAY_NAMES[mode]}
-                      </SelectItem>
-                    ))}
-                  </div>
-                  <div className="w-px self-stretch bg-white/[0.08]" />
-                  <div className="flex w-[248px] flex-col justify-center px-3 py-2 text-left">
-                    <div
-                      className={cn(
-                        'flex items-center gap-2 text-foreground',
-                        isRiskyPermissionMode(permissionPreviewMode) && 'text-destructive',
-                      )}
-                    >
-                      {(() => {
-                        const ModeIcon = getModeIcon(permissionPreviewMode);
-                        return (
-                          <ModeIcon
-                            className={cn(
-                              'h-4 w-4 shrink-0 text-muted-foreground',
-                              isRiskyPermissionMode(permissionPreviewMode) && 'text-destructive',
-                            )}
-                          />
-                        );
-                      })()}
-                      <span className="text-[15px] font-semibold">
-                        {MODE_DISPLAY_NAMES[permissionPreviewMode]}
-                      </span>
-                    </div>
-                    <p
-                      className={cn(
-                        'mt-3 text-[12px] font-medium leading-5 text-foreground/88',
-                        isRiskyPermissionMode(permissionPreviewMode) && 'text-destructive/90',
-                      )}
-                    >
-                      {permissionPreview.desc}
-                    </p>
-                    <p
-                      className={cn(
-                        'mt-2 text-[11px] leading-5 text-muted-foreground',
-                        isRiskyPermissionMode(permissionPreviewMode) && 'text-destructive/75',
-                      )}
-                    >
-                      {permissionPreview.detail}
-                    </p>
-                  </div>
-                </div>
-              </SelectContent>
-            </Select>
-          </>
+          <ComposerControls
+            provider={composeProvider}
+            envName={currentEnv}
+            permMode={permissionMode}
+            environments={environments}
+            onEnvChange={(value) => void switchEnvironment(value)}
+            onPermModeChange={setPermissionMode}
+          />
         )}
       />
     </div>
@@ -1323,9 +1119,6 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     }
 
     const historyProvider = selectedSession.source === 'codex' ? 'codex' : 'claude';
-    const historyEnvName = selectedSession.envName || currentEnv || '';
-    const historyEnvColor = getEnvColorVar(historyEnvName || currentEnv);
-    const HistoryModeIcon = getModeIcon(permissionMode);
 
     return (
       <div className="flex h-full min-h-0 flex-col">
@@ -1363,29 +1156,14 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
           onPlanModeEnabledChange={selectedHistorySupportsInline ? setHistoryPlanModeEnabled : undefined}
           planModeAvailable={selectedHistorySupportsInline}
           controls={(
-            <>
-              <div className="flex items-center gap-1.5 pr-1 text-[12px] font-medium text-muted-foreground">
-                <ProviderIcon client={historyProvider} size={15} />
-                <span>{providerDisplayName(historyProvider)}</span>
-              </div>
-
-              {historyEnvName ? (
-                <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
-                  <Globe className="h-3.5 w-3.5" style={{ color: historyEnvColor }} />
-                  <span>{historyEnvName}</span>
-                </div>
-              ) : null}
-
-              <div
-                className={cn(
-                  'flex items-center gap-1.5 text-[12px] text-muted-foreground',
-                  isRiskyPermissionMode(permissionMode) && 'text-destructive',
-                )}
-              >
-                <HistoryModeIcon className="h-3.5 w-3.5" />
-                <span>{MODE_DISPLAY_NAMES[permissionMode]}</span>
-              </div>
-            </>
+            <ComposerControls
+              provider={historyProvider}
+              envName={historyEnv}
+              permMode={historyPermMode}
+              environments={environments}
+              onEnvChange={setHistoryEnv}
+              onPermModeChange={setHistoryPermMode}
+            />
           )}
           secondaryActions={selectedHistorySupportsInline ? (
             <TooltipProvider>
@@ -1401,7 +1179,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
                         selectedSession.project || undefined,
                         selectedSession.id,
                         historyProvider as LaunchClient,
-                        selectedSession.envName ?? currentEnv,
+                        historyEnv,
                       )
                         .then(() => toast.success(t('workspace.nativeHandoffDone')))
                         .catch(() => toast.error(t('workspace.nativeHandoffFailed')));

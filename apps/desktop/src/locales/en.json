@@ -152,6 +152,7 @@
     "nativeEmptyHint": "Send a prompt and the native runtime will stream here.",
     "nativeSendFailed": "Failed to send message",
     "nativePermissionFailed": "Failed to handle permission request",
+    "nativeSettingsFailed": "Failed to update session settings",
     "nativeStop": "Stop",
     "nativeStopFailed": "Failed to stop native session",
     "nativeOpenTerminal": "Continue in Terminal",

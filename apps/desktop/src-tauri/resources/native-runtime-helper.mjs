@@ -16087,6 +16087,7 @@ var claudeSawPartialThinking = false;
 var claudeTurnCompletionEmitted = false;
 var codexClient = null;
 var codexThread = null;
+var pendingSettings = null;
 var promptQueue = [];
 var pendingPermissions = /* @__PURE__ */ new Map();
 var pendingClaudeInteractivePrompts = /* @__PURE__ */ new Map();
@@ -16531,6 +16532,53 @@ function handleClaudePartialEvent(rawEvent) {
     });
   }
 }
+function applySettingsToInitCommand(settings) {
+  if (!initCommand) return false;
+  if (settings.permMode !== void 0) initCommand.perm_mode = settings.permMode;
+  if (settings.envVars !== void 0) initCommand.env_vars = settings.envVars;
+  if (settings.envName !== void 0) initCommand.env_name = settings.envName;
+  return true;
+}
+function applyPendingSettingsToInitCommand() {
+  if (!pendingSettings) return false;
+  const settings = pendingSettings;
+  pendingSettings = null;
+  return applySettingsToInitCommand(settings);
+}
+function applySettingsCommand(command) {
+  return applySettingsToInitCommand({
+    envName: command.env_name,
+    permMode: command.perm_mode,
+    envVars: command.env_vars
+  });
+}
+function queuePendingSettings(command) {
+  pendingSettings = {
+    ...pendingSettings,
+    ...command.env_name !== void 0 ? { envName: command.env_name } : {},
+    ...command.perm_mode !== void 0 ? { permMode: command.perm_mode } : {},
+    ...command.env_vars !== void 0 ? { envVars: command.env_vars } : {}
+  };
+}
+function canApplySettingsImmediately() {
+  if (!initCommand) return false;
+  if (initCommand.provider === "codex") {
+    return !activeTurn;
+  }
+  return claudeLastSessionState === "idle" || !claudeConsumeLoop;
+}
+function teardownClaudeSession() {
+  claudeInputQueue?.close();
+  currentClaudeQuery?.close();
+  claudeInputQueue = null;
+  currentClaudeQuery = null;
+  claudeConsumeLoop = null;
+  resetClaudeTurnTracking();
+}
+function teardownCodexSession(envChanged) {
+  codexThread = null;
+  if (envChanged) codexClient = null;
+}
 async function consumeClaudeMessages() {
   if (!initCommand) {
     throw new Error("Native runtime helper not initialized");
@@ -16675,6 +16723,12 @@ async function consumeClaudeMessages() {
         }
       }
       claudeLastSessionState = message.state;
+      if (message.state === "idle" && pendingSettings) {
+        applyPendingSettingsToInitCommand();
+        teardownClaudeSession();
+        emitStatus("ready", "Settings applied.");
+        return;
+      }
       continue;
     }
     if (message.type === "result") {
@@ -16944,6 +16998,12 @@ async function runQueuedTurns() {
   } finally {
     activeTurn = false;
     currentAbortController = null;
+    if (pendingSettings) {
+      const hadEnvVars = pendingSettings.envVars !== void 0;
+      applyPendingSettingsToInitCommand();
+      teardownCodexSession(hadEnvVars);
+      emitStatus("ready", "Settings applied.");
+    }
     if (!stopped) {
       void runQueuedTurns();
     }
@@ -17010,6 +17070,23 @@ async function handleCommand(command) {
         command.tool_use_id
       )
     );
+    return;
+  }
+  if (command.type === "update_settings") {
+    if (!initCommand) return;
+    if (canApplySettingsImmediately()) {
+      applySettingsCommand(command);
+      if (initCommand.provider === "claude" && claudeConsumeLoop) {
+        teardownClaudeSession();
+      }
+      if (initCommand.provider === "codex") {
+        teardownCodexSession(command.env_vars !== void 0);
+      }
+      emitStatus("ready", "Settings applied.");
+    } else {
+      queuePendingSettings(command);
+      emitStatus("processing", "Settings will apply after the current turn.");
+    }
     return;
   }
   if (command.type === "prompt") {

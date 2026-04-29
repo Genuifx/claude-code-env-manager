@@ -288,6 +288,14 @@ export interface TauriCommands {
     },
     void
   ];
+  update_native_session_settings: [
+    {
+      runtimeId: string;
+      envName?: string | null;
+      permMode?: string | null;
+    },
+    void
+  ];
   handoff_native_session_to_terminal: [
     {
       runtimeId: string;

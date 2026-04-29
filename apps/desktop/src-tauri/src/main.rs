@@ -1100,6 +1100,46 @@ fn get_native_session_events(
 }
 
 #[tauri::command]
+fn update_native_session_settings(
+    app: tauri::AppHandle,
+    native_state: State<'_, Arc<NativeRuntimeManager>>,
+    runtime_id: String,
+    env_name: Option<String>,
+    perm_mode: Option<String>,
+) -> Result<(), String> {
+    let current = native_state
+        .list_sessions()
+        .into_iter()
+        .find(|session| session.runtime_id == runtime_id)
+        .ok_or_else(|| format!("Native runtime {} not found", runtime_id))?;
+    let (resolved_env_name, env_vars) = match env_name.as_deref() {
+        Some(name) if !name.trim().is_empty() => match current.provider {
+            NativeProvider::Claude => {
+                let resolved = resolve_claude_env(name)?;
+                (Some(resolved.env_name), Some(resolved.env_vars))
+            }
+            NativeProvider::Codex => {
+                let resolved = resolve_codex_runtime(name)?;
+                let resolved_name = if resolved.env_name.is_empty() {
+                    name.to_string()
+                } else {
+                    resolved.env_name
+                };
+                (Some(resolved_name), Some(system_proxy::resolve_codex_proxy_env()))
+            }
+        }
+        _ => (None, None),
+    };
+    native_state.update_session_settings(
+        &app,
+        &runtime_id,
+        resolved_env_name.as_deref(),
+        perm_mode.as_deref(),
+        env_vars.as_ref(),
+    )
+}
+
+#[tauri::command]
 fn stop_native_session(
     native_state: State<'_, Arc<NativeRuntimeManager>>,
     runtime_id: String,
@@ -2935,6 +2975,7 @@ fn main() {
             respond_native_session_permission,
             respond_native_session_prompt,
             get_native_session_events,
+            update_native_session_settings,
             stop_native_session,
             handoff_native_session_to_terminal,
             launch_opencode_web,

@@ -144,6 +144,14 @@ enum HelperInputCommand<'a> {
         #[serde(skip_serializing_if = "Option::is_none")]
         annotations: Option<&'a HashMap<String, InteractivePromptAnnotation>>,
     },
+    UpdateSettings {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        env_name: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        perm_mode: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        env_vars: Option<&'a HashMap<String, String>>,
+    },
     Stop,
 }
 
@@ -409,6 +417,35 @@ impl NativeRuntimeManager {
                 annotations,
             },
         )
+    }
+
+    pub fn update_session_settings(
+        self: &Arc<Self>,
+        app: &AppHandle,
+        runtime_id: &str,
+        env_name: Option<&str>,
+        perm_mode: Option<&str>,
+        env_vars: Option<&HashMap<String, String>>,
+    ) -> Result<(), String> {
+        let handle = self.ensure_handle(app.clone(), runtime_id)?;
+        self.write_to_child(
+            &handle,
+            &HelperInputCommand::UpdateSettings {
+                env_name,
+                perm_mode,
+                env_vars,
+            },
+        )?;
+        self.update_record(runtime_id, |record| {
+            if let Some(name) = env_name {
+                record.env_name = name.to_string();
+            }
+            if let Some(mode) = perm_mode {
+                record.perm_mode = mode.to_string();
+            }
+            record.updated_at = Utc::now();
+        })?;
+        Ok(())
     }
 
     pub fn stop_session(&self, runtime_id: &str) -> Result<(), String> {

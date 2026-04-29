@@ -152,6 +152,7 @@
     "nativeEmptyHint": "发一条消息，原生 runtime 会在这里持续流式输出。",
     "nativeSendFailed": "发送消息失败",
     "nativePermissionFailed": "处理权限请求失败",
+    "nativeSettingsFailed": "更新会话设置失败",
     "nativeStop": "停止",
     "nativeStopFailed": "停止原生会话失败",
     "nativeOpenTerminal": "切到 Terminal 继续",

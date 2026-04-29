@@ -3,22 +3,15 @@ import {
   Bot,
   Check,
   ClipboardList,
-  Globe,
   Layers3,
   LoaderCircle,
   MessageSquareQuote,
   MonitorUp,
-  Shield,
   ShieldAlert,
-  ShieldBan,
-  ShieldCheck,
-  ShieldOff,
-  Search,
   Square,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Claude, Codex, OpenCode } from '@lobehub/icons';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
@@ -46,43 +39,11 @@ import {
 } from './composerAttachments';
 import { WorkspaceTranscriptList } from './WorkspaceTranscriptList';
 import { WorkspaceSessionComposer } from './WorkspaceSessionComposer';
-
-const MODE_DISPLAY_NAMES: Record<PermissionModeName, string> = {
-  yolo: 'YOLO',
-  dev: 'Developer',
-  readonly: 'Read Only',
-  safe: 'Safe',
-  ci: 'CI / CD',
-  audit: 'Audit',
-};
-
-function getModeIcon(mode: PermissionModeName): typeof Shield {
-  const iconMap: Record<PermissionModeName, typeof Shield> = {
-    yolo: ShieldOff,
-    dev: ShieldCheck,
-    readonly: ShieldBan,
-    safe: ShieldAlert,
-    ci: ShieldCheck,
-    audit: Search,
-  };
-  return iconMap[mode] || Shield;
-}
-
-function LiveProviderIcon({ provider, size = 16 }: { provider: string; size?: number }) {
-  if (provider === 'codex') return <Codex.Color size={size} />;
-  if (provider === 'opencode') return <OpenCode size={size} />;
-  return <Claude.Color size={size} />;
-}
-
-function providerDisplayName(provider: string) {
-  if (provider === 'codex') return 'Codex';
-  if (provider === 'opencode') return 'OpenCode';
-  return 'Claude';
-}
-
-function isRiskyPermissionMode(mode: PermissionModeName) {
-  return mode === 'yolo';
-}
+import {
+  ComposerControls,
+  normalizePermissionModeName,
+  providerDisplayName,
+} from './ComposerControls';
 
 function ProcessingActionIcon({ stopping = false }: { stopping?: boolean }) {
   return (
@@ -1221,17 +1182,21 @@ export function WorkspaceNativeSessionView({
   onStartNew,
 }: WorkspaceNativeSessionViewProps) {
   const { t } = useLocale();
-  const permissionMode = useAppStore((state) => state.permissionMode);
+  const environments = useAppStore((state) => state.environments);
   const {
     getNativeSessionEvents,
     sendNativeSessionInput,
     respondNativeSessionPermission,
     respondNativeSessionPrompt,
     stopNativeSession,
+    updateNativeSessionSettings,
     handoffNativeSessionToTerminal,
     listNativeSessions,
     searchWorkspaceFiles,
   } = useTauriCommands();
+  const [sessionEnv, setSessionEnv] = useState(session.env_name);
+  const [sessionRuntimePermMode, setSessionRuntimePermMode] = useState(session.perm_mode);
+  const sessionPermMode = normalizePermissionModeName(sessionRuntimePermMode);
   const [composerText, setComposerText] = useState('');
   const [composerPlanModeEnabled, setComposerPlanModeEnabled] = useState(session.perm_mode === 'plan');
   const [events, setEvents] = useState<SessionEventRecord[]>([]);
@@ -1271,6 +1236,11 @@ export function WorkspaceNativeSessionView({
     setQueuedMessages([]);
     setLocalUserPrompts(initialPrompts);
   }, [initialPrompt, seedMessages, session.perm_mode, session.runtime_id]);
+
+  useEffect(() => {
+    setSessionEnv(session.env_name);
+    setSessionRuntimePermMode(session.perm_mode);
+  }, [session.env_name, session.perm_mode, session.runtime_id]);
 
   const messages = useMemo(
     () => buildMessagesFromEvents(
@@ -1414,7 +1384,7 @@ export function WorkspaceNativeSessionView({
         : `/plan ${trimmedText}`;
     }
 
-    if (session.perm_mode === 'plan') {
+    if (sessionRuntimePermMode === 'plan') {
       return trimmedText;
     }
 
@@ -1424,7 +1394,7 @@ export function WorkspaceNativeSessionView({
       '',
       trimmedText,
     ].join('\n');
-  }, [session.perm_mode, session.provider]);
+  }, [session.provider, sessionRuntimePermMode]);
 
   const buildQueuedBatchText = useCallback((items: Array<{ text: string; planMode: boolean; attachments: ComposerAttachment[] }>) => {
     if (items.length === 1) {
@@ -1526,7 +1496,7 @@ export function WorkspaceNativeSessionView({
     setLocalUserPrompts((previous) => [...previous, promptEntry]);
     if (payload.kind === 'text') {
       setComposerText('');
-      setComposerPlanModeEnabled(session.perm_mode === 'plan');
+      setComposerPlanModeEnabled(sessionRuntimePermMode === 'plan');
     }
 
     try {
@@ -1558,10 +1528,36 @@ export function WorkspaceNativeSessionView({
     refreshSummary,
     respondNativeSessionPrompt,
     sendNativeSessionInput,
-    session.perm_mode,
+    sessionRuntimePermMode,
     session.runtime_id,
     t,
   ]);
+
+  const handleEnvChange = useCallback((envName: string) => {
+    const previousEnv = sessionEnv;
+    setSessionEnv(envName);
+    void updateNativeSessionSettings(session.runtime_id, envName, undefined)
+      .then(refreshSummary)
+      .catch((error) => {
+        console.error('Failed to update native session environment:', error);
+        setSessionEnv(previousEnv);
+        toast.error(t('workspace.nativeSettingsFailed'));
+      });
+  }, [refreshSummary, session.runtime_id, sessionEnv, t, updateNativeSessionSettings]);
+
+  const handlePermModeChange = useCallback((mode: PermissionModeName) => {
+    const previousMode = sessionRuntimePermMode;
+    setSessionRuntimePermMode(mode);
+    setComposerPlanModeEnabled(false);
+    void updateNativeSessionSettings(session.runtime_id, undefined, mode)
+      .then(refreshSummary)
+      .catch((error) => {
+        console.error('Failed to update native session permission mode:', error);
+        setSessionRuntimePermMode(previousMode);
+        setComposerPlanModeEnabled(previousMode === 'plan');
+        toast.error(t('workspace.nativeSettingsFailed'));
+      });
+  }, [refreshSummary, session.runtime_id, sessionRuntimePermMode, t, updateNativeSessionSettings]);
 
   const handleSend = useCallback(async (payload?: ComposerSubmitPayload) => {
     const text = payload?.text ?? composerText.trim();
@@ -1577,7 +1573,7 @@ export function WorkspaceNativeSessionView({
       attachments,
     };
     setComposerText('');
-    setComposerPlanModeEnabled(session.perm_mode === 'plan');
+    setComposerPlanModeEnabled(sessionRuntimePermMode === 'plan');
 
     if (hasQuickReplyPrompt && !isProcessingTurn && !hasHardBlockingAttention) {
       return sendInteractivePromptReply({
@@ -1607,7 +1603,7 @@ export function WorkspaceNativeSessionView({
     isProcessingTurn,
     sendPromptBatch,
     sendInteractivePromptReply,
-    session.perm_mode,
+    sessionRuntimePermMode,
     t,
   ]);
 
@@ -1747,7 +1743,7 @@ export function WorkspaceNativeSessionView({
         searchWorkspaceFiles={searchWorkspaceFiles}
         planModeEnabled={composerPlanModeEnabled}
         onPlanModeEnabledChange={setComposerPlanModeEnabled}
-        planModeHint={session.provider === 'claude' && session.perm_mode === 'plan'
+        planModeHint={session.provider === 'claude' && sessionRuntimePermMode === 'plan'
           ? t('workspace.composerPlanModeHintClaudeLocked')
           : undefined}
         queuedMessages={queuedMessages}
@@ -1770,32 +1766,16 @@ export function WorkspaceNativeSessionView({
             }}
           />
         ) : null}
-        controls={(() => {
-          const ModeIcon = getModeIcon(permissionMode);
-          return (
-            <>
-              <div className="flex items-center gap-1.5 pr-1 text-[12px] font-medium text-muted-foreground">
-                <LiveProviderIcon provider={session.provider} size={15} />
-                <span>{providerDisplayName(session.provider)}</span>
-              </div>
-
-              <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
-                <Globe className="h-3.5 w-3.5" />
-                <span>{session.env_name}</span>
-              </div>
-
-              <div
-                className={cn(
-                  'flex items-center gap-1.5 text-[12px] text-muted-foreground',
-                  isRiskyPermissionMode(permissionMode) && 'text-destructive',
-                )}
-              >
-                <ModeIcon className="h-3.5 w-3.5" />
-                <span>{MODE_DISPLAY_NAMES[permissionMode]}</span>
-              </div>
-            </>
-          );
-        })()}
+        controls={(
+          <ComposerControls
+            provider={session.provider}
+            envName={sessionEnv}
+            permMode={sessionPermMode}
+            environments={environments}
+            onEnvChange={handleEnvChange}
+            onPermModeChange={handlePermModeChange}
+          />
+        )}
         secondaryActions={(
           <>
             {!isTerminalStatus(session.status) ? (

@@ -42,6 +42,19 @@ type PermissionResponseCommand = {
   approved: boolean;
 };
 
+type UpdateSettingsCommand = {
+  type: 'update_settings';
+  env_name?: string;
+  perm_mode?: string;
+  env_vars?: Record<string, string>;
+};
+
+type RuntimeSettingsPatch = {
+  envName?: string;
+  permMode?: string;
+  envVars?: Record<string, string>;
+};
+
 type StopCommand = {
   type: 'stop';
 };
@@ -51,6 +64,7 @@ type InputCommand =
   | PromptCommand
   | InteractivePromptResponseCommand
   | PermissionResponseCommand
+  | UpdateSettingsCommand
   | StopCommand;
 
 type HelperOutput =
@@ -99,6 +113,7 @@ let claudeSawPartialThinking = false;
 let claudeTurnCompletionEmitted = false;
 let codexClient: Codex | null = null;
 let codexThread: any = null;
+let pendingSettings: RuntimeSettingsPatch | null = null;
 const promptQueue: string[] = [];
 const pendingPermissions = new Map<string, PermissionResolver>();
 const pendingClaudeInteractivePrompts = new Map<string, ClaudeInteractivePromptResolver>();
@@ -746,6 +761,60 @@ function handleClaudePartialEvent(rawEvent: Record<string, unknown>) {
   }
 }
 
+function applySettingsToInitCommand(settings: RuntimeSettingsPatch) {
+  if (!initCommand) return false;
+  if (settings.permMode !== undefined) initCommand.perm_mode = settings.permMode;
+  if (settings.envVars !== undefined) initCommand.env_vars = settings.envVars;
+  if (settings.envName !== undefined) initCommand.env_name = settings.envName;
+  return true;
+}
+
+function applyPendingSettingsToInitCommand() {
+  if (!pendingSettings) return false;
+  const settings = pendingSettings;
+  pendingSettings = null;
+  return applySettingsToInitCommand(settings);
+}
+
+function applySettingsCommand(command: UpdateSettingsCommand) {
+  return applySettingsToInitCommand({
+    envName: command.env_name,
+    permMode: command.perm_mode,
+    envVars: command.env_vars,
+  });
+}
+
+function queuePendingSettings(command: UpdateSettingsCommand) {
+  pendingSettings = {
+    ...pendingSettings,
+    ...(command.env_name !== undefined ? { envName: command.env_name } : {}),
+    ...(command.perm_mode !== undefined ? { permMode: command.perm_mode } : {}),
+    ...(command.env_vars !== undefined ? { envVars: command.env_vars } : {}),
+  };
+}
+
+function canApplySettingsImmediately() {
+  if (!initCommand) return false;
+  if (initCommand.provider === 'codex') {
+    return !activeTurn;
+  }
+  return claudeLastSessionState === 'idle' || !claudeConsumeLoop;
+}
+
+function teardownClaudeSession() {
+  claudeInputQueue?.close();
+  currentClaudeQuery?.close();
+  claudeInputQueue = null;
+  currentClaudeQuery = null;
+  claudeConsumeLoop = null;
+  resetClaudeTurnTracking();
+}
+
+function teardownCodexSession(envChanged: boolean) {
+  codexThread = null;
+  if (envChanged) codexClient = null;
+}
+
 async function consumeClaudeMessages() {
   if (!initCommand) {
     throw new Error('Native runtime helper not initialized');
@@ -912,6 +981,13 @@ async function consumeClaudeMessages() {
       }
 
       claudeLastSessionState = message.state;
+
+      if (message.state === 'idle' && pendingSettings) {
+        applyPendingSettingsToInitCommand();
+        teardownClaudeSession();
+        emitStatus('ready', 'Settings applied.');
+        return;
+      }
       continue;
     }
 
@@ -1215,6 +1291,12 @@ async function runQueuedTurns() {
   } finally {
     activeTurn = false;
     currentAbortController = null;
+    if (pendingSettings) {
+      const hadEnvVars = pendingSettings.envVars !== undefined;
+      applyPendingSettingsToInitCommand();
+      teardownCodexSession(hadEnvVars);
+      emitStatus('ready', 'Settings applied.');
+    }
     if (!stopped) {
       void runQueuedTurns();
     }
@@ -1288,6 +1370,25 @@ async function handleCommand(command: InputCommand) {
         command.tool_use_id,
       ),
     );
+    return;
+  }
+
+  if (command.type === 'update_settings') {
+    if (!initCommand) return;
+
+    if (canApplySettingsImmediately()) {
+      applySettingsCommand(command);
+      if (initCommand.provider === 'claude' && claudeConsumeLoop) {
+        teardownClaudeSession();
+      }
+      if (initCommand.provider === 'codex') {
+        teardownCodexSession(command.env_vars !== undefined);
+      }
+      emitStatus('ready', 'Settings applied.');
+    } else {
+      queuePendingSettings(command);
+      emitStatus('processing', 'Settings will apply after the current turn.');
+    }
     return;
   }
 
