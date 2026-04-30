@@ -18,6 +18,7 @@ type InitCommand = {
   codex_path?: string | null;
   codex_base_url?: string | null;
   codex_api_key?: string | null;
+  effort?: string | null;
 };
 
 type PromptCommand = {
@@ -47,12 +48,14 @@ type UpdateSettingsCommand = {
   env_name?: string;
   perm_mode?: string;
   env_vars?: Record<string, string>;
+  effort?: string;
 };
 
 type RuntimeSettingsPatch = {
   envName?: string;
   permMode?: string;
   envVars?: Record<string, string>;
+  effort?: string;
 };
 
 type StopCommand = {
@@ -766,6 +769,7 @@ function applySettingsToInitCommand(settings: RuntimeSettingsPatch) {
   if (settings.permMode !== undefined) initCommand.perm_mode = settings.permMode;
   if (settings.envVars !== undefined) initCommand.env_vars = settings.envVars;
   if (settings.envName !== undefined) initCommand.env_name = settings.envName;
+  if (settings.effort !== undefined) initCommand.effort = settings.effort || undefined;
   return true;
 }
 
@@ -781,6 +785,7 @@ function applySettingsCommand(command: UpdateSettingsCommand) {
     envName: command.env_name,
     permMode: command.perm_mode,
     envVars: command.env_vars,
+    effort: command.effort,
   });
 }
 
@@ -790,6 +795,7 @@ function queuePendingSettings(command: UpdateSettingsCommand) {
     ...(command.env_name !== undefined ? { envName: command.env_name } : {}),
     ...(command.perm_mode !== undefined ? { permMode: command.perm_mode } : {}),
     ...(command.env_vars !== undefined ? { envVars: command.env_vars } : {}),
+    ...(command.effort !== undefined ? { effort: command.effort } : {}),
   };
 }
 
@@ -825,6 +831,7 @@ async function consumeClaudeMessages() {
     ...process.env,
     ...initCommand.env_vars,
     CLAUDE_AGENT_SDK_CLIENT_APP: 'ccem-desktop',
+    ...(initCommand.effort ? { CLAUDE_CODE_EFFORT_LEVEL: initCommand.effort } : {}),
   };
 
   claudeInputQueue = new AsyncMessageQueue<SDKUserMessage>();
@@ -1121,6 +1128,7 @@ async function ensureCodexThread() {
       networkAccessEnabled: true,
       skipGitRepoCheck: true,
       ...sandbox,
+      ...(initCommand.effort ? { modelReasoningEffort: initCommand.effort } : {}),
     };
     codexThread = currentProviderSessionId
       ? codexClient.resumeThread(currentProviderSessionId, threadOptions)
@@ -1382,7 +1390,7 @@ async function handleCommand(command: InputCommand) {
         teardownClaudeSession();
       }
       if (initCommand.provider === 'codex') {
-        teardownCodexSession(command.env_vars !== undefined);
+        teardownCodexSession(command.env_vars !== undefined || command.effort !== undefined);
       }
       emitStatus('ready', 'Settings applied.');
     } else {

@@ -4071,6 +4071,7 @@ fn create_interactive_telegram_session(
             perm_mode,
             working_dir: working_dir.clone(),
             resume_session_id,
+            initial_prompt: None,
             env_vars: resolved.env_vars,
         },
     )?;

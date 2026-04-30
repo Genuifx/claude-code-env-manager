@@ -973,6 +973,7 @@ async fn create_native_session(
     working_dir: Option<String>,
     initial_prompt: String,
     provider_session_id: Option<String>,
+    effort: Option<String>,
 ) -> Result<NativeSessionSummary, String> {
     let provider = parse_native_provider(&provider)?;
     let effective_working_dir = resolve_headless_working_dir(working_dir);
@@ -994,6 +995,7 @@ async fn create_native_session(
                 codex_path: None,
                 codex_base_url: None,
                 codex_api_key: None,
+                effort: effort.clone(),
             }
         }
         NativeProvider::Codex => {
@@ -1016,6 +1018,7 @@ async fn create_native_session(
                 codex_path: terminal::resolve_codex_path(),
                 codex_base_url: None,
                 codex_api_key: None,
+                effort,
             }
         }
     };
@@ -1106,6 +1109,7 @@ fn update_native_session_settings(
     runtime_id: String,
     env_name: Option<String>,
     perm_mode: Option<String>,
+    effort: Option<String>,
 ) -> Result<(), String> {
     let current = native_state
         .list_sessions()
@@ -1136,6 +1140,7 @@ fn update_native_session_settings(
         resolved_env_name.as_deref(),
         perm_mode.as_deref(),
         env_vars.as_ref(),
+        effort.as_deref(),
     )
 }
 
@@ -1193,6 +1198,7 @@ async fn create_interactive_session(
     working_dir: Option<String>,
     resume_session_id: Option<String>,
     client: Option<String>,
+    initial_prompt: Option<String>,
 ) -> Result<Session, String> {
     let client_name = client
         .unwrap_or_else(|| "claude".to_string())
@@ -1254,6 +1260,7 @@ async fn create_interactive_session(
                 perm_mode: "n/a".to_string(),
                 working_dir: effective_working_dir,
                 resume_session_id,
+                initial_prompt: initial_prompt.clone(),
                 env_vars,
             },
         );
@@ -1336,6 +1343,7 @@ async fn create_interactive_session(
                 perm_mode: "n/a".to_string(),
                 working_dir: effective_working_dir.clone(),
                 resume_session_id,
+                initial_prompt: initial_prompt.clone(),
                 env_vars,
             },
         );
@@ -1412,6 +1420,7 @@ async fn create_interactive_session(
             perm_mode: effective_perm_mode,
             working_dir: effective_working_dir,
             resume_session_id,
+            initial_prompt,
             env_vars,
         },
     );

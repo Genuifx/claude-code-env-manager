@@ -1,10 +1,8 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDown,
-  ExternalLink,
   FolderOpen,
-  MonitorUp,
-  Sparkles,
+  TerminalSquare,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { shallow } from 'zustand/shallow';
@@ -13,6 +11,7 @@ import { ProjectTree } from '@/components/workspace/ProjectTree';
 import { WorkspaceNativeSessionView } from '@/components/workspace/WorkspaceNativeSessionView';
 import { WorkspaceSessionComposer } from '@/components/workspace/WorkspaceSessionComposer';
 import { ComposerControls } from '@/components/workspace/ComposerControls';
+import type { EffortLevel } from '@/components/workspace/ComposerControls';
 import type { PermissionModeName } from '@ccem/core/browser';
 import {
   buildComposerPromptPreview,
@@ -214,6 +213,8 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
   const [historyPlanModeEnabled, setHistoryPlanModeEnabled] = useState(false);
   const [historyEnv, setHistoryEnv] = useState('');
   const [historyPermMode, setHistoryPermMode] = useState<PermissionModeName>(permissionMode);
+  const [composeEffort, setComposeEffort] = useState<EffortLevel>('high');
+  const [historyEffort, setHistoryEffort] = useState<EffortLevel>('high');
   const [composeDir, setComposeDir] = useState<string | null>(selectedWorkingDir || defaultWorkingDir || null);
   const [workspaceInstalledSkills, setWorkspaceInstalledSkills] = useState<InstalledSkill[]>([]);
   const [liveSessionsByRuntimeId, setLiveSessionsByRuntimeId] = useState<
@@ -1013,103 +1014,88 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
   useKeyboardShortcuts(isActive ? shortcuts : {});
 
   const renderComposeView = () => (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex flex-1 items-center justify-center px-8 py-10">
-        <div className="w-full max-w-3xl text-center">
-          <img src="/logo.png" alt="" aria-hidden="true" className="mx-auto h-16 w-16 rounded-3xl" />
-          <h2 className="mt-6 text-4xl font-semibold tracking-tight text-foreground">
+    <div className="flex h-full min-h-0 flex-col items-center px-8">
+      <div className="flex flex-1 flex-col items-center justify-end">
+        <div className="mb-6 flex items-center justify-center gap-3">
+          <img src="/logo.png" alt="" aria-hidden="true" className="h-10 w-10 rounded-xl" />
+          <h2 className="text-2xl font-semibold tracking-tight text-foreground">
             {t('workspace.composeTitle')}
           </h2>
           <button
             type="button"
             onClick={() => void handlePickComposeDir()}
-            className="mt-5 inline-flex items-center gap-2 text-4xl font-semibold tracking-tight text-muted-foreground transition-colors hover:text-foreground"
+            className="inline-flex items-center gap-1.5 text-2xl font-semibold tracking-tight text-muted-foreground transition-colors hover:text-foreground"
           >
-            <FolderOpen className="h-7 w-7" />
-            <span className="max-w-[700px] truncate">
+            <FolderOpen className="h-4 w-4" />
+            <span className="max-w-[300px] truncate">
               {effectiveComposeDirLabel || t('workspace.composeSelectFolder')}
             </span>
-            <ChevronDown className="h-5 w-5" />
+            <ChevronDown className="h-3.5 w-3.5" />
           </button>
-
-          <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-            <button
-              type="button"
-              onClick={() => {
-                setComposeProvider('claude');
-                setLaunchClient('claude');
-              }}
-              className={cn(
-                'inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-all',
-                composeProvider === 'claude'
-                  ? 'bg-primary/12 text-primary shadow-[0_16px_40px_-24px_rgba(30,41,59,0.45)]'
-                  : 'bg-muted/55 text-muted-foreground hover:bg-muted hover:text-foreground'
-              )}
-            >
-              <Sparkles className="h-4 w-4" />
-              {t('workspace.newSessionClaude')}
-            </button>
-            <button
-              type="button"
-              disabled={!codexInstalled}
-              onClick={() => {
-                setComposeProvider('codex');
-                setLaunchClient('codex');
-              }}
-              className={cn(
-                'inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-all',
-                composeProvider === 'codex'
-                  ? 'bg-[hsl(var(--chart-3)/0.14)] text-[hsl(var(--chart-3))]'
-                  : 'bg-muted/55 text-muted-foreground hover:bg-muted hover:text-foreground',
-                !codexInstalled && 'cursor-not-allowed opacity-50'
-              )}
-            >
-              <Sparkles className="h-4 w-4" />
-              {t('workspace.newSessionCodex')}
-            </button>
-            <button
-              type="button"
-              disabled={!opencodeInstalled}
-              onClick={() => void handleNewSession('opencode')}
-              className={cn(
-                'inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-all',
-                'bg-muted/55 text-muted-foreground hover:bg-muted hover:text-foreground',
-                !opencodeInstalled && 'cursor-not-allowed opacity-50'
-              )}
-            >
-              <ExternalLink className="h-4 w-4" />
-              {t('workspace.openCodeWeb')}
-            </button>
-          </div>
         </div>
       </div>
 
-      <WorkspaceSessionComposer
-        value={composePrompt}
-        onValueChange={setComposePrompt}
-        onSubmit={handleCreateNativeConversation}
-        placeholder={t('workspace.composePlaceholder')}
-        canSubmit={!!composePrompt.trim() && !!effectiveComposeDir && !isCreatingNativeSession}
-        isSubmitting={isCreatingNativeSession}
-        submitLabel={t('workspace.composeSend')}
-        loadingLabel={t('common.loading')}
-        provider={composeProvider}
-        installedSkills={workspaceInstalledSkills}
-        workingDir={effectiveComposeDir}
-        searchWorkspaceFiles={searchWorkspaceFiles}
-        planModeEnabled={composePlanModeEnabled}
-        onPlanModeEnabledChange={setComposePlanModeEnabled}
-        controls={(
-          <ComposerControls
-            provider={composeProvider}
-            envName={currentEnv}
-            permMode={permissionMode}
-            environments={environments}
-            onEnvChange={(value) => void switchEnvironment(value)}
-            onPermModeChange={setPermissionMode}
-          />
-        )}
-      />
+      <div className="w-full max-w-3xl">
+        <WorkspaceSessionComposer
+          value={composePrompt}
+          onValueChange={setComposePrompt}
+          onSubmit={handleCreateNativeConversation}
+          placeholder={t('workspace.composePlaceholder')}
+          canSubmit={!!composePrompt.trim() && !!effectiveComposeDir && !isCreatingNativeSession}
+          isSubmitting={isCreatingNativeSession}
+          submitLabel={t('workspace.composeSend')}
+          loadingLabel={t('common.loading')}
+          provider={composeProvider}
+          installedSkills={workspaceInstalledSkills}
+          workingDir={effectiveComposeDir}
+          searchWorkspaceFiles={searchWorkspaceFiles}
+          planModeEnabled={composePlanModeEnabled}
+          onPlanModeEnabledChange={setComposePlanModeEnabled}
+          codexInstalled={codexInstalled}
+          opencodeInstalled={opencodeInstalled}
+          onLaunchNewSession={handleNewSession}
+          secondaryActions={(
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-9 w-9 rounded-full"
+                    onClick={() => {
+                      const prompt = composePrompt.trim() || undefined;
+                      void launchClaudeCode(
+                        effectiveComposeDir || undefined,
+                        undefined,
+                        composeProvider as LaunchClient,
+                        currentEnv || undefined,
+                        prompt,
+                      );
+                    }}
+                  >
+                    <TerminalSquare className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">{t('workspace.nativeOpenTerminal')}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+          controls={(
+            <ComposerControls
+              provider={composeProvider}
+              envName={currentEnv}
+              permMode={permissionMode}
+              effort={composeEffort}
+              environments={environments}
+              onEnvChange={(value) => void switchEnvironment(value)}
+              onPermModeChange={setPermissionMode}
+              onEffortChange={setComposeEffort}
+            />
+          )}
+        />
+      </div>
+      <div className="flex-1" />
     </div>
   );
 
@@ -1155,14 +1141,19 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
           planModeEnabled={historyPlanModeEnabled}
           onPlanModeEnabledChange={selectedHistorySupportsInline ? setHistoryPlanModeEnabled : undefined}
           planModeAvailable={selectedHistorySupportsInline}
+          codexInstalled={codexInstalled}
+          opencodeInstalled={opencodeInstalled}
+          onLaunchNewSession={handleNewSession}
           controls={(
             <ComposerControls
               provider={historyProvider}
               envName={historyEnv}
               permMode={historyPermMode}
+              effort={historyEffort}
               environments={environments}
               onEnvChange={setHistoryEnv}
               onPermModeChange={setHistoryPermMode}
+              onEffortChange={setHistoryEffort}
             />
           )}
           secondaryActions={selectedHistorySupportsInline ? (
@@ -1185,7 +1176,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
                         .catch(() => toast.error(t('workspace.nativeHandoffFailed')));
                     }}
                   >
-                    <MonitorUp className="h-4 w-4" />
+                    <TerminalSquare className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="top">{t('workspace.nativeOpenTerminal')}</TooltipContent>
@@ -1267,6 +1258,9 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
                       installedSkills={workspaceInstalledSkills}
                       isVisible={isActiveLiveEntry}
                       onSessionUpdate={handleLiveSessionUpdate}
+                      codexInstalled={codexInstalled}
+                      opencodeInstalled={opencodeInstalled}
+                      onLaunchNewSession={handleNewSession}
                       onStartNew={() => {
                         setWorkspaceMode('compose');
                         setActiveLiveRuntimeId(null);

@@ -98,6 +98,7 @@ pub struct NativeSessionOptions {
     pub codex_path: Option<String>,
     pub codex_base_url: Option<String>,
     pub codex_api_key: Option<String>,
+    pub effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,6 +130,8 @@ enum HelperInputCommand<'a> {
         codex_base_url: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         codex_api_key: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        effort: Option<&'a str>,
     },
     Prompt {
         text: &'a str,
@@ -151,6 +154,8 @@ enum HelperInputCommand<'a> {
         perm_mode: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         env_vars: Option<&'a HashMap<String, String>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        effort: Option<&'a str>,
     },
     Stop,
 }
@@ -426,6 +431,7 @@ impl NativeRuntimeManager {
         env_name: Option<&str>,
         perm_mode: Option<&str>,
         env_vars: Option<&HashMap<String, String>>,
+        effort: Option<&str>,
     ) -> Result<(), String> {
         let handle = self.ensure_handle(app.clone(), runtime_id)?;
         self.write_to_child(
@@ -434,6 +440,7 @@ impl NativeRuntimeManager {
                 env_name,
                 perm_mode,
                 env_vars,
+                effort,
             },
         )?;
         self.update_record(runtime_id, |record| {
@@ -629,6 +636,7 @@ impl NativeRuntimeManager {
                 codex_path: handle.codex_path.as_deref(),
                 codex_base_url: handle.codex_base_url.as_deref(),
                 codex_api_key: handle.codex_api_key.as_deref(),
+                effort: options.effort.as_deref(),
             },
         )?;
 
@@ -1181,6 +1189,7 @@ fn build_runtime_bootstrap_options(
         codex_path: resolve_codex_path(),
         codex_base_url,
         codex_api_key,
+        effort: None,
     })
 }
 

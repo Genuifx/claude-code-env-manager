@@ -6,9 +6,10 @@ import {
   Layers3,
   LoaderCircle,
   MessageSquareQuote,
-  MonitorUp,
   ShieldAlert,
   Square,
+  SquarePen,
+  TerminalSquare,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -25,7 +26,7 @@ import type {
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { useAppStore } from '@/store';
-import type { InstalledSkill } from '@/store';
+import type { InstalledSkill, LaunchClient } from '@/store';
 import type { PermissionModeName } from '@ccem/core/browser';
 import type {
   ConversationContentBlock,
@@ -44,6 +45,7 @@ import {
   normalizePermissionModeName,
   providerDisplayName,
 } from './ComposerControls';
+import type { EffortLevel } from './ComposerControls';
 
 function ProcessingActionIcon({ stopping = false }: { stopping?: boolean }) {
   return (
@@ -129,6 +131,9 @@ interface WorkspaceNativeSessionViewProps {
   isVisible?: boolean;
   onSessionUpdate: (session: NativeSessionSummary) => void;
   onStartNew: () => void;
+  codexInstalled?: boolean;
+  opencodeInstalled?: boolean;
+  onLaunchNewSession?: (client: LaunchClient) => void;
 }
 
 const ACTIVE_POLL_INTERVAL_MS = 140;
@@ -1180,6 +1185,9 @@ export function WorkspaceNativeSessionView({
   isVisible = true,
   onSessionUpdate,
   onStartNew,
+  codexInstalled = false,
+  opencodeInstalled = false,
+  onLaunchNewSession,
 }: WorkspaceNativeSessionViewProps) {
   const { t } = useLocale();
   const environments = useAppStore((state) => state.environments);
@@ -1197,6 +1205,7 @@ export function WorkspaceNativeSessionView({
   const [sessionEnv, setSessionEnv] = useState(session.env_name);
   const [sessionRuntimePermMode, setSessionRuntimePermMode] = useState(session.perm_mode);
   const sessionPermMode = normalizePermissionModeName(sessionRuntimePermMode);
+  const [sessionEffort, setSessionEffort] = useState<EffortLevel>('high');
   const [composerText, setComposerText] = useState('');
   const [composerPlanModeEnabled, setComposerPlanModeEnabled] = useState(session.perm_mode === 'plan');
   const [events, setEvents] = useState<SessionEventRecord[]>([]);
@@ -1559,6 +1568,17 @@ export function WorkspaceNativeSessionView({
       });
   }, [refreshSummary, session.runtime_id, sessionRuntimePermMode, t, updateNativeSessionSettings]);
 
+  const handleEffortChange = useCallback((effort: EffortLevel) => {
+    const previousEffort = sessionEffort;
+    setSessionEffort(effort);
+    void updateNativeSessionSettings(session.runtime_id, undefined, undefined, effort)
+      .catch((error) => {
+        console.error('Failed to update native session effort:', error);
+        setSessionEffort(previousEffort);
+        toast.error(t('workspace.nativeSettingsFailed'));
+      });
+  }, [session.runtime_id, sessionEffort, t, updateNativeSessionSettings]);
+
   const handleSend = useCallback(async (payload?: ComposerSubmitPayload) => {
     const text = payload?.text ?? composerText.trim();
     const attachments = payload?.attachments ?? [];
@@ -1735,8 +1755,44 @@ export function WorkspaceNativeSessionView({
         isSubmitting={false}
         submitLabel={t('workspace.composeSend')}
         loadingLabel={t('common.loading')}
-        primaryActionLabel={t('workspace.composeSend')}
-        primaryActionIcon={<ArrowUp className="h-4 w-4" />}
+        primaryActionLabel={
+          isTerminalStatus(session.status)
+            ? t('workspace.newSession')
+            : !composerText.trim() && isProcessingTurn
+              ? t('workspace.nativeStop')
+              : t('workspace.composeSend')
+        }
+        primaryActionIcon={
+          isTerminalStatus(session.status)
+            ? <SquarePen className="h-4 w-4" />
+            : !composerText.trim() && isProcessingTurn
+              ? <ProcessingActionIcon stopping={isStopping} />
+              : <ArrowUp className="h-4 w-4" />
+        }
+        primaryActionDisabled={
+          isTerminalStatus(session.status)
+            ? false
+            : !composerText.trim() && isProcessingTurn
+              ? isStopping
+              : undefined
+        }
+        onPrimaryAction={
+          isTerminalStatus(session.status)
+            ? onStartNew
+            : !composerText.trim() && isProcessingTurn
+              ? () => void handleStop()
+              : undefined
+        }
+        primaryActionVariant={
+          isTerminalStatus(session.status)
+            ? 'outline'
+            : 'default'
+        }
+        primaryActionClassName={
+          isTerminalStatus(session.status)
+            ? 'shadow-none w-auto rounded-full px-3 gap-1.5'
+            : undefined
+        }
         provider={session.provider}
         installedSkills={installedSkills}
         workingDir={session.project_dir}
@@ -1746,6 +1802,9 @@ export function WorkspaceNativeSessionView({
         planModeHint={session.provider === 'claude' && sessionRuntimePermMode === 'plan'
           ? t('workspace.composerPlanModeHintClaudeLocked')
           : undefined}
+        codexInstalled={codexInstalled}
+        opencodeInstalled={opencodeInstalled}
+        onLaunchNewSession={onLaunchNewSession}
         queuedMessages={queuedMessages}
         onFlushQueuedMessages={() => void flushQueuedMessages()}
         onRemoveQueuedMessage={(id) => {
@@ -1771,61 +1830,35 @@ export function WorkspaceNativeSessionView({
             provider={session.provider}
             envName={sessionEnv}
             permMode={sessionPermMode}
+            effort={sessionEffort}
             environments={environments}
             onEnvChange={handleEnvChange}
             onPermModeChange={handlePermModeChange}
+            onEffortChange={handleEffortChange}
           />
         )}
         secondaryActions={(
-          <>
-            {!isTerminalStatus(session.status) ? (
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="h-9 w-9 rounded-full"
-                      disabled={!isProcessingTurn || isStopping}
-                      onClick={() => void handleStop()}
-                    >
-                      <ProcessingActionIcon stopping={isStopping} />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top">{t('workspace.nativeStop')}</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            ) : null}
-            {!isTerminalStatus(session.status) ? (
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="h-9 w-9 rounded-full"
-                      disabled={!session.can_handoff_to_terminal || isHandingOff}
-                      onClick={() => void handleHandoff()}
-                    >
-                      {isHandingOff ? (
-                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <MonitorUp className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top">{t('workspace.nativeOpenTerminal')}</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            ) : null}
-            {isTerminalStatus(session.status) ? (
-              <Button type="button" variant="outline" size="sm" onClick={onStartNew}>
-                {t('workspace.newSession')}
-              </Button>
-            ) : null}
-          </>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="h-9 w-9 rounded-full"
+                  disabled={isHandingOff}
+                  onClick={() => void handleHandoff()}
+                >
+                  {isHandingOff ? (
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <TerminalSquare className="h-4 w-4" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">{t('workspace.nativeOpenTerminal')}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         )}
       />
     </div>

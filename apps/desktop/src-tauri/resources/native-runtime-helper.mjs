@@ -16537,6 +16537,7 @@ function applySettingsToInitCommand(settings) {
   if (settings.permMode !== void 0) initCommand.perm_mode = settings.permMode;
   if (settings.envVars !== void 0) initCommand.env_vars = settings.envVars;
   if (settings.envName !== void 0) initCommand.env_name = settings.envName;
+  if (settings.effort !== void 0) initCommand.effort = settings.effort || void 0;
   return true;
 }
 function applyPendingSettingsToInitCommand() {
@@ -16549,7 +16550,8 @@ function applySettingsCommand(command) {
   return applySettingsToInitCommand({
     envName: command.env_name,
     permMode: command.perm_mode,
-    envVars: command.env_vars
+    envVars: command.env_vars,
+    effort: command.effort
   });
 }
 function queuePendingSettings(command) {
@@ -16557,7 +16559,8 @@ function queuePendingSettings(command) {
     ...pendingSettings,
     ...command.env_name !== void 0 ? { envName: command.env_name } : {},
     ...command.perm_mode !== void 0 ? { permMode: command.perm_mode } : {},
-    ...command.env_vars !== void 0 ? { envVars: command.env_vars } : {}
+    ...command.env_vars !== void 0 ? { envVars: command.env_vars } : {},
+    ...command.effort !== void 0 ? { effort: command.effort } : {}
   };
 }
 function canApplySettingsImmediately() {
@@ -16587,7 +16590,8 @@ async function consumeClaudeMessages() {
   const env = {
     ...process2.env,
     ...initCommand.env_vars,
-    CLAUDE_AGENT_SDK_CLIENT_APP: "ccem-desktop"
+    CLAUDE_AGENT_SDK_CLIENT_APP: "ccem-desktop",
+    ...initCommand.effort ? { CLAUDE_CODE_EFFORT_LEVEL: initCommand.effort } : {}
   };
   claudeInputQueue = new AsyncMessageQueue();
   currentClaudeQuery = E$$({
@@ -16848,7 +16852,8 @@ async function ensureCodexThread() {
       workingDirectory: initCommand.working_dir,
       networkAccessEnabled: true,
       skipGitRepoCheck: true,
-      ...sandbox
+      ...sandbox,
+      ...initCommand.effort ? { modelReasoningEffort: initCommand.effort } : {}
     };
     codexThread = currentProviderSessionId ? codexClient.resumeThread(currentProviderSessionId, threadOptions) : codexClient.startThread(threadOptions);
     if (currentProviderSessionId) {
@@ -17080,7 +17085,7 @@ async function handleCommand(command) {
         teardownClaudeSession();
       }
       if (initCommand.provider === "codex") {
-        teardownCodexSession(command.env_vars !== void 0);
+        teardownCodexSession(command.env_vars !== void 0 || command.effort !== void 0);
       }
       emitStatus("ready", "Settings applied.");
     } else {

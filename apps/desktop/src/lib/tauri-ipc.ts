@@ -246,6 +246,7 @@ export interface TauriCommands {
       workingDir?: string | null;
       initialPrompt: string;
       providerSessionId?: string | null;
+      effort?: string | null;
     },
     NativeSessionSummary
   ];
@@ -293,6 +294,7 @@ export interface TauriCommands {
       runtimeId: string;
       envName?: string | null;
       permMode?: string | null;
+      effort?: string | null;
     },
     void
   ];

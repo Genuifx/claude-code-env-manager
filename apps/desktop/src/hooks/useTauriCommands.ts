@@ -358,6 +358,7 @@ export function useTauriCommands() {
     workingDir?: string | null;
     resumeSessionId?: string | null;
     client?: LaunchClient;
+    initialPrompt?: string | null;
   } = {}): Promise<Session> => {
     setLoading(true);
     try {
@@ -369,6 +370,7 @@ export function useTauriCommands() {
         workingDir: workDir,
         resumeSessionId: options.resumeSessionId ?? null,
         client: options.client ?? 'claude',
+        initialPrompt: options.initialPrompt ?? null,
       });
       const session = toFrontendSession(tauriSession);
 
@@ -421,12 +423,14 @@ export function useTauriCommands() {
     resumeSessionId?: string,
     client: LaunchClient = 'claude',
     envName?: string,
+    initialPrompt?: string,
   ) => {
     await createInteractiveSession({
       envName: envName ?? undefined,
       workingDir: workingDir ?? null,
       resumeSessionId: resumeSessionId ?? null,
       client,
+      initialPrompt: initialPrompt ?? null,
     });
   }, [createInteractiveSession]);
 
@@ -685,6 +689,7 @@ export function useTauriCommands() {
     workingDir?: string | null;
     initialPrompt: string;
     providerSessionId?: string | null;
+    effort?: string | null;
   }): Promise<NativeSessionSummary> => {
     const { currentEnv, permissionMode, selectedWorkingDir } = getSessionDefaults();
     return invoke<NativeSessionSummary>('create_native_session', {
@@ -694,6 +699,7 @@ export function useTauriCommands() {
       workingDir: options.workingDir ?? selectedWorkingDir ?? null,
       initialPrompt: options.initialPrompt,
       providerSessionId: options.providerSessionId ?? null,
+      effort: options.effort ?? null,
     });
   }, [getSessionDefaults]);
 
@@ -753,11 +759,13 @@ export function useTauriCommands() {
     runtimeId: string,
     envName?: string | null,
     permMode?: string | null,
+    effort?: string | null,
   ): Promise<void> => {
     await invoke('update_native_session_settings', {
       runtimeId,
       envName: envName ?? null,
       permMode: permMode ?? null,
+      effort: effort ?? null,
     });
   }, []);
 

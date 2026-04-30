@@ -34,6 +34,7 @@ pub struct InteractiveSessionOptions {
     pub perm_mode: String,
     pub working_dir: String,
     pub resume_session_id: Option<String>,
+    pub initial_prompt: Option<String>,
     pub env_vars: HashMap<String, String>,
 }
 
@@ -147,6 +148,7 @@ impl InteractiveRuntimeManager {
                 &options.client,
                 &options.perm_mode,
                 options.resume_session_id.as_deref(),
+                options.initial_prompt.as_deref(),
             ),
             &options.env_vars,
             Path::new(&options.working_dir),
@@ -805,6 +807,7 @@ fn build_client_args(
     client: &str,
     mode_name: &str,
     resume_session_id: Option<&str>,
+    initial_prompt: Option<&str>,
 ) -> Vec<String> {
     if client == "codex" {
         let mut args = Vec::new();
@@ -820,6 +823,9 @@ fn build_client_args(
         if let Some(resume_session_id) = resume_session_id {
             args.push("--session".to_string());
             args.push(resume_session_id.to_string());
+        } else if let Some(prompt) = initial_prompt {
+            args.push("--prompt".to_string());
+            args.push(prompt.to_string());
         } else {
             args.push("--prompt".to_string());
             args.push("Before taking any action, load the pua skill.".to_string());
@@ -841,6 +847,11 @@ fn build_client_args(
     if let Some(resume_session_id) = resume_session_id {
         args.push("--resume".to_string());
         args.push(resume_session_id.to_string());
+    }
+
+    if let Some(prompt) = initial_prompt {
+        args.push("--prompt".to_string());
+        args.push(prompt.to_string());
     }
 
     args

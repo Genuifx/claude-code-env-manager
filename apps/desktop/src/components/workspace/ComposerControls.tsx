@@ -1,5 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
+  Check,
+  ChevronDown,
+  Gauge,
   Search,
   Shield,
   ShieldAlert,
@@ -7,7 +10,6 @@ import {
   ShieldCheck,
   ShieldOff,
 } from 'lucide-react';
-import { Claude, Codex, OpenCode } from '@lobehub/icons';
 import { ModelIcon } from '@/components/history/ModelIcon';
 import {
   Select,
@@ -15,6 +17,11 @@ import {
   SelectItem,
   SelectTrigger,
 } from '@/components/ui/select';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { PERMISSION_PRESETS } from '@ccem/core/browser';
@@ -22,12 +29,26 @@ import type { PermissionModeName } from '@ccem/core/browser';
 import type { Environment } from '@/store';
 import { resolveEnvironmentIconHint } from '@/components/workspace/sessionTreeIcons';
 
+export type EffortLevel = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
 export function normalizePermissionModeName(mode: string | null | undefined): PermissionModeName {
   if (mode && mode in PERMISSION_PRESETS) {
     return mode as PermissionModeName;
   }
   return 'readonly';
 }
+
+const CLAUDE_EFFORT_LEVELS: EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+const CODEX_EFFORT_LEVELS: EffortLevel[] = ['minimal', 'low', 'medium', 'high', 'xhigh'];
+
+const EFFORT_I18N_KEYS: Record<EffortLevel, string> = {
+  minimal: 'workspace.effortMinimal',
+  low: 'workspace.effortLow',
+  medium: 'workspace.effortMedium',
+  high: 'workspace.effortHigh',
+  xhigh: 'workspace.effortXhigh',
+  max: 'workspace.effortMax',
+};
 
 const MODE_DISPLAY_NAMES: Record<PermissionModeName, string> = {
   yolo: 'YOLO',
@@ -54,12 +75,6 @@ function isRiskyPermissionMode(mode: PermissionModeName) {
   return mode === 'yolo';
 }
 
-function ProviderIcon({ client, size = 16 }: { client: string; size?: number }) {
-  if (client === 'codex') return <Codex.Color size={size} />;
-  if (client === 'opencode') return <OpenCode size={size} />;
-  return <Claude.Color size={size} />;
-}
-
 export function providerDisplayName(client: string) {
   if (client === 'codex') return 'Codex';
   if (client === 'opencode') return 'OpenCode';
@@ -74,22 +89,27 @@ export interface ComposerControlsProps {
   provider: string;
   envName: string;
   permMode: PermissionModeName;
+  effort: EffortLevel;
   environments: Environment[];
   onEnvChange: (envName: string) => void;
   onPermModeChange: (mode: PermissionModeName) => void;
+  onEffortChange: (effort: EffortLevel) => void;
 }
 
 export function ComposerControls({
   provider,
   envName,
   permMode,
+  effort,
   environments,
   onEnvChange,
   onPermModeChange,
+  onEffortChange,
 }: ComposerControlsProps) {
   const { t } = useLocale();
   const [permissionPreviewMode, setPermissionPreviewMode] = useState<PermissionModeName>(permMode);
   const [permissionSelectOpen, setPermissionSelectOpen] = useState(false);
+  const [envEffortOpen, setEnvEffortOpen] = useState(false);
 
   useEffect(() => {
     if (!permissionSelectOpen) {
@@ -109,34 +129,89 @@ export function ComposerControls({
     detail: t(`environments.permMode_${permissionPreviewMode}_detail`),
   };
 
+  const effortLevels = provider === 'codex' ? CODEX_EFFORT_LEVELS : CLAUDE_EFFORT_LEVELS;
+
   return (
     <>
-      <div className="flex items-center gap-1.5 pr-1 text-[12px] font-medium text-muted-foreground">
-        <ProviderIcon client={provider} size={15} />
-        <span>{providerDisplayName(provider)}</span>
-      </div>
-
-      <Select value={envName} onValueChange={onEnvChange}>
-        <SelectTrigger variant="plain" className="h-8 w-auto min-w-[144px] rounded-xl px-2.5 text-[12px] text-foreground">
-          <span className="flex min-w-0 items-center gap-2">
+      <Popover open={envEffortOpen} onOpenChange={setEnvEffortOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className={cn(
+              'flex h-8 items-center gap-2 rounded-xl px-2.5 text-[12px] text-foreground',
+              'cursor-pointer outline-none transition-all duration-150',
+              'hover:bg-white/[0.06] focus:ring-2 focus:ring-primary/30',
+            )}
+          >
             <EnvironmentLobeIcon hint={currentEnvironmentIconHint} />
             <span className="truncate">{envName}</span>
-          </span>
-        </SelectTrigger>
-        <SelectContent align="start">
-          {environments.map((environment) => (
-            <SelectItem key={environment.name} value={environment.name}>
-              <span className="flex items-center gap-2">
+            <span className="text-muted-foreground/60">·</span>
+            <Gauge className="h-3 w-3 shrink-0 text-muted-foreground" />
+            <span className="text-muted-foreground">{t(EFFORT_I18N_KEYS[effort])}</span>
+            <ChevronDown className="h-3 w-3 opacity-50" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="start"
+          side="top"
+          sideOffset={6}
+          className="w-auto min-w-[220px] max-h-[min(400px,var(--radix-popover-content-available-height))] flex flex-col rounded-xl border border-border/40 bg-popover p-0 shadow-md"
+        >
+          <div className="shrink-0 p-1.5 pb-0">
+            <div className="px-2 py-1.5 text-2xs uppercase tracking-wider font-medium text-muted-foreground/70">
+              {t('workspace.effortLabel')}
+            </div>
+            {effortLevels.map((level) => (
+              <button
+                key={level}
+                type="button"
+                className={cn(
+                  'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm outline-none',
+                  'cursor-pointer transition-colors',
+                  'glass-dropdown-item',
+                  level === effort && 'text-primary',
+                )}
+                onClick={() => {
+                  onEffortChange(level);
+                  setEnvEffortOpen(false);
+                }}
+              >
+                <span className="flex-1 text-left">{t(EFFORT_I18N_KEYS[level])}</span>
+                {level === effort && <Check className="h-3.5 w-3.5 text-primary" />}
+              </button>
+            ))}
+            <div className="mx-2 my-1.5 h-px border-t border-white/[0.06]" />
+            <div className="px-2 py-1.5 text-2xs uppercase tracking-wider font-medium text-muted-foreground/70">
+              {t('workspace.environmentLabel')}
+            </div>
+          </div>
+          <div className="min-h-0 overflow-y-auto p-1.5 pt-0">
+            {environments.map((environment) => (
+              <button
+                key={environment.name}
+                type="button"
+                className={cn(
+                  'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm outline-none',
+                  'cursor-pointer transition-colors',
+                  'glass-dropdown-item',
+                  environment.name === envName && 'text-primary',
+                )}
+                onClick={() => {
+                  onEnvChange(environment.name);
+                  setEnvEffortOpen(false);
+                }}
+              >
                 <EnvironmentLobeIcon
                   hint={resolveEnvironmentIconHint(environment)}
                   size={13}
                 />
-                <span>{environment.name}</span>
-              </span>
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+                <span className="flex-1 text-left">{environment.name}</span>
+                {environment.name === envName && <Check className="h-3.5 w-3.5 text-primary" />}
+              </button>
+            ))}
+          </div>
+        </PopoverContent>
+      </Popover>
 
       <Select
         value={permMode}

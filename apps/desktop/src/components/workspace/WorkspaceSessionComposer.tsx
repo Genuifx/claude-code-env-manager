@@ -14,18 +14,26 @@ import {
   Command,
   FileText,
   FolderTree,
+  ListChecks,
   LoaderCircle,
   Paperclip,
+  Plus,
   Sparkles,
   X,
 } from 'lucide-react';
+import { Claude, Codex, OpenCode } from '@lobehub/icons';
 import { Button, type ButtonProps } from '@/components/ui/button';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { WorkspaceFileSuggestion } from '@/lib/tauri-ipc';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
-import type { InstalledSkill } from '@/store';
+import type { InstalledSkill, LaunchClient } from '@/store';
 import {
   getComposerCapabilities,
   type WorkspaceComposerProvider,
@@ -89,6 +97,9 @@ interface WorkspaceSessionComposerProps {
   onPlanModeEnabledChange?: (enabled: boolean) => void;
   planModeAvailable?: boolean;
   planModeHint?: string;
+  codexInstalled?: boolean;
+  opencodeInstalled?: boolean;
+  onLaunchNewSession?: (client: LaunchClient) => void;
   queuedMessages?: ComposerQueuedMessage[];
   onFlushQueuedMessages?: () => void | Promise<void>;
   onRemoveQueuedMessage?: (id: string) => void;
@@ -154,6 +165,121 @@ function ComposerAttachmentChip({
         <X className="h-3 w-3" />
       </button>
     </span>
+  );
+}
+
+function ComposerQuickMenu({
+  codexInstalled,
+  opencodeInstalled,
+  planModeEnabled,
+  planButtonVisible,
+  planModeHint,
+  planModeKind,
+  onLaunchNewSession,
+  onPlanModeEnabledChange,
+}: {
+  codexInstalled: boolean;
+  opencodeInstalled: boolean;
+  planModeEnabled: boolean;
+  planButtonVisible: boolean;
+  planModeHint?: string;
+  planModeKind: 'session_permission' | 'command_prefix';
+  onLaunchNewSession?: (client: LaunchClient) => void;
+  onPlanModeEnabledChange?: (enabled: boolean) => void;
+}) {
+  const { t } = useLocale();
+  const [open, setOpen] = useState(false);
+
+  const sdkItems: { client: LaunchClient; icon: ReactNode; label: string; installed: boolean }[] = [
+    { client: 'claude', icon: <Claude.Color size={16} />, label: t('workspace.newSessionClaude'), installed: true },
+    { client: 'codex', icon: <Codex.Color size={16} />, label: t('workspace.newSessionCodex'), installed: codexInstalled },
+    { client: 'opencode', icon: <OpenCode size={16} />, label: t('workspace.newSessionOpenCode'), installed: opencodeInstalled },
+  ];
+
+  const resolvedPlanHint = planModeHint ?? (
+    planModeKind === 'session_permission'
+      ? t('workspace.composerPlanModeHintClaude')
+      : t('workspace.composerPlanModeHintCodex')
+  );
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-white/[0.06] hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/30"
+          aria-label={t('workspace.composerQuickMenuLabel')}
+        >
+          <Plus className="h-4 w-4" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        side="top"
+        sideOffset={6}
+        className="w-auto min-w-[200px] rounded-xl border border-border/40 bg-popover p-1.5 shadow-md"
+      >
+        {sdkItems.map((item) => (
+          <button
+            key={item.client}
+            type="button"
+            disabled={!item.installed}
+            className={cn(
+              'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm outline-none',
+              'transition-colors glass-dropdown-item',
+              !item.installed && 'cursor-not-allowed opacity-50',
+            )}
+            onClick={() => {
+              if (item.installed && onLaunchNewSession) {
+                onLaunchNewSession(item.client);
+                setOpen(false);
+              }
+            }}
+          >
+            <span className="shrink-0">{item.icon}</span>
+            <span className="flex-1 text-left">{item.label}</span>
+            {!item.installed && (
+              <span className="text-2xs text-muted-foreground">({t('settings.cliNotInstalled')})</span>
+            )}
+          </button>
+        ))}
+
+        {planButtonVisible ? (
+          <>
+            <div className="mx-2 my-1.5 h-px border-t border-white/[0.06]" />
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div
+                    className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors glass-dropdown-item"
+                  >
+                    <ListChecks className={cn(
+                      'h-4 w-4 shrink-0 text-muted-foreground transition-colors',
+                      planModeEnabled && 'text-foreground',
+                    )} />
+                    <span className={cn(
+                      'flex-1 text-left transition-colors',
+                      planModeEnabled && 'text-foreground',
+                    )}>
+                      {t('workspace.composerPlanModeShort')}
+                    </span>
+                    <Switch
+                      checked={planModeEnabled}
+                      onCheckedChange={(checked) => onPlanModeEnabledChange?.(checked)}
+                      aria-label={t('workspace.composerPlanModeShort')}
+                      className="data-[state=checked]:bg-foreground data-[state=unchecked]:bg-muted/85"
+                    />
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="left" className="max-w-[280px] text-[12px] leading-5">
+                  {resolvedPlanHint}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </>
+        ) : null}
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -413,6 +539,9 @@ export function WorkspaceSessionComposer({
   onPlanModeEnabledChange,
   planModeAvailable,
   planModeHint,
+  codexInstalled = false,
+  opencodeInstalled = false,
+  onLaunchNewSession,
   queuedMessages = [],
   onFlushQueuedMessages,
   onRemoveQueuedMessage,
@@ -849,42 +978,21 @@ export function WorkspaceSessionComposer({
           />
 
           <div className="mt-2 flex flex-wrap items-center gap-2.5 border-t border-border/40 pt-2">
+            <ComposerQuickMenu
+              codexInstalled={codexInstalled}
+              opencodeInstalled={opencodeInstalled}
+              planModeEnabled={planModeEnabled}
+              planButtonVisible={planButtonVisible}
+              planModeHint={planModeHint}
+              planModeKind={capabilities.planModeKind}
+              onLaunchNewSession={onLaunchNewSession}
+              onPlanModeEnabledChange={onPlanModeEnabledChange}
+            />
+
             {controls}
 
             <div className="ml-auto flex items-center gap-2">
               {secondaryActions}
-
-              {planButtonVisible ? (
-                <div className="inline-flex items-center gap-2 pr-1 text-[12px] font-medium text-muted-foreground">
-                  <span className={cn(
-                    'transition-colors',
-                    planModeEnabled && 'text-foreground',
-                  )}>
-                    {t('workspace.composerPlanModeShort')}
-                  </span>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span>
-                          <Switch
-                            checked={planModeEnabled}
-                            onCheckedChange={(checked) => onPlanModeEnabledChange?.(checked)}
-                            aria-label={t('workspace.composerPlanModeShort')}
-                            className="data-[state=checked]:bg-foreground data-[state=unchecked]:bg-muted/85"
-                          />
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="max-w-[280px] text-[12px] leading-5">
-                        {planModeHint ?? (
-                          capabilities.planModeKind === 'session_permission'
-                            ? t('workspace.composerPlanModeHintClaude')
-                            : t('workspace.composerPlanModeHintCodex')
-                        )}
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </div>
-              ) : null}
 
               <Button
                 type="button"
