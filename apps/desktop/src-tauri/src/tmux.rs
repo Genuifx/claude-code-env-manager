@@ -22,6 +22,7 @@ pub struct TmuxWindowInfo {
     pub window_name: String,
     pub window_index: u32,
     pub pane_pid: Option<u32>,
+    pub session_attached_clients: u32,
     pub target: String,
 }
 
@@ -122,6 +123,7 @@ impl TmuxManager {
                 window_name: window_name.clone(),
                 window_index,
                 pane_pid: None,
+                session_attached_clients: 0,
                 target,
             },
         };
@@ -237,7 +239,7 @@ impl TmuxManager {
                     "-t",
                     session_name,
                     "-F",
-                    "#{window_index}\t#{window_name}\t#{pane_pid}",
+                    "#{window_index}\t#{window_name}\t#{pane_pid}\t#{session_attached}",
                 ])
                 .output()
                 .map_err(|error| {
@@ -431,7 +433,7 @@ impl TmuxManager {
                 "-p",
                 "-t",
                 target,
-                "#{session_name}\t#{window_name}\t#{window_index}\t#{pane_pid}",
+                "#{session_name}\t#{window_name}\t#{window_index}\t#{pane_pid}\t#{session_attached}",
             ])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -684,6 +686,12 @@ fn orphaned_managed_tmux_targets(
             continue;
         }
 
+        // A manually attached tmux client is live user state, even if ccem lost
+        // the runtime record that originally created the target.
+        if window.session_attached_clients > 0 {
+            continue;
+        }
+
         if window.session_name == session_prefix {
             if !active_targets.contains(&window.target) {
                 actions.push(ManagedTmuxTargetAction::KillWindow(window.target.clone()));
@@ -772,12 +780,17 @@ fn parse_window_line(session_name: &str, line: &str) -> Option<TmuxWindowInfo> {
     let window_index = parts.next()?.parse::<u32>().ok()?;
     let window_name = parts.next()?.to_string();
     let pane_pid = parts.next().and_then(|value| value.parse::<u32>().ok());
+    let session_attached_clients = parts
+        .next()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(0);
     Some(TmuxWindowInfo {
         session_name: session_name.to_string(),
         target: format!("{}:{}", session_name, window_name),
         window_name,
         window_index,
         pane_pid,
+        session_attached_clients,
     })
 }
 
@@ -787,11 +800,16 @@ fn parse_target_line(line: &str, fallback_target: &str) -> Option<TmuxWindowInfo
     let window_name = parts.next()?.to_string();
     let window_index = parts.next()?.parse::<u32>().ok()?;
     let pane_pid = parts.next().and_then(|value| value.parse::<u32>().ok());
+    let session_attached_clients = parts
+        .next()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(0);
     Some(TmuxWindowInfo {
         session_name,
         window_name,
         window_index,
         pane_pid,
+        session_attached_clients,
         target: fallback_target.to_string(),
     })
 }
@@ -934,12 +952,12 @@ fn is_tmux_session_create_race_error(error: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        ClaudeTerminalState, ManagedTmuxTargetAction, TmuxWindowInfo, build_status_left_format,
-        build_status_right_format, build_tmux_launch_command, build_tmux_launch_spec,
-        compact_model_label, detect_state_from_capture, is_managed_session_name,
-        is_missing_tmux_session_error, is_tmux_session_create_race_error, merge_path_entries,
-        orphaned_managed_tmux_targets, session_name_for_runtime, target_candidates_for_runtime,
-        window_name_for_runtime,
+        build_status_left_format, build_status_right_format, build_tmux_launch_command,
+        build_tmux_launch_spec, compact_model_label, detect_state_from_capture,
+        is_managed_session_name, is_missing_tmux_session_error, is_tmux_session_create_race_error,
+        merge_path_entries, orphaned_managed_tmux_targets, parse_target_line, parse_window_line,
+        session_name_for_runtime, target_candidates_for_runtime, window_name_for_runtime,
+        ClaudeTerminalState, ManagedTmuxTargetAction, TmuxWindowInfo,
     };
     use std::collections::HashMap;
 
@@ -1071,11 +1089,10 @@ mod tests {
 
         assert!(!spec.command.contains("sk-ant-secret-value"));
         assert!(!spec.command.contains("ANTHROPIC_AUTH_TOKEN"));
-        assert!(
-            spec.environment
-                .iter()
-                .any(|entry| entry == "ANTHROPIC_AUTH_TOKEN=sk-ant-secret-value")
-        );
+        assert!(spec
+            .environment
+            .iter()
+            .any(|entry| entry == "ANTHROPIC_AUTH_TOKEN=sk-ant-secret-value"));
     }
 
     #[test]
@@ -1086,6 +1103,7 @@ mod tests {
                 window_name: "main".to_string(),
                 window_index: 0,
                 pane_pid: Some(101),
+                session_attached_clients: 0,
                 target: "ccem-session111:main".to_string(),
             },
             TmuxWindowInfo {
@@ -1093,6 +1111,7 @@ mod tests {
                 window_name: "main".to_string(),
                 window_index: 0,
                 pane_pid: Some(202),
+                session_attached_clients: 0,
                 target: "ccem-session222:main".to_string(),
             },
         ];
@@ -1105,6 +1124,48 @@ mod tests {
                 "ccem-session222".to_string()
             )]
         );
+    }
+
+    #[test]
+    fn orphan_detection_preserves_attached_dedicated_sessions() {
+        let windows = vec![TmuxWindowInfo {
+            session_name: "ccem-session222".to_string(),
+            window_name: "main".to_string(),
+            window_index: 0,
+            pane_pid: Some(202),
+            session_attached_clients: 1,
+            target: "ccem-session222:main".to_string(),
+        }];
+
+        let actions = orphaned_managed_tmux_targets(&windows, &[], "ccem");
+
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn orphan_detection_preserves_attached_legacy_windows() {
+        let windows = vec![TmuxWindowInfo {
+            session_name: "ccem".to_string(),
+            window_name: "ccem-12345678".to_string(),
+            window_index: 1,
+            pane_pid: Some(303),
+            session_attached_clients: 1,
+            target: "ccem:ccem-12345678".to_string(),
+        }];
+
+        let actions = orphaned_managed_tmux_targets(&windows, &[], "ccem");
+
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn tmux_metadata_parses_attached_client_count() {
+        let window = parse_window_line("ccem-session222", "0\tmain\t202\t1").unwrap();
+        assert_eq!(window.session_attached_clients, 1);
+
+        let target =
+            parse_target_line("ccem-session222\tmain\t0\t202\t2", "ccem-session222:main").unwrap();
+        assert_eq!(target.session_attached_clients, 2);
     }
 
     #[test]
