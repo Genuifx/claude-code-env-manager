@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.29
+
+### Patch Changes
+
+- Run CI and release workflows on Node 22 for pnpm compatibility.
+
 ## 2.0.0-beta.28
 
 ### Patch Changes
