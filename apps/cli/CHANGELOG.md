@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.28
+
+### Patch Changes
+
+- Update GitHub Actions pnpm setup runtime for Node 24 compatibility.
+
 ## 2.0.0-beta.26
 
 ### Patch Changes
