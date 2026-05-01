@@ -1,6 +1,7 @@
 import {
   type ReactNode,
   type TextareaHTMLAttributes,
+  type MutableRefObject,
   useCallback,
   useEffect,
   useMemo,
@@ -14,6 +15,7 @@ import {
   Command,
   FileText,
   FolderTree,
+  Image as ImageIcon,
   ListChecks,
   LoaderCircle,
   Paperclip,
@@ -40,12 +42,20 @@ import {
 } from './composerCapabilities';
 import {
   createComposerFileAttachment,
+  createComposerImageAttachment,
+  createComposerImagePlaceholder,
   createComposerTextAttachment,
+  getNextComposerImagePlaceholderIndex,
+  getSupportedImageMediaType,
   isLargeComposerPaste,
   loadComposerRecentFiles,
   mergeComposerAttachments,
+  revokeComposerImageUrls,
   saveComposerRecentFile,
+  splitComposerImagePlaceholders,
+  validateComposerImageFile,
   type ComposerAttachment,
+  type ComposerImageAttachment,
   type ComposerRecentFile,
   type ComposerSubmitPayload,
 } from './composerAttachments';
@@ -111,6 +121,10 @@ function attachmentIcon(attachment: ComposerAttachment) {
     return <FileText className="h-3.5 w-3.5" />;
   }
 
+  if (attachment.kind === 'image') {
+    return <ImageIcon className="h-3.5 w-3.5" />;
+  }
+
   return <Paperclip className="h-3.5 w-3.5" />;
 }
 
@@ -127,6 +141,76 @@ function suggestionIcon(kind: ComposerSuggestion['kind']) {
   }
 }
 
+function formatImageSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function insertComposerTextAtRange(
+  text: string,
+  insertion: string,
+  start: number,
+  end: number,
+): { nextText: string; nextCaretPosition: number } {
+  const safeStart = Math.max(0, Math.min(start, text.length));
+  const safeEnd = Math.max(safeStart, Math.min(end, text.length));
+  const before = text.slice(0, safeStart);
+  const after = text.slice(safeEnd);
+  const leadingSpace = before && !/\s$/.test(before) ? ' ' : '';
+  const trailingSpace = !after || !/^\s/.test(after) ? ' ' : '';
+  const inserted = `${leadingSpace}${insertion}${trailingSpace}`;
+
+  return {
+    nextText: `${before}${inserted}${after}`,
+    nextCaretPosition: before.length + inserted.length,
+  };
+}
+
+function removeComposerImagePlaceholder(text: string, placeholder: string): string {
+  const index = text.indexOf(placeholder);
+  if (index < 0) {
+    return text;
+  }
+
+  const before = text.slice(0, index);
+  const after = text.slice(index + placeholder.length);
+  if (/\s$/.test(before) && /^\s/.test(after)) {
+    return `${before}${after.replace(/^\s+/, ' ')}`;
+  }
+
+  return `${before}${after}`;
+}
+
+function ComposerTextareaHighlight({
+  value,
+  scrollRef,
+}: {
+  value: string;
+  scrollRef: MutableRefObject<HTMLDivElement | null>;
+}) {
+  const parts = useMemo(() => splitComposerImagePlaceholders(value), [value]);
+
+  return (
+    <div
+      ref={scrollRef}
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 z-0 min-h-[72px] overflow-hidden whitespace-pre-wrap break-words text-[14px] leading-6.5 text-foreground"
+    >
+      {parts.map((part, index) => part.kind === 'image' ? (
+        <span
+          key={`${part.text}-${index}`}
+          className="rounded-[5px] bg-primary/[0.12] font-medium text-primary ring-1 ring-inset ring-primary/[0.35] shadow-[0_0_0_1px_rgba(255,255,255,0.04)_inset]"
+        >
+          {part.text}
+        </span>
+      ) : (
+        <span key={`text-${index}`}>{part.text}</span>
+      ))}
+    </div>
+  );
+}
+
 function ComposerAttachmentChip({
   attachment,
   onRemove,
@@ -135,18 +219,37 @@ function ComposerAttachmentChip({
   onRemove: (id: string) => void;
 }) {
   const { t } = useLocale();
+
   const secondaryLabel = attachment.kind === 'file'
     ? attachment.displayPath
-    : `${attachment.lineCount} lines`;
+    : attachment.kind === 'image'
+      ? formatImageSize(attachment.byteSize)
+      : `${attachment.lineCount} lines`;
+
+  const title = attachment.kind === 'file'
+    ? attachment.absolutePath
+    : attachment.name;
+
+  const thumbnail = attachment.kind === 'image' && attachment.objectUrl
+    ? (
+      <img
+        src={attachment.objectUrl}
+        alt={attachment.name}
+        className="h-8 w-8 rounded-md object-cover"
+      />
+    )
+    : (
+      <span className="rounded-md bg-background/80 p-1 text-muted-foreground">
+        {attachmentIcon(attachment)}
+      </span>
+    );
 
   return (
     <span
       className="inline-flex max-w-full items-center gap-2 rounded-[16px] bg-muted/45 px-2.5 py-1.5 text-left text-foreground"
-      title={attachment.kind === 'file' ? attachment.absolutePath : attachment.name}
+      title={title}
     >
-      <span className="rounded-md bg-background/80 p-1 text-muted-foreground">
-        {attachmentIcon(attachment)}
-      </span>
+      {thumbnail}
       <span className="min-w-0">
         <span className="block truncate text-[11px] font-medium leading-4">
           {attachment.name}
@@ -550,6 +653,7 @@ export function WorkspaceSessionComposer({
   const { t } = useLocale();
   const composerShellRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const textareaHighlightRef = useRef<HTMLDivElement | null>(null);
   const pendingCaretRef = useRef<number | null>(null);
   const fileSearchSeqRef = useRef(0);
   const [caretPosition, setCaretPosition] = useState(value.length);
@@ -597,6 +701,10 @@ export function WorkspaceSessionComposer({
     && attachments.length === 0
     && recentFileSuggestions.length > 0;
   const visibleSuggestions = showRecentFiles ? recentFileSuggestions : suggestions;
+  const hasImagePlaceholders = useMemo(
+    () => splitComposerImagePlaceholders(value).some((part) => part.kind === 'image'),
+    [value],
+  );
 
   useEffect(() => {
     setActiveSuggestionIndex(0);
@@ -604,10 +712,21 @@ export function WorkspaceSessionComposer({
 
   useEffect(() => {
     setRecentFiles(loadComposerRecentFiles(workingDir));
-    setAttachments([]);
+    setAttachments((previous) => {
+      revokeComposerImageUrls(previous);
+      return [];
+    });
     setIsDragTarget(false);
     setDraggedFileCount(0);
   }, [workingDir]);
+
+  const attachmentsRef = useRef(attachments);
+  attachmentsRef.current = attachments;
+  useEffect(() => {
+    return () => {
+      revokeComposerImageUrls(attachmentsRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (pendingCaretRef.current == null || !textareaRef.current) {
@@ -669,6 +788,57 @@ export function WorkspaceSessionComposer({
     }
     setRecentFiles(loadComposerRecentFiles(workingDir));
   }, [workingDir]);
+
+  const handleImagePaste = useCallback(async (
+    items: DataTransferItem[],
+    insertion?: { text: string; start: number; end: number },
+  ) => {
+    if (!capabilities.supportsImages) {
+      return;
+    }
+
+    const imageAttachments: ComposerImageAttachment[] = [];
+    const firstImageIndex = getNextComposerImagePlaceholderIndex(attachmentsRef.current);
+    for (const item of items) {
+      const file = item.getAsFile();
+      if (!file) continue;
+
+      const validation = validateComposerImageFile(file);
+      if (!validation.valid) {
+        const errorMessage = t(validation.errorKey);
+        setAttachments((prev) => prev);
+        console.warn(`Image paste rejected: ${errorMessage}`);
+        continue;
+      }
+
+      try {
+        const placeholder = createComposerImagePlaceholder(firstImageIndex + imageAttachments.length);
+        const attachment = await createComposerImageAttachment(
+          file,
+          t('workspace.composerImagePastedName'),
+          'paste',
+          placeholder,
+        );
+        imageAttachments.push(attachment);
+      } catch (error) {
+        console.error('Failed to read pasted image:', error);
+      }
+    }
+
+    if (imageAttachments.length > 0) {
+      if (insertion) {
+        const { nextText, nextCaretPosition } = insertComposerTextAtRange(
+          insertion.text,
+          imageAttachments.map((attachment) => attachment.placeholder).join(' '),
+          insertion.start,
+          insertion.end,
+        );
+        pendingCaretRef.current = nextCaretPosition;
+        onValueChange(nextText);
+      }
+      addAttachments(imageAttachments);
+    }
+  }, [addAttachments, capabilities.supportsImages, onValueChange, t]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -742,6 +912,15 @@ export function WorkspaceSessionComposer({
     setCaretPosition(textareaRef.current.selectionStart ?? value.length);
   };
 
+  const syncTextareaHighlightScroll = useCallback(() => {
+    if (!textareaRef.current || !textareaHighlightRef.current) {
+      return;
+    }
+
+    textareaHighlightRef.current.scrollTop = textareaRef.current.scrollTop;
+    textareaHighlightRef.current.scrollLeft = textareaRef.current.scrollLeft;
+  }, []);
+
   const applySuggestion = useCallback((suggestion: ComposerSuggestion) => {
     if (!activeQuery) {
       if (showRecentFiles && suggestion.path) {
@@ -772,6 +951,7 @@ export function WorkspaceSessionComposer({
 
     const result = await onSubmit(payload);
     if (result !== false) {
+      revokeComposerImageUrls(attachments);
       setAttachments([]);
       setIsDragTarget(false);
       setDraggedFileCount(0);
@@ -879,7 +1059,16 @@ export function WorkspaceSessionComposer({
                       key={attachment.id}
                       attachment={attachment}
                       onRemove={(id) => {
-                        setAttachments((previous) => previous.filter((candidate) => candidate.id !== id));
+                        setAttachments((previous) => {
+                          const removed = previous.find((c) => c.id === id);
+                          if (removed?.kind === 'image' && removed.objectUrl) {
+                            URL.revokeObjectURL(removed.objectUrl);
+                          }
+                          if (removed?.kind === 'image') {
+                            onValueChange(removeComposerImagePlaceholder(value, removed.placeholder));
+                          }
+                          return previous.filter((c) => c.id !== id);
+                        });
                       }}
                     />
                   ))}
@@ -888,94 +1077,131 @@ export function WorkspaceSessionComposer({
             </div>
           ) : null}
 
-          <textarea
-            ref={textareaRef}
-            {...textareaProps}
-            value={value}
-            onChange={(event) => {
-              onValueChange(event.target.value);
-              setCaretPosition(event.target.selectionStart ?? event.target.value.length);
-            }}
-            onFocus={(event) => {
-              textareaProps?.onFocus?.(event);
-            }}
-            onBlur={(event) => {
-              textareaProps?.onBlur?.(event);
-            }}
-            onPaste={(event) => {
-              textareaProps?.onPaste?.(event);
-              if (event.defaultPrevented) {
-                return;
-              }
-
-              const pastedText = event.clipboardData?.getData('text/plain') ?? '';
-              if (!isLargeComposerPaste(pastedText)) {
-                return;
-              }
-
-              event.preventDefault();
-              addAttachments([createComposerTextAttachment(
-                pastedText,
-                t('workspace.composerPastedTextName'),
-                'paste',
-              )]);
-            }}
-            onSelect={(event) => {
-              syncCaretFromDom();
-              textareaProps?.onSelect?.(event);
-            }}
-            onClick={(event) => {
-              syncCaretFromDom();
-              textareaProps?.onClick?.(event);
-            }}
-            onKeyUp={(event) => {
-              syncCaretFromDom();
-              textareaProps?.onKeyUp?.(event);
-            }}
-            onKeyDown={(event) => {
-              textareaProps?.onKeyDown?.(event);
-              if (event.defaultPrevented) {
-                return;
-              }
-
-              if (event.key === 'Tab' && event.shiftKey && planButtonVisible && onPlanModeEnabledChange) {
-                event.preventDefault();
-                onPlanModeEnabledChange(!planModeEnabled);
-                return;
-              }
-
-              if (visibleSuggestions.length > 0) {
-                if (event.key === 'ArrowDown') {
-                  event.preventDefault();
-                  setActiveSuggestionIndex((current) => (current + 1) % visibleSuggestions.length);
+          <div className="relative min-h-[72px]">
+            {hasImagePlaceholders ? (
+              <ComposerTextareaHighlight
+                value={value}
+                scrollRef={textareaHighlightRef}
+              />
+            ) : null}
+            <textarea
+              ref={textareaRef}
+              {...textareaProps}
+              value={value}
+              onChange={(event) => {
+                onValueChange(event.target.value);
+                setCaretPosition(event.target.selectionStart ?? event.target.value.length);
+                syncTextareaHighlightScroll();
+              }}
+              onFocus={(event) => {
+                textareaProps?.onFocus?.(event);
+              }}
+              onBlur={(event) => {
+                textareaProps?.onBlur?.(event);
+              }}
+              onScroll={(event) => {
+                syncTextareaHighlightScroll();
+                textareaProps?.onScroll?.(event);
+              }}
+              onPaste={(event) => {
+                textareaProps?.onPaste?.(event);
+                if (event.defaultPrevented) {
                   return;
                 }
 
-                if (event.key === 'ArrowUp') {
-                  event.preventDefault();
-                  setActiveSuggestionIndex((current) => (current - 1 + visibleSuggestions.length) % visibleSuggestions.length);
-                  return;
-                }
-
-                if (event.key === 'Tab' && !event.shiftKey) {
-                  event.preventDefault();
-                  const suggestion = visibleSuggestions[activeSuggestionIndex] ?? visibleSuggestions[0];
-                  if (suggestion) {
-                    applySuggestion(suggestion);
+                const items = event.clipboardData?.items;
+                if (items) {
+                  const imageItems: DataTransferItem[] = [];
+                  for (let i = 0; i < items.length; i++) {
+                    if (items[i].kind === 'file' && getSupportedImageMediaType(items[i].type)) {
+                      imageItems.push(items[i]);
+                    }
                   }
+                  if (imageItems.length > 0) {
+                    event.preventDefault();
+                    void handleImagePaste(imageItems, {
+                      text: value,
+                      start: textareaRef.current?.selectionStart ?? value.length,
+                      end: textareaRef.current?.selectionEnd ?? value.length,
+                    });
+                    return;
+                  }
+                }
+
+                const pastedText = event.clipboardData?.getData('text/plain') ?? '';
+                if (!isLargeComposerPaste(pastedText)) {
                   return;
                 }
-              }
 
-              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
                 event.preventDefault();
-                void handleComposerSubmit();
-              }
-            }}
-            placeholder={placeholder}
-            disabled={disabled}
-            className="min-h-[72px] w-full resize-none bg-transparent text-[14px] leading-6.5 text-foreground outline-none placeholder:text-muted-foreground/75 disabled:cursor-not-allowed disabled:text-muted-foreground"
-          />
+                addAttachments([createComposerTextAttachment(
+                  pastedText,
+                  t('workspace.composerPastedTextName'),
+                  'paste',
+                )]);
+              }}
+              onSelect={(event) => {
+                syncCaretFromDom();
+                textareaProps?.onSelect?.(event);
+              }}
+              onClick={(event) => {
+                syncCaretFromDom();
+                textareaProps?.onClick?.(event);
+              }}
+              onKeyUp={(event) => {
+                syncCaretFromDom();
+                textareaProps?.onKeyUp?.(event);
+              }}
+              onKeyDown={(event) => {
+                textareaProps?.onKeyDown?.(event);
+                if (event.defaultPrevented) {
+                  return;
+                }
+
+                if (event.key === 'Tab' && event.shiftKey && planButtonVisible && onPlanModeEnabledChange) {
+                  event.preventDefault();
+                  onPlanModeEnabledChange(!planModeEnabled);
+                  return;
+                }
+
+                if (visibleSuggestions.length > 0) {
+                  if (event.key === 'ArrowDown') {
+                    event.preventDefault();
+                    setActiveSuggestionIndex((current) => (current + 1) % visibleSuggestions.length);
+                    return;
+                  }
+
+                  if (event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    setActiveSuggestionIndex((current) => (current - 1 + visibleSuggestions.length) % visibleSuggestions.length);
+                    return;
+                  }
+
+                  if (event.key === 'Tab' && !event.shiftKey) {
+                    event.preventDefault();
+                    const suggestion = visibleSuggestions[activeSuggestionIndex] ?? visibleSuggestions[0];
+                    if (suggestion) {
+                      applySuggestion(suggestion);
+                    }
+                    return;
+                  }
+                }
+
+                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                  event.preventDefault();
+                  void handleComposerSubmit();
+                }
+              }}
+              placeholder={placeholder}
+              disabled={disabled}
+              className={cn(
+                'relative z-10 min-h-[72px] w-full resize-none bg-transparent text-[14px] leading-6.5 outline-none placeholder:text-muted-foreground/75 disabled:cursor-not-allowed disabled:text-muted-foreground',
+                hasImagePlaceholders
+                  ? 'text-transparent caret-foreground selection:bg-primary/25 placeholder:text-transparent'
+                  : 'text-foreground',
+              )}
+            />
+          </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-2.5 border-t border-border/40 pt-2">
             <ComposerQuickMenu

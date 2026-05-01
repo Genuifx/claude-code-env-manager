@@ -1,7 +1,11 @@
 import { query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { Codex } from '@openai/codex-sdk';
 import { createInterface } from 'node:readline';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import process from 'node:process';
+import { buildPromptContentParts, type PromptImage } from './promptContent';
 
 type NativeProvider = 'claude' | 'codex';
 
@@ -13,6 +17,7 @@ type InitCommand = {
   working_dir: string;
   env_vars?: Record<string, string>;
   initial_prompt?: string | null;
+  initial_images?: PromptImage[] | null;
   provider_session_id?: string | null;
   claude_path?: string | null;
   codex_path?: string | null;
@@ -24,6 +29,7 @@ type InitCommand = {
 type PromptCommand = {
   type: 'prompt';
   text: string;
+  images?: PromptImage[] | null;
 };
 
 type InteractivePromptResponseCommand = {
@@ -117,7 +123,7 @@ let claudeTurnCompletionEmitted = false;
 let codexClient: Codex | null = null;
 let codexThread: any = null;
 let pendingSettings: RuntimeSettingsPatch | null = null;
-const promptQueue: string[] = [];
+const promptQueue: Array<{ text: string; images?: PromptImage[] | null }> = [];
 const pendingPermissions = new Map<string, PermissionResolver>();
 const pendingClaudeInteractivePrompts = new Map<string, ClaudeInteractivePromptResolver>();
 const startedToolNames = new Map<string, string>();
@@ -1056,17 +1062,35 @@ async function ensureClaudeSession() {
   }
 }
 
-function enqueueClaudePrompt(text: string) {
+function enqueueClaudePrompt(text: string, images?: PromptImage[] | null) {
   if (!claudeInputQueue) {
     throw new Error('Claude streaming input queue is not ready');
   }
+
+  const parts = buildPromptContentParts(text, images);
+  const hasImages = parts.some((part) => part.type === 'image');
+  const content = hasImages
+    ? parts.map((part) => {
+        if (part.type === 'text') {
+          return { type: 'text' as const, text: part.text };
+        }
+        return {
+          type: 'image' as const,
+          source: {
+            type: 'base64' as const,
+            media_type: part.image.mediaType,
+            data: part.image.base64Data,
+          },
+        };
+      })
+    : text.trim();
 
   resetClaudeTurnTracking();
   claudeInputQueue.push({
     type: 'user',
     message: {
       role: 'user',
-      content: text,
+      content,
     },
     parent_tool_use_id: null,
   });
@@ -1142,10 +1166,37 @@ async function ensureCodexThread() {
   return codexThread;
 }
 
-async function runCodexTurn(text: string) {
+async function runCodexTurn(text: string, images?: PromptImage[] | null) {
   const thread = await ensureCodexThread();
   currentAbortController = new AbortController();
-  const streamed = await thread.runStreamed(text, {
+
+  let input: import('@openai/codex-sdk').Input;
+  const parts = buildPromptContentParts(text, images);
+  const hasImages = parts.some((part) => part.type === 'image');
+  if (hasImages) {
+    const tempDir = path.join(os.tmpdir(), 'ccem-images');
+    fs.mkdirSync(tempDir, { recursive: true });
+
+    const inputParts: import('@openai/codex-sdk').UserInput[] = [];
+    for (const part of parts) {
+      if (part.type === 'text') {
+        inputParts.push({ type: 'text', text: part.text });
+        continue;
+      }
+
+      const ext = part.image.mediaType.split('/')[1] || 'png';
+      const filename = `paste-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+      const filePath = path.join(tempDir, filename);
+      fs.writeFileSync(filePath, Buffer.from(part.image.base64Data, 'base64'));
+      inputParts.push({ type: 'local_image', path: filePath });
+    }
+
+    input = inputParts;
+  } else {
+    input = text.trim();
+  }
+
+  const streamed = await thread.runStreamed(input, {
     signal: currentAbortController.signal,
   });
 
@@ -1275,13 +1326,9 @@ async function runQueuedTurns() {
   }
 
   activeTurn = true;
-  emitStatus('processing', initCommand.provider === 'codex' ? 'Codex is processing a turn.' : 'Claude is processing a turn.');
+  emitStatus('processing', 'Codex is processing a turn.');
   try {
-    if (initCommand.provider === 'codex') {
-      await runCodexTurn(nextPrompt);
-    } else {
-      await runClaudeTurn(nextPrompt);
-    }
+    await runCodexTurn(nextPrompt.text, nextPrompt.images);
     if (!stopped) {
       emitStatus('ready', 'Ready for the next prompt.');
     }
@@ -1319,12 +1366,14 @@ async function handleCommand(command: InputCommand) {
       emitSessionMeta(currentProviderSessionId);
     }
     emitStatus('ready', 'Native runtime helper initialized.');
-    if (command.initial_prompt?.trim()) {
+    const initialText = command.initial_prompt?.trim() ?? '';
+    const initialImages = command.initial_images?.length ? command.initial_images : null;
+    if (initialText || initialImages) {
       if (command.provider === 'claude') {
         await ensureClaudeSession();
-        enqueueClaudePrompt(command.initial_prompt.trim());
+        enqueueClaudePrompt(initialText, initialImages);
       } else {
-        promptQueue.push(command.initial_prompt.trim());
+        promptQueue.push({ text: initialText, images: initialImages });
         await runQueuedTurns();
       }
     } else if (command.provider === 'claude') {
@@ -1401,14 +1450,15 @@ async function handleCommand(command: InputCommand) {
   }
 
   if (command.type === 'prompt') {
-    if (!command.text.trim()) {
+    const hasImages = command.images && command.images.length > 0;
+    if (!command.text.trim() && !hasImages) {
       return;
     }
     if (initCommand?.provider === 'claude') {
       await ensureClaudeSession();
-      enqueueClaudePrompt(command.text.trim());
+      enqueueClaudePrompt(command.text.trim(), command.images);
     } else {
-      promptQueue.push(command.text.trim());
+      promptQueue.push({ text: command.text.trim(), images: command.images });
       await runQueuedTurns();
     }
     return;

@@ -11,6 +11,7 @@ export interface WorkspaceComposerCapabilities {
   planModeKind: 'session_permission' | 'command_prefix';
   planCommandPrefix?: string;
   commands: ComposerCommandDefinition[];
+  supportsImages: boolean;
 }
 
 const CLAUDE_COMMANDS: ComposerCommandDefinition[] = [
@@ -69,6 +70,7 @@ const CAPABILITIES: Record<WorkspaceComposerProvider, WorkspaceComposerCapabilit
     label: 'Claude Code',
     planModeKind: 'session_permission',
     commands: CLAUDE_COMMANDS,
+    supportsImages: true,
   },
   codex: {
     provider: 'codex',
@@ -76,6 +78,7 @@ const CAPABILITIES: Record<WorkspaceComposerProvider, WorkspaceComposerCapabilit
     planModeKind: 'command_prefix',
     planCommandPrefix: '/plan',
     commands: CODEX_COMMANDS,
+    supportsImages: true,
   },
 };
 

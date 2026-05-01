@@ -52,7 +52,7 @@ use interactive_runtime::{
 };
 use native_runtime::{
     InteractivePromptAnnotation, NativeProvider, NativeRuntimeManager, NativeSessionOptions,
-    NativeSessionSummary,
+    NativeSessionSummary, PromptImage,
 };
 use opencode::{snapshot_known_session_ids, track_launched_session};
 use proxy_debug::{
@@ -972,12 +972,14 @@ async fn create_native_session(
     perm_mode: Option<String>,
     working_dir: Option<String>,
     initial_prompt: String,
+    initial_images: Option<Vec<PromptImage>>,
     provider_session_id: Option<String>,
     effort: Option<String>,
 ) -> Result<NativeSessionSummary, String> {
     let provider = parse_native_provider(&provider)?;
     let effective_working_dir = resolve_headless_working_dir(working_dir);
     let effective_perm_mode = perm_mode.unwrap_or_else(|| "dev".to_string());
+    let initial_images = initial_images.filter(|images| !images.is_empty());
 
     let options = match provider {
         NativeProvider::Claude => {
@@ -988,6 +990,7 @@ async fn create_native_session(
                 perm_mode: effective_perm_mode,
                 working_dir: effective_working_dir,
                 initial_prompt: Some(initial_prompt),
+                initial_images: initial_images.clone(),
                 provider_session_id: provider_session_id.clone(),
                 helper_env_vars: resolved.env_vars.clone(),
                 terminal_env_vars: resolved.env_vars,
@@ -1011,6 +1014,7 @@ async fn create_native_session(
                 perm_mode: effective_perm_mode,
                 working_dir: effective_working_dir,
                 initial_prompt: Some(initial_prompt),
+                initial_images: initial_images.clone(),
                 provider_session_id: provider_session_id.clone(),
                 helper_env_vars: proxy_env_vars.clone(),
                 terminal_env_vars: proxy_env_vars,
@@ -1058,8 +1062,9 @@ fn send_native_session_input(
     native_state: State<'_, Arc<NativeRuntimeManager>>,
     runtime_id: String,
     text: String,
+    images: Option<Vec<PromptImage>>,
 ) -> Result<(), String> {
-    native_state.send_user_message(&app, &runtime_id, &text)
+    native_state.send_user_message(&app, &runtime_id, &text, images.as_ref())
 }
 
 #[tauri::command]

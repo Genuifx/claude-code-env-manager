@@ -201,6 +201,10 @@
     "composerAttachmentSummary": "{count} attachments",
     "composerRemoveAttachment": "Remove attachment",
     "composerPastedTextName": "Pasted text",
+    "composerImagePastedName": "Pasted image",
+    "composerImageTooLarge": "Image exceeds the 10 MB size limit",
+    "composerImageUnsupported": "Unsupported image format",
+    "composerImageReadFailed": "Failed to read pasted image",
     "composerPathLabel": "Path",
     "composerAcceptKey": "Tab"
   },

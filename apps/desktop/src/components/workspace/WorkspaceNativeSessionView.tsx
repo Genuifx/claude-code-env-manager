@@ -35,6 +35,7 @@ import type {
 import {
   buildComposerPromptPreview,
   buildComposerPromptText,
+  extractComposerImagePayloads,
   type ComposerAttachment,
   type ComposerSubmitPayload,
 } from './composerAttachments';
@@ -1436,12 +1437,14 @@ export function WorkspaceNativeSessionView({
   const sendPromptBatch = useCallback(async (
     prompts: Array<{ id: string; text: string; planMode: boolean; attachments: ComposerAttachment[] }>,
   ) => {
+    const allAttachments = prompts.flatMap((p) => p.attachments);
+    const images = extractComposerImagePayloads(allAttachments);
     const payload = buildQueuedBatchText(prompts.map((prompt) => ({
       text: prompt.text,
       planMode: prompt.planMode,
       attachments: prompt.attachments,
     })));
-    if (!payload) {
+    if (!payload && images.length === 0) {
       return;
     }
 
@@ -1468,7 +1471,11 @@ export function WorkspaceNativeSessionView({
     setLocalUserPrompts((previous) => [...previous, promptEntry]);
 
     try {
-      await sendNativeSessionInput(session.runtime_id, payload);
+      await sendNativeSessionInput(
+        session.runtime_id,
+        payload ?? '',
+        images.length > 0 ? images : undefined,
+      );
       await pollEvents();
       await refreshSummary();
     } catch (error) {
@@ -1494,9 +1501,12 @@ export function WorkspaceNativeSessionView({
     };
 
     let requestText = '';
+    let requestImages: Array<{ mediaType: string; base64Data: string }> | undefined;
     if (payload.kind === 'text') {
       requestText = buildComposerPromptText(payload.text, payload.attachments ?? []);
-      if (!requestText.trim()) {
+      const images = extractComposerImagePayloads(payload.attachments ?? []);
+      requestImages = images.length > 0 ? images : undefined;
+      if (!requestText.trim() && !requestImages) {
         return false;
       }
     }
@@ -1517,7 +1527,7 @@ export function WorkspaceNativeSessionView({
           annotations: payload.annotations,
         });
       } else {
-        await sendNativeSessionInput(session.runtime_id, requestText);
+        await sendNativeSessionInput(session.runtime_id, requestText, requestImages);
       }
       await pollEvents();
       await refreshSummary();

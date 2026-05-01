@@ -21,7 +21,21 @@ export interface ComposerTextAttachment {
   charCount: number;
 }
 
-export type ComposerAttachment = ComposerFileAttachment | ComposerTextAttachment;
+export type ComposerImageMediaType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+
+export interface ComposerImageAttachment {
+  id: string;
+  kind: 'image';
+  source: ComposerAttachmentSource;
+  name: string;
+  placeholder: string;
+  mediaType: ComposerImageMediaType;
+  base64Data: string;
+  byteSize: number;
+  objectUrl: string | null;
+}
+
+export type ComposerAttachment = ComposerFileAttachment | ComposerTextAttachment | ComposerImageAttachment;
 
 export interface ComposerSubmitPayload {
   text: string;
@@ -36,11 +50,31 @@ export interface ComposerRecentFile {
   lastUsed: number;
 }
 
+export interface ComposerImagePayload {
+  mediaType: ComposerImageMediaType;
+  base64Data: string;
+  placeholder: string;
+}
+
+export type ComposerImagePlaceholderPart =
+  | { kind: 'text'; text: string }
+  | { kind: 'image'; text: string };
+
 const RECENT_FILES_LIMIT = 8;
 const RECENT_FILES_STORAGE_PREFIX = 'ccem:workspace-composer-recent-files:v1:';
 const LARGE_PASTE_CHAR_THRESHOLD = 1200;
 const LARGE_PASTE_LINE_THRESHOLD = 14;
 const MAX_TEXT_ATTACHMENT_CHARS = 16_000;
+const MAX_IMAGE_BYTE_SIZE = 10 * 1024 * 1024;
+
+const SUPPORTED_IMAGE_TYPES: Record<string, ComposerImageMediaType> = {
+  'image/png': 'image/png',
+  'image/jpeg': 'image/jpeg',
+  'image/gif': 'image/gif',
+  'image/webp': 'image/webp',
+};
+
+const IMAGE_PLACEHOLDER_RE = /\[Image #\d+\]/g;
 
 function makeId(prefix: string): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -131,6 +165,107 @@ export function isLargeComposerPaste(text: string): boolean {
   return trimmed.length >= LARGE_PASTE_CHAR_THRESHOLD || lineCount >= LARGE_PASTE_LINE_THRESHOLD;
 }
 
+export function getSupportedImageMediaType(mimeType: string): ComposerImageMediaType | null {
+  return SUPPORTED_IMAGE_TYPES[mimeType] ?? null;
+}
+
+export function createComposerImagePlaceholder(index: number): string {
+  return `[Image #${Math.max(1, index)}]`;
+}
+
+export function splitComposerImagePlaceholders(text: string): ComposerImagePlaceholderPart[] {
+  if (!text) {
+    return [];
+  }
+
+  const parts: ComposerImagePlaceholderPart[] = [];
+  let cursor = 0;
+  for (const match of text.matchAll(IMAGE_PLACEHOLDER_RE)) {
+    const start = match.index ?? 0;
+    if (start > cursor) {
+      parts.push({ kind: 'text', text: text.slice(cursor, start) });
+    }
+    parts.push({ kind: 'image', text: match[0] });
+    cursor = start + match[0].length;
+  }
+
+  if (cursor < text.length) {
+    parts.push({ kind: 'text', text: text.slice(cursor) });
+  }
+
+  return parts.length > 0 ? parts : [{ kind: 'text', text }];
+}
+
+export function getNextComposerImagePlaceholderIndex(attachments: ComposerAttachment[]): number {
+  const usedIndexes = attachments
+    .filter((attachment): attachment is ComposerImageAttachment => attachment.kind === 'image')
+    .map((attachment) => /\[Image #(\d+)\]/.exec(attachment.placeholder)?.[1])
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0);
+
+  return usedIndexes.length > 0 ? Math.max(...usedIndexes) + 1 : 1;
+}
+
+export function validateComposerImageFile(file: File): { valid: true } | { valid: false; errorKey: string } {
+  if (!SUPPORTED_IMAGE_TYPES[file.type]) {
+    return { valid: false, errorKey: 'workspace.composerImageUnsupported' };
+  }
+  if (file.size > MAX_IMAGE_BYTE_SIZE) {
+    return { valid: false, errorKey: 'workspace.composerImageTooLarge' };
+  }
+  return { valid: true };
+}
+
+export function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const commaIndex = result.indexOf(',');
+      resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('FileReader failed'));
+    reader.readAsDataURL(file);
+  });
+}
+
+export async function createComposerImageAttachment(
+  file: File,
+  name?: string,
+  source: ComposerAttachmentSource = 'paste',
+  placeholder = createComposerImagePlaceholder(1),
+): Promise<ComposerImageAttachment> {
+  const base64Data = await readFileAsBase64(file);
+  const objectUrl = URL.createObjectURL(file);
+  const mediaType = SUPPORTED_IMAGE_TYPES[file.type] ?? 'image/png';
+
+  return {
+    id: makeId('attachment-image'),
+    kind: 'image',
+    source,
+    name: name ?? (file.name || 'image'),
+    placeholder,
+    mediaType,
+    base64Data,
+    byteSize: file.size,
+    objectUrl,
+  };
+}
+
+export function revokeComposerImageUrls(attachments: ComposerAttachment[]) {
+  for (const attachment of attachments) {
+    if (attachment.kind === 'image' && attachment.objectUrl) {
+      URL.revokeObjectURL(attachment.objectUrl);
+    }
+  }
+}
+
+export function extractComposerImagePayloads(attachments: ComposerAttachment[]): ComposerImagePayload[] {
+  return attachments
+    .filter((a): a is ComposerImageAttachment => a.kind === 'image')
+    .map((a) => ({ mediaType: a.mediaType, base64Data: a.base64Data, placeholder: a.placeholder }));
+}
+
 export function mergeComposerAttachments(
   previous: ComposerAttachment[],
   next: ComposerAttachment[],
@@ -145,6 +280,11 @@ export function mergeComposerAttachments(
       if (existingIndex >= 0) {
         merged.splice(existingIndex, 1);
       }
+      merged.push(attachment);
+      continue;
+    }
+
+    if (attachment.kind === 'image') {
       merged.push(attachment);
       continue;
     }
@@ -286,9 +426,11 @@ export function buildComposerPromptPreview(
 
   const fileCount = attachments.filter((attachment) => attachment.kind === 'file').length;
   const textCount = attachments.filter((attachment) => attachment.kind === 'text').length;
+  const imageCount = attachments.filter((attachment) => attachment.kind === 'image').length;
   const summaryLines = [
     fileCount > 0 ? `Files attached: ${fileCount}` : null,
     textCount > 0 ? `Text snippets attached: ${textCount}` : null,
+    imageCount > 0 ? `Images attached: ${imageCount}` : null,
   ].filter((line): line is string => Boolean(line));
 
   if (!trimmedText) {

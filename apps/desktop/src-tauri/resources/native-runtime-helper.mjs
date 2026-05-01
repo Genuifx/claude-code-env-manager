@@ -15929,26 +15929,26 @@ function flattenConfigOverrides(value, prefix, overrides) {
     if (child === void 0) {
       continue;
     }
-    const path3 = prefix ? `${prefix}.${key}` : key;
+    const path32 = prefix ? `${prefix}.${key}` : key;
     if (isPlainObject(child)) {
-      flattenConfigOverrides(child, path3, overrides);
+      flattenConfigOverrides(child, path32, overrides);
     } else {
-      overrides.push(`${path3}=${toTomlValue(child, path3)}`);
+      overrides.push(`${path32}=${toTomlValue(child, path32)}`);
     }
   }
 }
-function toTomlValue(value, path3) {
+function toTomlValue(value, path32) {
   if (typeof value === "string") {
     return JSON.stringify(value);
   } else if (typeof value === "number") {
     if (!Number.isFinite(value)) {
-      throw new Error(`Codex config override at ${path3} must be a finite number`);
+      throw new Error(`Codex config override at ${path32} must be a finite number`);
     }
     return `${value}`;
   } else if (typeof value === "boolean") {
     return value ? "true" : "false";
   } else if (Array.isArray(value)) {
-    const rendered = value.map((item, index) => toTomlValue(item, `${path3}[${index}]`));
+    const rendered = value.map((item, index) => toTomlValue(item, `${path32}[${index}]`));
     return `[${rendered.join(", ")}]`;
   } else if (isPlainObject(value)) {
     const parts = [];
@@ -15959,14 +15959,14 @@ function toTomlValue(value, path3) {
       if (child === void 0) {
         continue;
       }
-      parts.push(`${formatTomlKey(key)} = ${toTomlValue(child, `${path3}.${key}`)}`);
+      parts.push(`${formatTomlKey(key)} = ${toTomlValue(child, `${path32}.${key}`)}`);
     }
     return `{${parts.join(", ")}}`;
   } else if (value === null) {
-    throw new Error(`Codex config override at ${path3} cannot be null`);
+    throw new Error(`Codex config override at ${path32} cannot be null`);
   } else {
     const typeName = typeof value;
-    throw new Error(`Unsupported Codex config override value at ${path3}: ${typeName}`);
+    throw new Error(`Unsupported Codex config override value at ${path32}: ${typeName}`);
   }
 }
 var TOML_BARE_KEY = /^[A-Za-z0-9_-]+$/;
@@ -16072,7 +16072,80 @@ var Codex = class {
 
 // src/index.ts
 import { createInterface } from "node:readline";
+import fs2 from "node:fs";
+import os2 from "node:os";
+import path3 from "node:path";
 import process2 from "node:process";
+
+// src/promptContent.ts
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function defaultImagePlaceholder(index) {
+  return `[Image #${index + 1}]`;
+}
+function pushTextPart(parts, text) {
+  const trimmed = text.trim();
+  if (trimmed) {
+    parts.push({ type: "text", text: trimmed });
+  }
+}
+function buildPromptContentParts(text, images) {
+  const trimmedText = text.trim();
+  const promptImages = images?.filter((image) => image.base64Data.trim()) ?? [];
+  if (promptImages.length === 0) {
+    return trimmedText ? [{ type: "text", text: trimmedText }] : [];
+  }
+  if (!trimmedText) {
+    return promptImages.map((image) => ({ type: "image", image }));
+  }
+  const occurrences = [];
+  for (const [imageIndex, image] of promptImages.entries()) {
+    const candidates = Array.from(new Set([
+      image.placeholder?.trim() || null,
+      defaultImagePlaceholder(imageIndex)
+    ].filter((candidate) => Boolean(candidate))));
+    let best = null;
+    for (const candidate of candidates) {
+      const match = new RegExp(escapeRegExp(candidate)).exec(trimmedText);
+      if (!match || match.index == null) {
+        continue;
+      }
+      const occurrence = {
+        start: match.index,
+        end: match.index + candidate.length
+      };
+      if (!best || occurrence.start < best.start) {
+        best = occurrence;
+      }
+    }
+    if (best) {
+      occurrences.push({ imageIndex, ...best });
+    }
+  }
+  occurrences.sort((a2, b10) => a2.start - b10.start || a2.end - b10.end);
+  const parts = [];
+  const usedImageIndexes = /* @__PURE__ */ new Set();
+  let cursor = 0;
+  for (const occurrence of occurrences) {
+    if (usedImageIndexes.has(occurrence.imageIndex) || occurrence.start < cursor) {
+      continue;
+    }
+    pushTextPart(parts, trimmedText.slice(cursor, occurrence.start));
+    parts.push({ type: "image", image: promptImages[occurrence.imageIndex] });
+    usedImageIndexes.add(occurrence.imageIndex);
+    cursor = occurrence.end;
+  }
+  pushTextPart(parts, trimmedText.slice(cursor));
+  for (const [imageIndex, image] of promptImages.entries()) {
+    if (!usedImageIndexes.has(imageIndex)) {
+      parts.push({ type: "image", image });
+    }
+  }
+  return parts;
+}
+
+// src/index.ts
 var initCommand = null;
 var stopped = false;
 var activeTurn = false;
@@ -16787,16 +16860,31 @@ async function ensureClaudeSession() {
     });
   }
 }
-function enqueueClaudePrompt(text) {
+function enqueueClaudePrompt(text, images) {
   if (!claudeInputQueue) {
     throw new Error("Claude streaming input queue is not ready");
   }
+  const parts = buildPromptContentParts(text, images);
+  const hasImages = parts.some((part) => part.type === "image");
+  const content = hasImages ? parts.map((part) => {
+    if (part.type === "text") {
+      return { type: "text", text: part.text };
+    }
+    return {
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: part.image.mediaType,
+        data: part.image.base64Data
+      }
+    };
+  }) : text.trim();
   resetClaudeTurnTracking();
   claudeInputQueue.push({
     type: "user",
     message: {
       role: "user",
-      content: text
+      content
     },
     parent_tool_use_id: null
   });
@@ -16862,10 +16950,32 @@ async function ensureCodexThread() {
   }
   return codexThread;
 }
-async function runCodexTurn(text) {
+async function runCodexTurn(text, images) {
   const thread = await ensureCodexThread();
   currentAbortController = new AbortController();
-  const streamed = await thread.runStreamed(text, {
+  let input;
+  const parts = buildPromptContentParts(text, images);
+  const hasImages = parts.some((part) => part.type === "image");
+  if (hasImages) {
+    const tempDir = path3.join(os2.tmpdir(), "ccem-images");
+    fs2.mkdirSync(tempDir, { recursive: true });
+    const inputParts = [];
+    for (const part of parts) {
+      if (part.type === "text") {
+        inputParts.push({ type: "text", text: part.text });
+        continue;
+      }
+      const ext = part.image.mediaType.split("/")[1] || "png";
+      const filename = `paste-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+      const filePath = path3.join(tempDir, filename);
+      fs2.writeFileSync(filePath, Buffer.from(part.image.base64Data, "base64"));
+      inputParts.push({ type: "local_image", path: filePath });
+    }
+    input = inputParts;
+  } else {
+    input = text.trim();
+  }
+  const streamed = await thread.runStreamed(input, {
     signal: currentAbortController.signal
   });
   const seenTextByItem = /* @__PURE__ */ new Map();
@@ -16979,13 +17089,9 @@ async function runQueuedTurns() {
     return;
   }
   activeTurn = true;
-  emitStatus("processing", initCommand.provider === "codex" ? "Codex is processing a turn." : "Claude is processing a turn.");
+  emitStatus("processing", "Codex is processing a turn.");
   try {
-    if (initCommand.provider === "codex") {
-      await runCodexTurn(nextPrompt);
-    } else {
-      await runClaudeTurn(nextPrompt);
-    }
+    await runCodexTurn(nextPrompt.text, nextPrompt.images);
     if (!stopped) {
       emitStatus("ready", "Ready for the next prompt.");
     }
@@ -17022,12 +17128,14 @@ async function handleCommand(command) {
       emitSessionMeta(currentProviderSessionId);
     }
     emitStatus("ready", "Native runtime helper initialized.");
-    if (command.initial_prompt?.trim()) {
+    const initialText = command.initial_prompt?.trim() ?? "";
+    const initialImages = command.initial_images?.length ? command.initial_images : null;
+    if (initialText || initialImages) {
       if (command.provider === "claude") {
         await ensureClaudeSession();
-        enqueueClaudePrompt(command.initial_prompt.trim());
+        enqueueClaudePrompt(initialText, initialImages);
       } else {
-        promptQueue.push(command.initial_prompt.trim());
+        promptQueue.push({ text: initialText, images: initialImages });
         await runQueuedTurns();
       }
     } else if (command.provider === "claude") {
@@ -17095,14 +17203,15 @@ async function handleCommand(command) {
     return;
   }
   if (command.type === "prompt") {
-    if (!command.text.trim()) {
+    const hasImages = command.images && command.images.length > 0;
+    if (!command.text.trim() && !hasImages) {
       return;
     }
     if (initCommand?.provider === "claude") {
       await ensureClaudeSession();
-      enqueueClaudePrompt(command.text.trim());
+      enqueueClaudePrompt(command.text.trim(), command.images);
     } else {
-      promptQueue.push(command.text.trim());
+      promptQueue.push({ text: command.text.trim(), images: command.images });
       await runQueuedTurns();
     }
     return;

@@ -91,6 +91,7 @@ pub struct NativeSessionOptions {
     pub perm_mode: String,
     pub working_dir: String,
     pub initial_prompt: Option<String>,
+    pub initial_images: Option<Vec<PromptImage>>,
     pub provider_session_id: Option<String>,
     pub helper_env_vars: HashMap<String, String>,
     pub terminal_env_vars: HashMap<String, String>,
@@ -109,6 +110,15 @@ pub struct InteractivePromptAnnotation {
     pub notes: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptImage {
+    pub media_type: String,
+    pub base64_data: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placeholder: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum HelperInputCommand<'a> {
@@ -120,6 +130,8 @@ enum HelperInputCommand<'a> {
         env_vars: &'a HashMap<String, String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         initial_prompt: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        initial_images: Option<&'a [PromptImage]>,
         #[serde(skip_serializing_if = "Option::is_none")]
         provider_session_id: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -135,6 +147,8 @@ enum HelperInputCommand<'a> {
     },
     Prompt {
         text: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        images: Option<&'a [PromptImage]>,
     },
     PermissionResponse {
         request_id: &'a str,
@@ -372,14 +386,25 @@ impl NativeRuntimeManager {
         app: &AppHandle,
         runtime_id: &str,
         text: &str,
+        images: Option<&Vec<PromptImage>>,
     ) -> Result<(), String> {
         let text = text.trim();
-        if text.is_empty() {
+        let has_images = images.as_ref().map_or(false, |imgs| !imgs.is_empty());
+        if text.is_empty() && !has_images {
             return Ok(());
         }
 
         let handle = self.ensure_handle(app.clone(), runtime_id)?;
-        self.write_to_child(&handle, &HelperInputCommand::Prompt { text })
+        let images_ref = images
+            .filter(|imgs| !imgs.is_empty())
+            .map(|imgs| imgs.as_slice());
+        self.write_to_child(
+            &handle,
+            &HelperInputCommand::Prompt {
+                text,
+                images: images_ref,
+            },
+        )
     }
 
     pub fn respond_to_permission(
@@ -631,6 +656,7 @@ impl NativeRuntimeManager {
                 working_dir: &options.working_dir,
                 env_vars: &handle.helper_env_vars,
                 initial_prompt: options.initial_prompt.as_deref(),
+                initial_images: options.initial_images.as_deref(),
                 provider_session_id: options.provider_session_id.as_deref(),
                 claude_path: handle.claude_path.as_deref(),
                 codex_path: handle.codex_path.as_deref(),
@@ -1182,6 +1208,7 @@ fn build_runtime_bootstrap_options(
         perm_mode: record.perm_mode.clone(),
         working_dir: record.project_dir.clone(),
         initial_prompt: None,
+        initial_images: None,
         provider_session_id: record.provider_session_id.clone(),
         helper_env_vars,
         terminal_env_vars,
@@ -1196,8 +1223,9 @@ fn build_runtime_bootstrap_options(
 #[cfg(test)]
 mod tests {
     use super::{
-        drain_helper_output_lines, merge_helper_env_path, NativeProvider, NativeRuntimeManager,
-        NativeSessionHandle, NativeSessionRecord, NativeTransport,
+        drain_helper_output_lines, merge_helper_env_path, HelperInputCommand, NativeProvider,
+        NativeRuntimeManager, NativeSessionHandle, NativeSessionRecord, NativeTransport,
+        PromptImage,
     };
     use crate::event_bus::{SessionEventPayload, SessionStore};
     use chrono::Utc;
@@ -1296,6 +1324,41 @@ mod tests {
                 r#"{"type":"status","status":"processing","detail":"go"}"#.to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn helper_init_serializes_initial_images_for_first_turn() {
+        let env_vars = HashMap::new();
+        let images = vec![PromptImage {
+            media_type: "image/png".to_string(),
+            base64_data: "iVBORw0KGgo=".to_string(),
+            placeholder: Some("[Image #1]".to_string()),
+        }];
+
+        let command = HelperInputCommand::Init {
+            provider: "claude",
+            env_name: "default",
+            perm_mode: "dev",
+            working_dir: "/tmp/project",
+            env_vars: &env_vars,
+            initial_prompt: Some("describe this"),
+            initial_images: Some(images.as_slice()),
+            provider_session_id: None,
+            claude_path: None,
+            codex_path: None,
+            codex_base_url: None,
+            codex_api_key: None,
+            effort: None,
+        };
+
+        let serialized = serde_json::to_value(command).expect("serialize init command");
+        assert_eq!(serialized["initial_prompt"], "describe this");
+        assert_eq!(serialized["initial_images"][0]["mediaType"], "image/png");
+        assert_eq!(
+            serialized["initial_images"][0]["base64Data"],
+            "iVBORw0KGgo="
+        );
+        assert_eq!(serialized["initial_images"][0]["placeholder"], "[Image #1]");
     }
 
     #[test]

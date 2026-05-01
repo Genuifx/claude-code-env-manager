@@ -16,6 +16,7 @@ import type { PermissionModeName } from '@ccem/core/browser';
 import {
   buildComposerPromptPreview,
   buildComposerPromptText,
+  extractComposerImagePayloads,
   type ComposerSubmitPayload,
 } from '@/components/workspace/composerAttachments';
 import { WorkspaceSkeleton } from '@/components/ui/skeleton-states';
@@ -86,7 +87,7 @@ function resolveComposerDispatch(options: {
   return {
     prompt: trimmedPrompt.startsWith('/plan')
       ? trimmedPrompt
-      : `/plan ${trimmedPrompt}`,
+      : (trimmedPrompt ? `/plan ${trimmedPrompt}` : '/plan'),
     permMode: options.permissionMode,
   };
 }
@@ -847,8 +848,9 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     const rawPrompt = payload?.text ?? composePrompt;
     const attachments = payload?.attachments ?? [];
     const prompt = buildComposerPromptText(rawPrompt, attachments);
+    const images = extractComposerImagePayloads(attachments);
     const workingDir = effectiveComposeDir;
-    if (!prompt || !workingDir) {
+    if ((!prompt && images.length === 0) || !workingDir) {
       return false;
     }
     const previewPrompt = buildComposerPromptPreview(rawPrompt, attachments);
@@ -868,6 +870,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
         permMode: dispatch.permMode,
         workingDir,
         initialPrompt: dispatch.prompt,
+        initialImages: images.length > 0 ? images : undefined,
       });
 
       upsertLiveSessionEntry(summary, {
@@ -891,6 +894,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
   }, [
     buildComposerPromptPreview,
     buildComposerPromptText,
+    extractComposerImagePayloads,
     composePrompt,
     composeProvider,
     composePlanModeEnabled,
@@ -922,7 +926,8 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     const rawPrompt = payload?.text ?? historyComposerText;
     const attachments = payload?.attachments ?? [];
     const prompt = buildComposerPromptText(rawPrompt, attachments);
-    if (!prompt || !selectedSession.project) {
+    const images = extractComposerImagePayloads(attachments);
+    if ((!prompt && images.length === 0) || !selectedSession.project) {
       return false;
     }
 
@@ -943,6 +948,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
         permMode: dispatch.permMode,
         workingDir: selectedSession.project,
         initialPrompt: dispatch.prompt,
+        initialImages: images.length > 0 ? images : undefined,
         providerSessionId: selectedSession.id,
       });
 
@@ -968,6 +974,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
   }, [
     buildComposerPromptPreview,
     buildComposerPromptText,
+    extractComposerImagePayloads,
     createNativeSession,
     historyEnv,
     historyPermMode,

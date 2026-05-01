@@ -688,6 +688,7 @@ export function useTauriCommands() {
     permMode?: string;
     workingDir?: string | null;
     initialPrompt: string;
+    initialImages?: Array<{ mediaType: string; base64Data: string; placeholder?: string }>;
     providerSessionId?: string | null;
     effort?: string | null;
   }): Promise<NativeSessionSummary> => {
@@ -698,6 +699,7 @@ export function useTauriCommands() {
       permMode: options.permMode ?? permissionMode,
       workingDir: options.workingDir ?? selectedWorkingDir ?? null,
       initialPrompt: options.initialPrompt,
+      initialImages: options.initialImages?.length ? options.initialImages : null,
       providerSessionId: options.providerSessionId ?? null,
       effort: options.effort ?? null,
     });
@@ -707,8 +709,16 @@ export function useTauriCommands() {
     return invoke<NativeSessionSummary[]>('list_native_sessions');
   }, []);
 
-  const sendNativeSessionInput = useCallback(async (runtimeId: string, text: string): Promise<void> => {
-    await invoke('send_native_session_input', { runtimeId, text });
+  const sendNativeSessionInput = useCallback(async (
+    runtimeId: string,
+    text: string,
+    images?: Array<{ mediaType: string; base64Data: string; placeholder?: string }>,
+  ): Promise<void> => {
+    await invoke('send_native_session_input', {
+      runtimeId,
+      text,
+      images: images?.length ? images : null,
+    });
   }, []);
 
   const respondNativeSessionPermission = useCallback(async (

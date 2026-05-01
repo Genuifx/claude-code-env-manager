@@ -245,6 +245,7 @@ export interface TauriCommands {
       permMode?: string | null;
       workingDir?: string | null;
       initialPrompt: string;
+      initialImages?: Array<{ mediaType: string; base64Data: string; placeholder?: string }> | null;
       providerSessionId?: string | null;
       effort?: string | null;
     },
@@ -255,6 +256,7 @@ export interface TauriCommands {
     {
       runtimeId: string;
       text: string;
+      images?: Array<{ mediaType: string; base64Data: string; placeholder?: string }> | null;
     },
     void
   ];
