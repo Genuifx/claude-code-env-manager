@@ -197,7 +197,8 @@ pub fn list_records_by_client(
              FROM session_provenance
              WHERE client = ?1
                AND source_session_id IS NOT NULL
-               AND TRIM(source_session_id) != ''",
+               AND TRIM(source_session_id) != ''
+             ORDER BY updated_at ASC",
         )
         .map_err(|error| format!("Failed to prepare provenance lookup: {}", error))?;
 

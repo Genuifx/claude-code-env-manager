@@ -53,6 +53,7 @@ type WorkspaceRuntimeDescriptor =
     };
 
 const POLL_INTERVAL_MS = 3000;
+const RUNTIME_HISTORY_FALLBACK_WINDOW_MS = 2 * 60 * 1000;
 
 function toSessionKey(session: Pick<HistorySessionItem, 'id' | 'source'>): string {
   return `${session.source}:${session.id}`;
@@ -152,6 +153,26 @@ function isRuntimeProcessing(
     return runtime.status === 'processing' || runtime.status === 'initializing';
   }
   return runtime.status === 'processing' || runtime.status === 'initializing';
+}
+
+function runtimeHasProviderIdentity(runtime: WorkspaceRuntimeDescriptor): boolean {
+  return (runtime.kind === 'native' && !!runtime.providerSessionId)
+    || (runtime.kind === 'unified' && !!runtime.historySessionId);
+}
+
+function canUseHistoryFallbackMatch(
+  runtime: WorkspaceRuntimeDescriptor,
+  session: HistorySessionItem
+): boolean {
+  if (runtimeHasProviderIdentity(runtime)) {
+    return false;
+  }
+
+  if (!Number.isFinite(runtime.createdAt) || !Number.isFinite(session.timestamp)) {
+    return false;
+  }
+
+  return Math.abs(session.timestamp - runtime.createdAt) <= RUNTIME_HISTORY_FALLBACK_WINDOW_MS;
 }
 
 function lastEventSeq(events?: SessionEventRecord[]) {
@@ -258,6 +279,9 @@ function buildRuntimeMatchMap(
     if (usedRuntimeIds.has(runtime.id)) {
       continue;
     }
+    if (runtimeHasProviderIdentity(runtime)) {
+      continue;
+    }
 
     const client = runtimeClient(runtime);
     const projectDir = normalizePath(runtime.projectDir);
@@ -270,6 +294,9 @@ function buildRuntimeMatchMap(
         return false;
       }
       if (session.envName && session.envName !== runtime.envName) {
+        return false;
+      }
+      if (!canUseHistoryFallbackMatch(runtime, session)) {
         return false;
       }
 

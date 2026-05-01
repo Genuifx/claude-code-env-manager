@@ -6,7 +6,7 @@ use crate::{opencode, runtime, session_provenance};
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -123,6 +123,7 @@ struct CodexLine {
 #[derive(Debug, Default, Clone)]
 struct CodexSessionMeta {
     cwd: Option<String>,
+    subagent_parent_thread_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -140,6 +141,12 @@ struct CodexSessionFileInfo {
     rollout_path: PathBuf,
     cwd: Option<String>,
     modified_at: u64,
+}
+
+#[derive(Debug, Default)]
+struct CodexSessionFileCollection {
+    files: Vec<(String, CodexSessionFileInfo)>,
+    subagent_parent_by_id: HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -217,7 +224,7 @@ pub async fn get_conversation_history(
             sessions.extend(load_opencode_history()?);
         }
 
-        sessions = dedupe_near_duplicate_history_sessions(sessions);
+        sessions = dedupe_history_sessions(sessions);
         sessions.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
 
         // Overlay user-edited title overrides
@@ -515,6 +522,101 @@ fn apply_provenance_to_history_session(
     }
 }
 
+fn dedupe_history_sessions(sessions: Vec<HistorySession>) -> Vec<HistorySession> {
+    let records = collect_history_provenance_records();
+    dedupe_history_sessions_with_provenance_records(sessions, &records)
+}
+
+fn collect_history_provenance_records() -> Vec<session_provenance::SessionProvenanceRecord> {
+    [SOURCE_CLAUDE, SOURCE_CODEX, SOURCE_OPENCODE]
+        .into_iter()
+        .filter_map(|source| session_provenance::list_records_by_client(source).ok())
+        .flat_map(|records| records.into_values())
+        .collect()
+}
+
+fn dedupe_history_sessions_with_provenance_records(
+    sessions: Vec<HistorySession>,
+    records: &[session_provenance::SessionProvenanceRecord],
+) -> Vec<HistorySession> {
+    let sessions = dedupe_provenance_alias_history_sessions(sessions, records);
+    dedupe_near_duplicate_history_sessions(sessions)
+}
+
+fn dedupe_provenance_alias_history_sessions(
+    sessions: Vec<HistorySession>,
+    records: &[session_provenance::SessionProvenanceRecord],
+) -> Vec<HistorySession> {
+    if sessions.len() < 2 || records.is_empty() {
+        return sessions;
+    }
+
+    let mut aliases: HashMap<(String, String), String> = HashMap::new();
+    for record in records {
+        let source = record.client.trim().to_lowercase();
+        let ccem_session_id = record.ccem_session_id.trim();
+        let source_session_id = record.source_session_id.trim();
+
+        if source.is_empty()
+            || ccem_session_id.is_empty()
+            || source_session_id.is_empty()
+            || ccem_session_id == source_session_id
+        {
+            continue;
+        }
+
+        aliases.insert(
+            (source, ccem_session_id.to_string()),
+            source_session_id.to_string(),
+        );
+    }
+
+    if aliases.is_empty() {
+        return sessions;
+    }
+
+    let present_keys = sessions
+        .iter()
+        .map(|session| {
+            (
+                session.source.trim().to_lowercase(),
+                session.id.trim().to_string(),
+            )
+        })
+        .collect::<HashSet<_>>();
+    let mut deduped: Vec<HistorySession> = Vec::with_capacity(sessions.len());
+    let mut indexes_by_key: HashMap<(String, String), usize> = HashMap::new();
+
+    for mut session in sessions {
+        let source = session.source.trim().to_lowercase();
+        let original_id = session.id.trim().to_string();
+        let canonical_id = aliases
+            .get(&(source.clone(), original_id.clone()))
+            .filter(|source_session_id| {
+                present_keys.contains(&(source.clone(), (*source_session_id).clone()))
+            })
+            .cloned()
+            .unwrap_or_else(|| original_id.clone());
+        let key = (source, canonical_id.clone());
+
+        if let Some(existing_index) = indexes_by_key.get(&key).copied() {
+            let mut merged =
+                merge_near_duplicate_history_sessions(&deduped[existing_index], &session);
+            merged.id = canonical_id;
+            deduped[existing_index] = merged;
+            continue;
+        }
+
+        if session.id != canonical_id {
+            session.id = canonical_id.clone();
+        }
+        indexes_by_key.insert(key, deduped.len());
+        deduped.push(session);
+    }
+
+    deduped
+}
+
 fn dedupe_near_duplicate_history_sessions(sessions: Vec<HistorySession>) -> Vec<HistorySession> {
     let mut deduped = Vec::with_capacity(sessions.len());
     let mut indexes_by_key: HashMap<(String, String, String), Vec<usize>> = HashMap::new();
@@ -527,9 +629,7 @@ fn dedupe_near_duplicate_history_sessions(sessions: Vec<HistorySession>) -> Vec<
 
         let duplicate_index = indexes_by_key.get(&key).and_then(|indexes| {
             indexes.iter().copied().find(|index| {
-                deduped[*index]
-                    .timestamp
-                    .abs_diff(session.timestamp)
+                deduped[*index].timestamp.abs_diff(session.timestamp)
                     <= HISTORY_NEAR_DUPLICATE_WINDOW_MS
             })
         });
@@ -583,13 +683,12 @@ fn merge_near_duplicate_history_sessions(
     left: &HistorySession,
     right: &HistorySession,
 ) -> HistorySession {
-    let (mut winner, donor) = if history_session_preference_score(right)
-        > history_session_preference_score(left)
-    {
-        (right.clone(), left)
-    } else {
-        (left.clone(), right)
-    };
+    let (mut winner, donor) =
+        if history_session_preference_score(right) > history_session_preference_score(left) {
+            (right.clone(), left)
+        } else {
+            (left.clone(), right)
+        };
 
     merge_history_session_metadata(&mut winner, donor);
     winner
@@ -796,9 +895,7 @@ fn extract_first_claude_message_text(message: &serde_json::Value) -> Option<&str
 
     // Format 2: content is a plain string (SDK shorthand, used by native runtime)
     //   {content: "hello"}
-    content
-        .as_str()
-        .filter(|text| !text.trim().is_empty())
+    content.as_str().filter(|text| !text.trim().is_empty())
 }
 
 fn find_claude_session_file(projects_dir: &PathBuf, session_id: &str) -> Option<PathBuf> {
@@ -1169,7 +1266,7 @@ fn build_codex_session_records(
 
     let mut session_map: HashMap<String, CodexSessionRecord> = HashMap::new();
 
-    for (session_id, file_info) in session_files {
+    for (session_id, file_info) in session_files.files {
         let record = codex_record(&mut session_map, &session_id);
         apply_codex_rollout_path(
             record,
@@ -1239,6 +1336,11 @@ fn build_codex_session_records(
         }
         record.timestamp = record.timestamp.max(timestamp);
     }
+
+    collapse_codex_duplicate_subagent_records(
+        &mut session_map,
+        &session_files.subagent_parent_by_id,
+    );
 
     Ok(session_map)
 }
@@ -1434,10 +1536,74 @@ fn apply_codex_rollout_path(
     }
 }
 
-fn collect_codex_session_files(root: &Path) -> HashMap<String, CodexSessionFileInfo> {
-    let mut file_map: HashMap<String, CodexSessionFileInfo> = HashMap::new();
+fn collapse_codex_duplicate_subagent_records(
+    session_map: &mut HashMap<String, CodexSessionRecord>,
+    subagent_parent_by_id: &HashMap<String, String>,
+) {
+    if subagent_parent_by_id.is_empty() {
+        return;
+    }
+
+    let duplicate_ids = subagent_parent_by_id
+        .iter()
+        .filter_map(|(subagent_id, parent_id)| {
+            let subagent = session_map.get(subagent_id)?;
+            let parent = session_map.get(parent_id)?;
+            if is_duplicate_codex_subagent_record(subagent, parent) {
+                Some((subagent_id.clone(), parent_id.clone()))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    for (subagent_id, parent_id) in duplicate_ids {
+        let Some(subagent) = session_map.remove(&subagent_id) else {
+            continue;
+        };
+        if let Some(parent) = session_map.get_mut(&parent_id) {
+            parent.timestamp = parent.timestamp.max(subagent.timestamp);
+            if parent.project.is_empty() {
+                parent.project = subagent.project;
+                parent.project_priority = subagent.project_priority;
+                parent.project_timestamp = subagent.project_timestamp;
+            }
+            if parent.rollout_path.is_none() {
+                parent.rollout_path = subagent.rollout_path;
+                parent.rollout_priority = subagent.rollout_priority;
+                parent.rollout_timestamp = subagent.rollout_timestamp;
+            }
+        }
+    }
+}
+
+fn is_duplicate_codex_subagent_record(
+    subagent: &CodexSessionRecord,
+    parent: &CodexSessionRecord,
+) -> bool {
+    if parent.rollout_path.is_none() {
+        return false;
+    }
+
+    let subagent_display = clean_display_title(&subagent.display).to_lowercase();
+    let parent_display = clean_display_title(&parent.display).to_lowercase();
+    if subagent_display.is_empty() || subagent_display != parent_display {
+        return false;
+    }
+
+    let subagent_project = normalize_project_for_dedupe(&subagent.project);
+    let parent_project = normalize_project_for_dedupe(&parent.project);
+    subagent_project.is_empty() || parent_project.is_empty() || subagent_project == parent_project
+}
+
+fn normalize_project_for_dedupe(project: &str) -> String {
+    project.trim().trim_end_matches('/').to_lowercase()
+}
+
+fn collect_codex_session_files(root: &Path) -> CodexSessionFileCollection {
+    let mut collection = CodexSessionFileCollection::default();
     if !root.exists() {
-        return file_map;
+        return collection;
     }
 
     let mut stack = vec![root.to_path_buf()];
@@ -1459,24 +1625,33 @@ fn collect_codex_session_files(root: &Path) -> HashMap<String, CodexSessionFileI
                 continue;
             }
 
-            if let Some(session_id) = extract_codex_session_id_from_path(&path) {
-                let candidate = CodexSessionFileInfo {
-                    cwd: read_codex_session_meta(&path).and_then(|meta| meta.cwd),
-                    modified_at: file_modified_at_millis(&path),
-                    rollout_path: path,
-                };
+            if let Some(path_session_id) = extract_codex_session_id_from_path(&path) {
+                let meta = read_codex_session_meta(&path);
+                let subagent_parent_thread_id = meta
+                    .as_ref()
+                    .and_then(|meta| meta.subagent_parent_thread_id.as_deref())
+                    .filter(|parent_id| *parent_id != path_session_id && looks_like_uuid(parent_id))
+                    .map(|parent_id| parent_id.to_string());
 
-                match file_map.get(&session_id) {
-                    Some(existing) if existing.modified_at >= candidate.modified_at => {}
-                    _ => {
-                        file_map.insert(session_id, candidate);
-                    }
+                if let Some(parent_thread_id) = subagent_parent_thread_id {
+                    collection
+                        .subagent_parent_by_id
+                        .insert(path_session_id.clone(), parent_thread_id);
                 }
+
+                collection.files.push((
+                    path_session_id,
+                    CodexSessionFileInfo {
+                        cwd: meta.and_then(|meta| meta.cwd),
+                        modified_at: file_modified_at_millis(&path),
+                        rollout_path: path,
+                    },
+                ));
             }
         }
     }
 
-    file_map
+    collection
 }
 
 fn extract_codex_session_id_from_path(path: &Path) -> Option<String> {
@@ -1534,8 +1709,15 @@ fn read_codex_session_meta(path: &Path) -> Option<CodexSessionMeta> {
             .get("cwd")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
+        let subagent_parent_thread_id = payload
+            .pointer("/source/subagent/thread_spawn/parent_thread_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
 
-        return Some(CodexSessionMeta { cwd });
+        return Some(CodexSessionMeta {
+            cwd,
+            subagent_parent_thread_id,
+        });
     }
 
     None
@@ -2889,13 +3071,15 @@ fn extract_usage_fields(
 #[cfg(test)]
 mod tests {
     use super::{
-        dedupe_near_duplicate_history_sessions, find_codex_session_file_with_config,
-        is_noise_display, load_claude_history_from_paths, load_codex_history_from_config,
-        merge_opencode_history_session, normalize_history_display, normalize_history_source,
-        parse_codex_history_timestamp, parse_opencode_conversation_export,
-        parse_opencode_history_session, resolve_codex_path_config_from, upsert_codex_history_session,
-        CodexHistoryLine, CodexPathConfig, HistorySession, SOURCE_CLAUDE,
+        dedupe_history_sessions_with_provenance_records, dedupe_near_duplicate_history_sessions,
+        find_codex_session_file_with_config, is_noise_display, load_claude_history_from_paths,
+        load_codex_history_from_config, merge_opencode_history_session, normalize_history_display,
+        normalize_history_source, parse_codex_history_timestamp,
+        parse_opencode_conversation_export, parse_opencode_history_session,
+        resolve_codex_path_config_from, upsert_codex_history_session, CodexHistoryLine,
+        CodexPathConfig, HistorySession, SOURCE_CLAUDE,
     };
+    use crate::session_provenance::SessionProvenanceRecord;
     use rusqlite::Connection;
     use std::collections::HashMap;
     use std::fs;
@@ -2941,6 +3125,34 @@ mod tests {
             ),
         )
         .expect("write codex session file");
+        path
+    }
+
+    fn write_codex_subagent_session_file(
+        root: &PathBuf,
+        session_id: &str,
+        parent_thread_id: &str,
+        cwd: &str,
+    ) -> PathBuf {
+        let session_dir = root.join("sessions").join("2026").join("04").join("15");
+        fs::create_dir_all(&session_dir).expect("create codex session dir");
+        let path = session_dir.join(format!("rollout-2026-04-15T12-10-00-{session_id}.jsonl"));
+        fs::write(
+            &path,
+            format!(
+                concat!(
+                    "{{\"timestamp\":\"2026-04-15T12:10:00.000Z\",\"type\":\"session_meta\",\"payload\":",
+                    "{{\"id\":\"{session_id}\",\"forked_from_id\":\"{parent_thread_id}\",\"cwd\":\"{cwd}\",",
+                    "\"source\":{{\"subagent\":{{\"thread_spawn\":{{\"parent_thread_id\":\"{parent_thread_id}\"}}}}}}}}}}\n",
+                    "{{\"timestamp\":\"2026-04-15T12:10:01.000Z\",\"type\":\"event_msg\",\"payload\":",
+                    "{{\"type\":\"thread_name_updated\",\"thread_id\":\"{parent_thread_id}\",\"thread_name\":\"Parent title\"}}}}\n"
+                ),
+                session_id = session_id,
+                parent_thread_id = parent_thread_id,
+                cwd = cwd,
+            ),
+        )
+        .expect("write codex subagent session file");
         path
     }
 
@@ -3381,6 +3593,86 @@ mod tests {
     }
 
     #[test]
+    fn test_dedupe_history_sessions_merges_workspace_runtime_aliases() {
+        let records = vec![SessionProvenanceRecord {
+            ccem_session_id: "native-1776489728117".to_string(),
+            client: SOURCE_CLAUDE.to_string(),
+            source_session_id: "provider-session-1".to_string(),
+            env_name: "3891".to_string(),
+            config_source: Some("ccem".to_string()),
+            working_dir: "/Users/g/baymax".to_string(),
+            perm_mode: Some("dev".to_string()),
+            launch_mode: "native_sdk".to_string(),
+            started_via: "desktop".to_string(),
+            created_at: "2026-04-17T12:00:00Z".to_string(),
+            updated_at: "2026-04-17T12:00:02Z".to_string(),
+        }];
+        let sessions = vec![
+            HistorySession {
+                id: "native-1776489728117".to_string(),
+                source: SOURCE_CLAUDE.to_string(),
+                display: "整理工作间会话关系".to_string(),
+                timestamp: 1_776_489_728_117,
+                project: "/Users/g/baymax".to_string(),
+                project_name: "baymax".to_string(),
+                env_name: Some("3891".to_string()),
+                config_source: Some("ccem".to_string()),
+            },
+            HistorySession {
+                id: "provider-session-1".to_string(),
+                source: SOURCE_CLAUDE.to_string(),
+                display: "整理工作间会话关系".to_string(),
+                timestamp: 1_776_489_738_586,
+                project: "/Users/g/baymax".to_string(),
+                project_name: "baymax".to_string(),
+                env_name: None,
+                config_source: None,
+            },
+        ];
+
+        let deduped = dedupe_history_sessions_with_provenance_records(sessions, &records);
+
+        assert_eq!(deduped.len(), 1);
+        let merged = deduped.first().expect("merged session");
+        assert_eq!(merged.id, "provider-session-1");
+        assert_eq!(merged.timestamp, 1_776_489_738_586);
+        assert_eq!(merged.env_name.as_deref(), Some("3891"));
+        assert_eq!(merged.config_source.as_deref(), Some("ccem"));
+    }
+
+    #[test]
+    fn test_dedupe_history_sessions_keeps_runtime_id_until_provider_history_exists() {
+        let records = vec![SessionProvenanceRecord {
+            ccem_session_id: "native-1776489728117".to_string(),
+            client: SOURCE_CLAUDE.to_string(),
+            source_session_id: "provider-session-1".to_string(),
+            env_name: "3891".to_string(),
+            config_source: Some("ccem".to_string()),
+            working_dir: "/Users/g/baymax".to_string(),
+            perm_mode: Some("dev".to_string()),
+            launch_mode: "native_sdk".to_string(),
+            started_via: "desktop".to_string(),
+            created_at: "2026-04-17T12:00:00Z".to_string(),
+            updated_at: "2026-04-17T12:00:02Z".to_string(),
+        }];
+        let sessions = vec![HistorySession {
+            id: "native-1776489728117".to_string(),
+            source: SOURCE_CLAUDE.to_string(),
+            display: "整理工作间会话关系".to_string(),
+            timestamp: 1_776_489_728_117,
+            project: "/Users/g/baymax".to_string(),
+            project_name: "baymax".to_string(),
+            env_name: Some("3891".to_string()),
+            config_source: Some("ccem".to_string()),
+        }];
+
+        let deduped = dedupe_history_sessions_with_provenance_records(sessions, &records);
+
+        assert_eq!(deduped.len(), 1);
+        assert_eq!(deduped[0].id, "native-1776489728117");
+    }
+
+    #[test]
     fn test_codex_history_uses_session_index_when_history_missing() {
         let root = temp_history_dir("codex-session-index");
         let sqlite_home = root.join("sqlite");
@@ -3446,6 +3738,123 @@ mod tests {
         assert_eq!(session.project, "/Users/g/sqlite");
         assert_eq!(session.project_name, "sqlite");
         assert!(session.timestamp >= 1_776_183_187_000);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_codex_history_collapses_subagent_rollouts_under_parent_thread() {
+        let root = temp_history_dir("codex-subagent-collapse");
+        let sqlite_home = root.join("sqlite");
+        let parent_id = "019dd43b-1460-7621-af7b-d05a495ee171";
+        let subagent_a = "019dd510-a117-7a63-b574-9051b6f1ba9b";
+        let subagent_b = "019dd510-a257-7bb0-930b-e9b8716317cd";
+        let parent_path = write_codex_session_file(&root, parent_id, "/Users/g/Github/AG");
+        let subagent_a_path =
+            write_codex_subagent_session_file(&root, subagent_a, parent_id, "/Users/g/Github/AG");
+        let subagent_b_path =
+            write_codex_subagent_session_file(&root, subagent_b, parent_id, "/Users/g/Github/AG");
+
+        create_state_db(
+            &sqlite_home,
+            "state_5.sqlite",
+            &[
+                &format!(
+                    concat!(
+                        "INSERT INTO threads (",
+                        "id, rollout_path, created_at, updated_at, source, model_provider, cwd, title, sandbox_policy, approval_mode",
+                        ") VALUES (",
+                        "'{}', '{}', 1776182000, 1776182001, 'vscode', 'openai', '/Users/g/Github/AG', 'Parent title', 'workspace-write', 'never'",
+                        ");"
+                    ),
+                    parent_id,
+                    parent_path.display()
+                ),
+                &format!(
+                    concat!(
+                        "INSERT INTO threads (",
+                        "id, rollout_path, created_at, updated_at, source, model_provider, cwd, title, sandbox_policy, approval_mode",
+                        ") VALUES (",
+                        "'{}', '{}', 1776182100, 1776182101, 'vscode', 'openai', '/Users/g/Github/AG', 'Parent title', 'workspace-write', 'never'",
+                        ");"
+                    ),
+                    subagent_a,
+                    subagent_a_path.display()
+                ),
+                &format!(
+                    concat!(
+                        "INSERT INTO threads (",
+                        "id, rollout_path, created_at, updated_at, source, model_provider, cwd, title, sandbox_policy, approval_mode",
+                        ") VALUES (",
+                        "'{}', '{}', 1776182200, 1776182201, 'vscode', 'openai', '/Users/g/Github/AG', 'Parent title', 'workspace-write', 'never'",
+                        ");"
+                    ),
+                    subagent_b,
+                    subagent_b_path.display()
+                ),
+            ],
+        );
+
+        let config = temp_codex_config(&root, &sqlite_home);
+        let sessions = load_codex_history_from_config(&config).expect("load codex history");
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, parent_id);
+        assert_eq!(sessions[0].display, "Parent title");
+        assert_eq!(sessions[0].project, "/Users/g/Github/AG");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_codex_history_keeps_titled_subagent_rollouts() {
+        let root = temp_history_dir("codex-subagent-keep-titled");
+        let sqlite_home = root.join("sqlite");
+        let parent_id = "019dd43b-1460-7621-af7b-d05a495ee171";
+        let subagent_id = "019dd4ea-e946-7930-82a1-96429b98aca9";
+        let parent_path = write_codex_session_file(&root, parent_id, "/Users/g/Github/AG");
+        let subagent_path =
+            write_codex_subagent_session_file(&root, subagent_id, parent_id, "/Users/g/Github/AG");
+
+        create_state_db(
+            &sqlite_home,
+            "state_5.sqlite",
+            &[
+                &format!(
+                    concat!(
+                        "INSERT INTO threads (",
+                        "id, rollout_path, created_at, updated_at, source, model_provider, cwd, title, sandbox_policy, approval_mode",
+                        ") VALUES (",
+                        "'{}', '{}', 1776182000, 1776182001, 'vscode', 'openai', '/Users/g/Github/AG', 'Parent title', 'workspace-write', 'never'",
+                        ");"
+                    ),
+                    parent_id,
+                    parent_path.display()
+                ),
+                &format!(
+                    concat!(
+                        "INSERT INTO threads (",
+                        "id, rollout_path, created_at, updated_at, source, model_provider, cwd, title, sandbox_policy, approval_mode",
+                        ") VALUES (",
+                        "'{}', '{}', 1776182100, 1776182101, 'vscode', 'openai', '/Users/g/Github/AG', 'Child task title', 'workspace-write', 'never'",
+                        ");"
+                    ),
+                    subagent_id,
+                    subagent_path.display()
+                ),
+            ],
+        );
+
+        let config = temp_codex_config(&root, &sqlite_home);
+        let sessions = load_codex_history_from_config(&config).expect("load codex history");
+
+        assert_eq!(sessions.len(), 2);
+        assert!(sessions
+            .iter()
+            .any(|session| session.id == parent_id && session.display == "Parent title"));
+        assert!(sessions
+            .iter()
+            .any(|session| session.id == subagent_id && session.display == "Child task title"));
 
         let _ = fs::remove_dir_all(root);
     }
