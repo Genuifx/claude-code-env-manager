@@ -308,7 +308,7 @@ fn next_runs(expression: &str, count: usize) -> Vec<String> {
         if cron_matches(expression, &cursor) {
             results.push(cursor.to_rfc3339());
         }
-        cursor = cursor + Duration::minutes(1);
+        cursor += Duration::minutes(1);
         iterations += 1;
     }
 

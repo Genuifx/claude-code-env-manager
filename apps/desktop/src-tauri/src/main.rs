@@ -1,5 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![allow(dead_code)]
+#![allow(clippy::too_many_arguments)]
 
 mod analytics;
 mod channel;
@@ -226,10 +228,7 @@ fn get_system_username() -> String {
 }
 
 #[tauri::command]
-fn window_control(
-    app: tauri::AppHandle,
-    action: WindowControlAction,
-) -> Result<(), String> {
+fn window_control(app: tauri::AppHandle, action: WindowControlAction) -> Result<(), String> {
     let main_window = app
         .get_webview_window("main")
         .ok_or_else(|| "Main window not available".to_string())?;
@@ -498,13 +497,12 @@ async fn launch_claude_code(
         client_name, env_name, perm_mode, working_dir, resume_session_id
     );
 
-    if client_name == "codex" || client_name == "opencode" {
-        if perm_mode
+    if (client_name == "codex" || client_name == "opencode")
+        && perm_mode
             .as_ref()
             .is_some_and(|mode| !mode.trim().is_empty())
-        {
-            println!("{client_name} launch ignores permission mode");
-        }
+    {
+        println!("{client_name} launch ignores permission mode");
     }
 
     // Generate session ID first (needed for launch tracking + proxy route binding)
@@ -1134,9 +1132,12 @@ fn update_native_session_settings(
                 } else {
                     resolved.env_name
                 };
-                (Some(resolved_name), Some(system_proxy::resolve_codex_proxy_env()))
+                (
+                    Some(resolved_name),
+                    Some(system_proxy::resolve_codex_proxy_env()),
+                )
             }
-        }
+        },
         _ => (None, None),
     };
     native_state.update_session_settings(
@@ -3163,11 +3164,7 @@ fn main() {
 
                 let fullscreen_window = main_window.clone();
                 main_window.listen("did-enter-fullscreen", move |_| {
-                    schedule_macos_traffic_light_sync(
-                        fullscreen_window.clone(),
-                        240,
-                        "fullscreen",
-                    );
+                    schedule_macos_traffic_light_sync(fullscreen_window.clone(), 240, "fullscreen");
                 });
 
                 let fullscreen_exit_window = main_window.clone();

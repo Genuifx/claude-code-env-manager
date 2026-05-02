@@ -157,7 +157,7 @@ fn build_sessions_menu(app: &AppHandle) -> Result<Submenu<tauri::Wry>, tauri::Er
         let project_name = session
             .working_dir
             .split('/')
-            .last()
+            .next_back()
             .unwrap_or(&session.working_dir);
 
         let label = format!(

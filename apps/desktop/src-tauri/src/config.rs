@@ -452,6 +452,7 @@ pub fn read_config() -> Result<CcemConfig, String> {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(false)
             .open(&config_path)
             .map_err(|e| format!("Failed to open config for locking: {}", e))?;
 
@@ -475,6 +476,7 @@ pub fn read_config() -> Result<CcemConfig, String> {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(false)
             .open(&config_path)
             .map_err(|e| format!("Failed to open config for locking: {}", e))?;
 
@@ -510,6 +512,7 @@ pub fn write_config(config: &CcemConfig) -> Result<(), String> {
     let lock_file = OpenOptions::new()
         .create(true)
         .write(true)
+        .truncate(false)
         .open(&config_path)
         .map_err(|e| format!("Failed to open config for locking: {}", e))?;
 
@@ -682,10 +685,18 @@ fn build_opencode_config_content(env: &EnvConfig) -> Option<String> {
     );
 
     let mut provider_options = serde_json::Map::new();
-    if let Some(base_url) = env.base_url.as_ref().filter(|value| !value.trim().is_empty()) {
+    if let Some(base_url) = env
+        .base_url
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
         provider_options.insert("baseURL".to_string(), json!(base_url));
     }
-    if let Some(api_key) = env.auth_token.as_ref().filter(|value| !value.trim().is_empty()) {
+    if let Some(api_key) = env
+        .auth_token
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
         provider_options.insert("apiKey".to_string(), json!(api_key));
     }
     if !provider_options.is_empty() {
@@ -700,7 +711,10 @@ fn build_opencode_config_content(env: &EnvConfig) -> Option<String> {
     }
 
     if let Some(model) = resolve_opencode_primary_model(env) {
-        root.insert("model".to_string(), json!(format_opencode_model_ref(&model)));
+        root.insert(
+            "model".to_string(),
+            json!(format_opencode_model_ref(&model)),
+        );
     }
     if let Some(model) = env
         .default_haiku_model
@@ -721,7 +735,12 @@ fn build_opencode_config_content(env: &EnvConfig) -> Option<String> {
 }
 
 fn resolve_opencode_primary_model(env: &EnvConfig) -> Option<String> {
-    match env.model.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+    match env
+        .model
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         Some("haiku") => env
             .default_haiku_model
             .clone()
@@ -1076,12 +1095,14 @@ mod tests {
             Some("https://opencode.ai/config.json")
         );
         assert_eq!(
-            value.pointer("/provider/anthropic/options/baseURL")
+            value
+                .pointer("/provider/anthropic/options/baseURL")
                 .and_then(|raw| raw.as_str()),
             Some("https://example.com/anthropic")
         );
         assert_eq!(
-            value.pointer("/provider/anthropic/options/apiKey")
+            value
+                .pointer("/provider/anthropic/options/apiKey")
                 .and_then(|raw| raw.as_str()),
             Some("auth-token-123")
         );

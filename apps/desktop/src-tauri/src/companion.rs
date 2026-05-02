@@ -67,12 +67,20 @@ fn hash_string(s: &str) -> u32 {
 const SALT: &str = "friend-2026-401";
 
 const SPECIES: &[&str] = &[
-    "duck", "goose", "blob", "cat", "dragon", "octopus", "owl", "penguin",
-    "turtle", "snail", "ghost", "axolotl", "capybara", "cactus", "robot",
-    "rabbit", "mushroom", "chonk",
+    "duck", "goose", "blob", "cat", "dragon", "octopus", "owl", "penguin", "turtle", "snail",
+    "ghost", "axolotl", "capybara", "cactus", "robot", "rabbit", "mushroom", "chonk",
 ];
 const EYES: &[&str] = &["·", "✦", "×", "◉", "@", "°"];
-const HATS: &[&str] = &["none", "crown", "tophat", "propeller", "halo", "wizard", "beanie", "tinyduck"];
+const HATS: &[&str] = &[
+    "none",
+    "crown",
+    "tophat",
+    "propeller",
+    "halo",
+    "wizard",
+    "beanie",
+    "tinyduck",
+];
 const RARITIES: &[&str] = &["common", "uncommon", "rare", "epic", "legendary"];
 const RARITY_WEIGHTS: &[u32] = &[60, 25, 10, 4, 1];
 const STAT_NAMES: &[&str] = &["DEBUGGING", "PATIENCE", "CHAOS", "WISDOM", "SNARK"];
@@ -95,17 +103,26 @@ fn roll_rarity(rng: &mut u32) -> &'static str {
 }
 
 const RARITY_FLOOR: &[(&str, i32)] = &[
-    ("common", 5), ("uncommon", 15), ("rare", 25), ("epic", 35), ("legendary", 50),
+    ("common", 5),
+    ("uncommon", 15),
+    ("rare", 25),
+    ("epic", 35),
+    ("legendary", 50),
 ];
 
 fn floor_for(rarity: &str) -> i32 {
-    RARITY_FLOOR.iter().find(|(r, _)| *r == rarity).map(|(_, f)| *f).unwrap_or(5)
+    RARITY_FLOOR
+        .iter()
+        .find(|(r, _)| *r == rarity)
+        .map(|(_, f)| *f)
+        .unwrap_or(5)
 }
 
 fn roll_stats(rng: &mut u32, rarity: &str) -> HashMap<String, u8> {
     let floor = floor_for(rarity);
     let peak_idx = (mulberry32(rng) * STAT_NAMES.len() as f64) as usize;
-    let dump_idx = (peak_idx + 1 + (mulberry32(rng) * (STAT_NAMES.len() - 1) as f64) as usize) % STAT_NAMES.len();
+    let dump_idx = (peak_idx + 1 + (mulberry32(rng) * (STAT_NAMES.len() - 1) as f64) as usize)
+        % STAT_NAMES.len();
     let peak = STAT_NAMES[peak_idx.min(STAT_NAMES.len() - 1)];
     let dump = STAT_NAMES[dump_idx];
     let mut stats = HashMap::new();

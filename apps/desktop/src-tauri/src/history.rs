@@ -971,11 +971,8 @@ fn parse_claude_conversation_file(
 
         // Detect compact_boundary (not microcompact).
         if msg_type == "system" && parsed.subtype.as_deref() == Some("compact_boundary") {
-            let is_null_parent = match &parsed.parent_uuid {
-                Some(serde_json::Value::Null) => true,
-                None => true,
-                _ => false,
-            };
+            let is_null_parent =
+                matches!(&parsed.parent_uuid, Some(serde_json::Value::Null) | None);
             if is_null_parent {
                 current_segment += 1;
                 let ts = parse_timestamp_value(&parsed.timestamp);
@@ -1364,7 +1361,7 @@ fn load_codex_history_index(path: &Path) -> Vec<CodexHistoryLine> {
 
     BufReader::new(file)
         .lines()
-        .filter_map(|line_result| line_result.ok())
+        .map_while(Result::ok)
         .filter(|line| !line.trim().is_empty())
         .filter_map(|line| serde_json::from_str::<CodexHistoryLine>(&line).ok())
         .collect()
@@ -1378,7 +1375,7 @@ fn load_codex_session_index(path: &Path) -> Vec<CodexSessionIndexLine> {
 
     BufReader::new(file)
         .lines()
-        .filter_map(|line_result| line_result.ok())
+        .map_while(Result::ok)
         .filter(|line| !line.trim().is_empty())
         .filter_map(|line| serde_json::from_str::<CodexSessionIndexLine>(&line).ok())
         .collect()
@@ -2722,7 +2719,7 @@ fn clean_display_title(raw: &str) -> String {
             .trim_start()
             .trim_start_matches("<synthetic>")
             .trim_start();
-        let cleaned = strip_leading_image_marker(&cleaned);
+        let cleaned = strip_leading_image_marker(cleaned);
         let cleaned = strip_leading_image_source_marker(&cleaned);
         let cleaned = strip_leading_skill_reference(&cleaned);
         if cleaned == s {
@@ -2822,6 +2819,7 @@ fn strip_leading_image_source_marker(text: &str) -> String {
 /// Strip a leading skill marker such as:
 /// - `[$skill](/path/to/SKILL.md)`
 /// - `$skill-name`
+///
 /// Only strips from the beginning so normal markdown links in real titles are preserved.
 fn strip_leading_skill_reference(text: &str) -> String {
     let trimmed = text.trim_start();

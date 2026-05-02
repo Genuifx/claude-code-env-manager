@@ -44,6 +44,7 @@ impl TitleOverrides {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(false)
             .open(Self::lock_path())?;
 
         lock_file.lock_exclusive()?;
@@ -86,7 +87,8 @@ impl TitleOverrides {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        self.entries.insert(key, TitleOverride { title, updated_at });
+        self.entries
+            .insert(key, TitleOverride { title, updated_at });
     }
 
     pub fn remove(&mut self, source: &str, id: &str) {
@@ -101,8 +103,8 @@ pub async fn set_session_title(
     title: String,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let (mut overrides, _lock) = TitleOverrides::load_locked()
-            .map_err(|e| format!("Failed to acquire lock: {}", e))?;
+        let (mut overrides, _lock) =
+            TitleOverrides::load_locked().map_err(|e| format!("Failed to acquire lock: {}", e))?;
         let trimmed = title.trim();
         if trimmed.is_empty() {
             overrides.remove(&source, &session_id);

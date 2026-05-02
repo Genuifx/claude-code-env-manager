@@ -34,7 +34,7 @@ pub fn encrypt(plaintext: &str) -> String {
     let block_size = 16;
     let padding_len = block_size - (plaintext.len() % block_size);
     let mut buffer = plaintext.as_bytes().to_vec();
-    buffer.extend(std::iter::repeat(padding_len as u8).take(padding_len));
+    buffer.extend(std::iter::repeat_n(padding_len as u8, padding_len));
 
     let len = buffer.len();
     let cipher = Aes256CbcEnc::new(&key.into(), &iv.into());

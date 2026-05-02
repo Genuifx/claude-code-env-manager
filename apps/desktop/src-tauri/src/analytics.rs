@@ -1101,8 +1101,9 @@ fn build_opencode_cache_entry(
     }
 
     let timestamp = extract_opencode_timestamp(value)
-        .map(|timestamp| chrono::DateTime::<chrono::Utc>::from_timestamp_millis(timestamp as i64))
-        .flatten()
+        .and_then(|timestamp| {
+            chrono::DateTime::<chrono::Utc>::from_timestamp_millis(timestamp as i64)
+        })
         .map(|timestamp| timestamp.to_rfc3339())
         .or_else(|| extract_opencode_string(value, &["timestamp", "createdAt", "updatedAt"]))?;
 

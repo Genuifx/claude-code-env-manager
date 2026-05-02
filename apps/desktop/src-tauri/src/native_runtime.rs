@@ -389,7 +389,7 @@ impl NativeRuntimeManager {
         images: Option<&Vec<PromptImage>>,
     ) -> Result<(), String> {
         let text = text.trim();
-        let has_images = images.as_ref().map_or(false, |imgs| !imgs.is_empty());
+        let has_images = images.as_ref().is_some_and(|imgs| !imgs.is_empty());
         if text.is_empty() && !has_images {
             return Ok(());
         }
@@ -1181,7 +1181,7 @@ fn persist_native_runtime_state_to(
     let temp_path = path.with_extension("json.tmp");
     fs::write(&temp_path, serialized)
         .map_err(|error| format!("Failed to write native runtime state: {}", error))?;
-    fs::rename(&temp_path, &path)
+    fs::rename(&temp_path, path)
         .map_err(|error| format!("Failed to finalize native runtime state: {}", error))
 }
 

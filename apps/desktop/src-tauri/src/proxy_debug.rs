@@ -1177,7 +1177,7 @@ fn write_error_response(
         .map_err(|e| format!("Failed to write error status line: {}", e))?;
     write!(stream, "content-type: application/json\r\n")
         .map_err(|e| format!("Failed to write error content-type: {}", e))?;
-    write!(stream, "content-length: {}\r\n", payload.as_bytes().len())
+    write!(stream, "content-length: {}\r\n", payload.len())
         .map_err(|e| format!("Failed to write error content-length: {}", e))?;
     write!(stream, "connection: close\r\n\r\n")
         .map_err(|e| format!("Failed to write error headers terminator: {}", e))?;
@@ -2039,7 +2039,7 @@ fn rewrite_records(records: &[TrafficRecord]) -> Result<(), String> {
             .map_err(|e| format!("Failed to rewrite traffic record line: {}", e))?;
         writeln!(idx, "{},{},{}", record.timestamp, record.id, offset)
             .map_err(|e| format!("Failed to rewrite traffic index line: {}", e))?;
-        offset = offset.saturating_add(line.as_bytes().len() as u64 + 1);
+        offset = offset.saturating_add(line.len() as u64 + 1);
     }
 
     apply_private_file_permissions(&jsonl_path);

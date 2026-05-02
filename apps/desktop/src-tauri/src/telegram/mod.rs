@@ -287,7 +287,7 @@ struct PendingBindSession {
     selected_env: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct TelegramBridgeState {
     configured: bool,
     running: bool,
@@ -302,26 +302,6 @@ struct TelegramBridgeState {
     seen_interactive_tool_events: HashMap<String, Instant>,
     pending_bind_sessions: HashMap<String, PendingBindSession>,
     known_forum_topics: HashMap<i64, KnownForumTopicState>,
-}
-
-impl Default for TelegramBridgeState {
-    fn default() -> Self {
-        Self {
-            configured: false,
-            running: false,
-            bot_username: None,
-            last_error: None,
-            allowed_chat_id: None,
-            next_update_id: None,
-            active_runtime_by_scope: HashMap::new(),
-            interactive_monitor_by_scope: HashMap::new(),
-            pending_interactive_actions: HashMap::new(),
-            active_interactive_prompts: HashMap::new(),
-            seen_interactive_tool_events: HashMap::new(),
-            pending_bind_sessions: HashMap::new(),
-            known_forum_topics: HashMap::new(),
-        }
-    }
 }
 
 pub struct TelegramBridgeManager {
@@ -967,10 +947,10 @@ fn clear_pending_bind_session(
     Ok(())
 }
 
-fn find_topic_binding<'a>(
-    settings: &'a TelegramSettings,
+fn find_topic_binding(
+    settings: &TelegramSettings,
     thread_id: Option<i64>,
-) -> Option<&'a TelegramTopicBinding> {
+) -> Option<&TelegramTopicBinding> {
     let thread_id = canonical_thread_id(thread_id)?;
     settings
         .topic_bindings

@@ -132,7 +132,11 @@ impl SessionManager {
         }
 
         // 获取文件锁
-        let lock_result = OpenOptions::new().create(true).write(true).open(&path);
+        let lock_result = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&path);
 
         let lock_file = match lock_result {
             Ok(f) => f,
@@ -537,7 +541,7 @@ fn project_label(working_dir: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Session, tmux_session_has_recoverable_target};
+    use super::{tmux_session_has_recoverable_target, Session};
 
     #[test]
     fn tmux_backed_session_with_target_survives_pidless_startup_reconcile() {

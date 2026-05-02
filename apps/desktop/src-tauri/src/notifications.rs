@@ -298,10 +298,7 @@ pub fn maybe_notify_session_event<R: Runtime>(
     }
 }
 
-pub fn maybe_notify_task_completed<R: Runtime>(
-    app: &AppHandle<R>,
-    context: &NotificationContext,
-) {
+pub fn maybe_notify_task_completed<R: Runtime>(app: &AppHandle<R>, context: &NotificationContext) {
     let prefs = load_prefs(app);
     let draft = build_task_completed_draft(context);
     if should_send(&prefs, &draft) {
@@ -335,7 +332,9 @@ pub fn send_test_notification<R: Runtime>(app: &AppHandle<R>) -> Result<(), Stri
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event_bus::{InteractiveToolPrompt, SessionEventPayload, ToolCategory, UserInputKind};
+    use crate::event_bus::{
+        InteractiveToolPrompt, SessionEventPayload, ToolCategory, UserInputKind,
+    };
 
     fn enabled_prefs() -> NotificationPrefs {
         NotificationPrefs {

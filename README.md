@@ -16,6 +16,7 @@
 [![npm version](https://img.shields.io/npm/v/ccem.svg)](https://www.npmjs.com/package/ccem)
 [![GitHub stars](https://img.shields.io/github/stars/Genuifx/claude-code-env-manager)](https://github.com/Genuifx/claude-code-env-manager)
 [![GitHub release](https://img.shields.io/github/v/release/Genuifx/claude-code-env-manager)](https://github.com/Genuifx/claude-code-env-manager/releases)
+[![Release Desktop](https://github.com/Genuifx/claude-code-env-manager/actions/workflows/release-desktop.yml/badge.svg)](https://github.com/Genuifx/claude-code-env-manager/actions/workflows/release-desktop.yml)
 [![license](https://img.shields.io/npm/l/ccem.svg)](https://github.com/Genuifx/claude-code-env-manager/blob/main/LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/Genuifx/claude-code-env-manager/pulls)
 

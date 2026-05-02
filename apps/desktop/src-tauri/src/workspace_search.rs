@@ -10,7 +10,8 @@ const DEFAULT_LIMIT: usize = 12;
 const MAX_LIMIT: usize = 40;
 const MAX_INDEX_ENTRIES: usize = 60_000;
 
-static WORKSPACE_FILE_INDEX: OnceLock<Mutex<HashMap<String, CachedWorkspaceIndex>>> = OnceLock::new();
+static WORKSPACE_FILE_INDEX: OnceLock<Mutex<HashMap<String, CachedWorkspaceIndex>>> =
+    OnceLock::new();
 
 const IGNORED_DIRS: &[&str] = &[
     ".git",
@@ -79,7 +80,11 @@ fn should_skip_entry(name: &str, is_dir: bool) -> bool {
         return true;
     }
 
-    if is_dir && IGNORED_DIRS.iter().any(|candidate| candidate.eq_ignore_ascii_case(name)) {
+    if is_dir
+        && IGNORED_DIRS
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(name))
+    {
         return true;
     }
 
@@ -95,14 +100,17 @@ fn collect_workspace_entries(
     dir: &Path,
     entries: &mut Vec<FileIndexEntry>,
 ) -> Result<(), String> {
-    let read_dir = fs::read_dir(dir)
-        .map_err(|error| format!("Failed to read workspace directory {}: {}", dir.display(), error))?;
+    let read_dir = fs::read_dir(dir).map_err(|error| {
+        format!(
+            "Failed to read workspace directory {}: {}",
+            dir.display(),
+            error
+        )
+    })?;
 
-    let mut children = read_dir
-        .flatten()
-        .collect::<Vec<_>>();
+    let mut children = read_dir.flatten().collect::<Vec<_>>();
 
-    children.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
+    children.sort_by_key(|entry| entry.file_name());
 
     for child in children {
         if entries.len() >= MAX_INDEX_ENTRIES {
@@ -120,9 +128,7 @@ fn collect_workspace_entries(
         }
 
         let path = child.path();
-        let relative = path
-            .strip_prefix(root)
-            .unwrap_or(&path);
+        let relative = path.strip_prefix(root).unwrap_or(&path);
         let relative_path = normalize_path(relative);
         let absolute_path = normalize_path(&path);
         let lower_relative_path = relative_path.to_ascii_lowercase();
@@ -208,9 +214,7 @@ fn subsequence_score(haystack: &str, needle: &str) -> Option<i32> {
             }
         }
 
-        let Some(idx) = found else {
-            return None;
-        };
+        let idx = found?;
 
         if let Some(previous_idx) = last_match {
             total_gap_penalty += (idx.saturating_sub(previous_idx + 1)) as i32;
@@ -223,9 +227,7 @@ fn subsequence_score(haystack: &str, needle: &str) -> Option<i32> {
 
 fn score_entry(entry: &FileIndexEntry, normalized_query: &str) -> Option<i32> {
     if normalized_query.is_empty() {
-        let score = 460
-            - (entry.depth as i32 * 16)
-            - if entry.is_dir { 22 } else { 0 }
+        let score = 460 - (entry.depth as i32 * 16) - if entry.is_dir { 22 } else { 0 }
             + boost_priority_file(entry);
         return Some(score);
     }
@@ -277,10 +279,17 @@ pub fn search_workspace_files(
     query: Option<String>,
     limit: Option<usize>,
 ) -> Result<Vec<WorkspaceFileSuggestion>, String> {
-    let root = fs::canonicalize(PathBuf::from(&working_dir))
-        .map_err(|error| format!("Failed to resolve workspace path {}: {}", working_dir, error))?;
+    let root = fs::canonicalize(PathBuf::from(&working_dir)).map_err(|error| {
+        format!(
+            "Failed to resolve workspace path {}: {}",
+            working_dir, error
+        )
+    })?;
     if !root.is_dir() {
-        return Err(format!("Workspace path {} is not a directory", root.display()));
+        return Err(format!(
+            "Workspace path {} is not a directory",
+            root.display()
+        ));
     }
 
     let normalized_query = query.unwrap_or_default().trim().to_ascii_lowercase();
@@ -363,7 +372,8 @@ mod tests {
 
     #[test]
     fn subsequence_match_can_still_surface_a_result() {
-        let entry = make_entry("apps/desktop/src/components/workspace/WorkspaceSessionComposer.tsx");
+        let entry =
+            make_entry("apps/desktop/src/components/workspace/WorkspaceSessionComposer.tsx");
         let score = score_entry(&entry, "wsc").expect("fuzzy score");
         assert!(score > 0);
     }

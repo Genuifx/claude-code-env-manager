@@ -253,7 +253,7 @@ pub fn search_skills_stream(app: AppHandle, query: String) {
             "--allowedTools",
             "Bash(npx skills find *)",
         ])
-        .env("PATH", &user_path)
+        .env("PATH", user_path)
         .env_remove("CLAUDECODE")
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
@@ -311,8 +311,8 @@ pub fn list_installed_skills() -> Result<Vec<InstalledSkill>, String> {
 
     if let Some(home) = dirs::home_dir() {
         // Source 1: Filesystem skills — scan multiple agent directories
-        let claude_agents = vec!["Claude Code"];
-        let codex_agents = vec!["Codex"];
+        let claude_agents = ["Claude Code"];
+        let codex_agents = ["Codex"];
 
         // ~/.claude/skills/ → Claude Code
         let claude_skills_dir = home.join(".claude").join("skills");

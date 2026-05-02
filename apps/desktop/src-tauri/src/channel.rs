@@ -113,7 +113,7 @@ impl OutputChannel for DesktopChannel {
     fn send_event(&self, event: &SessionEventRecord) -> Result<(), String> {
         for event_name in self.session_event_names {
             self.app
-                .emit(*event_name, event)
+                .emit(event_name, event)
                 .map_err(|error| format!("Failed to emit {}: {}", event_name, error))?;
         }
         Ok(())

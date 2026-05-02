@@ -27,7 +27,11 @@ impl ProxySettings {
     }
 }
 
-fn insert_proxy_env(env_vars: &mut HashMap<String, String>, upper_key: &str, value: Option<String>) {
+fn insert_proxy_env(
+    env_vars: &mut HashMap<String, String>,
+    upper_key: &str,
+    value: Option<String>,
+) {
     let Some(value) = value.filter(|value| !value.trim().is_empty()) else {
         return;
     };
