@@ -28,6 +28,10 @@ import { useLocale } from '@/locales';
 import { useAppStore } from '@/store';
 import type { InstalledSkill, LaunchClient } from '@/store';
 import type { PermissionModeName } from '@ccem/core/browser';
+
+function isNearBottom(container: HTMLDivElement): boolean {
+  return container.scrollHeight - container.clientHeight - container.scrollTop <= 48;
+}
 import type {
   ConversationMessageData,
 } from '@/features/conversations/types';
@@ -856,6 +860,10 @@ export function WorkspaceNativeSessionView({
   }>>([]);
   const lastSeenSeqRef = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const programmaticScrollRef = useRef(false);
+  const autoScrollDetachedRef = useRef(false);
+  const scrollFrameRef = useRef<number | null>(null);
+  const prevMessageCountRef = useRef(0);
   const tickInFlightRef = useRef(false);
 
   useEffect(() => {
@@ -864,6 +872,8 @@ export function WorkspaceNativeSessionView({
       : [];
 
     lastSeenSeqRef.current = null;
+    autoScrollDetachedRef.current = false;
+    prevMessageCountRef.current = 0;
     setEvents([]);
     setComposerText('');
     setComposerPlanModeEnabled(session.perm_mode === 'plan');
@@ -973,18 +983,67 @@ export function WorkspaceNativeSessionView({
     };
   }, [isVisible, pollEvents, pollIntervalMs, refreshSummary]);
 
+  // Detect user scroll-away to suppress auto-scroll
   useEffect(() => {
-    if (!isVisible) {
-      return;
-    }
-
     const container = containerRef.current;
     if (!container) {
       return;
     }
 
-    container.scrollTo({ top: container.scrollHeight });
-  }, [isVisible, messages]);
+    const handleScroll = () => {
+      if (programmaticScrollRef.current) {
+        return;
+      }
+      autoScrollDetachedRef.current = !isNearBottom(container);
+    };
+
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+    };
+  }, [session.runtime_id]);
+
+  // Clean up any pending scroll animation frame on unmount
+  useEffect(() => () => {
+    if (scrollFrameRef.current !== null) {
+      cancelAnimationFrame(scrollFrameRef.current);
+    }
+  }, []);
+
+  // Auto-scroll to bottom when new messages arrive, unless the user has scrolled up
+  useEffect(() => {
+    if (!isVisible || !containerRef.current) {
+      return;
+    }
+
+    const container = containerRef.current;
+    const prevCount = prevMessageCountRef.current;
+    prevMessageCountRef.current = messages.length;
+
+    // Nothing to scroll to
+    if (messages.length === 0) {
+      return;
+    }
+
+    // User scrolled up to read earlier content — don't yank the scrollbar
+    if (autoScrollDetachedRef.current && prevCount > 0) {
+      return;
+    }
+
+    if (scrollFrameRef.current !== null) {
+      cancelAnimationFrame(scrollFrameRef.current);
+    }
+
+    programmaticScrollRef.current = true;
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      container.scrollTo({ top: container.scrollHeight });
+      scrollFrameRef.current = requestAnimationFrame(() => {
+        programmaticScrollRef.current = false;
+        autoScrollDetachedRef.current = !isNearBottom(container);
+        scrollFrameRef.current = null;
+      });
+    });
+  }, [isVisible, messages.length]);
 
   const isProcessingTurn = session.status === 'initializing' || session.status === 'processing';
   const isAwaitingResponse = isSending || isProcessingTurn;

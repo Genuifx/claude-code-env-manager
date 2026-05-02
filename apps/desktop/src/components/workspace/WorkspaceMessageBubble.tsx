@@ -413,7 +413,12 @@ function DisclosureCard({
   const [hasRenderedBody, setHasRenderedBody] = useState(defaultOpen);
 
   return (
-    <div className={cn('rounded-2xl border border-border/50 bg-surface/75', className)}>
+    <div
+      className={cn(
+        'overflow-hidden rounded-xl border border-border/40 bg-[hsl(var(--chat-assistant-bg)/0.45)] shadow-[0_1px_2px_rgba(0,0,0,0.03)]',
+        className,
+      )}
+    >
       <button
         type="button"
         aria-expanded={open}
@@ -426,22 +431,36 @@ function DisclosureCard({
           });
         }}
         className={cn(
-          'flex w-full items-center gap-2 px-3.5 py-2.5 text-left transition-colors hover:bg-muted/35',
-          headerClassName
+          'flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition-colors hover:bg-[hsl(var(--chat-assistant-bg)/0.65)]',
+          headerClassName,
         )}
       >
-        <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />
-        <span className="text-[12px] font-medium text-foreground/90">{label}</span>
+        <Icon className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+        <span className="text-[12px] font-semibold tracking-[0.01em] text-foreground/85">{label}</span>
         {summary ? (
-          <span className={cn('min-w-0 truncate text-[11px] text-muted-foreground/75', summaryClassName)}>
+          <span className={cn('min-w-0 truncate text-[11px] text-muted-foreground/65', summaryClassName)}>
             {summary}
           </span>
         ) : null}
-        <ChevronDown className={cn('ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground/60 transition-transform', open && 'rotate-180')} />
+        <ChevronDown
+          className={cn(
+            'ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground/50 transition-transform duration-200 ease-out',
+            open && 'rotate-180',
+          )}
+        />
       </button>
       {hasRenderedBody ? (
-        <div className={cn('border-t border-border/40 px-3.5 py-3', contentClassName, !open && 'hidden')}>
-          {children}
+        <div
+          className={cn(
+            'grid transition-all duration-250 ease-out',
+            open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
+          )}
+        >
+          <div className="overflow-hidden">
+            <div className={cn('border-t border-border/30 px-4 py-3.5', contentClassName)}>
+              {children}
+            </div>
+          </div>
         </div>
       ) : null}
     </div>
@@ -463,7 +482,7 @@ function CommandPill({
         className={cn(
           'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[11px]',
           subtle
-            ? 'border border-[#d8d0c4] bg-white/72 text-foreground/78 shadow-[0_1px_2px_rgba(15,23,42,0.03)]'
+            ? 'border border-border/40 bg-[hsl(var(--chat-assistant-bg)/0.6)] text-foreground/78 shadow-[0_1px_2px_rgba(0,0,0,0.02)]'
             : 'border border-primary/20 bg-primary/8 text-primary'
         )}
       >
@@ -501,11 +520,11 @@ const ToolPayloadPanel = memo(function ToolPayloadPanel({
   }
 
   return (
-    <div className="workspace-tool-payload-virtualized rounded-lg bg-surface/80 px-3 py-2">
-      <p className="mb-1 text-[10px] uppercase tracking-[0.22em] text-muted-foreground/55">
+    <div className="workspace-tool-payload-virtualized rounded-lg bg-[hsl(var(--tool-input-bg))] px-3 py-2.5">
+      <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground/50">
         {label}
       </p>
-      <pre className="max-h-[160px] overflow-y-auto whitespace-pre-wrap font-mono text-[11px] leading-5 text-muted-foreground/80">
+      <pre className="max-h-[160px] overflow-y-auto whitespace-pre-wrap font-mono text-[11px] leading-[1.55] text-muted-foreground/75">
         {text}
       </pre>
     </div>
@@ -529,11 +548,11 @@ const ThinkingEntryPanel = memo(function ThinkingEntryPanel({
       : `${label} ${index + 1}`;
 
   return (
-    <div className="workspace-tool-payload-virtualized rounded-lg bg-surface/80 px-3 py-2">
-      <p className="mb-1 text-[10px] uppercase tracking-[0.22em] text-muted-foreground/55">
+    <div className="workspace-tool-payload-virtualized rounded-lg bg-[hsl(var(--tool-input-bg))] px-3 py-2.5">
+      <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground/50">
         {headerLabel}
       </p>
-      <pre className="max-h-[160px] overflow-y-auto whitespace-pre-wrap font-mono text-[11px] leading-5 text-muted-foreground/80">
+      <pre className="max-h-[160px] overflow-y-auto whitespace-pre-wrap font-mono text-[11px] leading-[1.55] text-muted-foreground/75">
         {entry.content}
       </pre>
     </div>
@@ -553,7 +572,7 @@ const ToolCallRow = memo(function ToolCallRow({
   const detail = useMemo(() => extractToolSummary(block.name, block.input), [block.input, block.name]);
 
   return (
-    <div className="workspace-tool-row-virtualized rounded-xl border border-border/40 bg-background/70">
+    <div className="workspace-tool-row-virtualized overflow-hidden rounded-lg border border-border/35 bg-[hsl(var(--tool-input-bg))] shadow-[0_1px_2px_rgba(0,0,0,0.025)]">
       <button
         type="button"
         aria-expanded={open}
@@ -565,33 +584,54 @@ const ToolCallRow = memo(function ToolCallRow({
             return !current;
           });
         }}
-        className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
+        className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left transition-colors hover:bg-[hsl(var(--tool-input-bg)/0.7)]"
       >
-        <Circle className={cn('h-[7px] w-[7px] shrink-0 fill-current', isError ? 'text-destructive' : 'text-primary/80')} />
-        <span className="text-[12px] font-medium text-foreground/90">{block.name || 'Tool'}</span>
+        <Circle
+          className={cn(
+            'h-2 w-2 shrink-0 fill-current',
+            isError ? 'text-destructive/70' : 'text-success/70',
+          )}
+        />
+        <span className="text-[12px] font-semibold tracking-[0.01em] text-foreground/85">
+          {block.name || 'Tool'}
+        </span>
         {detail ? (
-          <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground/75">
+          <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground/65">
             {detail}
           </span>
         ) : null}
         {hasResult ? (
-          <span className={cn('ml-auto text-[11px]', isError ? 'text-destructive/80' : 'text-emerald-600')}>
+          <span
+            className={cn(
+              'ml-auto shrink-0 text-[11px] font-medium',
+              isError ? 'text-destructive/75' : 'text-success/70',
+            )}
+          >
             {isError ? t('workspace.toolFailedState') : t('workspace.toolDone')}
           </span>
         ) : null}
         <ChevronDown
           className={cn(
-            'h-3.5 w-3.5 shrink-0 text-muted-foreground/55 transition-transform',
-            open && 'rotate-180'
+            'h-3.5 w-3.5 shrink-0 text-muted-foreground/45 transition-transform duration-200 ease-out',
+            open && 'rotate-180',
           )}
         />
       </button>
       {hasRenderedBody ? (
-        <div className={cn('space-y-2 border-t border-border/35 px-3 pb-3 pt-2', !open && 'hidden')}>
-          <ToolPayloadPanel label={t('history.toolInput')} value={block.input} />
-          {hasResult ? (
-            <ToolPayloadPanel label={t('history.toolOutput')} value={block._result} />
-          ) : null}
+        <div
+          className={cn(
+            'grid transition-all duration-250 ease-out',
+            open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
+          )}
+        >
+          <div className="overflow-hidden">
+            <div className="space-y-2 border-t border-border/25 px-3.5 pb-3.5 pt-3">
+              <ToolPayloadPanel label={t('history.toolInput')} value={block.input} />
+              {hasResult ? (
+                <ToolPayloadPanel label={t('history.toolOutput')} value={block._result} />
+              ) : null}
+            </div>
+          </div>
         </div>
       ) : null}
     </div>
@@ -691,69 +731,83 @@ function WorkspaceToolDigestComponent({
             return !current;
           });
         }}
-        className="flex w-full items-center gap-3 py-2 text-left"
+        className="group flex w-full items-center gap-3 py-2 text-left"
       >
-        <div className="flex min-w-0 items-center gap-2 text-muted-foreground/78">
-          <Wrench className="h-3.5 w-3.5 shrink-0" />
-          <span className="shrink-0 text-[12px] font-medium text-foreground/82">
-            {t('workspace.processedLabel')}
-            {durationLabel ? (
-              <span className="ml-1 font-normal text-muted-foreground/78">{durationLabel}</span>
-            ) : null}
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[hsl(var(--chat-assistant-bg)/0.8)]">
+            <Wrench className="h-3.5 w-3.5 text-muted-foreground/65" />
           </span>
-          <span className="min-w-0 truncate text-[12px]">{summary}</span>
+          <span className="shrink-0 text-[12px] font-semibold tracking-[0.01em] text-foreground/80">
+            {t('workspace.processedLabel')}
+          </span>
+          {durationLabel ? (
+            <span className="font-normal text-muted-foreground/65">{durationLabel}</span>
+          ) : null}
+          <span className="min-w-0 truncate text-[12px] text-muted-foreground/65">{summary}</span>
         </div>
         <ChevronDown
           className={cn(
-            'ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground/55 transition-transform',
-            open && 'rotate-180'
+            'ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground/40 transition-transform duration-200 ease-out',
+            open && 'rotate-180',
           )}
         />
       </button>
-      <div className="h-px bg-border/55" />
+      <div className="h-px bg-border/45" />
       {hasRenderedBody ? (
-        <div className={cn('pt-4', !open && 'hidden')}>
-          <div className="rounded-[26px] border border-border/45 bg-background/72 p-4 shadow-[0_16px_36px_rgba(15,23,42,0.04)]">
-            <div className="space-y-3">
-              <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground/70">
-                {toolCount > 0 ? (
-                  <span className="rounded-full border border-border/40 bg-surface-raised px-2 py-0.5">
-                    {toolCount} {t('workspace.toolCalls')}
-                  </span>
-                ) : null}
-                {thinkingCount > 0 ? (
-                  <span className="rounded-full border border-border/40 bg-surface-raised px-2 py-0.5">
-                    {thinkingCount} {t('workspace.thinkingNotes')}
-                  </span>
-                ) : null}
-                {toolCount > 0 ? (
-                  <span className="rounded-full border border-border/40 bg-surface-raised px-2 py-0.5">
-                    {completedCount} {t('workspace.toolSucceeded')}
-                  </span>
-                ) : null}
-              </div>
-              <div className="space-y-3">
-                {entries.map((entry, entryIndex) => {
-                  if (entry.type === 'thinking' && entry.thinking) {
-                    return (
-                      <ThinkingEntryPanel
-                        key={entry.thinking.key}
-                        entry={entry.thinking}
-                        index={entryIndex}
-                        label={t('history.thinking')}
-                      />
-                    );
-                  }
-                  if (entry.type === 'tool_use' && entry.block) {
-                    return (
-                      <ToolCallRow
-                        key={entry.block.id || `${entry.block.name || 'tool'}-${entryIndex}`}
-                        block={entry.block}
-                      />
-                    );
-                  }
-                  return null;
-                })}
+        <div
+          className={cn(
+            'grid transition-all duration-250 ease-out',
+            open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
+          )}
+        >
+          <div className="overflow-hidden">
+            <div className="pt-4">
+              <div className="rounded-2xl border border-border/35 bg-[hsl(var(--chat-assistant-bg)/0.5)] p-4 shadow-[0_2px_8px_rgba(0,0,0,0.03)]">
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {toolCount > 0 ? (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-border/30 bg-[hsl(var(--tool-input-bg))] px-2.5 py-1 text-[11px] font-medium text-foreground/70">
+                        <Wrench className="h-3 w-3 text-muted-foreground/50" />
+                        {toolCount} {t('workspace.toolCalls')}
+                      </span>
+                    ) : null}
+                    {thinkingCount > 0 ? (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-border/30 bg-[hsl(var(--tool-input-bg))] px-2.5 py-1 text-[11px] font-medium text-foreground/70">
+                        <Brain className="h-3 w-3 text-muted-foreground/50" />
+                        {thinkingCount} {t('workspace.thinkingNotes')}
+                      </span>
+                    ) : null}
+                    {toolCount > 0 ? (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-border/30 bg-[hsl(var(--tool-input-bg))] px-2.5 py-1 text-[11px] font-medium text-success/70">
+                        <Circle className="h-2 w-2 fill-current" />
+                        {completedCount} {t('workspace.toolSucceeded')}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="space-y-2.5">
+                    {entries.map((entry, entryIndex) => {
+                      if (entry.type === 'thinking' && entry.thinking) {
+                        return (
+                          <ThinkingEntryPanel
+                            key={entry.thinking.key}
+                            entry={entry.thinking}
+                            index={entryIndex}
+                            label={t('history.thinking')}
+                          />
+                        );
+                      }
+                      if (entry.type === 'tool_use' && entry.block) {
+                        return (
+                          <ToolCallRow
+                            key={entry.block.id || `${entry.block.name || 'tool'}-${entryIndex}`}
+                            block={entry.block}
+                          />
+                        );
+                      }
+                      return null;
+                    })}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -777,9 +831,13 @@ export const WorkspacePendingResponse = memo(function WorkspacePendingResponse()
   const { t } = useLocale();
 
   return (
-    <div className="flex items-center gap-2.5 py-1 text-[12px] text-muted-foreground/72">
-      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-      <span>{t('workspace.nativeThinking')}</span>
+    <div className="flex items-center gap-3 py-1.5">
+      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[hsl(var(--chat-assistant-bg)/0.8)]">
+        <LoaderCircle className="h-3 w-3 animate-spin text-muted-foreground/55" />
+      </span>
+      <span className="text-[12px] font-medium text-muted-foreground/65">
+        {t('workspace.nativeThinking')}
+      </span>
     </div>
   );
 });
@@ -1019,11 +1077,13 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
     <div className={cn(spacingClass, 'workspace-msg-virtualized')}>
       {hasMainContent ? (
         isUser ? (
-          <div className="ml-auto max-w-[78%] min-w-[220px] rounded-[28px] border border-[#ddd5c8] bg-[#f3efe7] px-5 py-4 text-foreground shadow-[0_14px_34px_rgba(15,23,42,0.045)]">
+          <div className="ml-auto max-w-[78%] min-w-[220px] rounded-[24px] border border-border/30 bg-[hsl(var(--chat-assistant-bg)/0.7)] px-5 py-4 text-foreground shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_16px_rgba(0,0,0,0.03)]">
             {renderedContent}
           </div>
         ) : (
-          <div className="space-y-3">{renderedContent}</div>
+          <div className="rounded-2xl border border-border/20 bg-[hsl(var(--chat-assistant-bg)/0.35)] px-5 py-4 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+            <div className="space-y-3">{renderedContent}</div>
+          </div>
         )
       ) : null}
 

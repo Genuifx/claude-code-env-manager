@@ -49,11 +49,14 @@ export function getWorkspaceTranscriptSpacing(
     return 'mt-0';
   }
 
+  // Tighter spacing within the same role — conversational flow
   if (prevRole === role) {
-    return kind === 'tool-digest' ? 'mt-3' : 'mt-4';
+    return kind === 'tool-digest' ? 'mt-2' : 'mt-3';
   }
 
-  return kind === 'tool-digest' ? 'mt-7' : 'mt-8';
+  // Generous breathing room between different roles — turn boundaries
+  // Tool digests get slightly tighter spacing than full messages
+  return kind === 'tool-digest' ? 'mt-5' : 'mt-6';
 }
 
 export function buildWorkspaceTranscriptItems(
