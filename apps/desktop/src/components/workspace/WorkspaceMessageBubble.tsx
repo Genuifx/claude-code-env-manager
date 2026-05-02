@@ -413,12 +413,7 @@ function DisclosureCard({
   const [hasRenderedBody, setHasRenderedBody] = useState(defaultOpen);
 
   return (
-    <div
-      className={cn(
-        'overflow-hidden rounded-xl border border-border/40 bg-[hsl(var(--chat-assistant-bg)/0.45)] shadow-[0_1px_2px_rgba(0,0,0,0.03)]',
-        className,
-      )}
-    >
+    <div className={className}>
       <button
         type="button"
         aria-expanded={open}
@@ -431,20 +426,20 @@ function DisclosureCard({
           });
         }}
         className={cn(
-          'flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition-colors hover:bg-[hsl(var(--chat-assistant-bg)/0.65)]',
+          'flex w-full items-center gap-2 text-left transition-colors',
           headerClassName,
         )}
       >
-        <Icon className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-        <span className="text-[12px] font-semibold tracking-[0.01em] text-foreground/85">{label}</span>
+        <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+        <span className="text-[12px] font-medium text-foreground/75">{label}</span>
         {summary ? (
-          <span className={cn('min-w-0 truncate text-[11px] text-muted-foreground/65', summaryClassName)}>
+          <span className={cn('min-w-0 truncate text-[11px] text-muted-foreground/60', summaryClassName)}>
             {summary}
           </span>
         ) : null}
         <ChevronDown
           className={cn(
-            'ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground/50 transition-transform duration-200 ease-out',
+            'ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground/40 transition-transform duration-200 ease-out',
             open && 'rotate-180',
           )}
         />
@@ -457,7 +452,7 @@ function DisclosureCard({
           )}
         >
           <div className="overflow-hidden">
-            <div className={cn('border-t border-border/30 px-4 py-3.5', contentClassName)}>
+            <div className={cn('pl-5 pt-2', contentClassName)}>
               {children}
             </div>
           </div>
@@ -572,7 +567,7 @@ const ToolCallRow = memo(function ToolCallRow({
   const detail = useMemo(() => extractToolSummary(block.name, block.input), [block.input, block.name]);
 
   return (
-    <div className="workspace-tool-row-virtualized overflow-hidden rounded-lg border border-border/35 bg-[hsl(var(--tool-input-bg))] shadow-[0_1px_2px_rgba(0,0,0,0.025)]">
+    <div className="workspace-tool-row-virtualized">
       <button
         type="button"
         aria-expanded={open}
@@ -584,7 +579,7 @@ const ToolCallRow = memo(function ToolCallRow({
             return !current;
           });
         }}
-        className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left transition-colors hover:bg-[hsl(var(--tool-input-bg)/0.7)]"
+        className="flex w-full items-center gap-2 py-1 text-left transition-colors"
       >
         <Circle
           className={cn(
@@ -592,11 +587,11 @@ const ToolCallRow = memo(function ToolCallRow({
             isError ? 'text-destructive/70' : 'text-success/70',
           )}
         />
-        <span className="text-[12px] font-semibold tracking-[0.01em] text-foreground/85">
+        <span className="text-[12px] font-medium text-foreground/75">
           {block.name || 'Tool'}
         </span>
         {detail ? (
-          <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground/65">
+          <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground/55">
             {detail}
           </span>
         ) : null}
@@ -604,7 +599,7 @@ const ToolCallRow = memo(function ToolCallRow({
           <span
             className={cn(
               'ml-auto shrink-0 text-[11px] font-medium',
-              isError ? 'text-destructive/75' : 'text-success/70',
+              isError ? 'text-destructive/70' : 'text-success/65',
             )}
           >
             {isError ? t('workspace.toolFailedState') : t('workspace.toolDone')}
@@ -612,7 +607,7 @@ const ToolCallRow = memo(function ToolCallRow({
         ) : null}
         <ChevronDown
           className={cn(
-            'h-3.5 w-3.5 shrink-0 text-muted-foreground/45 transition-transform duration-200 ease-out',
+            'h-3.5 w-3.5 shrink-0 text-muted-foreground/35 transition-transform duration-200 ease-out',
             open && 'rotate-180',
           )}
         />
@@ -625,7 +620,7 @@ const ToolCallRow = memo(function ToolCallRow({
           )}
         >
           <div className="overflow-hidden">
-            <div className="space-y-2 border-t border-border/25 px-3.5 pb-3.5 pt-3">
+            <div className="space-y-2 py-2 pl-4">
               <ToolPayloadPanel label={t('history.toolInput')} value={block.input} />
               {hasResult ? (
                 <ToolPayloadPanel label={t('history.toolOutput')} value={block._result} />
@@ -654,10 +649,9 @@ function WorkspaceToolDigestComponent({
   const [hasRenderedBody, setHasRenderedBody] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const previousAutoExpandedRef = useRef(autoExpanded);
-  const { completedCount, summary, toolCount, thinkingCount } = useMemo(() => {
+  const { summary, toolCount, thinkingCount } = useMemo(() => {
     const toolEntries = entries.filter((e) => e.type === 'tool_use');
     const thinkingEntriesList = entries.filter((e) => e.type === 'thinking');
-    const completed = toolEntries.filter((e) => e.block && '_result' in e.block && e.block._resultError !== true).length;
     const toolNames = Array.from(new Set(toolEntries.map((e) => e.block?.name || 'Tool')));
     const visibleToolNames = toolNames.slice(0, 3).join(' · ');
     const hiddenToolCount = Math.max(0, toolNames.length - 3);
@@ -677,7 +671,6 @@ function WorkspaceToolDigestComponent({
     }
 
     return {
-      completedCount: completed,
       summary: summaryParts.join(' · '),
       toolCount: toolEntries.length,
       thinkingCount: thinkingEntriesList.length,
@@ -733,17 +726,15 @@ function WorkspaceToolDigestComponent({
         }}
         className="group flex w-full items-center gap-3 py-2 text-left"
       >
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[hsl(var(--chat-assistant-bg)/0.8)]">
-            <Wrench className="h-3.5 w-3.5 text-muted-foreground/65" />
-          </span>
-          <span className="shrink-0 text-[12px] font-semibold tracking-[0.01em] text-foreground/80">
+        <div className="flex min-w-0 items-center gap-2">
+          <Wrench className="h-3.5 w-3.5 shrink-0 text-muted-foreground/55" />
+          <span className="shrink-0 text-[12px] font-medium text-foreground/75">
             {t('workspace.processedLabel')}
           </span>
           {durationLabel ? (
-            <span className="font-normal text-muted-foreground/65">{durationLabel}</span>
+            <span className="font-normal text-muted-foreground/55">{durationLabel}</span>
           ) : null}
-          <span className="min-w-0 truncate text-[12px] text-muted-foreground/65">{summary}</span>
+          <span className="min-w-0 truncate text-[12px] text-muted-foreground/55">{summary}</span>
         </div>
         <ChevronDown
           className={cn(
@@ -761,54 +752,28 @@ function WorkspaceToolDigestComponent({
           )}
         >
           <div className="overflow-hidden">
-            <div className="pt-4">
-              <div className="rounded-2xl border border-border/35 bg-[hsl(var(--chat-assistant-bg)/0.5)] p-4 shadow-[0_2px_8px_rgba(0,0,0,0.03)]">
-                <div className="space-y-3">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {toolCount > 0 ? (
-                      <span className="inline-flex items-center gap-1 rounded-full border border-border/30 bg-[hsl(var(--tool-input-bg))] px-2.5 py-1 text-[11px] font-medium text-foreground/70">
-                        <Wrench className="h-3 w-3 text-muted-foreground/50" />
-                        {toolCount} {t('workspace.toolCalls')}
-                      </span>
-                    ) : null}
-                    {thinkingCount > 0 ? (
-                      <span className="inline-flex items-center gap-1 rounded-full border border-border/30 bg-[hsl(var(--tool-input-bg))] px-2.5 py-1 text-[11px] font-medium text-foreground/70">
-                        <Brain className="h-3 w-3 text-muted-foreground/50" />
-                        {thinkingCount} {t('workspace.thinkingNotes')}
-                      </span>
-                    ) : null}
-                    {toolCount > 0 ? (
-                      <span className="inline-flex items-center gap-1 rounded-full border border-border/30 bg-[hsl(var(--tool-input-bg))] px-2.5 py-1 text-[11px] font-medium text-success/70">
-                        <Circle className="h-2 w-2 fill-current" />
-                        {completedCount} {t('workspace.toolSucceeded')}
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="space-y-2.5">
-                    {entries.map((entry, entryIndex) => {
-                      if (entry.type === 'thinking' && entry.thinking) {
-                        return (
-                          <ThinkingEntryPanel
-                            key={entry.thinking.key}
-                            entry={entry.thinking}
-                            index={entryIndex}
-                            label={t('history.thinking')}
-                          />
-                        );
-                      }
-                      if (entry.type === 'tool_use' && entry.block) {
-                        return (
-                          <ToolCallRow
-                            key={entry.block.id || `${entry.block.name || 'tool'}-${entryIndex}`}
-                            block={entry.block}
-                          />
-                        );
-                      }
-                      return null;
-                    })}
-                  </div>
-                </div>
-              </div>
+            <div className="pt-3 space-y-2.5">
+              {entries.map((entry, entryIndex) => {
+                if (entry.type === 'thinking' && entry.thinking) {
+                  return (
+                    <ThinkingEntryPanel
+                      key={entry.thinking.key}
+                      entry={entry.thinking}
+                      index={entryIndex}
+                      label={t('history.thinking')}
+                    />
+                  );
+                }
+                if (entry.type === 'tool_use' && entry.block) {
+                  return (
+                    <ToolCallRow
+                      key={entry.block.id || `${entry.block.name || 'tool'}-${entryIndex}`}
+                      block={entry.block}
+                    />
+                  );
+                }
+                return null;
+              })}
             </div>
           </div>
         </div>
@@ -831,11 +796,9 @@ export const WorkspacePendingResponse = memo(function WorkspacePendingResponse()
   const { t } = useLocale();
 
   return (
-    <div className="flex items-center gap-3 py-1.5">
-      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[hsl(var(--chat-assistant-bg)/0.8)]">
-        <LoaderCircle className="h-3 w-3 animate-spin text-muted-foreground/55" />
-      </span>
-      <span className="text-[12px] font-medium text-muted-foreground/65">
+    <div className="flex items-center gap-2.5 py-1">
+      <LoaderCircle className="h-3.5 w-3.5 animate-spin text-muted-foreground/50" />
+      <span className="text-[12px] text-muted-foreground/60">
         {t('workspace.nativeThinking')}
       </span>
     </div>
@@ -1081,9 +1044,7 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
             {renderedContent}
           </div>
         ) : (
-          <div className="rounded-2xl border border-border/20 bg-[hsl(var(--chat-assistant-bg)/0.35)] px-5 py-4 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
-            <div className="space-y-3">{renderedContent}</div>
-          </div>
+          <div className="space-y-3">{renderedContent}</div>
         )
       ) : null}
 
