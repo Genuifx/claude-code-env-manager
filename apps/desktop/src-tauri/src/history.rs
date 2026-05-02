@@ -3072,7 +3072,7 @@ mod tests {
         dedupe_history_sessions_with_provenance_records, dedupe_near_duplicate_history_sessions,
         find_codex_session_file_with_config, is_noise_display, load_claude_history_from_paths,
         load_codex_history_from_config, merge_opencode_history_session, normalize_history_display,
-        normalize_history_source, parse_codex_history_timestamp,
+        normalize_history_source, parse_claude_conversation_file, parse_codex_history_timestamp,
         parse_opencode_conversation_export, parse_opencode_history_session,
         resolve_codex_path_config_from, upsert_codex_history_session, CodexHistoryLine,
         CodexPathConfig, HistorySession, SOURCE_CLAUDE,
@@ -3468,6 +3468,40 @@ mod tests {
         assert_eq!(session.project, "/Users/g/cc-home");
         assert_eq!(session.project_name, "cc-home");
         assert_eq!(session.display, "Say exactly ok");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_claude_conversation_file_accepts_mixed_content_shapes() {
+        let root = temp_history_dir("mixed-content-shapes");
+        let session_path = root.join("session-mixed.jsonl");
+        fs::write(
+            &session_path,
+            concat!(
+                "{\"type\":\"progress\",\"cwd\":\"/Users/g/cc-home\",\"sessionId\":\"session-mixed\",\"timestamp\":\"2026-03-11T15:43:34.800Z\"}\n",
+                "{\"not\":\"valid conversation\"}\n",
+                "{\"type\":\"user\",\"uuid\":\"user-1\",\"timestamp\":\"2026-03-11T15:43:34.817Z\",\"message\":{\"content\":\"Native prompt\"}}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"assistant-1\",\"timestamp\":\"2026-03-11T15:43:40.817Z\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"CLI reply\"}],\"model\":\"claude-test\"}}\n"
+            ),
+        )
+        .expect("write mixed session file");
+
+        let (messages, segments) =
+            parse_claude_conversation_file(&session_path).expect("parse conversation");
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(segments[0].message_count, 2);
+        assert_eq!(messages[0].msg_type, "user");
+        assert_eq!(
+            messages[0].content,
+            serde_json::Value::String("Native prompt".to_string())
+        );
+        assert_eq!(messages[1].msg_type, "assistant");
+        assert_eq!(messages[1].model.as_deref(), Some("claude-test"));
+        assert!(
+            matches!(&messages[1].content, serde_json::Value::Array(blocks) if blocks.len() == 1)
+        );
 
         let _ = fs::remove_dir_all(root);
     }

@@ -286,4 +286,46 @@ mod tests {
 
         let _ = std::fs::remove_file(db_path);
     }
+
+    #[test]
+    fn native_event_log_preserves_raw_jsonl_payloads() {
+        let db_path = std::env::temp_dir().join(format!(
+            "ccem-native-event-log-jsonl-test-{}.sqlite",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default(),
+        ));
+        let raw_json = serde_json::json!({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "text", "text": "hello"},
+                    {"type": "tool_use", "id": "toolu-1", "name": "Bash", "input": {"command": "npm test"}}
+                ]
+            }
+        })
+        .to_string();
+        let log = NativeEventLog::new(db_path.clone());
+
+        log.append(&SessionEventRecord {
+            runtime_id: "runtime-jsonl".to_string(),
+            seq: 1,
+            occurred_at: Utc::now(),
+            payload: SessionEventPayload::ClaudeJson {
+                message_type: Some("assistant".to_string()),
+                raw_json: raw_json.clone(),
+            },
+        })
+        .expect("append raw jsonl payload");
+
+        let replay = log.replay("runtime-jsonl", None).expect("replay all");
+        assert_eq!(replay.events.len(), 1);
+        assert_eq!(
+            replay.events[0].payload,
+            SessionEventPayload::ClaudeJson {
+                message_type: Some("assistant".to_string()),
+                raw_json,
+            }
+        );
+
+        let _ = std::fs::remove_file(db_path);
+    }
 }

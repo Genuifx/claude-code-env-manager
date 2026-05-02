@@ -209,57 +209,68 @@ fn parse_assistant_line(
         raw_json: value.to_string(),
     }];
 
-    if let Some(blocks) = message.get("content").and_then(Value::as_array) {
-        for block in blocks {
-            match block
-                .get("type")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-            {
-                "text" => {
-                    let text = block
-                        .get("text")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .trim();
-                    if !text.is_empty() {
-                        events.push(SessionEventPayload::AssistantChunk {
-                            text: text.to_string(),
-                        });
-                    }
-                }
-                "tool_use" => {
-                    let Some(raw_name) = block.get("name").and_then(Value::as_str) else {
-                        continue;
-                    };
-                    let Some(tool_use_id) = block.get("id").and_then(Value::as_str) else {
-                        continue;
-                    };
-
-                    let input = block.get("input").cloned().unwrap_or(Value::Null);
-                    let category = categorize_tool(raw_name);
-                    let prompt = parse_interactive_tool_prompt(raw_name, &input);
-                    let needs_response = matches!(
-                        category,
-                        ToolCategory::UserInput {
-                            kind: UserInputKind::Question | UserInputKind::PlanExit,
-                            ..
-                        }
-                    );
-
-                    pending_tool_uses.insert(tool_use_id.to_string(), raw_name.to_string());
-                    events.push(SessionEventPayload::ToolUseStarted {
-                        tool_use_id: tool_use_id.to_string(),
-                        category,
-                        raw_name: raw_name.to_string(),
-                        input_summary: summarize_tool_input(raw_name, &input),
-                        needs_response,
-                        prompt,
-                    });
-                }
-                _ => {}
+    match message.get("content") {
+        Some(Value::String(text)) => {
+            let text = text.trim();
+            if !text.is_empty() {
+                events.push(SessionEventPayload::AssistantChunk {
+                    text: text.to_string(),
+                });
             }
         }
+        Some(Value::Array(blocks)) => {
+            for block in blocks {
+                match block
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                {
+                    "text" => {
+                        let text = block
+                            .get("text")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .trim();
+                        if !text.is_empty() {
+                            events.push(SessionEventPayload::AssistantChunk {
+                                text: text.to_string(),
+                            });
+                        }
+                    }
+                    "tool_use" => {
+                        let Some(raw_name) = block.get("name").and_then(Value::as_str) else {
+                            continue;
+                        };
+                        let Some(tool_use_id) = block.get("id").and_then(Value::as_str) else {
+                            continue;
+                        };
+
+                        let input = block.get("input").cloned().unwrap_or(Value::Null);
+                        let category = categorize_tool(raw_name);
+                        let prompt = parse_interactive_tool_prompt(raw_name, &input);
+                        let needs_response = matches!(
+                            category,
+                            ToolCategory::UserInput {
+                                kind: UserInputKind::Question | UserInputKind::PlanExit,
+                                ..
+                            }
+                        );
+
+                        pending_tool_uses.insert(tool_use_id.to_string(), raw_name.to_string());
+                        events.push(SessionEventPayload::ToolUseStarted {
+                            tool_use_id: tool_use_id.to_string(),
+                            category,
+                            raw_name: raw_name.to_string(),
+                            input_summary: summarize_tool_input(raw_name, &input),
+                            needs_response,
+                            prompt,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+        _ => {}
     }
 
     events
@@ -643,6 +654,31 @@ mod tests {
                 && raw_name_again == "Bash"
                 && input_summary == "npm test"
                 && !needs_response
+        )));
+    }
+
+    #[test]
+    fn assistant_jsonl_line_accepts_sdk_string_content() {
+        let mut pending = HashMap::new();
+        let value = json!({
+            "type": "assistant",
+            "message": {
+                "content": "plain sdk output"
+            }
+        });
+
+        let events = parse_jsonl_line(&value, &mut pending);
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            SessionEventPayload::ClaudeJson {
+                message_type: Some(message_type),
+                ..
+            } if message_type == "assistant"
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            SessionEventPayload::AssistantChunk { text } if text == "plain sdk output"
         )));
     }
 
