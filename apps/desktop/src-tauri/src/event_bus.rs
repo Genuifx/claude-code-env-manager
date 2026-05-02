@@ -156,6 +156,31 @@ pub struct ReplayBatch {
     pub events: Vec<SessionEventRecord>,
 }
 
+pub fn replay_records(records: &[SessionEventRecord], last_seen_seq: Option<u64>) -> ReplayBatch {
+    let oldest_available_seq = records.first().map(|event| event.seq);
+    let newest_available_seq = records.last().map(|event| event.seq);
+    let gap_detected = match (last_seen_seq, oldest_available_seq) {
+        (Some(last_seen), Some(oldest)) => last_seen.saturating_add(1) < oldest,
+        _ => false,
+    };
+
+    let events = match last_seen_seq {
+        Some(last_seen) => records
+            .iter()
+            .filter(|event| event.seq > last_seen)
+            .cloned()
+            .collect(),
+        None => records.to_vec(),
+    };
+
+    ReplayBatch {
+        gap_detected,
+        oldest_available_seq,
+        newest_available_seq,
+        events,
+    }
+}
+
 pub struct SessionStore {
     runtime_id: String,
     capacity: usize,
@@ -200,29 +225,8 @@ impl SessionStore {
     }
 
     pub fn events_since(&self, last_seen_seq: Option<u64>) -> ReplayBatch {
-        let oldest_available_seq = self.oldest_seq();
-        let newest_available_seq = self.newest_seq();
-        let gap_detected = match (last_seen_seq, oldest_available_seq) {
-            (Some(last_seen), Some(oldest)) => last_seen.saturating_add(1) < oldest,
-            _ => false,
-        };
-
-        let events = match last_seen_seq {
-            Some(last_seen) => self
-                .events
-                .iter()
-                .filter(|event| event.seq > last_seen)
-                .cloned()
-                .collect(),
-            None => self.events.iter().cloned().collect(),
-        };
-
-        ReplayBatch {
-            gap_detected,
-            oldest_available_seq,
-            newest_available_seq,
-            events,
-        }
+        let records = self.events.iter().cloned().collect::<Vec<_>>();
+        replay_records(&records, last_seen_seq)
     }
 
     pub fn len(&self) -> usize {

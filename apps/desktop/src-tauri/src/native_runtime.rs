@@ -1,5 +1,6 @@
 use crate::config::{resolve_claude_env, resolve_codex_runtime};
 use crate::event_bus::{ReplayBatch, SessionEventPayload, SessionStore};
+use crate::native_event_log::NativeEventLog;
 use crate::native_helper_resource::native_helper_script_path;
 use crate::session_provenance::bind_source_session_id;
 use crate::system_proxy::resolve_codex_proxy_env;
@@ -247,6 +248,7 @@ pub struct NativeRuntimeManager {
     records: Mutex<HashMap<String, NativeSessionRecord>>,
     handles: Mutex<HashMap<String, Arc<NativeSessionHandle>>>,
     state_path: PathBuf,
+    event_log: NativeEventLog,
 }
 
 impl Default for NativeRuntimeManager {
@@ -262,6 +264,7 @@ impl Default for NativeRuntimeManager {
             records: Mutex::new(records),
             handles: Mutex::new(HashMap::new()),
             state_path,
+            event_log: NativeEventLog::default(),
         }
     }
 }
@@ -369,6 +372,15 @@ impl NativeRuntimeManager {
         runtime_id: &str,
         since_seq: Option<u64>,
     ) -> Result<ReplayBatch, String> {
+        match self.event_log.replay(runtime_id, since_seq) {
+            Ok(batch) if batch.newest_available_seq.is_some() => return Ok(batch),
+            Ok(_) => {}
+            Err(error) => eprintln!(
+                "Failed to replay native events from sqlite for {}: {}",
+                runtime_id, error
+            ),
+        }
+
         let handles = self
             .handles
             .lock()
@@ -542,8 +554,9 @@ impl NativeRuntimeManager {
             record.is_active = false;
             record.updated_at = now;
             if record.last_error.is_none() {
-                record.last_error =
-                    Some("Native runtime was interrupted because the desktop app restarted.".to_string());
+                record.last_error = Some(
+                    "Native runtime was interrupted because the desktop app restarted.".to_string(),
+                );
             }
             changed += 1;
         }
@@ -993,7 +1006,13 @@ impl NativeRuntimeManager {
                 .events
                 .lock()
                 .map_err(|_| "Failed to lock native session store".to_string())?;
-            store.append(payload);
+            let record = store.append(payload);
+            if let Err(error) = self.event_log.append(&record) {
+                eprintln!(
+                    "Failed to persist native event {}:{}: {}",
+                    record.runtime_id, record.seq, error
+                );
+            }
         }
         drop(handles);
         if let Some(message) = last_error {
@@ -1335,6 +1354,7 @@ mod tests {
         PromptImage,
     };
     use crate::event_bus::{SessionEventPayload, SessionStore};
+    use crate::native_event_log::NativeEventLog;
     use chrono::Utc;
     use std::collections::HashMap;
     use std::sync::atomic::AtomicBool;
@@ -1374,6 +1394,9 @@ mod tests {
             handles: Mutex::new(HashMap::from([(runtime_id.to_string(), Arc::new(handle))])),
             state_path: std::env::temp_dir()
                 .join(format!("ccem-native-runtime-test-{runtime_id}.json")),
+            event_log: NativeEventLog::new(
+                std::env::temp_dir().join(format!("ccem-native-runtime-test-{runtime_id}.sqlite")),
+            ),
         };
         manager
     }
@@ -1390,8 +1413,12 @@ mod tests {
                     .collect(),
             ),
             handles: Mutex::new(HashMap::new()),
-            state_path: std::env::temp_dir()
-                .join(format!("ccem-native-runtime-reconcile-test-{runtime_id}.json")),
+            state_path: std::env::temp_dir().join(format!(
+                "ccem-native-runtime-reconcile-test-{runtime_id}.json"
+            )),
+            event_log: NativeEventLog::new(std::env::temp_dir().join(format!(
+                "ccem-native-runtime-reconcile-test-{runtime_id}.sqlite"
+            ))),
         }
     }
 
