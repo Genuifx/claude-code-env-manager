@@ -48,6 +48,18 @@ import type {
 import { toSessionKey } from '@/features/conversations/types';
 import { useWorkspaceSessionDecorations } from '@/components/workspace/useWorkspaceSessionDecorations';
 import type { NativeSessionSummary } from '@/lib/tauri-ipc';
+import {
+  buildWorkspaceSidebarSessions,
+  findLiveEntryForSidebarSession,
+  toLiveHistorySessionItem,
+} from '@/components/workspace/workspaceSidebarSessions';
+import {
+  normalizeEffortForProvider,
+  resolveHistorySessionControls,
+  updateHistorySessionPreference,
+  type WorkspaceHistorySessionPreference,
+  type WorkspaceHistorySessionPreferences,
+} from '@/components/workspace/workspaceSessionPreferences';
 
 const LazyHistoryDetail = lazy(async () =>
   import('@/components/workspace/WorkspaceConversationDetail').then((m) => ({
@@ -216,6 +228,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
   const [historyPermMode, setHistoryPermMode] = useState<PermissionModeName>(permissionMode);
   const [composeEffort, setComposeEffort] = useState<EffortLevel>('high');
   const [historyEffort, setHistoryEffort] = useState<EffortLevel>('high');
+  const [historySessionPreferences, setHistorySessionPreferences] = useState<WorkspaceHistorySessionPreferences>({});
   const [composeDir, setComposeDir] = useState<string | null>(selectedWorkingDir || defaultWorkingDir || null);
   const [workspaceInstalledSkills, setWorkspaceInstalledSkills] = useState<InstalledSkill[]>([]);
   const [liveSessionsByRuntimeId, setLiveSessionsByRuntimeId] = useState<
@@ -251,13 +264,6 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
       setComposeDir(selectedWorkingDir);
     }
   }, [composeDir, selectedWorkingDir]);
-
-  useEffect(() => {
-    setHistoryComposerText('');
-    setHistoryPlanModeEnabled(false);
-    setHistoryEnv(selectedSession?.envName || currentEnv || '');
-    setHistoryPermMode(permissionMode);
-  }, [selectedKey]);
 
   const upsertLiveSessionEntry = useCallback((
     session: NativeSessionSummary,
@@ -391,7 +397,11 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
       return;
     }
 
-    const stillExists = nextSessions.some((session) => toSessionKey(session) === currentSelectedKey);
+    const stillExists = nextSessions.some((session) => toSessionKey(session) === currentSelectedKey)
+      || Object.values(liveSessionsByRuntimeId).some((entry) => {
+        const liveItem = toLiveHistorySessionItem(entry);
+        return liveItem ? toSessionKey(liveItem) === currentSelectedKey : false;
+      });
     if (!stillExists) {
       selectedKeyRef.current = null;
       setSelectedKey(null);
@@ -637,13 +647,46 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     return sessions.find((session) => toSessionKey(session) === selectedKey) ?? null;
   }, [selectedKey, sessions]);
 
+  useEffect(() => {
+    setComposeEffort((previous) => normalizeEffortForProvider(previous, composeProvider));
+  }, [composeProvider]);
+
+  useEffect(() => {
+    if (!selectedSession) {
+      return;
+    }
+
+    const controls = resolveHistorySessionControls({
+      session: selectedSession,
+      preferences: historySessionPreferences,
+      currentEnv,
+      defaultPermMode: permissionMode,
+    });
+
+    setHistoryComposerText('');
+    setHistoryPlanModeEnabled(false);
+    setHistoryEnv(controls.envName);
+    setHistoryPermMode(controls.permMode);
+    setHistoryEffort(controls.effort);
+  }, [selectedKey]);
+
   const environmentByName = useMemo(
     () => Object.fromEntries(environments.map((environment) => [environment.name, environment])),
     [environments]
   );
 
+  const liveSessionEntries = useMemo(
+    () => Object.values(liveSessionsByRuntimeId),
+    [liveSessionsByRuntimeId],
+  );
+
+  const sidebarSessions = useMemo(
+    () => buildWorkspaceSidebarSessions(sessions, liveSessionEntries),
+    [liveSessionEntries, sessions],
+  );
+
   const { decorationsBySessionKey } = useWorkspaceSessionDecorations({
-    sessions,
+    sessions: sidebarSessions,
     isActive,
   });
 
@@ -655,11 +698,8 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
       return liveSessionsByRuntimeId[runtimeId];
     }
 
-    return Object.values(liveSessionsByRuntimeId).find((entry) =>
-      entry.session.provider_session_id === session.id
-      && entry.session.provider === session.source,
-    );
-  }, [decorationsBySessionKey, liveSessionsByRuntimeId]);
+    return findLiveEntryForSidebarSession(liveSessionEntries, session);
+  }, [decorationsBySessionKey, liveSessionEntries, liveSessionsByRuntimeId]);
 
   const shouldHydrateLiveEntryFromHistory = useCallback((entry: WorkspaceLiveSessionEntry | null | undefined) => {
     if (!entry?.session.provider_session_id) {
@@ -731,8 +771,11 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
           return nativeSession.runtime_id === runtimeId;
         }
 
-        return nativeSession.provider_session_id === session.id
-          && nativeSession.provider === session.source;
+        return nativeSession.provider === session.source
+          && (
+            nativeSession.runtime_id === session.id
+            || nativeSession.provider_session_id === session.id
+          );
       })
       .sort((left, right) => Date.parse(right.updated_at) - Date.parse(left.updated_at))[0];
 
@@ -840,6 +883,33 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     }
   }, [openDirectoryPicker, setSelectedWorkingDir]);
 
+  const saveSelectedHistoryPreference = useCallback((patch: WorkspaceHistorySessionPreference) => {
+    const key = selectedKeyRef.current;
+    if (!key) {
+      return;
+    }
+
+    setHistorySessionPreferences((previous) =>
+      updateHistorySessionPreference(previous, key, patch),
+    );
+  }, []);
+
+  const handleHistoryEnvChange = useCallback((envName: string) => {
+    setHistoryEnv(envName);
+    saveSelectedHistoryPreference({ envName });
+  }, [saveSelectedHistoryPreference]);
+
+  const handleHistoryPermModeChange = useCallback((mode: PermissionModeName) => {
+    setHistoryPermMode(mode);
+    saveSelectedHistoryPreference({ permMode: mode });
+  }, [saveSelectedHistoryPreference]);
+
+  const handleHistoryEffortChange = useCallback((effort: EffortLevel) => {
+    const nextEffort = normalizeEffortForProvider(effort, selectedSession?.source);
+    setHistoryEffort(nextEffort);
+    saveSelectedHistoryPreference({ effort: nextEffort });
+  }, [saveSelectedHistoryPreference, selectedSession?.source]);
+
   const handleCreateForProject = useCallback((projectPath: string) => {
     openComposer(composeProvider, projectPath);
   }, [composeProvider, openComposer]);
@@ -871,12 +941,22 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
         workingDir,
         initialPrompt: dispatch.prompt,
         initialImages: images.length > 0 ? images : undefined,
+        effort: normalizeEffortForProvider(composeEffort, composeProvider),
       });
 
       upsertLiveSessionEntry(summary, {
         initialPrompt: previewPrompt,
         seedMessages: [],
       });
+      const liveItem = toLiveHistorySessionItem({
+        session: summary,
+        initialPrompt: previewPrompt,
+      });
+      if (liveItem) {
+        const nextKey = toSessionKey(liveItem);
+        selectedKeyRef.current = nextKey;
+        setSelectedKey(nextKey);
+      }
       setActiveLiveRuntimeId(summary.runtime_id);
       setWorkspaceMode('live');
       setComposePrompt('');
@@ -896,6 +976,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     buildComposerPromptText,
     extractComposerImagePayloads,
     composePrompt,
+    composeEffort,
     composeProvider,
     composePlanModeEnabled,
     createNativeSession,
@@ -950,6 +1031,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
         initialPrompt: dispatch.prompt,
         initialImages: images.length > 0 ? images : undefined,
         providerSessionId: selectedSession.id,
+        effort: normalizeEffortForProvider(historyEffort, provider),
       });
 
       setLaunchClient(provider);
@@ -980,6 +1062,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     historyPermMode,
     historyPlanModeEnabled,
     historyComposerText,
+    historyEffort,
     launchOpenCodeWeb,
     messages,
     scheduleWorkspaceRefresh,
@@ -995,10 +1078,25 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
   }, [upsertLiveSessionEntry]);
 
   const selectedHistorySupportsInline = selectedSession?.source !== 'opencode';
-  const liveSessionEntries = useMemo(
-    () => Object.values(liveSessionsByRuntimeId),
-    [liveSessionsByRuntimeId],
-  );
+
+  useEffect(() => {
+    if (workspaceMode !== 'live' || !activeLiveEntry) {
+      return;
+    }
+
+    const liveItem = toLiveHistorySessionItem(activeLiveEntry);
+    if (!liveItem) {
+      return;
+    }
+
+    const nextKey = toSessionKey(liveItem);
+    if (selectedKeyRef.current === nextKey) {
+      return;
+    }
+
+    selectedKeyRef.current = nextKey;
+    setSelectedKey(nextKey);
+  }, [activeLiveEntry, workspaceMode]);
 
   const shortcuts = useMemo(
     () => ({
@@ -1158,9 +1256,9 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
               permMode={historyPermMode}
               effort={historyEffort}
               environments={environments}
-              onEnvChange={setHistoryEnv}
-              onPermModeChange={setHistoryPermMode}
-              onEffortChange={setHistoryEffort}
+              onEnvChange={handleHistoryEnvChange}
+              onPermModeChange={handleHistoryPermModeChange}
+              onEffortChange={handleHistoryEffortChange}
             />
           )}
           secondaryActions={selectedHistorySupportsInline ? (
@@ -1205,7 +1303,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
 
       <div className="workspace-main-container mx-3 mb-3 flex min-h-0 flex-1 overflow-hidden">
         <ProjectTree
-          sessions={sessions}
+          sessions={sidebarSessions}
           environmentByName={environmentByName}
           decorationsBySessionKey={decorationsBySessionKey}
           isLoading={isLoadingSessions}

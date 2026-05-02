@@ -13,11 +13,14 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tauri::AppHandle;
 use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
     ShellExt,
 };
+
+const NATIVE_STOP_GRACE_PERIOD: Duration = Duration::from_millis(1_500);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -54,6 +57,8 @@ pub struct NativeSessionRecord {
     pub project_dir: String,
     pub env_name: String,
     pub perm_mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
     pub status: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -73,6 +78,8 @@ pub struct NativeSessionSummary {
     pub project_dir: String,
     pub env_name: String,
     pub perm_mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
     pub status: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -219,6 +226,7 @@ impl NativeSessionHandle {
             project_dir: record.project_dir,
             env_name: record.env_name,
             perm_mode: record.perm_mode,
+            effort: record.effort,
             status: record.status,
             created_at: record.created_at,
             updated_at: record.updated_at,
@@ -276,6 +284,7 @@ impl NativeRuntimeManager {
             project_dir: options.working_dir.clone(),
             env_name: options.env_name.clone(),
             perm_mode: options.perm_mode.clone(),
+            effort: options.effort.clone(),
             status: "initializing".to_string(),
             created_at: now,
             updated_at: now,
@@ -338,6 +347,7 @@ impl NativeRuntimeManager {
                         project_dir: record.project_dir,
                         env_name: record.env_name,
                         perm_mode: record.perm_mode,
+                        effort: record.effort,
                         status: record.status,
                         created_at: record.created_at,
                         updated_at: record.updated_at,
@@ -475,12 +485,15 @@ impl NativeRuntimeManager {
             if let Some(mode) = perm_mode {
                 record.perm_mode = mode.to_string();
             }
+            if let Some(next_effort) = effort {
+                record.effort = non_empty_error(next_effort);
+            }
             record.updated_at = Utc::now();
         })?;
         Ok(())
     }
 
-    pub fn stop_session(&self, runtime_id: &str) -> Result<(), String> {
+    pub fn stop_session(self: &Arc<Self>, runtime_id: &str) -> Result<(), String> {
         self.update_record(runtime_id, |record| {
             record.status = "stopped".to_string();
             record.is_active = false;
@@ -492,9 +505,54 @@ impl NativeRuntimeManager {
                 reason: "Stopped from desktop workspace.".to_string(),
             },
         )?;
-        self.kill_child(runtime_id)?;
-        self.remove_handle(runtime_id)?;
+        if self.request_child_stop(runtime_id)? {
+            self.schedule_force_kill(runtime_id.to_string());
+        } else {
+            self.kill_child(runtime_id)?;
+            self.remove_handle(runtime_id)?;
+        }
         Ok(())
+    }
+
+    pub fn reconcile_stale_records(&self) -> Result<usize, String> {
+        let live_runtime_ids = self
+            .handles
+            .lock()
+            .map_err(|_| "Failed to lock native runtime handles".to_string())?
+            .keys()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>();
+        let mut changed = 0;
+        let now = Utc::now();
+
+        let mut records = self
+            .records
+            .lock()
+            .map_err(|_| "Failed to lock native runtime records".to_string())?;
+
+        for record in records.values_mut() {
+            if live_runtime_ids.contains(&record.runtime_id) {
+                continue;
+            }
+            if !record.is_active || is_native_terminal_status(&record.status) {
+                continue;
+            }
+
+            record.status = "interrupted".to_string();
+            record.is_active = false;
+            record.updated_at = now;
+            if record.last_error.is_none() {
+                record.last_error =
+                    Some("Native runtime was interrupted because the desktop app restarted.".to_string());
+            }
+            changed += 1;
+        }
+
+        if changed > 0 {
+            persist_native_runtime_state_to(&self.state_path, records.values().cloned().collect())?;
+        }
+
+        Ok(changed)
     }
 
     pub fn handoff_to_terminal(
@@ -877,6 +935,50 @@ impl NativeRuntimeManager {
             .map_err(|error| format!("Failed to write to native sidecar stdin: {}", error))
     }
 
+    fn request_child_stop(&self, runtime_id: &str) -> Result<bool, String> {
+        let handle = self
+            .handles
+            .lock()
+            .map_err(|_| "Failed to lock native runtime handles".to_string())?
+            .get(runtime_id)
+            .cloned();
+        let Some(handle) = handle else {
+            return Ok(false);
+        };
+
+        handle.alive.store(false, Ordering::SeqCst);
+        let has_child = handle
+            .child
+            .lock()
+            .map_err(|_| "Failed to lock native sidecar child".to_string())?
+            .is_some();
+        if !has_child {
+            return Ok(false);
+        }
+
+        match self.write_to_child(&handle, &HelperInputCommand::Stop) {
+            Ok(()) => Ok(true),
+            Err(error) => {
+                let _ = self.append_event(
+                    runtime_id,
+                    SessionEventPayload::StdErrLine {
+                        line: format!("Failed to request native helper stop: {}", error),
+                    },
+                );
+                Ok(false)
+            }
+        }
+    }
+
+    fn schedule_force_kill(self: &Arc<Self>, runtime_id: String) {
+        let manager = Arc::clone(self);
+        tauri::async_runtime::spawn_blocking(move || {
+            std::thread::sleep(NATIVE_STOP_GRACE_PERIOD);
+            let _ = manager.kill_child(&runtime_id);
+            let _ = manager.remove_handle(&runtime_id);
+        });
+    }
+
     fn append_event(&self, runtime_id: &str, payload: SessionEventPayload) -> Result<(), String> {
         let last_error = payload_last_error(&payload);
         let handles = self
@@ -1021,6 +1123,7 @@ impl NativeRuntimeManager {
                 project_dir: record.project_dir,
                 env_name: record.env_name,
                 perm_mode: record.perm_mode,
+                effort: record.effort,
                 status: record.status,
                 created_at: record.created_at,
                 updated_at: record.updated_at,
@@ -1099,6 +1202,10 @@ fn payload_last_error(payload: &SessionEventPayload) -> Option<String> {
         }
         _ => None,
     }
+}
+
+fn is_native_terminal_status(status: &str) -> bool {
+    matches!(status, "stopped" | "error" | "handoff" | "interrupted")
 }
 
 fn merge_colon_path_values(primary: &str, secondary: &str) -> String {
@@ -1216,7 +1323,7 @@ fn build_runtime_bootstrap_options(
         codex_path: resolve_codex_path(),
         codex_base_url,
         codex_api_key,
-        effort: None,
+        effort: record.effort.clone(),
     })
 }
 
@@ -1242,6 +1349,7 @@ mod tests {
             project_dir: "/tmp/project".to_string(),
             env_name: "DeepSeek".to_string(),
             perm_mode: "dev".to_string(),
+            effort: None,
             status: "processing".to_string(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -1268,6 +1376,42 @@ mod tests {
                 .join(format!("ccem-native-runtime-test-{runtime_id}.json")),
         };
         manager
+    }
+
+    fn manager_with_records(
+        runtime_id: &str,
+        records: Vec<NativeSessionRecord>,
+    ) -> NativeRuntimeManager {
+        NativeRuntimeManager {
+            records: Mutex::new(
+                records
+                    .into_iter()
+                    .map(|record| (record.runtime_id.clone(), record))
+                    .collect(),
+            ),
+            handles: Mutex::new(HashMap::new()),
+            state_path: std::env::temp_dir()
+                .join(format!("ccem-native-runtime-reconcile-test-{runtime_id}.json")),
+        }
+    }
+
+    fn native_record(runtime_id: &str, status: &str, is_active: bool) -> NativeSessionRecord {
+        NativeSessionRecord {
+            runtime_id: runtime_id.to_string(),
+            provider: NativeProvider::Claude,
+            transport: NativeTransport::NativeSdk,
+            provider_session_id: None,
+            project_dir: "/tmp/project".to_string(),
+            env_name: "DeepSeek".to_string(),
+            perm_mode: "dev".to_string(),
+            effort: None,
+            status: status.to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            is_active,
+            can_handoff_to_terminal: false,
+            last_error: None,
+        }
     }
 
     #[test]
@@ -1359,6 +1503,52 @@ mod tests {
             "iVBORw0KGgo="
         );
         assert_eq!(serialized["initial_images"][0]["placeholder"], "[Image #1]");
+    }
+
+    #[test]
+    fn helper_stop_serializes_shutdown_command() {
+        let serialized = serde_json::to_value(HelperInputCommand::Stop).expect("serialize stop");
+
+        assert_eq!(serialized["type"], "stop");
+    }
+
+    #[test]
+    fn reconcile_stale_records_marks_active_records_interrupted() {
+        let manager = manager_with_records(
+            "native-reconcile",
+            vec![
+                native_record("native-reconcile-active", "processing", true),
+                native_record("native-reconcile-stopped", "stopped", false),
+            ],
+        );
+
+        let reconciled = manager
+            .reconcile_stale_records()
+            .expect("reconcile stale records");
+
+        assert_eq!(reconciled, 1);
+        let active = manager
+            .summary_for("native-reconcile-active")
+            .expect("active summary");
+        let stopped = manager
+            .summary_for("native-reconcile-stopped")
+            .expect("stopped summary");
+
+        assert_eq!(active.status, "interrupted");
+        assert!(!active.is_active);
+        assert_eq!(stopped.status, "stopped");
+        assert!(!stopped.is_active);
+    }
+
+    #[test]
+    fn summary_includes_persisted_effort() {
+        let mut record = native_record("native-effort", "ready", true);
+        record.effort = Some("max".to_string());
+        let manager = manager_with_records("native-effort", vec![record]);
+
+        let summary = manager.summary_for("native-effort").expect("summary");
+
+        assert_eq!(summary.effort.as_deref(), Some("max"));
     }
 
     #[test]

@@ -588,6 +588,7 @@ export interface NativeSessionSummary {
   project_dir: string;
   env_name: string;
   perm_mode: string;
+  effort?: string | null;
   status: string;
   created_at: string;
   updated_at: string;

@@ -46,6 +46,7 @@ import {
   providerDisplayName,
 } from './ComposerControls';
 import type { EffortLevel } from './ComposerControls';
+import { normalizeEffortForProvider } from './workspaceSessionPreferences';
 import {
   buildBaseMessages,
   buildMessagesFromEvents,
@@ -827,7 +828,9 @@ export function WorkspaceNativeSessionView({
   const [sessionEnv, setSessionEnv] = useState(session.env_name);
   const [sessionRuntimePermMode, setSessionRuntimePermMode] = useState(session.perm_mode);
   const sessionPermMode = normalizePermissionModeName(sessionRuntimePermMode);
-  const [sessionEffort, setSessionEffort] = useState<EffortLevel>('high');
+  const [sessionEffort, setSessionEffort] = useState<EffortLevel>(
+    () => normalizeEffortForProvider(session.effort, session.provider),
+  );
   const [composerText, setComposerText] = useState('');
   const [composerPlanModeEnabled, setComposerPlanModeEnabled] = useState(session.perm_mode === 'plan');
   const [events, setEvents] = useState<SessionEventRecord[]>([]);
@@ -871,7 +874,8 @@ export function WorkspaceNativeSessionView({
   useEffect(() => {
     setSessionEnv(session.env_name);
     setSessionRuntimePermMode(session.perm_mode);
-  }, [session.env_name, session.perm_mode, session.runtime_id]);
+    setSessionEffort(normalizeEffortForProvider(session.effort, session.provider));
+  }, [session.effort, session.env_name, session.perm_mode, session.provider, session.runtime_id]);
 
   const messages = useMemo(
     () => buildMessagesFromEvents(
@@ -1200,15 +1204,17 @@ export function WorkspaceNativeSessionView({
   }, [refreshSummary, session.runtime_id, sessionRuntimePermMode, t, updateNativeSessionSettings]);
 
   const handleEffortChange = useCallback((effort: EffortLevel) => {
+    const nextEffort = normalizeEffortForProvider(effort, session.provider);
     const previousEffort = sessionEffort;
-    setSessionEffort(effort);
-    void updateNativeSessionSettings(session.runtime_id, undefined, undefined, effort)
+    setSessionEffort(nextEffort);
+    void updateNativeSessionSettings(session.runtime_id, undefined, undefined, nextEffort)
+      .then(refreshSummary)
       .catch((error) => {
         console.error('Failed to update native session effort:', error);
         setSessionEffort(previousEffort);
         toast.error(t('workspace.nativeSettingsFailed'));
       });
-  }, [session.runtime_id, sessionEffort, t, updateNativeSessionSettings]);
+  }, [refreshSummary, session.provider, session.runtime_id, sessionEffort, t, updateNativeSessionSettings]);
 
   const handleSend = useCallback(async (payload?: ComposerSubmitPayload) => {
     const text = payload?.text ?? composerText.trim();

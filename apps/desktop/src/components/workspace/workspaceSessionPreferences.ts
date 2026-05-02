@@ -1,0 +1,83 @@
+import type { PermissionModeName } from '@ccem/core/browser';
+import type { HistorySessionItem, HistorySource } from '@/features/conversations/types';
+import type { EffortLevel } from '@/components/workspace/ComposerControls';
+
+export interface WorkspaceHistorySessionPreference {
+  envName?: string;
+  permMode?: PermissionModeName;
+  effort?: EffortLevel;
+}
+
+export type WorkspaceHistorySessionPreferences = Record<string, WorkspaceHistorySessionPreference>;
+
+const DEFAULT_EFFORT: EffortLevel = 'high';
+const PERMISSION_MODES = new Set(['yolo', 'dev', 'readonly', 'safe', 'ci', 'audit']);
+const CLAUDE_EFFORT_LEVELS = new Set<EffortLevel>(['low', 'medium', 'high', 'xhigh', 'max']);
+const CODEX_EFFORT_LEVELS = new Set<EffortLevel>(['minimal', 'low', 'medium', 'high', 'xhigh']);
+
+function isPermissionMode(value: string | undefined): value is PermissionModeName {
+  return Boolean(value && PERMISSION_MODES.has(value));
+}
+
+function isEffortLevel(value: string | null | undefined): value is EffortLevel {
+  return Boolean(
+    value
+      && (
+        CLAUDE_EFFORT_LEVELS.has(value as EffortLevel)
+        || CODEX_EFFORT_LEVELS.has(value as EffortLevel)
+      ),
+  );
+}
+
+function sessionPreferenceKey(session: Pick<HistorySessionItem, 'id' | 'source'>): string {
+  return `${session.source}:${session.id}`;
+}
+
+export function normalizeEffortForProvider(
+  effort: string | null | undefined,
+  provider: HistorySource | string | null | undefined,
+): EffortLevel {
+  if (!isEffortLevel(effort)) {
+    return DEFAULT_EFFORT;
+  }
+
+  if (provider === 'codex' && !CODEX_EFFORT_LEVELS.has(effort)) {
+    return DEFAULT_EFFORT;
+  }
+
+  if (provider !== 'codex' && !CLAUDE_EFFORT_LEVELS.has(effort)) {
+    return DEFAULT_EFFORT;
+  }
+
+  return effort;
+}
+
+export function updateHistorySessionPreference(
+  preferences: WorkspaceHistorySessionPreferences,
+  sessionKey: string,
+  patch: WorkspaceHistorySessionPreference,
+): WorkspaceHistorySessionPreferences {
+  return {
+    ...preferences,
+    [sessionKey]: {
+      ...preferences[sessionKey],
+      ...patch,
+    },
+  };
+}
+
+export function resolveHistorySessionControls(options: {
+  session: Pick<HistorySessionItem, 'id' | 'source' | 'envName'>;
+  preferences: WorkspaceHistorySessionPreferences;
+  currentEnv?: string | null;
+  defaultPermMode: PermissionModeName;
+}) {
+  const saved = options.preferences[sessionPreferenceKey(options.session)] ?? {};
+  const savedPermMode = isPermissionMode(saved.permMode) ? saved.permMode : null;
+
+  return {
+    envName: saved.envName || options.session.envName || options.currentEnv || '',
+    permMode: savedPermMode || options.defaultPermMode,
+    effort: normalizeEffortForProvider(saved.effort, options.session.source),
+  };
+}

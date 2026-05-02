@@ -3114,6 +3114,13 @@ fn main() {
 
             // Validate persisted sessions against actual terminal state
             session_manager_for_setup.validate_and_reconcile();
+            match native_runtime_manager.reconcile_stale_records() {
+                Ok(count) if count > 0 => {
+                    eprintln!("Reconciled {} stale native runtime record(s)", count);
+                }
+                Ok(_) => {}
+                Err(error) => eprintln!("Native runtime reconcile warning: {}", error),
+            }
             if let Err(error) = interactive_manager_for_setup
                 .rehydrate_existing(app.handle().clone(), session_manager_for_setup.clone())
             {
