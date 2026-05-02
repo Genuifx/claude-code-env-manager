@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.30
+
+### Patch Changes
+
+- Stabilize live workspace transcript ordering, streaming thinking reduction, image prompts, and process duration display.
+
 ## 2.0.0-beta.29
 
 ### Patch Changes
