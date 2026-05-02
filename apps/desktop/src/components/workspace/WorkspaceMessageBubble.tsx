@@ -35,6 +35,8 @@ export interface WorkspaceThinkingEntry {
   key: string;
   content: string;
   segmentCount?: number;
+  startedAt?: number;
+  completedAt?: number;
 }
 
 export interface ToolDigestEntry {
@@ -47,6 +49,50 @@ export interface MessageSegment {
   type: 'text' | 'tool-group';
   message?: ConversationMessageData;
   entries: ToolDigestEntry[];
+}
+
+function toFiniteTimestamp(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function formatProcessDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (totalMinutes < 60) {
+    return seconds > 0 ? `${totalMinutes}m ${seconds}s` : `${totalMinutes}m`;
+  }
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+}
+
+function getDigestTimeRange(entries: ToolDigestEntry[]) {
+  let startedAt: number | undefined;
+  let completedAt: number | undefined;
+
+  entries.forEach((entry) => {
+    const entryStartedAt = entry.type === 'thinking'
+      ? entry.thinking?.startedAt
+      : toFiniteTimestamp(entry.block?._startedAt);
+    const entryCompletedAt = entry.type === 'thinking'
+      ? entry.thinking?.completedAt
+      : toFiniteTimestamp(entry.block?._completedAt);
+
+    if (entryStartedAt != null) {
+      startedAt = startedAt == null ? entryStartedAt : Math.min(startedAt, entryStartedAt);
+    }
+    if (entryCompletedAt != null) {
+      completedAt = completedAt == null ? entryCompletedAt : Math.max(completedAt, entryCompletedAt);
+    }
+  });
+
+  return startedAt == null ? null : { startedAt, completedAt };
 }
 
 function toContentBlocks(content: ConversationMessageData['content']): ConversationContentBlock[] {
@@ -134,6 +180,8 @@ function extractProcessFromBlocks(
         thinkingEntries.push({
           key: `${blockKey}-thinking`,
           content,
+          startedAt: toFiniteTimestamp(block._startedAt),
+          completedAt: toFiniteTimestamp(block._completedAt),
         });
       }
       return;
@@ -288,7 +336,12 @@ export function processMessageBlocks(
       if (content) {
         currentEntries.push({
           type: 'thinking',
-          thinking: { key: `${blockKey}-thinking`, content },
+          thinking: {
+            key: `${blockKey}-thinking`,
+            content,
+            startedAt: toFiniteTimestamp(block._startedAt),
+            completedAt: toFiniteTimestamp(block._completedAt),
+          },
         });
       }
       continue;
@@ -549,14 +602,17 @@ function WorkspaceToolDigestComponent({
   entries,
   className,
   autoExpanded = false,
+  isActive = false,
 }: {
   entries: ToolDigestEntry[];
   className?: string;
   autoExpanded?: boolean;
+  isActive?: boolean;
 }) {
   const { t } = useLocale();
   const [open, setOpen] = useState(false);
   const [hasRenderedBody, setHasRenderedBody] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
   const previousAutoExpandedRef = useRef(autoExpanded);
   const { completedCount, summary, toolCount, thinkingCount } = useMemo(() => {
     const toolEntries = entries.filter((e) => e.type === 'tool_use');
@@ -587,6 +643,19 @@ function WorkspaceToolDigestComponent({
       thinkingCount: thinkingEntriesList.length,
     };
   }, [entries, t]);
+  const timeRange = useMemo(() => getDigestTimeRange(entries), [entries]);
+  const durationLabel = useMemo(() => {
+    if (!timeRange) {
+      return null;
+    }
+
+    const end = timeRange.completedAt ?? (isActive ? now : undefined);
+    if (end == null) {
+      return null;
+    }
+
+    return formatProcessDuration(end - timeRange.startedAt);
+  }, [isActive, now, timeRange]);
 
   useEffect(() => {
     if (autoExpanded && (thinkingCount > 0 || toolCount > 0)) {
@@ -598,6 +667,16 @@ function WorkspaceToolDigestComponent({
 
     previousAutoExpandedRef.current = autoExpanded;
   }, [autoExpanded, toolCount, thinkingCount]);
+
+  useEffect(() => {
+    if (!isActive || !timeRange) {
+      return undefined;
+    }
+
+    setNow(Date.now());
+    const intervalId = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(intervalId);
+  }, [isActive, timeRange]);
 
   return (
     <div className={cn('max-w-[760px]', className)}>
@@ -616,7 +695,12 @@ function WorkspaceToolDigestComponent({
       >
         <div className="flex min-w-0 items-center gap-2 text-muted-foreground/78">
           <Wrench className="h-3.5 w-3.5 shrink-0" />
-          <span className="text-[12px] font-medium text-foreground/82">{t('workspace.processedLabel')}</span>
+          <span className="shrink-0 text-[12px] font-medium text-foreground/82">
+            {t('workspace.processedLabel')}
+            {durationLabel ? (
+              <span className="ml-1 font-normal text-muted-foreground/78">{durationLabel}</span>
+            ) : null}
+          </span>
           <span className="min-w-0 truncate text-[12px]">{summary}</span>
         </div>
         <ChevronDown
@@ -685,6 +769,7 @@ export const WorkspaceToolDigest = memo(
     prevProps.className === nextProps.className
     && prevProps.entries === nextProps.entries
     && prevProps.autoExpanded === nextProps.autoExpanded
+    && prevProps.isActive === nextProps.isActive
   )
 );
 

@@ -171,14 +171,15 @@ export function WorkspaceTranscriptList({
       return null;
     }
 
+    let activeKey: string | null = null;
     for (let index = lastUserIndex + 1; index < transcriptItems.length; index += 1) {
       const item = transcriptItems[index];
       if (item.type === 'tool-digest') {
-        return item.key;
+        activeKey = item.key;
       }
     }
 
-    return null;
+    return activeKey;
   }, [isAwaitingResponse, transcriptItems]);
   const displayItems = useMemo(() => {
     if (!isAwaitingResponse) {
@@ -217,6 +218,7 @@ export function WorkspaceTranscriptList({
               <WorkspaceToolDigest
                 entries={item.entries}
                 autoExpanded={item.key === activeDigestKey}
+                isActive={item.key === activeDigestKey}
               />
             </div>
           );
