@@ -136,9 +136,69 @@ interface WorkspaceNativeSessionViewProps {
 const ACTIVE_POLL_INTERVAL_MS = 140;
 const IDLE_POLL_INTERVAL_MS = 700;
 const TERMINAL_POLL_INTERVAL_MS = 1100;
+const NATIVE_EVENT_CACHE_KEY_PREFIX = 'ccem-workspace-native-events:';
+const NATIVE_EVENT_CACHE_LIMIT = 8000;
 
 function isTerminalStatus(status: string) {
   return status === 'stopped' || status === 'error' || status === 'handoff' || status === 'interrupted';
+}
+
+function latestEventSeq(events: SessionEventRecord[]): number | null {
+  return events[events.length - 1]?.seq ?? null;
+}
+
+function nativeEventCacheKey(runtimeId: string) {
+  return `${NATIVE_EVENT_CACHE_KEY_PREFIX}${runtimeId}`;
+}
+
+function readCachedNativeEvents(runtimeId: string): SessionEventRecord[] {
+  try {
+    if (typeof sessionStorage === 'undefined') {
+      return [];
+    }
+
+    const raw = sessionStorage.getItem(nativeEventCacheKey(runtimeId));
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.filter((event): event is SessionEventRecord =>
+      event
+      && typeof event === 'object'
+      && event.runtime_id === runtimeId
+      && typeof event.seq === 'number'
+      && typeof event.occurred_at === 'string'
+      && event.payload
+      && typeof event.payload === 'object',
+    );
+  } catch {
+    return [];
+  }
+}
+
+function writeCachedNativeEvents(runtimeId: string, events: SessionEventRecord[]) {
+  try {
+    if (typeof sessionStorage === 'undefined') {
+      return;
+    }
+
+    const key = nativeEventCacheKey(runtimeId);
+    for (const limit of [NATIVE_EVENT_CACHE_LIMIT, 3000, 1000]) {
+      try {
+        sessionStorage.setItem(key, JSON.stringify(events.slice(-limit)));
+        return;
+      } catch {
+        // Try a smaller retained window before giving up.
+      }
+    }
+  } catch {
+    // Losing the UI-side cache should never break the live session itself.
+  }
 }
 
 function extractAttentionState(events: SessionEventRecord[]): NativeSessionAttentionState {
@@ -837,7 +897,9 @@ export function WorkspaceNativeSessionView({
   );
   const [composerText, setComposerText] = useState('');
   const [composerPlanModeEnabled, setComposerPlanModeEnabled] = useState(session.perm_mode === 'plan');
-  const [events, setEvents] = useState<SessionEventRecord[]>([]);
+  const [events, setEvents] = useState<SessionEventRecord[]>(() =>
+    readCachedNativeEvents(session.runtime_id),
+  );
   const [localUserPrompts, setLocalUserPrompts] = useState<LocalUserPrompt[]>(() => {
     if (!initialPrompt) {
       return [];
@@ -858,7 +920,7 @@ export function WorkspaceNativeSessionView({
     planMode: boolean;
     attachments: ComposerAttachment[];
   }>>([]);
-  const lastSeenSeqRef = useRef<number | null>(null);
+  const lastSeenSeqRef = useRef<number | null>(latestEventSeq(events));
   const containerRef = useRef<HTMLDivElement>(null);
   const programmaticScrollRef = useRef(false);
   const autoScrollDetachedRef = useRef(false);
@@ -867,19 +929,20 @@ export function WorkspaceNativeSessionView({
   const tickInFlightRef = useRef(false);
 
   useEffect(() => {
+    const cachedEvents = readCachedNativeEvents(session.runtime_id);
     const initialPrompts = initialPrompt
       ? [{ id: 'initial-user', text: initialPrompt }]
       : [];
 
-    lastSeenSeqRef.current = null;
+    lastSeenSeqRef.current = latestEventSeq(cachedEvents);
     autoScrollDetachedRef.current = false;
     prevMessageCountRef.current = 0;
-    setEvents([]);
+    setEvents(cachedEvents);
     setComposerText('');
     setComposerPlanModeEnabled(session.perm_mode === 'plan');
     setQueuedMessages([]);
     setLocalUserPrompts(initialPrompts);
-  }, [initialPrompt, seedMessages, session.perm_mode, session.runtime_id]);
+  }, [session.runtime_id]);
 
   useEffect(() => {
     setSessionEnv(session.env_name);
@@ -914,9 +977,11 @@ export function WorkspaceNativeSessionView({
     }
 
     lastSeenSeqRef.current = batch.events[batch.events.length - 1]?.seq ?? lastSeenSeqRef.current;
-    setEvents((previous) =>
-      dedupeEvents(batch.gap_detected ? batch.events : [...previous, ...batch.events]),
-    );
+    setEvents((previous) => {
+      const nextEvents = dedupeEvents([...previous, ...batch.events]);
+      writeCachedNativeEvents(session.runtime_id, nextEvents);
+      return nextEvents;
+    });
   }, [getNativeSessionEvents, session.runtime_id]);
 
   const attentionState = useMemo(

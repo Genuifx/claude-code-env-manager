@@ -65,13 +65,21 @@ export function buildWorkspaceTranscriptItems(
   const items: WorkspaceTranscriptItem[] = [];
   let digestIndex = 0;
   const pendingSegments: MessageSegment[] = [];
+  const seenItemKeys = new Map<string, number>();
+
+  const uniqueItemKey = (baseKey: string) => {
+    const seenCount = seenItemKeys.get(baseKey) ?? 0;
+    seenItemKeys.set(baseKey, seenCount + 1);
+    return seenCount === 0 ? baseKey : `${baseKey}-${seenCount}`;
+  };
 
   const pushToolDigest = (entries: ToolDigestEntry[]) => {
     if (entries.length > 0) {
+      const digestKey = `tool-digest-${digestIndex}`;
       items.push({
         type: 'tool-digest',
         role: 'assistant',
-        key: `tool-digest-${digestIndex}`,
+        key: uniqueItemKey(digestKey),
         entries,
       });
       digestIndex += 1;
@@ -82,7 +90,7 @@ export function buildWorkspaceTranscriptItems(
     items.push({
       type: 'message',
       role: 'assistant',
-      key: message.uuid || `assistant-msg-${digestIndex}`,
+      key: uniqueItemKey(message.uuid || `assistant-msg-${digestIndex}`),
       message,
     });
   };
@@ -127,7 +135,7 @@ export function buildWorkspaceTranscriptItems(
       items.push({
         type: 'message',
         role,
-        key: messageKey,
+        key: uniqueItemKey(messageKey),
         message,
       });
       return;
