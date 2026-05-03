@@ -282,6 +282,7 @@ export interface TauriCommands {
     {
       runtimeId: string;
       sinceSeq?: number | null;
+      limit?: number | null;
     },
     ReplayBatch
   ];

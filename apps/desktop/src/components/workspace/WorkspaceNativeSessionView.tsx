@@ -11,7 +11,7 @@ import {
   SquarePen,
   TerminalSquare,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -52,9 +52,10 @@ import {
 import type { EffortLevel } from './ComposerControls';
 import { normalizeEffortForProvider } from './workspaceSessionPreferences';
 import {
+  appendSessionEvents,
   buildBaseMessages,
   buildMessagesFromEvents,
-  dedupeEvents,
+  stabilizeMessageRefs,
   type LocalUserPrompt,
 } from './workspaceEventTranscript';
 
@@ -136,6 +137,9 @@ interface WorkspaceNativeSessionViewProps {
 const ACTIVE_POLL_INTERVAL_MS = 140;
 const IDLE_POLL_INTERVAL_MS = 700;
 const TERMINAL_POLL_INTERVAL_MS = 1100;
+const SUMMARY_REFRESH_COOLDOWN_MS = 2000;
+const CACHE_FLUSH_INTERVAL_MS = 1500;
+const INITIAL_EVENT_REPLAY_LIMIT = 1200;
 const NATIVE_EVENT_CACHE_KEY_PREFIX = 'ccem-workspace-native-events:';
 const NATIVE_EVENT_CACHE_LIMIT = 8000;
 
@@ -145,6 +149,34 @@ function isTerminalStatus(status: string) {
 
 function latestEventSeq(events: SessionEventRecord[]): number | null {
   return events[events.length - 1]?.seq ?? null;
+}
+
+function hasImmediateAttentionEvent(events: SessionEventRecord[]) {
+  return events.some((event) => {
+    switch (event.payload.type) {
+      case 'permission_required':
+      case 'permission_responded':
+      case 'terminal_prompt_required':
+      case 'terminal_prompt_resolved':
+        return true;
+      case 'tool_use_started':
+        return event.payload.needs_response === true;
+      case 'tool_use_completed':
+        return true;
+      default:
+        return false;
+    }
+  });
+}
+
+function hasSummaryBoundaryEvent(events: SessionEventRecord[]) {
+  return events.some((event) =>
+    event.payload.type === 'session_completed'
+    || event.payload.type === 'permission_required'
+    || event.payload.type === 'permission_responded'
+    || event.payload.type === 'terminal_prompt_required'
+    || event.payload.type === 'terminal_prompt_resolved'
+  );
 }
 
 function nativeEventCacheKey(runtimeId: string) {
@@ -921,11 +953,16 @@ export function WorkspaceNativeSessionView({
     attachments: ComposerAttachment[];
   }>>([]);
   const lastSeenSeqRef = useRef<number | null>(latestEventSeq(events));
+  const latestEventsRef = useRef<SessionEventRecord[]>(events);
+  const previousMessagesRef = useRef<ConversationMessageData[]>([]);
+  const cacheFlushTimerRef = useRef<number | null>(null);
+  const cacheFlushPendingRef = useRef(false);
+  const lastSummaryRefreshTimestampRef = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const programmaticScrollRef = useRef(false);
   const autoScrollDetachedRef = useRef(false);
   const scrollFrameRef = useRef<number | null>(null);
-  const prevMessageCountRef = useRef(0);
+  const prevEventCountRef = useRef(0);
   const tickInFlightRef = useRef(false);
 
   useEffect(() => {
@@ -935,8 +972,10 @@ export function WorkspaceNativeSessionView({
       : [];
 
     lastSeenSeqRef.current = latestEventSeq(cachedEvents);
+    latestEventsRef.current = cachedEvents;
+    previousMessagesRef.current = [];
     autoScrollDetachedRef.current = false;
-    prevMessageCountRef.current = 0;
+    prevEventCountRef.current = 0;
     setEvents(cachedEvents);
     setComposerText('');
     setComposerPlanModeEnabled(session.perm_mode === 'plan');
@@ -950,7 +989,7 @@ export function WorkspaceNativeSessionView({
     setSessionEffort(normalizeEffortForProvider(session.effort, session.provider));
   }, [session.effort, session.env_name, session.perm_mode, session.provider, session.runtime_id]);
 
-  const messages = useMemo(
+  const rawMessages = useMemo(
     () => buildMessagesFromEvents(
       buildBaseMessages(seedMessages, localUserPrompts[0]),
       localUserPrompts.slice(1),
@@ -960,7 +999,63 @@ export function WorkspaceNativeSessionView({
     [events, localUserPrompts, seedMessages, session.last_error, session.status],
   );
 
-  const refreshSummary = useCallback(async () => {
+  const messages = useMemo(
+    () => stabilizeMessageRefs(rawMessages, previousMessagesRef.current),
+    [rawMessages],
+  );
+
+  useEffect(() => {
+    previousMessagesRef.current = messages;
+  }, [messages]);
+
+  const flushCachedEvents = useCallback(() => {
+    cacheFlushPendingRef.current = false;
+    writeCachedNativeEvents(session.runtime_id, latestEventsRef.current);
+  }, [session.runtime_id]);
+
+  const scheduleCacheFlush = useCallback(() => {
+    cacheFlushPendingRef.current = true;
+    if (cacheFlushTimerRef.current !== null) {
+      return;
+    }
+
+    cacheFlushTimerRef.current = window.setTimeout(() => {
+      cacheFlushTimerRef.current = null;
+      if (cacheFlushPendingRef.current) {
+        flushCachedEvents();
+      }
+    }, CACHE_FLUSH_INTERVAL_MS);
+  }, [flushCachedEvents]);
+
+  useEffect(() => {
+    latestEventsRef.current = events;
+    if (events.length > 0) {
+      scheduleCacheFlush();
+    }
+  }, [events, scheduleCacheFlush]);
+
+  useEffect(() => () => {
+    if (cacheFlushTimerRef.current !== null) {
+      window.clearTimeout(cacheFlushTimerRef.current);
+      cacheFlushTimerRef.current = null;
+    }
+    if (latestEventsRef.current.length > 0) {
+      flushCachedEvents();
+    }
+  }, [flushCachedEvents]);
+
+  useEffect(() => {
+    if (isTerminalStatus(session.status) && latestEventsRef.current.length > 0) {
+      flushCachedEvents();
+    }
+  }, [flushCachedEvents, session.status]);
+
+  const refreshSummary = useCallback(async (options: { force?: boolean } = {}) => {
+    const now = Date.now();
+    if (!options.force && now - lastSummaryRefreshTimestampRef.current < SUMMARY_REFRESH_COOLDOWN_MS) {
+      return;
+    }
+    lastSummaryRefreshTimestampRef.current = now;
     const sessions = await listNativeSessions();
     const next = sessions.find(
       (candidate) => candidate.runtime_id === session.runtime_id,
@@ -971,17 +1066,28 @@ export function WorkspaceNativeSessionView({
   }, [listNativeSessions, onSessionUpdate, session.runtime_id]);
 
   const pollEvents = useCallback(async () => {
-    const batch = await getNativeSessionEvents(session.runtime_id, lastSeenSeqRef.current);
+    const sinceSeq = lastSeenSeqRef.current;
+    const batch = await getNativeSessionEvents(
+      session.runtime_id,
+      sinceSeq,
+      sinceSeq == null ? INITIAL_EVENT_REPLAY_LIMIT : null,
+    );
     if (!batch.events.length) {
-      return;
+      return false;
     }
 
     lastSeenSeqRef.current = batch.events[batch.events.length - 1]?.seq ?? lastSeenSeqRef.current;
-    setEvents((previous) => {
-      const nextEvents = dedupeEvents([...previous, ...batch.events]);
-      writeCachedNativeEvents(session.runtime_id, nextEvents);
-      return nextEvents;
-    });
+    const updateEvents = () => {
+      setEvents((previous) => appendSessionEvents(previous, batch.events, batch.gap_detected));
+    };
+
+    if (hasImmediateAttentionEvent(batch.events)) {
+      updateEvents();
+    } else {
+      startTransition(updateEvents);
+    }
+
+    return hasSummaryBoundaryEvent(batch.events);
   }, [getNativeSessionEvents, session.runtime_id]);
 
   const attentionState = useMemo(
@@ -1026,8 +1132,8 @@ export function WorkspaceNativeSessionView({
 
       tickInFlightRef.current = true;
       try {
-        await pollEvents();
-        await refreshSummary();
+        const forceSummary = await pollEvents();
+        await refreshSummary({ force: forceSummary });
       } catch (error) {
         if (!cancelled) {
           console.error('Failed to poll native session:', error);
@@ -1075,15 +1181,15 @@ export function WorkspaceNativeSessionView({
     }
   }, []);
 
-  // Auto-scroll to bottom when new messages arrive, unless the user has scrolled up
+  // Streaming deltas usually grow the current message without changing message count.
   useEffect(() => {
     if (!isVisible || !containerRef.current) {
       return;
     }
 
     const container = containerRef.current;
-    const prevCount = prevMessageCountRef.current;
-    prevMessageCountRef.current = messages.length;
+    const prevCount = prevEventCountRef.current;
+    prevEventCountRef.current = events.length;
 
     // Nothing to scroll to
     if (messages.length === 0) {
@@ -1108,7 +1214,7 @@ export function WorkspaceNativeSessionView({
         scrollFrameRef.current = null;
       });
     });
-  }, [isVisible, messages.length]);
+  }, [events.length, isVisible, messages.length]);
 
   const isProcessingTurn = session.status === 'initializing' || session.status === 'processing';
   const isAwaitingResponse = isSending || isProcessingTurn;
@@ -1226,7 +1332,7 @@ export function WorkspaceNativeSessionView({
         images.length > 0 ? images : undefined,
       );
       await pollEvents();
-      await refreshSummary();
+      await refreshSummary({ force: true });
     } catch (error) {
       console.error('Failed to send native session input:', error);
       setLocalUserPrompts((previous) =>
@@ -1279,7 +1385,7 @@ export function WorkspaceNativeSessionView({
         await sendNativeSessionInput(session.runtime_id, requestText, requestImages);
       }
       await pollEvents();
-      await refreshSummary();
+      await refreshSummary({ force: true });
       return true;
     } catch (error) {
       console.error('Failed to send interactive prompt reply:', error);
@@ -1305,7 +1411,7 @@ export function WorkspaceNativeSessionView({
     const previousEnv = sessionEnv;
     setSessionEnv(envName);
     void updateNativeSessionSettings(session.runtime_id, envName, undefined)
-      .then(refreshSummary)
+      .then(() => refreshSummary({ force: true }))
       .catch((error) => {
         console.error('Failed to update native session environment:', error);
         setSessionEnv(previousEnv);
@@ -1318,7 +1424,7 @@ export function WorkspaceNativeSessionView({
     setSessionRuntimePermMode(mode);
     setComposerPlanModeEnabled(false);
     void updateNativeSessionSettings(session.runtime_id, undefined, mode)
-      .then(refreshSummary)
+      .then(() => refreshSummary({ force: true }))
       .catch((error) => {
         console.error('Failed to update native session permission mode:', error);
         setSessionRuntimePermMode(previousMode);
@@ -1332,7 +1438,7 @@ export function WorkspaceNativeSessionView({
     const previousEffort = sessionEffort;
     setSessionEffort(nextEffort);
     void updateNativeSessionSettings(session.runtime_id, undefined, undefined, nextEffort)
-      .then(refreshSummary)
+      .then(() => refreshSummary({ force: true }))
       .catch((error) => {
         console.error('Failed to update native session effort:', error);
         setSessionEffort(previousEffort);
@@ -1416,7 +1522,7 @@ export function WorkspaceNativeSessionView({
     try {
       await respondNativeSessionPermission(session.runtime_id, requestId, approved);
       await pollEvents();
-      await refreshSummary();
+      await refreshSummary({ force: true });
     } catch (error) {
       console.error('Failed to respond to native permission:', error);
       toast.error(t('workspace.nativePermissionFailed'));
@@ -1429,7 +1535,7 @@ export function WorkspaceNativeSessionView({
     setIsStopping(true);
     try {
       await stopNativeSession(session.runtime_id);
-      await refreshSummary();
+      await refreshSummary({ force: true });
     } catch (error) {
       console.error('Failed to stop native session:', error);
       toast.error(t('workspace.nativeStopFailed'));
@@ -1442,7 +1548,7 @@ export function WorkspaceNativeSessionView({
     setIsHandingOff(true);
     try {
       await handoffNativeSessionToTerminal(session.runtime_id);
-      await refreshSummary();
+      await refreshSummary({ force: true });
       toast.success(t('workspace.nativeHandoffDone'));
     } catch (error) {
       console.error('Failed to handoff native session:', error);

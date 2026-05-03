@@ -754,10 +754,12 @@ export function useTauriCommands() {
   const getNativeSessionEvents = useCallback(async (
     runtimeId: string,
     sinceSeq?: number | null,
+    limit?: number | null,
   ): Promise<ReplayBatch> => {
     return invoke<ReplayBatch>('get_native_session_events', {
       runtimeId,
       sinceSeq: sinceSeq ?? null,
+      limit: limit ?? null,
     });
   }, []);
 

@@ -2007,6 +2007,27 @@
   contain-intrinsic-size: 56px;
 }
 
+/* Paint skipping for long live workspace transcripts */
+.workspace-msg-virtualized,
+.workspace-tool-payload-virtualized,
+.workspace-tool-row-virtualized,
+.workspace-tool-digest-virtualized {
+  content-visibility: auto;
+}
+
+.workspace-msg-virtualized {
+  contain-intrinsic-size: auto 180px;
+}
+
+.workspace-tool-payload-virtualized {
+  contain-intrinsic-size: auto 120px;
+}
+
+.workspace-tool-row-virtualized,
+.workspace-tool-digest-virtualized {
+  contain-intrinsic-size: auto 56px;
+}
+
 /* === Reduced Performance Mode === */
 :root[data-performance-mode='reduced'] {
   --glass-blur: 18px;

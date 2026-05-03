@@ -1102,8 +1102,9 @@ fn get_native_session_events(
     native_state: State<'_, Arc<NativeRuntimeManager>>,
     runtime_id: String,
     since_seq: Option<u64>,
+    limit: Option<u64>,
 ) -> Result<event_bus::ReplayBatch, String> {
-    native_state.replay_events(&runtime_id, since_seq)
+    native_state.replay_events_limited(&runtime_id, since_seq, limit)
 }
 
 #[tauri::command]

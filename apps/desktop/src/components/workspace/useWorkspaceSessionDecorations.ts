@@ -8,6 +8,7 @@ import type {
 } from '@/lib/tauri-ipc';
 import type { HistorySessionItem } from '@/features/conversations/types';
 import type { Session } from '@/store';
+import { appendSessionEvents } from './workspaceEventTranscript';
 
 export type WorkspaceSessionVisualState = 'identity' | 'processing' | 'attention';
 export type WorkspaceAttentionKind = 'input_required' | 'plan_review' | 'permission_required';
@@ -180,14 +181,6 @@ function lastEventSeq(events?: SessionEventRecord[]) {
     return null;
   }
   return events[events.length - 1]?.seq ?? null;
-}
-
-function dedupeEvents(events: SessionEventRecord[]) {
-  return events.filter((event, index, all) =>
-    index === all.findIndex((candidate) =>
-      candidate.runtime_id === event.runtime_id && candidate.seq === event.seq
-    )
-  );
 }
 
 function resolveAttentionKind(events: SessionEventRecord[]): WorkspaceAttentionKind | undefined {
@@ -385,11 +378,8 @@ export function useWorkspaceSessionDecorations({
           const batch = await getSessionEvents(runtime.id, sinceSeq);
           setEventsByRuntime((current) => {
             const previous = sinceSeq && !batch.gap_detected ? current[runtime.id] ?? [] : [];
-            const next = dedupeEvents([...previous, ...batch.events]);
-            if (
-              previous.length === next.length
-              && previous.every((event, index) => next[index]?.seq === event.seq)
-            ) {
+            const next = appendSessionEvents(previous, batch.events, batch.gap_detected);
+            if (previous === next) {
               return current;
             }
             return {
@@ -412,11 +402,8 @@ export function useWorkspaceSessionDecorations({
             const previous = sinceSeq && !batch.gap_detected
               ? current[runtime.runtime_id] ?? []
               : [];
-            const next = dedupeEvents([...previous, ...batch.events]);
-            if (
-              previous.length === next.length
-              && previous.every((event, index) => next[index]?.seq === event.seq)
-            ) {
+            const next = appendSessionEvents(previous, batch.events, batch.gap_detected);
+            if (previous === next) {
               return current;
             }
             return {

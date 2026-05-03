@@ -372,7 +372,16 @@ impl NativeRuntimeManager {
         runtime_id: &str,
         since_seq: Option<u64>,
     ) -> Result<ReplayBatch, String> {
-        match self.event_log.replay(runtime_id, since_seq) {
+        self.replay_events_limited(runtime_id, since_seq, None)
+    }
+
+    pub fn replay_events_limited(
+        &self,
+        runtime_id: &str,
+        since_seq: Option<u64>,
+        limit: Option<u64>,
+    ) -> Result<ReplayBatch, String> {
+        match self.event_log.replay(runtime_id, since_seq, limit) {
             Ok(batch) if batch.newest_available_seq.is_some() => return Ok(batch),
             Ok(_) => {}
             Err(error) => eprintln!(
@@ -400,7 +409,17 @@ impl NativeRuntimeManager {
             .events
             .lock()
             .map_err(|_| "Failed to lock native session events".to_string())
-            .map(|store| store.events_since(since_seq))
+            .map(|store| {
+                let mut batch = store.events_since(since_seq);
+                if since_seq.is_none() {
+                    if let Some(limit) = limit.and_then(|value| usize::try_from(value).ok()) {
+                        if limit > 0 && batch.events.len() > limit {
+                            batch.events = batch.events[batch.events.len() - limit..].to_vec();
+                        }
+                    }
+                }
+                batch
+            })
     }
 
     pub fn send_user_message(

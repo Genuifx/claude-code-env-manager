@@ -1,4 +1,4 @@
-import { useMemo, useState, useDeferredValue, useCallback } from 'react';
+import { memo, useMemo, useState, useDeferredValue, useCallback } from 'react';
 import { ChevronRight, FolderOpen, FolderClosed, MessageSquare, RefreshCw, Search, SquarePen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getHistorySessionDisplay } from '@/components/history/historySession';
@@ -78,7 +78,7 @@ function ProjectTreeSkeleton() {
 
 const PAGE_SIZE = 10;
 
-export function ProjectTree({
+export const ProjectTree = memo(function ProjectTree({
   sessions,
   environmentByName = {},
   decorationsBySessionKey = {},
@@ -434,4 +434,4 @@ export function ProjectTree({
       )}
     </div>
   );
-}
+});

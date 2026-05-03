@@ -75,6 +75,27 @@ interface WorkspaceLiveSessionEntry {
   seedMessages: ConversationMessageData[];
 }
 
+function areNativeSessionSummariesEqual(
+  previous: NativeSessionSummary,
+  next: NativeSessionSummary,
+) {
+  return previous.runtime_id === next.runtime_id
+    && previous.provider === next.provider
+    && previous.transport === next.transport
+    && previous.provider_session_id === next.provider_session_id
+    && previous.project_dir === next.project_dir
+    && previous.env_name === next.env_name
+    && previous.perm_mode === next.perm_mode
+    && previous.effort === next.effort
+    && previous.status === next.status
+    && previous.created_at === next.created_at
+    && previous.updated_at === next.updated_at
+    && previous.is_active === next.is_active
+    && previous.last_event_seq === next.last_event_seq
+    && previous.can_handoff_to_terminal === next.can_handoff_to_terminal
+    && previous.last_error === next.last_error;
+}
+
 function resolveComposerDispatch(options: {
   provider: 'claude' | 'codex';
   prompt: string;
@@ -274,12 +295,24 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
   ) => {
     setLiveSessionsByRuntimeId((previous) => {
       const existing = previous[session.runtime_id];
+      const nextInitialPrompt = options.initialPrompt ?? existing?.initialPrompt ?? null;
+      const nextSeedMessages = options.seedMessages ?? existing?.seedMessages ?? [];
+
+      if (
+        existing
+        && existing.initialPrompt === nextInitialPrompt
+        && existing.seedMessages === nextSeedMessages
+        && areNativeSessionSummariesEqual(existing.session, session)
+      ) {
+        return previous;
+      }
+
       return {
         ...previous,
         [session.runtime_id]: {
           session,
-          initialPrompt: options.initialPrompt ?? existing?.initialPrompt ?? null,
-          seedMessages: options.seedMessages ?? existing?.seedMessages ?? [],
+          initialPrompt: nextInitialPrompt,
+          seedMessages: nextSeedMessages,
         },
       };
     });

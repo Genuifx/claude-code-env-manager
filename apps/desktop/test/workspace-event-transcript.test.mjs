@@ -120,3 +120,91 @@ test('live transcript records process timing metadata for duration display', asy
   assert.equal(toolBlock._startedAt, Date.parse('2026-05-01T00:00:03.000Z'));
   assert.equal(toolBlock._completedAt, Date.parse('2026-05-01T00:00:05.000Z'));
 });
+
+test('dedupes live events linearly while preserving first-seen order', async () => {
+  const { dedupeEvents } = await importWorkspaceEventTranscript();
+
+  const events = [
+    event(1, { type: 'assistant_chunk', text: 'a' }),
+    event(2, { type: 'assistant_chunk', text: 'b' }),
+    event(1, { type: 'assistant_chunk', text: 'duplicate' }),
+    { ...event(1, { type: 'assistant_chunk', text: 'other runtime' }), runtime_id: 'runtime-2' },
+  ];
+
+  assert.deepEqual(
+    dedupeEvents(events).map((item) => `${item.runtime_id}:${item.seq}:${item.payload.text}`),
+    ['runtime-1:1:a', 'runtime-1:2:b', 'runtime-2:1:other runtime'],
+  );
+});
+
+test('appends monotonic live events without reallocating on duplicate-only batches', async () => {
+  const { appendSessionEvents } = await importWorkspaceEventTranscript();
+
+  const previous = [
+    event(1, { type: 'assistant_chunk', text: 'a' }),
+    event(2, { type: 'assistant_chunk', text: 'b' }),
+  ];
+  const appended = appendSessionEvents(previous, [
+    event(3, { type: 'assistant_chunk', text: 'c' }),
+  ]);
+  assert.deepEqual(appended.map((item) => item.seq), [1, 2, 3]);
+
+  const dedupedIncoming = appendSessionEvents(previous, [
+    event(3, { type: 'assistant_chunk', text: 'c' }),
+    event(3, { type: 'assistant_chunk', text: 'duplicate' }),
+  ]);
+  assert.deepEqual(dedupedIncoming.map((item) => `${item.seq}:${item.payload.text}`), [
+    '1:a',
+    '2:b',
+    '3:c',
+  ]);
+
+  const unchanged = appendSessionEvents(appended, [
+    event(2, { type: 'assistant_chunk', text: 'duplicate' }),
+  ]);
+  assert.equal(unchanged, appended);
+
+  const reset = appendSessionEvents(appended, [
+    event(10, { type: 'assistant_chunk', text: 'reset' }),
+  ], true);
+  assert.deepEqual(reset.map((item) => item.seq), [10]);
+});
+
+test('stabilizes unchanged message references but updates visible tool metadata changes', async () => {
+  const {
+    buildMessagesFromEvents,
+    stabilizeMessageRefs,
+  } = await importWorkspaceEventTranscript();
+
+  const base = [
+    { msgType: 'user', uuid: 'user-1', content: 'run', segmentIndex: 0, isCompactBoundary: false },
+  ];
+  const first = buildMessagesFromEvents(base, [], [
+    event(1, { type: 'lifecycle', stage: 'turn_started', detail: '' }),
+    event(2, { type: 'tool_use_started', tool_use_id: 'tool-1', raw_name: 'Bash', input_summary: 'pnpm test', needs_response: false, category: { category: 'execution', raw_name: 'Bash' } }),
+    event(3, { type: 'tool_use_completed', tool_use_id: 'tool-1', raw_name: 'Bash', result_summary: 'ok', success: true }),
+  ]);
+  const same = buildMessagesFromEvents(base, [], [
+    event(1, { type: 'lifecycle', stage: 'turn_started', detail: '' }),
+    event(2, { type: 'tool_use_started', tool_use_id: 'tool-1', raw_name: 'Bash', input_summary: 'pnpm test', needs_response: false, category: { category: 'execution', raw_name: 'Bash' } }),
+    event(3, { type: 'tool_use_completed', tool_use_id: 'tool-1', raw_name: 'Bash', result_summary: 'ok', success: true }),
+  ]);
+  const stabilized = stabilizeMessageRefs(same, first);
+  assert.equal(stabilized[1], first[1]);
+
+  const changedInput = buildMessagesFromEvents(base, [], [
+    event(1, { type: 'lifecycle', stage: 'turn_started', detail: '' }),
+    event(2, { type: 'tool_use_started', tool_use_id: 'tool-1', raw_name: 'Bash', input_summary: 'pnpm build', needs_response: false, category: { category: 'execution', raw_name: 'Bash' } }),
+    event(3, { type: 'tool_use_completed', tool_use_id: 'tool-1', raw_name: 'Bash', result_summary: 'ok', success: true }),
+  ]);
+  const changedStabilized = stabilizeMessageRefs(changedInput, first);
+  assert.notEqual(changedStabilized[1], first[1]);
+
+  const changedTiming = buildMessagesFromEvents(base, [], [
+    event(1, { type: 'lifecycle', stage: 'turn_started', detail: '' }),
+    event(4, { type: 'tool_use_started', tool_use_id: 'tool-1', raw_name: 'Bash', input_summary: 'pnpm test', needs_response: false, category: { category: 'execution', raw_name: 'Bash' } }),
+    event(5, { type: 'tool_use_completed', tool_use_id: 'tool-1', raw_name: 'Bash', result_summary: 'ok', success: true }),
+  ]);
+  const timingStabilized = stabilizeMessageRefs(changedTiming, first);
+  assert.notEqual(timingStabilized[1], first[1]);
+});

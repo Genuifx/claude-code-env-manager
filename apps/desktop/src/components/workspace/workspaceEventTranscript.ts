@@ -135,11 +135,181 @@ function createAssistantTurnMessage(
 }
 
 export function dedupeEvents(events: SessionEventRecord[]) {
-  return events.filter((event, index, all) =>
-    index === all.findIndex((candidate) =>
-      candidate.runtime_id === event.runtime_id && candidate.seq === event.seq,
-    ),
-  );
+  const seen = new Set<string>();
+  const deduped: SessionEventRecord[] = [];
+
+  for (const event of events) {
+    const key = `${event.runtime_id}:${event.seq}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(event);
+  }
+
+  return deduped;
+}
+
+export function appendSessionEvents(
+  previous: SessionEventRecord[],
+  incoming: SessionEventRecord[],
+  reset = false,
+) {
+  if (!incoming.length) {
+    return reset ? [] : previous;
+  }
+
+  if (reset || previous.length === 0) {
+    return dedupeEvents(incoming);
+  }
+
+  const lastPrevious = previous[previous.length - 1];
+  let lastSeq = lastPrevious?.seq ?? 0;
+  const isMonotonicAppend = Boolean(lastPrevious) && incoming.every((event) => {
+    if (event.runtime_id !== lastPrevious!.runtime_id || event.seq <= lastSeq) {
+      return false;
+    }
+    lastSeq = event.seq;
+    return true;
+  });
+
+  if (isMonotonicAppend) {
+    return [...previous, ...incoming];
+  }
+
+  const seen = new Set(previous.map((event) => `${event.runtime_id}:${event.seq}`));
+  const nextEvents: SessionEventRecord[] = [];
+  for (const event of incoming) {
+    const key = `${event.runtime_id}:${event.seq}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    nextEvents.push(event);
+  }
+
+  if (!nextEvents.length) {
+    return previous;
+  }
+
+  return [...previous, ...nextEvents];
+}
+
+function stableUnknownEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a == null || b == null) return a === b;
+  if (typeof a !== typeof b) return false;
+  if (typeof a !== 'object') return a === b;
+
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
+function shallowEqualContentBlock(
+  block: ConversationContentBlock,
+  next: ConversationContentBlock,
+): boolean {
+  if (block.type !== next.type) return false;
+
+  switch (block.type) {
+    case 'text':
+      return block.text === next.text;
+    case 'thinking':
+      return (block.thinking || block.text) === (next.thinking || next.text)
+        && block._startedAt === next._startedAt
+        && block._completedAt === next._completedAt;
+    case 'tool_use':
+      return block.id === next.id
+        && block.name === next.name
+        && stableUnknownEqual(block.input, next.input)
+        && block._startedAt === next._startedAt
+        && block._completedAt === next._completedAt
+        && stableUnknownEqual(block._result, next._result)
+        && block._resultError === next._resultError;
+    case 'tool_result':
+      return block.tool_use_id === next.tool_use_id
+        && stableUnknownEqual(block.content, next.content)
+        && block.is_error === next.is_error;
+    default:
+      return stableUnknownEqual(block, next);
+  }
+}
+
+function shallowEqualContent(
+  a: ConversationMessageData['content'],
+  b: ConversationMessageData['content'],
+): boolean {
+  if (a === b) return true;
+  if (typeof a === 'string' || typeof b === 'string') return a === b;
+  if (a == null || b == null) return a === b;
+
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return false;
+    if (a.length !== b.length) return false;
+    return a.every((block, index) => shallowEqualContentBlock(block, b[index]!));
+  }
+
+  if (typeof a === 'object' && typeof b === 'object') {
+    return shallowEqualContentBlock(
+      a as ConversationContentBlock,
+      b as ConversationContentBlock,
+    );
+  }
+
+  return false;
+}
+
+function shallowEqualMessages(
+  previous: ConversationMessageData,
+  next: ConversationMessageData,
+): boolean {
+  return previous.uuid === next.uuid
+    && previous.msgType === next.msgType
+    && previous.timestamp === next.timestamp
+    && previous.segmentIndex === next.segmentIndex
+    && previous.isCompactBoundary === next.isCompactBoundary
+    && previous.planContent === next.planContent
+    && previous.summary === next.summary
+    && previous.model === next.model
+    && previous.inputTokens === next.inputTokens
+    && previous.outputTokens === next.outputTokens
+    && previous.cacheCreationTokens === next.cacheCreationTokens
+    && previous.cacheReadTokens === next.cacheReadTokens
+    && shallowEqualContent(previous.content, next.content);
+}
+
+export function stabilizeMessageRefs(
+  messages: ConversationMessageData[],
+  previousMessages: ConversationMessageData[] | undefined,
+): ConversationMessageData[] {
+  if (!previousMessages?.length) {
+    return messages;
+  }
+
+  const previousByUuid = new Map<string, ConversationMessageData>();
+  for (const message of previousMessages) {
+    if (message.uuid) {
+      previousByUuid.set(message.uuid, message);
+    }
+  }
+
+  let reusedAny = false;
+  const stabilized = messages.map((message) => {
+    if (!message.uuid) {
+      return message;
+    }
+    const previous = previousByUuid.get(message.uuid);
+    if (!previous || previous === message || !shallowEqualMessages(previous, message)) {
+      return message;
+    }
+    reusedAny = true;
+    return previous;
+  });
+
+  return reusedAny ? stabilized : messages;
 }
 
 function appendTextBlock(blocks: ConversationContentBlock[], text: string) {
