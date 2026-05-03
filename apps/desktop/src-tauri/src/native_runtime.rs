@@ -483,6 +483,7 @@ impl NativeRuntimeManager {
         runtime_id: &str,
         tool_use_id: &str,
         prompt_type: &str,
+        display_text: Option<&str>,
         answers: &HashMap<String, String>,
         annotations: Option<&HashMap<String, InteractivePromptAnnotation>>,
     ) -> Result<(), String> {
@@ -491,6 +492,7 @@ impl NativeRuntimeManager {
         }
 
         let handle = self.ensure_handle(app.clone(), runtime_id)?;
+        self.append_interactive_prompt_response_event(runtime_id, display_text, answers)?;
         self.write_to_child(
             &handle,
             &HelperInputCommand::InteractivePromptResponse {
@@ -1044,6 +1046,18 @@ impl NativeRuntimeManager {
         )
     }
 
+    fn append_interactive_prompt_response_event(
+        &self,
+        runtime_id: &str,
+        display_text: Option<&str>,
+        answers: &HashMap<String, String>,
+    ) -> Result<(), String> {
+        let Some(text) = summarize_interactive_prompt_response(display_text, answers) else {
+            return Ok(());
+        };
+        self.append_user_prompt_event(runtime_id, &text, None)
+    }
+
     fn append_event(&self, runtime_id: &str, payload: SessionEventPayload) -> Result<(), String> {
         let last_error = payload_last_error(&payload);
         let handles = self
@@ -1258,6 +1272,45 @@ fn take_remaining_helper_output_line(buffer: &mut Vec<u8>) -> Option<String> {
     }
     let line = std::mem::take(buffer);
     trim_helper_output_line(&line)
+}
+
+fn summarize_interactive_prompt_response(
+    display_text: Option<&str>,
+    answers: &HashMap<String, String>,
+) -> Option<String> {
+    if let Some(text) = display_text.map(str::trim).filter(|value| !value.is_empty()) {
+        return Some(text.to_string());
+    }
+
+    let mut entries = answers
+        .iter()
+        .filter_map(|(question, answer)| {
+            let answer = answer.trim();
+            if answer.is_empty() {
+                return None;
+            }
+            Some((question.trim(), answer))
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| left.0.cmp(right.0));
+
+    match entries.as_slice() {
+        [] => None,
+        [(_, answer)] => Some((*answer).to_string()),
+        _ => Some(
+            entries
+                .into_iter()
+                .map(|(question, answer)| {
+                    if question.is_empty() {
+                        answer.to_string()
+                    } else {
+                        format!("{question}: {answer}")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        ),
+    }
 }
 
 fn payload_last_error(payload: &SessionEventPayload) -> Option<String> {
@@ -1609,6 +1662,37 @@ mod tests {
             SessionEventPayload::UserPrompt {
                 text: "continue".to_string(),
                 image_count: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn interactive_prompt_response_is_replayable_as_user_prompt() {
+        let runtime_id = "native-interactive-response";
+        let manager = manager_with_handle(runtime_id);
+        let answers = HashMap::from([(
+            "Pick one".to_string(),
+            "Use the SQLite path".to_string(),
+        )]);
+
+        manager
+            .append_interactive_prompt_response_event(
+                runtime_id,
+                Some("Use the SQLite path"),
+                &answers,
+            )
+            .expect("append interactive response event");
+
+        let batch = manager
+            .replay_events(runtime_id, None)
+            .expect("replay events");
+
+        assert_eq!(batch.events.len(), 1);
+        assert_eq!(
+            batch.events[0].payload,
+            SessionEventPayload::UserPrompt {
+                text: "Use the SQLite path".to_string(),
+                image_count: 0,
             }
         );
     }

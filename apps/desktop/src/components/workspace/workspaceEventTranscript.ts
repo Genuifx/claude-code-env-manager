@@ -8,6 +8,7 @@ export interface LocalUserPrompt {
   id: string;
   text: string;
   timestamp?: number;
+  afterEventSeq?: number;
 }
 
 interface PendingAssistantTurn {
@@ -525,6 +526,40 @@ export function buildMessagesFromEvents(
   const emittedErrorTexts = new Set<string>();
   let promptQueue = [...remainingPrompts];
 
+  const flushPrompt = (prompt: LocalUserPrompt) => {
+    flushPendingTurn();
+    next.push(createUserMessage(prompt));
+  };
+
+  const flushAnchoredPromptsBeforeEvent = (event: SessionEventRecord) => {
+    if (promptQueue.length === 0) {
+      return;
+    }
+
+    const remaining: LocalUserPrompt[] = [];
+    for (const prompt of promptQueue) {
+      if (prompt.afterEventSeq != null && event.seq > prompt.afterEventSeq) {
+        flushPrompt(prompt);
+      } else {
+        remaining.push(prompt);
+      }
+    }
+    promptQueue = remaining;
+  };
+
+  const flushFirstUnanchoredPrompt = () => {
+    const index = promptQueue.findIndex((prompt) => prompt.afterEventSeq == null);
+    if (index === -1) {
+      return false;
+    }
+    flushPrompt(promptQueue[index]!);
+    promptQueue = [
+      ...promptQueue.slice(0, index),
+      ...promptQueue.slice(index + 1),
+    ];
+    return true;
+  };
+
   const attachToolResultToExistingMessages = (
     toolUseId: string,
     resultSummary: string,
@@ -607,6 +642,7 @@ export function buildMessagesFromEvents(
   };
 
   for (const event of events) {
+    flushAnchoredPromptsBeforeEvent(event);
     const occurredAt = parseOccurredAt(event.occurred_at);
 
     switch (event.payload.type) {
@@ -726,8 +762,7 @@ export function buildMessagesFromEvents(
           flushPendingTurn();
         }
         if (event.payload.stage === 'turn_completed' && promptQueue.length > 0) {
-          next.push(createUserMessage(promptQueue[0]!));
-          promptQueue = promptQueue.slice(1);
+          flushFirstUnanchoredPrompt();
         }
         break;
       }
@@ -747,7 +782,7 @@ export function buildMessagesFromEvents(
   appendErrorMessage('runtime-error-terminal', terminalError);
 
   for (const prompt of promptQueue) {
-    next.push(createUserMessage(prompt));
+    flushPrompt(prompt);
   }
 
   return next;

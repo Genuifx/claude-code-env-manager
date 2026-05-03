@@ -742,6 +742,7 @@ export function useTauriCommands() {
     payload: {
       toolUseId: string;
       promptType: 'ask_user_question';
+      displayText?: string | null;
       answers: Record<string, string>;
       annotations?: Record<string, InteractivePromptAnnotation>;
     },
@@ -750,6 +751,7 @@ export function useTauriCommands() {
       runtimeId,
       toolUseId: payload.toolUseId,
       promptType: payload.promptType,
+      displayText: payload.displayText ?? null,
       answers: payload.answers,
       annotations: payload.annotations ?? null,
     });

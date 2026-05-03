@@ -275,6 +275,7 @@ export interface TauriCommands {
       runtimeId: string;
       toolUseId: string;
       promptType: 'ask_user_question';
+      displayText?: string | null;
       answers: Record<string, string>;
       annotations?: Record<string, InteractivePromptAnnotation> | null;
     },

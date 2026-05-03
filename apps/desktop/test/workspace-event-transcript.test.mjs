@@ -195,6 +195,45 @@ test('renders persisted native user prompts as turn boundaries without lifecycle
   );
 });
 
+test('anchors optimistic interactive replies before later assistant events', async () => {
+  const { buildMessagesFromEvents } = await importWorkspaceEventTranscript();
+
+  const messages = buildMessagesFromEvents(
+    [],
+    [
+      {
+        id: 'ask-reply',
+        text: '改 Moonshot 用品牌色 + 去掉 needsContrastBg',
+        afterEventSeq: 3,
+      },
+    ],
+    [
+      event(1, { type: 'assistant_chunk', text: 'Before asking. ' }),
+      event(2, { type: 'lifecycle', stage: 'turn_completed', detail: '' }),
+      event(3, { type: 'tool_use_started', tool_use_id: 'tool-1', raw_name: 'AskUserQuestion', input_summary: 'question', needs_response: true, category: { category: 'user_input', kind: 'question', raw_name: 'AskUserQuestion' } }),
+      event(4, { type: 'system_message', message: 'Now continuing after the answer.' }),
+      event(5, { type: 'assistant_chunk', text: 'Done.' }),
+    ],
+  );
+
+  assert.deepEqual(
+    messages.map((message) => [message.msgType, message.content]),
+    [
+      ['assistant', 'Before asking. '],
+      ['user', '改 Moonshot 用品牌色 + 去掉 needsContrastBg'],
+      ['assistant', [
+        {
+          type: 'thinking',
+          thinking: 'Now continuing after the answer.',
+          _startedAt: Date.parse('2026-05-01T00:00:04.000Z'),
+          _completedAt: Date.parse('2026-05-01T00:00:04.000Z'),
+        },
+        { type: 'text', text: 'Done.' },
+      ]],
+    ],
+  );
+});
+
 test('filters optimistic native prompts already confirmed by the event log', async () => {
   const { filterConfirmedLocalUserPrompts } = await importWorkspaceEventTranscript();
 

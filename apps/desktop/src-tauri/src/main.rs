@@ -1094,6 +1094,7 @@ fn respond_native_session_prompt(
     runtime_id: String,
     tool_use_id: String,
     prompt_type: String,
+    display_text: Option<String>,
     answers: HashMap<String, String>,
     annotations: Option<HashMap<String, InteractivePromptAnnotation>>,
 ) -> Result<(), String> {
@@ -1102,6 +1103,7 @@ fn respond_native_session_prompt(
         &runtime_id,
         &tool_use_id,
         &prompt_type,
+        display_text.as_deref(),
         &answers,
         annotations.as_ref(),
     )

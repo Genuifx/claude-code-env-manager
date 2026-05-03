@@ -1368,6 +1368,7 @@ export function WorkspaceNativeSessionView({
         : `queue-batch-${Date.now()}`,
       text: previewText,
       timestamp: Date.now(),
+      afterEventSeq: latestEventSeq(latestEventsRef.current) ?? undefined,
     };
 
     setIsSending(true);
@@ -1402,6 +1403,7 @@ export function WorkspaceNativeSessionView({
         ? payload.text
         : buildComposerPromptPreview(payload.text, payload.attachments ?? []),
       timestamp: Date.now(),
+      afterEventSeq: latestEventSeq(latestEventsRef.current) ?? undefined,
     };
 
     let requestText = '';
@@ -1427,6 +1429,7 @@ export function WorkspaceNativeSessionView({
         await respondNativeSessionPrompt(session.runtime_id, {
           toolUseId: payload.toolUseId,
           promptType: 'ask_user_question',
+          displayText: payload.text,
           answers: payload.answers,
           annotations: payload.annotations,
         });
