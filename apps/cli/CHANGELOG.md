@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.31
+
+### Patch Changes
+
+- Stabilize workspace transcript rendering and native session replay.
+
 ## 2.0.0-beta.30
 
 ### Patch Changes
