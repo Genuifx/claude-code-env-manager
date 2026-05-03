@@ -11,6 +11,7 @@ import {
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   ArrowUp,
+  Check,
   Clock3,
   Command,
   FileText,
@@ -278,6 +279,7 @@ function ComposerQuickMenu({
   planButtonVisible,
   planModeHint,
   planModeKind,
+  provider,
   onLaunchNewSession,
   onPlanModeEnabledChange,
 }: {
@@ -287,6 +289,7 @@ function ComposerQuickMenu({
   planButtonVisible: boolean;
   planModeHint?: string;
   planModeKind: 'session_permission' | 'command_prefix';
+  provider: WorkspaceComposerProvider;
   onLaunchNewSession?: (client: LaunchClient) => void;
   onPlanModeEnabledChange?: (enabled: boolean) => void;
 }) {
@@ -341,6 +344,9 @@ function ComposerQuickMenu({
           >
             <span className="shrink-0">{item.icon}</span>
             <span className="flex-1 text-left">{item.label}</span>
+            {item.client === provider && (
+              <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />
+            )}
             {!item.installed && (
               <span className="text-2xs text-muted-foreground">({t('settings.cliNotInstalled')})</span>
             )}
@@ -434,7 +440,7 @@ function ComposerQueueDock({
         {messages.map((message, index) => (
           <div
             key={message.id}
-            className="flex items-start gap-2 rounded-[16px] bg-background/38 px-2 py-1.5"
+            className="flex items-start gap-2 rounded-[16px] bg-surface px-2 py-1.5"
           >
             <div className="mt-0.5 rounded-full bg-muted/70 px-1.5 py-0.5 text-[9px] font-semibold leading-4 text-muted-foreground">
               {index + 1}
@@ -502,8 +508,8 @@ function ComposerSuggestionPanel({
           className={cn(
             'flex w-full items-start gap-1.5 rounded-[16px] px-1.5 py-1 text-left transition-colors',
             index === activeSuggestionIndex
-              ? 'bg-background/90'
-              : 'hover:bg-background/60',
+              ? 'bg-surface'
+              : 'hover:bg-surface/65',
           )}
           onMouseEnter={() => onHoverSuggestion(index)}
           onMouseDown={(event) => {
@@ -1003,11 +1009,38 @@ export function WorkspaceSessionComposer({
       return null;
     }
 
+    const hasInterruption = Boolean(aboveComposer);
+
     return (
-      <div className="rounded-t-[20px] rounded-b-none border-x border-t border-border/45 bg-surface-raised/97 px-2 pt-2 pb-6 shadow-[0_18px_48px_-36px_rgba(0,0,0,0.42)] backdrop-blur-sm">
-        <div className="space-y-1.5">
-          {aboveComposer}
-          {composerAttentionPanel}
+      <div
+        data-attention-state={hasInterruption ? 'interruption' : 'auxiliary'}
+        className={cn(
+          'rounded-t-[18px] rounded-b-none border-x border-t bg-surface-raised px-2.5 pt-2 pb-6 transition-[border-color,box-shadow] duration-300',
+          'motion-reduce:transition-none',
+          hasInterruption
+            ? 'border-border/70 shadow-[0_2px_4px_rgba(0,0,0,0.06),0_10px_28px_-12px_rgba(0,0,0,0.16),inset_0_0.5px_0_rgba(255,255,255,0.05)]'
+            : 'border-border/40 shadow-[0_1px_3px_rgba(0,0,0,0.05),0_4px_12px_rgba(0,0,0,0.07),inset_0_0.5px_0_rgba(255,255,255,0.03)]',
+        )}
+        style={{ transitionTimingFunction: 'cubic-bezier(0.25, 1, 0.5, 1)' }}
+      >
+        <div className="space-y-1">
+          {aboveComposer ? (
+            <div className="max-h-[min(60vh,440px)] overflow-y-auto pr-0.5">
+              {aboveComposer}
+            </div>
+          ) : null}
+          {aboveComposer && composerAttentionPanel ? (
+            <div className="h-px bg-border/35" aria-hidden="true" />
+          ) : null}
+          {composerAttentionPanel ? (
+            hasInterruption ? (
+              <div className="max-h-[120px] overflow-y-auto">
+                {composerAttentionPanel}
+              </div>
+            ) : (
+              composerAttentionPanel
+            )
+          ) : null}
         </div>
       </div>
     );
@@ -1021,7 +1054,7 @@ export function WorkspaceSessionComposer({
       <div ref={composerShellRef} className="relative mx-auto w-full max-w-5xl">
         {combinedAboveComposer ? (
           <div className="workspace-attention-dock pointer-events-none absolute inset-x-0 bottom-[calc(100%-18px)] z-10 flex justify-center">
-            <div className="pointer-events-auto w-full max-w-[900px] px-4">
+            <div className="pointer-events-auto w-[95%]">
               {combinedAboveComposer}
             </div>
           </div>
@@ -1187,7 +1220,7 @@ export function WorkspaceSessionComposer({
                   }
                 }
 
-                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                if (event.key === 'Enter' && !event.altKey && !event.shiftKey) {
                   event.preventDefault();
                   void handleComposerSubmit();
                 }
@@ -1211,6 +1244,7 @@ export function WorkspaceSessionComposer({
               planButtonVisible={planButtonVisible}
               planModeHint={planModeHint}
               planModeKind={capabilities.planModeKind}
+              provider={provider}
               onLaunchNewSession={onLaunchNewSession}
               onPlanModeEnabledChange={onPlanModeEnabledChange}
             />
