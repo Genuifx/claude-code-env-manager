@@ -688,6 +688,7 @@ export function useTauriCommands() {
     permMode?: string;
     workingDir?: string | null;
     initialPrompt: string;
+    initialDisplayPrompt?: string | null;
     initialImages?: Array<{ mediaType: string; base64Data: string; placeholder?: string }>;
     providerSessionId?: string | null;
     effort?: string | null;
@@ -699,6 +700,7 @@ export function useTauriCommands() {
       permMode: options.permMode ?? permissionMode,
       workingDir: options.workingDir ?? selectedWorkingDir ?? null,
       initialPrompt: options.initialPrompt,
+      initialDisplayPrompt: options.initialDisplayPrompt ?? null,
       initialImages: options.initialImages?.length ? options.initialImages : null,
       providerSessionId: options.providerSessionId ?? null,
       effort: options.effort ?? null,
@@ -713,10 +715,12 @@ export function useTauriCommands() {
     runtimeId: string,
     text: string,
     images?: Array<{ mediaType: string; base64Data: string; placeholder?: string }>,
+    displayText?: string | null,
   ): Promise<void> => {
     await invoke('send_native_session_input', {
       runtimeId,
       text,
+      displayText: displayText ?? null,
       images: images?.length ? images : null,
     });
   }, []);

@@ -1,6 +1,7 @@
 import { memo, useMemo, useState, useDeferredValue, useCallback } from 'react';
 import { ChevronRight, FolderOpen, FolderClosed, MessageSquare, RefreshCw, Search, SquarePen } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { getHistorySessionDisplay } from '@/components/history/historySession';
 import { useLocale } from '@/locales';
 import type { Environment, LaunchClient } from '@/store';
@@ -275,7 +276,7 @@ export const ProjectTree = memo(function ProjectTree({
       </div>
 
       {/* Tree content */}
-      <div className="flex-1 overflow-y-auto min-h-0 py-1">
+      <ScrollArea className="flex-1 min-h-0 py-1">
         {isLoading ? (
           <ProjectTreeSkeleton />
         ) : filteredNodes.length === 0 ? (
@@ -423,7 +424,7 @@ export const ProjectTree = memo(function ProjectTree({
             );
           })
         )}
-      </div>
+      </ScrollArea>
 
       {/* Footer stats */}
       {totalSessions > 0 && (

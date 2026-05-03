@@ -79,6 +79,10 @@ pub enum TerminalPromptKind {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionEventPayload {
+    UserPrompt {
+        text: String,
+        image_count: u64,
+    },
     SystemMessage {
         message: String,
     },

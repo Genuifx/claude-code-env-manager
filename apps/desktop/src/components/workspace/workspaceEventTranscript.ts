@@ -51,6 +51,136 @@ function createUserMessage(prompt: LocalUserPrompt): ConversationMessageData {
   };
 }
 
+function promptTextKey(text: string | null | undefined): string {
+  return (text ?? '').trim();
+}
+
+function messageContentText(content: ConversationMessageData['content']): string {
+  if (typeof content === 'string') {
+    return content.trim();
+  }
+
+  const blockText = (block: ConversationContentBlock): string => {
+    if (typeof block.text === 'string') {
+      return block.text;
+    }
+    if (typeof block.thinking === 'string') {
+      return block.thinking;
+    }
+    if (typeof block.content === 'string') {
+      return block.content;
+    }
+    return '';
+  };
+
+  if (Array.isArray(content)) {
+    return content.map(blockText).filter(Boolean).join('\n').trim();
+  }
+
+  if (content && typeof content === 'object') {
+    return blockText(content as ConversationContentBlock).trim();
+  }
+
+  return '';
+}
+
+function promptMatchesMessage(promptText: string, messageText: string): boolean {
+  const prompt = promptTextKey(promptText);
+  const message = promptTextKey(messageText);
+  if (!prompt || !message) {
+    return false;
+  }
+  if (prompt === message) {
+    return true;
+  }
+
+  return prompt.length >= 8 && message.includes(prompt);
+}
+
+export function filterConfirmedLocalUserPrompts(
+  prompts: LocalUserPrompt[],
+  events: SessionEventRecord[],
+): LocalUserPrompt[] {
+  if (prompts.length === 0 || events.length === 0) {
+    return prompts;
+  }
+
+  const confirmedCounts = new Map<string, number>();
+  for (const event of events) {
+    if (event.payload.type !== 'user_prompt') {
+      continue;
+    }
+    const key = promptTextKey(event.payload.text);
+    if (!key) {
+      continue;
+    }
+    confirmedCounts.set(key, (confirmedCounts.get(key) ?? 0) + 1);
+  }
+
+  if (confirmedCounts.size === 0) {
+    return prompts;
+  }
+
+  return prompts.filter((prompt) => {
+    const key = promptTextKey(prompt.text);
+    const count = confirmedCounts.get(key) ?? 0;
+    if (count <= 0) {
+      return true;
+    }
+    if (count === 1) {
+      confirmedCounts.delete(key);
+    } else {
+      confirmedCounts.set(key, count - 1);
+    }
+    return false;
+  });
+}
+
+export function splitLocalUserPromptsForReplay(
+  prompts: LocalUserPrompt[],
+): {
+  initialPrompt: LocalUserPrompt | undefined;
+  remainingPrompts: LocalUserPrompt[];
+} {
+  const [firstPrompt, ...restPrompts] = prompts;
+  if (firstPrompt?.id === 'initial-user') {
+    return {
+      initialPrompt: firstPrompt,
+      remainingPrompts: restPrompts,
+    };
+  }
+
+  return {
+    initialPrompt: undefined,
+    remainingPrompts: prompts,
+  };
+}
+
+export function trimSeedMessagesBeforeFirstUserPrompt(
+  seedMessages: ConversationMessageData[],
+  events: SessionEventRecord[],
+): ConversationMessageData[] {
+  if (seedMessages.length === 0 || events.length === 0) {
+    return seedMessages;
+  }
+
+  const firstPersistedPrompt = events.find((event) =>
+    event.payload.type === 'user_prompt'
+    && promptTextKey(event.payload.text),
+  );
+  if (!firstPersistedPrompt || firstPersistedPrompt.payload.type !== 'user_prompt') {
+    return seedMessages;
+  }
+
+  const promptText = firstPersistedPrompt.payload.text;
+  const boundaryIndex = seedMessages.findIndex((message) =>
+    (message.msgType === 'user' || message.msgType === 'human')
+    && promptMatchesMessage(promptText, messageContentText(message.content)),
+  );
+
+  return boundaryIndex >= 0 ? seedMessages.slice(0, boundaryIndex) : seedMessages;
+}
+
 function createAssistantTextMessage(
   id: string,
   text: string,
@@ -461,10 +591,42 @@ export function buildMessagesFromEvents(
     next.push(createAssistantTextMessage(id, trimmedText, occurredAt));
   };
 
+  const consumeMatchingPrompt = (text: string) => {
+    const key = promptTextKey(text);
+    if (!key || promptQueue.length === 0) {
+      return;
+    }
+    const index = promptQueue.findIndex((prompt) => promptTextKey(prompt.text) === key);
+    if (index === -1) {
+      return;
+    }
+    promptQueue = [
+      ...promptQueue.slice(0, index),
+      ...promptQueue.slice(index + 1),
+    ];
+  };
+
   for (const event of events) {
     const occurredAt = parseOccurredAt(event.occurred_at);
 
     switch (event.payload.type) {
+      case 'user_prompt': {
+        const text = event.payload.text?.trim()
+          || (event.payload.image_count > 0
+            ? `Images attached: ${event.payload.image_count}`
+            : '');
+        if (!text) {
+          break;
+        }
+        flushPendingTurn();
+        next.push(createUserMessage({
+          id: `user-prompt-${event.seq}`,
+          text,
+          timestamp: occurredAt,
+        }));
+        consumeMatchingPrompt(text);
+        break;
+      }
       case 'system_message': {
         appendThinkingBlock(
           ensurePendingTurn(event, occurredAt).contentBlocks,

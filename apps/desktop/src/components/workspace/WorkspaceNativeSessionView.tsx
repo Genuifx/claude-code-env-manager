@@ -11,7 +11,7 @@ import {
   SquarePen,
   TerminalSquare,
 } from 'lucide-react';
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -24,6 +24,7 @@ import type {
   ToolQuestionPrompt,
 } from '@/lib/tauri-ipc';
 import { cn } from '@/lib/utils';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { useLocale } from '@/locales';
 import { useAppStore } from '@/store';
 import type { InstalledSkill, LaunchClient } from '@/store';
@@ -31,6 +32,10 @@ import type { PermissionModeName } from '@ccem/core/browser';
 
 function isNearBottom(container: HTMLDivElement): boolean {
   return container.scrollHeight - container.clientHeight - container.scrollTop <= 48;
+}
+
+function scrollToLatest(container: HTMLDivElement) {
+  container.scrollTo({ top: container.scrollHeight });
 }
 import type {
   ConversationMessageData,
@@ -55,6 +60,8 @@ import {
   appendSessionEvents,
   buildBaseMessages,
   buildMessagesFromEvents,
+  filterConfirmedLocalUserPrompts,
+  splitLocalUserPromptsForReplay,
   stabilizeMessageRefs,
   type LocalUserPrompt,
 } from './workspaceEventTranscript';
@@ -144,7 +151,7 @@ const NATIVE_EVENT_CACHE_KEY_PREFIX = 'ccem-workspace-native-events:';
 const NATIVE_EVENT_CACHE_LIMIT = 8000;
 
 function isTerminalStatus(status: string) {
-  return status === 'stopped' || status === 'error' || status === 'handoff' || status === 'interrupted';
+  return status === 'stopped' || status === 'error' || status === 'handoff';
 }
 
 function latestEventSeq(events: SessionEventRecord[]): number | null {
@@ -962,6 +969,7 @@ export function WorkspaceNativeSessionView({
   const programmaticScrollRef = useRef(false);
   const autoScrollDetachedRef = useRef(false);
   const scrollFrameRef = useRef<number | null>(null);
+  const scrollSettleTimeoutRef = useRef<number | null>(null);
   const prevEventCountRef = useRef(0);
   const tickInFlightRef = useRef(false);
 
@@ -989,14 +997,24 @@ export function WorkspaceNativeSessionView({
     setSessionEffort(normalizeEffortForProvider(session.effort, session.provider));
   }, [session.effort, session.env_name, session.perm_mode, session.provider, session.runtime_id]);
 
+  const unconfirmedLocalUserPrompts = useMemo(
+    () => filterConfirmedLocalUserPrompts(localUserPrompts, events),
+    [events, localUserPrompts],
+  );
+
+  const replayLocalPrompts = useMemo(
+    () => splitLocalUserPromptsForReplay(unconfirmedLocalUserPrompts),
+    [unconfirmedLocalUserPrompts],
+  );
+
   const rawMessages = useMemo(
     () => buildMessagesFromEvents(
-      buildBaseMessages(seedMessages, localUserPrompts[0]),
-      localUserPrompts.slice(1),
+      buildBaseMessages(seedMessages, replayLocalPrompts.initialPrompt),
+      replayLocalPrompts.remainingPrompts,
       events,
       session.status === 'error' ? session.last_error : null,
     ),
-    [events, localUserPrompts, seedMessages, session.last_error, session.status],
+    [events, replayLocalPrompts, seedMessages, session.last_error, session.status],
   );
 
   const messages = useMemo(
@@ -1154,6 +1172,18 @@ export function WorkspaceNativeSessionView({
     };
   }, [isVisible, pollEvents, pollIntervalMs, refreshSummary]);
 
+  const cancelPendingAutoScroll = useCallback(() => {
+    if (scrollFrameRef.current !== null) {
+      cancelAnimationFrame(scrollFrameRef.current);
+      scrollFrameRef.current = null;
+    }
+    if (scrollSettleTimeoutRef.current !== null) {
+      window.clearTimeout(scrollSettleTimeoutRef.current);
+      scrollSettleTimeoutRef.current = null;
+    }
+    programmaticScrollRef.current = false;
+  }, []);
+
   // Detect user scroll-away to suppress auto-scroll
   useEffect(() => {
     const container = containerRef.current;
@@ -1167,22 +1197,30 @@ export function WorkspaceNativeSessionView({
       }
       autoScrollDetachedRef.current = !isNearBottom(container);
     };
+    const handleWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0) {
+        cancelPendingAutoScroll();
+        autoScrollDetachedRef.current = true;
+      }
+    };
 
     container.addEventListener('scroll', handleScroll, { passive: true });
+    container.addEventListener('wheel', handleWheel, { passive: true });
     return () => {
       container.removeEventListener('scroll', handleScroll);
+      container.removeEventListener('wheel', handleWheel);
     };
-  }, [session.runtime_id]);
+  }, [cancelPendingAutoScroll, session.runtime_id]);
 
   // Clean up any pending scroll animation frame on unmount
   useEffect(() => () => {
-    if (scrollFrameRef.current !== null) {
-      cancelAnimationFrame(scrollFrameRef.current);
-    }
-  }, []);
+    cancelPendingAutoScroll();
+  }, [cancelPendingAutoScroll]);
 
-  // Streaming deltas usually grow the current message without changing message count.
-  useEffect(() => {
+  // Auto-scroll to bottom when new events arrive, unless the user has scrolled up.
+  // We watch events.length (not messages.length) because streaming deltas grow
+  // existing message content without increasing the message count.
+  useLayoutEffect(() => {
     if (!isVisible || !containerRef.current) {
       return;
     }
@@ -1203,15 +1241,25 @@ export function WorkspaceNativeSessionView({
 
     if (scrollFrameRef.current !== null) {
       cancelAnimationFrame(scrollFrameRef.current);
+      scrollFrameRef.current = null;
+    }
+    if (scrollSettleTimeoutRef.current !== null) {
+      window.clearTimeout(scrollSettleTimeoutRef.current);
+      scrollSettleTimeoutRef.current = null;
     }
 
     programmaticScrollRef.current = true;
+    scrollToLatest(container);
     scrollFrameRef.current = requestAnimationFrame(() => {
-      container.scrollTo({ top: container.scrollHeight });
+      scrollToLatest(container);
       scrollFrameRef.current = requestAnimationFrame(() => {
-        programmaticScrollRef.current = false;
-        autoScrollDetachedRef.current = !isNearBottom(container);
         scrollFrameRef.current = null;
+        scrollSettleTimeoutRef.current = window.setTimeout(() => {
+          scrollToLatest(container);
+          programmaticScrollRef.current = false;
+          autoScrollDetachedRef.current = !isNearBottom(container);
+          scrollSettleTimeoutRef.current = null;
+        }, 120);
       });
     });
   }, [events.length, isVisible, messages.length]);
@@ -1330,6 +1378,7 @@ export function WorkspaceNativeSessionView({
         session.runtime_id,
         payload ?? '',
         images.length > 0 ? images : undefined,
+        promptEntry.text,
       );
       await pollEvents();
       await refreshSummary({ force: true });
@@ -1382,7 +1431,7 @@ export function WorkspaceNativeSessionView({
           annotations: payload.annotations,
         });
       } else {
-        await sendNativeSessionInput(session.runtime_id, requestText, requestImages);
+        await sendNativeSessionInput(session.runtime_id, requestText, requestImages, requestText);
       }
       await pollEvents();
       await refreshSummary({ force: true });
@@ -1587,7 +1636,7 @@ export function WorkspaceNativeSessionView({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div ref={containerRef} className="flex-1 overflow-y-auto bg-background/30">
+      <ScrollArea viewportRef={containerRef} className="workspace-transcript-scroll flex-1 bg-background/30">
         <div className="mx-auto max-w-[960px] px-8 py-8">
           {messages.length === 0 ? (
             <div className="flex min-h-[280px] flex-col items-center justify-center gap-3 text-center">
@@ -1610,7 +1659,7 @@ export function WorkspaceNativeSessionView({
             />
           )}
         </div>
-      </div>
+      </ScrollArea>
 
       <WorkspaceSessionComposer
         value={composerText}

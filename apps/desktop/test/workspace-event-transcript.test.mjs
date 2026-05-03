@@ -170,6 +170,165 @@ test('appends monotonic live events without reallocating on duplicate-only batch
   assert.deepEqual(reset.map((item) => item.seq), [10]);
 });
 
+test('renders persisted native user prompts as turn boundaries without lifecycle markers', async () => {
+  const { buildMessagesFromEvents } = await importWorkspaceEventTranscript();
+
+  const messages = buildMessagesFromEvents(
+    [],
+    [],
+    [
+      event(1, { type: 'user_prompt', text: 'first prompt', image_count: 0 }),
+      event(2, { type: 'assistant_chunk', text: 'first reply' }),
+      event(3, { type: 'user_prompt', text: 'second prompt', image_count: 0 }),
+      event(4, { type: 'assistant_chunk', text: 'second reply' }),
+    ],
+  );
+
+  assert.deepEqual(
+    messages.map((message) => [message.msgType, message.content]),
+    [
+      ['user', 'first prompt'],
+      ['assistant', 'first reply'],
+      ['user', 'second prompt'],
+      ['assistant', 'second reply'],
+    ],
+  );
+});
+
+test('filters optimistic native prompts already confirmed by the event log', async () => {
+  const { filterConfirmedLocalUserPrompts } = await importWorkspaceEventTranscript();
+
+  const pending = filterConfirmedLocalUserPrompts(
+    [
+      { id: 'first', text: 'repeat me' },
+      { id: 'second', text: 'repeat me' },
+      { id: 'third', text: 'still local' },
+    ],
+    [
+      event(1, { type: 'user_prompt', text: 'repeat me', image_count: 0 }),
+    ],
+  );
+
+  assert.deepEqual(
+    pending.map((prompt) => prompt.id),
+    ['second', 'third'],
+  );
+});
+
+test('keeps optimistic continuation prompts after persisted transcript events', async () => {
+  const {
+    buildBaseMessages,
+    buildMessagesFromEvents,
+    splitLocalUserPromptsForReplay,
+  } = await importWorkspaceEventTranscript();
+  const split = splitLocalUserPromptsForReplay([
+    { id: 'new-message', text: 'second prompt' },
+  ]);
+
+  const messages = buildMessagesFromEvents(
+    buildBaseMessages([], split.initialPrompt),
+    split.remainingPrompts,
+    [
+      event(1, { type: 'user_prompt', text: 'first prompt', image_count: 0 }),
+      event(2, { type: 'assistant_chunk', text: 'first reply' }),
+    ],
+  );
+
+  assert.deepEqual(
+    messages.map((message) => [message.msgType, message.content]),
+    [
+      ['user', 'first prompt'],
+      ['assistant', 'first reply'],
+      ['user', 'second prompt'],
+    ],
+  );
+});
+
+test('keeps the unconfirmed initial prompt before legacy event streams', async () => {
+  const {
+    buildBaseMessages,
+    buildMessagesFromEvents,
+    splitLocalUserPromptsForReplay,
+  } = await importWorkspaceEventTranscript();
+  const split = splitLocalUserPromptsForReplay([
+    { id: 'initial-user', text: 'initial prompt' },
+  ]);
+
+  const messages = buildMessagesFromEvents(
+    buildBaseMessages([], split.initialPrompt),
+    split.remainingPrompts,
+    [
+      event(1, { type: 'assistant_chunk', text: 'legacy reply without prompt event' }),
+    ],
+  );
+
+  assert.deepEqual(
+    messages.map((message) => [message.msgType, message.content]),
+    [
+      ['user', 'initial prompt'],
+      ['assistant', 'legacy reply without prompt event'],
+    ],
+  );
+});
+
+test('trims hydrated history before the first persisted native prompt', async () => {
+  const { trimSeedMessagesBeforeFirstUserPrompt } = await importWorkspaceEventTranscript();
+  const seedMessages = [
+    { msgType: 'user', uuid: 'old-user', content: 'old prompt', segmentIndex: 0, isCompactBoundary: false },
+    { msgType: 'assistant', uuid: 'old-assistant', content: 'old reply', segmentIndex: 0, isCompactBoundary: false },
+    { msgType: 'user', uuid: 'live-user', content: 'resume prompt', segmentIndex: 0, isCompactBoundary: false },
+    { msgType: 'assistant', uuid: 'live-assistant', content: 'resume reply', segmentIndex: 0, isCompactBoundary: false },
+  ];
+
+  const trimmed = trimSeedMessagesBeforeFirstUserPrompt(
+    seedMessages,
+    [
+      event(1, { type: 'user_prompt', text: 'resume prompt', image_count: 0 }),
+      event(2, { type: 'assistant_chunk', text: 'resume reply' }),
+    ],
+  );
+
+  assert.deepEqual(
+    trimmed.map((message) => message.uuid),
+    ['old-user', 'old-assistant'],
+  );
+});
+
+test('trims hydrated history when the provider prompt wraps the visible prompt', async () => {
+  const { trimSeedMessagesBeforeFirstUserPrompt } = await importWorkspaceEventTranscript();
+  const seedMessages = [
+    { msgType: 'user', uuid: 'old-user', content: 'old prompt', segmentIndex: 0, isCompactBoundary: false },
+    {
+      msgType: 'user',
+      uuid: 'wrapped-live-user',
+      content: [
+        {
+          type: 'text',
+          text: [
+            'Stay in planning mode for this reply.',
+            '',
+            'resume prompt from composer',
+          ].join('\n'),
+        },
+      ],
+      segmentIndex: 0,
+      isCompactBoundary: false,
+    },
+  ];
+
+  const trimmed = trimSeedMessagesBeforeFirstUserPrompt(
+    seedMessages,
+    [
+      event(1, { type: 'user_prompt', text: 'resume prompt from composer', image_count: 0 }),
+    ],
+  );
+
+  assert.deepEqual(
+    trimmed.map((message) => message.uuid),
+    ['old-user'],
+  );
+});
+
 test('stabilizes unchanged message references but updates visible tool metadata changes', async () => {
   const {
     buildMessagesFromEvents,

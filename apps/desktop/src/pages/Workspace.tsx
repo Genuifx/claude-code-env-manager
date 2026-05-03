@@ -60,6 +60,7 @@ import {
   type WorkspaceHistorySessionPreference,
   type WorkspaceHistorySessionPreferences,
 } from '@/components/workspace/workspaceSessionPreferences';
+import { trimSeedMessagesBeforeFirstUserPrompt } from '@/components/workspace/workspaceEventTranscript';
 
 const LazyHistoryDetail = lazy(async () =>
   import('@/components/workspace/WorkspaceConversationDetail').then((m) => ({
@@ -166,11 +167,15 @@ function DetailFallback() {
 }
 
 function canRestoreWorkspaceLiveSession(session: NativeSessionSummary): boolean {
+  if (session.status === 'interrupted') {
+    return true;
+  }
+
   if (!session.is_active) {
     return false;
   }
 
-  return !['stopped', 'error', 'handoff', 'interrupted'].includes(session.status);
+  return !['stopped', 'error', 'handoff'].includes(session.status);
 }
 
 interface WorkspaceProps {
@@ -221,6 +226,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     checkOpenCodeInstalled,
     setSessionTitle,
     createNativeSession,
+    getNativeSessionEvents,
     listNativeSessions,
     launchOpenCodeWeb,
     launchClaudeCode,
@@ -263,6 +269,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
   const skillsBootstrapAttemptedRef = useRef(false);
   const conversationRequestSeqRef = useRef(0);
   const hydratingLiveRuntimeIdsRef = useRef(new Set<string>());
+  const hydratedLiveRuntimeIdsRef = useRef(new Set<string>());
   const pendingRefreshRef = useRef(false);
   const hasLoadedRef = useRef(false);
   const prevIsActiveRef = useRef(isActive);
@@ -739,17 +746,21 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
       return false;
     }
 
+    if (hydratedLiveRuntimeIdsRef.current.has(entry.session.runtime_id)) {
+      return false;
+    }
+
     if (entry.seedMessages.length > 0) {
       return false;
     }
 
-    return entry.session.last_event_seq == null;
+    return true;
   }, []);
 
   const hydrateLiveEntryFromHistory = useCallback(async (
     session: NativeSessionSummary,
   ): Promise<ConversationMessageData[] | null> => {
-    if (!session.provider_session_id || session.last_event_seq != null) {
+    if (!session.provider_session_id) {
       return null;
     }
 
@@ -760,23 +771,42 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     hydratingLiveRuntimeIdsRef.current.add(session.runtime_id);
 
     try {
+      const replayBatch = session.last_event_seq == null
+        ? null
+        : await getNativeSessionEvents(session.runtime_id, null, 1).catch((error) => {
+          console.error('Failed to read native session prompt anchors:', error);
+          return null;
+        });
+      const hasPersistedUserPrompt = replayBatch?.events.some((event) =>
+        event.payload.type === 'user_prompt',
+      ) ?? false;
+
+      if (session.last_event_seq != null && !hasPersistedUserPrompt) {
+        hydratedLiveRuntimeIdsRef.current.add(session.runtime_id);
+        return [];
+      }
+
       const { messages: historyMessages } = await fetchConversationDetail({
         id: session.provider_session_id,
         source: session.provider,
       });
+      const seedMessages = replayBatch
+        ? trimSeedMessagesBeforeFirstUserPrompt(historyMessages, replayBatch.events)
+        : historyMessages;
 
       upsertLiveSessionEntry(session, {
-        seedMessages: historyMessages,
+        seedMessages,
       });
+      hydratedLiveRuntimeIdsRef.current.add(session.runtime_id);
 
-      return historyMessages;
+      return seedMessages;
     } catch (error) {
       console.error('Failed to hydrate live workspace session from history:', error);
       return null;
     } finally {
       hydratingLiveRuntimeIdsRef.current.delete(session.runtime_id);
     }
-  }, [upsertLiveSessionEntry]);
+  }, [getNativeSessionEvents, upsertLiveSessionEntry]);
 
   const ensureLiveEntryForSession = useCallback(async (
     session: HistorySessionItem,
@@ -973,6 +1003,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
         permMode: dispatch.permMode,
         workingDir,
         initialPrompt: dispatch.prompt,
+        initialDisplayPrompt: previewPrompt,
         initialImages: images.length > 0 ? images : undefined,
         effort: normalizeEffortForProvider(composeEffort, composeProvider),
       });
@@ -1062,6 +1093,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
         permMode: dispatch.permMode,
         workingDir: selectedSession.project,
         initialPrompt: dispatch.prompt,
+        initialDisplayPrompt: previewPrompt,
         initialImages: images.length > 0 ? images : undefined,
         providerSessionId: selectedSession.id,
         effort: normalizeEffortForProvider(historyEffort, provider),

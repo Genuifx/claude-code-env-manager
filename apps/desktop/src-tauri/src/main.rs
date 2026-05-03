@@ -971,6 +971,7 @@ async fn create_native_session(
     perm_mode: Option<String>,
     working_dir: Option<String>,
     initial_prompt: String,
+    initial_display_prompt: Option<String>,
     initial_images: Option<Vec<PromptImage>>,
     provider_session_id: Option<String>,
     effort: Option<String>,
@@ -989,6 +990,7 @@ async fn create_native_session(
                 perm_mode: effective_perm_mode,
                 working_dir: effective_working_dir,
                 initial_prompt: Some(initial_prompt),
+                display_prompt: initial_display_prompt.clone(),
                 initial_images: initial_images.clone(),
                 provider_session_id: provider_session_id.clone(),
                 helper_env_vars: resolved.env_vars.clone(),
@@ -1013,6 +1015,7 @@ async fn create_native_session(
                 perm_mode: effective_perm_mode,
                 working_dir: effective_working_dir,
                 initial_prompt: Some(initial_prompt),
+                display_prompt: initial_display_prompt.clone(),
                 initial_images: initial_images.clone(),
                 provider_session_id: provider_session_id.clone(),
                 helper_env_vars: proxy_env_vars.clone(),
@@ -1061,9 +1064,16 @@ fn send_native_session_input(
     native_state: State<'_, Arc<NativeRuntimeManager>>,
     runtime_id: String,
     text: String,
+    display_text: Option<String>,
     images: Option<Vec<PromptImage>>,
 ) -> Result<(), String> {
-    native_state.send_user_message(&app, &runtime_id, &text, images.as_ref())
+    native_state.send_user_message(
+        &app,
+        &runtime_id,
+        &text,
+        display_text.as_deref(),
+        images.as_ref(),
+    )
 }
 
 #[tauri::command]

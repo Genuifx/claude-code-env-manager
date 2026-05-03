@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { Layers3 } from 'lucide-react';
 import { WorkspaceTranscriptList } from './WorkspaceTranscriptList';
 import { cn } from '@/lib/utils';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { useLocale } from '@/locales';
 import { getPerformanceMode } from '@/lib/performance';
 import { mergeToolResults } from '@/features/conversations/messageState';
@@ -24,6 +25,10 @@ function isNearBottom(container: HTMLDivElement): boolean {
   return container.scrollHeight - container.clientHeight - container.scrollTop <= 48;
 }
 
+function scrollToLatest(container: HTMLDivElement) {
+  container.scrollTo({ top: container.scrollHeight });
+}
+
 export function WorkspaceConversationDetail({
   selectedSession,
   messages,
@@ -39,6 +44,7 @@ export function WorkspaceConversationDetail({
   const programmaticScrollRef = useRef(false);
   const autoScrollDetachedRef = useRef(false);
   const scrollFrameRef = useRef<number | null>(null);
+  const scrollSettleTimeoutRef = useRef<number | null>(null);
   const messageBatchSize = getPerformanceMode() === 'reduced' ? 24 : 48;
   const mergedMessages = useMemo(() => mergeToolResults(messages), [messages]);
 
@@ -65,11 +71,21 @@ export function WorkspaceConversationDetail({
     autoScrollDetachedRef.current = false;
   }, [scrollContextKey]);
 
-  useEffect(() => () => {
+  const cancelPendingAutoScroll = useCallback(() => {
     if (scrollFrameRef.current !== null) {
       cancelAnimationFrame(scrollFrameRef.current);
+      scrollFrameRef.current = null;
     }
+    if (scrollSettleTimeoutRef.current !== null) {
+      window.clearTimeout(scrollSettleTimeoutRef.current);
+      scrollSettleTimeoutRef.current = null;
+    }
+    programmaticScrollRef.current = false;
   }, []);
+
+  useEffect(() => () => {
+    cancelPendingAutoScroll();
+  }, [cancelPendingAutoScroll]);
 
   useEffect(() => {
     if (!messagesContainerRef.current) {
@@ -83,14 +99,22 @@ export function WorkspaceConversationDetail({
       }
       autoScrollDetachedRef.current = !isNearBottom(container);
     };
+    const handleWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0) {
+        cancelPendingAutoScroll();
+        autoScrollDetachedRef.current = true;
+      }
+    };
 
     container.addEventListener('scroll', handleScroll, { passive: true });
+    container.addEventListener('wheel', handleWheel, { passive: true });
     return () => {
       container.removeEventListener('scroll', handleScroll);
+      container.removeEventListener('wheel', handleWheel);
     };
-  }, [scrollContextKey]);
+  }, [cancelPendingAutoScroll, scrollContextKey]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (displayedMessages.length === 0 || !messagesContainerRef.current) {
       return;
     }
@@ -103,15 +127,25 @@ export function WorkspaceConversationDetail({
     const container = messagesContainerRef.current;
     if (scrollFrameRef.current !== null) {
       cancelAnimationFrame(scrollFrameRef.current);
+      scrollFrameRef.current = null;
+    }
+    if (scrollSettleTimeoutRef.current !== null) {
+      window.clearTimeout(scrollSettleTimeoutRef.current);
+      scrollSettleTimeoutRef.current = null;
     }
 
     programmaticScrollRef.current = true;
+    scrollToLatest(container);
     scrollFrameRef.current = requestAnimationFrame(() => {
-      container.scrollTo({ top: container.scrollHeight });
+      scrollToLatest(container);
       scrollFrameRef.current = requestAnimationFrame(() => {
-        programmaticScrollRef.current = false;
-        autoScrollDetachedRef.current = !isNearBottom(container);
         scrollFrameRef.current = null;
+        scrollSettleTimeoutRef.current = window.setTimeout(() => {
+          scrollToLatest(container);
+          programmaticScrollRef.current = false;
+          autoScrollDetachedRef.current = !isNearBottom(container);
+          scrollSettleTimeoutRef.current = null;
+        }, 120);
       });
     });
   }, [displayedMessages.length, scrollContextKey]);
@@ -132,15 +166,24 @@ export function WorkspaceConversationDetail({
     const container = messagesContainerRef.current;
     if (scrollFrameRef.current !== null) {
       cancelAnimationFrame(scrollFrameRef.current);
+      scrollFrameRef.current = null;
+    }
+    if (scrollSettleTimeoutRef.current !== null) {
+      window.clearTimeout(scrollSettleTimeoutRef.current);
+      scrollSettleTimeoutRef.current = null;
     }
 
     programmaticScrollRef.current = true;
     scrollFrameRef.current = requestAnimationFrame(() => {
-      container.scrollTo({ top: container.scrollHeight });
+      scrollToLatest(container);
       scrollFrameRef.current = requestAnimationFrame(() => {
-        programmaticScrollRef.current = false;
-        autoScrollDetachedRef.current = !isNearBottom(container);
         scrollFrameRef.current = null;
+        scrollSettleTimeoutRef.current = window.setTimeout(() => {
+          scrollToLatest(container);
+          programmaticScrollRef.current = false;
+          autoScrollDetachedRef.current = !isNearBottom(container);
+          scrollSettleTimeoutRef.current = null;
+        }, 120);
       });
     });
   }, [visibleMessages.length]);
@@ -183,7 +226,7 @@ export function WorkspaceConversationDetail({
 
   return (
     <>
-      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto bg-background/30">
+      <ScrollArea viewportRef={messagesContainerRef} className="workspace-transcript-scroll flex-1 bg-background/30">
         <div className="mx-auto max-w-[860px] px-8 py-8">
           {isLoadingMessages ? (
             <div className="space-y-5">
@@ -208,7 +251,7 @@ export function WorkspaceConversationDetail({
             </div>
           )}
         </div>
-      </div>
+      </ScrollArea>
     </>
   );
 }

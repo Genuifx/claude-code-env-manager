@@ -99,6 +99,7 @@ pub struct NativeSessionOptions {
     pub perm_mode: String,
     pub working_dir: String,
     pub initial_prompt: Option<String>,
+    pub display_prompt: Option<String>,
     pub initial_images: Option<Vec<PromptImage>>,
     pub provider_session_id: Option<String>,
     pub helper_env_vars: HashMap<String, String>,
@@ -318,6 +319,15 @@ impl NativeRuntimeManager {
                 detail: format!("Starting {} native runtime.", options.provider.as_str()),
             },
         )?;
+        self.append_user_prompt_event(
+            &runtime_id,
+            options
+                .display_prompt
+                .as_deref()
+                .or(options.initial_prompt.as_deref())
+                .unwrap_or_default(),
+            options.initial_images.as_ref(),
+        )?;
         self.spawn_helper(app, &runtime_id, &options, handle)?;
         self.summary_for(&runtime_id)
     }
@@ -427,6 +437,7 @@ impl NativeRuntimeManager {
         app: &AppHandle,
         runtime_id: &str,
         text: &str,
+        display_text: Option<&str>,
         images: Option<&Vec<PromptImage>>,
     ) -> Result<(), String> {
         let text = text.trim();
@@ -439,6 +450,7 @@ impl NativeRuntimeManager {
         let images_ref = images
             .filter(|imgs| !imgs.is_empty())
             .map(|imgs| imgs.as_slice());
+        self.append_user_prompt_event(runtime_id, display_text.unwrap_or(text), images)?;
         self.write_to_child(
             &handle,
             &HelperInputCommand::Prompt {
@@ -1011,6 +1023,27 @@ impl NativeRuntimeManager {
         });
     }
 
+    fn append_user_prompt_event(
+        &self,
+        runtime_id: &str,
+        text: &str,
+        images: Option<&Vec<PromptImage>>,
+    ) -> Result<(), String> {
+        let text = text.trim();
+        let image_count = images.map(|items| items.len()).unwrap_or(0);
+        if text.is_empty() && image_count == 0 {
+            return Ok(());
+        }
+
+        self.append_event(
+            runtime_id,
+            SessionEventPayload::UserPrompt {
+                text: text.to_string(),
+                image_count: image_count as u64,
+            },
+        )
+    }
+
     fn append_event(&self, runtime_id: &str, payload: SessionEventPayload) -> Result<(), String> {
         let last_error = payload_last_error(&payload);
         let handles = self
@@ -1353,6 +1386,7 @@ fn build_runtime_bootstrap_options(
         perm_mode: record.perm_mode.clone(),
         working_dir: record.project_dir.clone(),
         initial_prompt: None,
+        display_prompt: None,
         initial_images: None,
         provider_session_id: record.provider_session_id.clone(),
         helper_env_vars,
@@ -1549,6 +1583,34 @@ mod tests {
             "iVBORw0KGgo="
         );
         assert_eq!(serialized["initial_images"][0]["placeholder"], "[Image #1]");
+    }
+
+    #[test]
+    fn native_user_prompt_events_are_replayable() {
+        let runtime_id = "native-user-prompt";
+        let manager = manager_with_handle(runtime_id);
+        let images = vec![PromptImage {
+            media_type: "image/png".to_string(),
+            base64_data: "iVBORw0KGgo=".to_string(),
+            placeholder: Some("[Image #1]".to_string()),
+        }];
+
+        manager
+            .append_user_prompt_event(runtime_id, "continue", Some(&images))
+            .expect("append user prompt event");
+
+        let batch = manager
+            .replay_events(runtime_id, None)
+            .expect("replay events");
+
+        assert_eq!(batch.events.len(), 1);
+        assert_eq!(
+            batch.events[0].payload,
+            SessionEventPayload::UserPrompt {
+                text: "continue".to_string(),
+                image_count: 1,
+            }
+        );
     }
 
     #[test]

@@ -137,7 +137,7 @@ function runtimeClient(runtime: WorkspaceRuntimeDescriptor): 'claude' | 'codex' 
 }
 
 function isRuntimeTerminalStatus(status: string): boolean {
-  return status === 'stopped' || status === 'completed' || status === 'error' || status === 'interrupted';
+  return status === 'stopped' || status === 'completed' || status === 'error';
 }
 
 function isRuntimeProcessing(

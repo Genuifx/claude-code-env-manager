@@ -20,6 +20,7 @@ import {
   type TeammateMessage,
 } from '@/components/conversation/messageContentUtils';
 import { cn } from '@/lib/utils';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { useLocale } from '@/locales';
 import type {
   ConversationContentBlock,
@@ -494,18 +495,18 @@ function CommandPill({
 function ThinkingBlock({ content, label }: { content: string; label: string }) {
   return (
     <DisclosureCard icon={Brain} label={label}>
-      <pre className="max-h-[260px] overflow-y-auto whitespace-pre-wrap font-mono text-[11px] leading-6 text-muted-foreground/80">
-        {content.trim()}
-      </pre>
+      <ScrollArea className="max-h-[260px]">
+        <pre className="whitespace-pre-wrap font-mono text-[11px] leading-6 text-muted-foreground/80">
+          {content.trim()}
+        </pre>
+      </ScrollArea>
     </DisclosureCard>
   );
 }
 
 const ToolPayloadPanel = memo(function ToolPayloadPanel({
-  label,
   value,
 }: {
-  label: string;
   value: unknown;
 }) {
   const text = useMemo(() => stringifyUnknown(value), [value]);
@@ -515,16 +516,15 @@ const ToolPayloadPanel = memo(function ToolPayloadPanel({
   }
 
   return (
-    <div className="workspace-tool-payload-virtualized rounded-lg bg-[hsl(var(--tool-input-bg))] px-3 py-2.5">
-      <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground/50">
-        {label}
-      </p>
-      <pre className="max-h-[160px] overflow-y-auto whitespace-pre-wrap font-mono text-[11px] leading-[1.55] text-muted-foreground/75">
-        {text}
-      </pre>
+    <div className="workspace-tool-payload-virtualized rounded-md bg-[hsl(var(--tool-input-bg))] px-2.5 py-2">
+      <ScrollArea className="max-h-[120px]">
+        <pre className="whitespace-pre-wrap font-mono text-[10px] leading-[1.45] text-muted-foreground/70">
+          {text}
+        </pre>
+      </ScrollArea>
     </div>
   );
-}, (prevProps, nextProps) => prevProps.label === nextProps.label && prevProps.value === nextProps.value);
+}, (prevProps, nextProps) => prevProps.value === nextProps.value);
 
 const ThinkingEntryPanel = memo(function ThinkingEntryPanel({
   entry,
@@ -547,12 +547,116 @@ const ThinkingEntryPanel = memo(function ThinkingEntryPanel({
       <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground/50">
         {headerLabel}
       </p>
-      <pre className="max-h-[160px] overflow-y-auto whitespace-pre-wrap font-mono text-[11px] leading-[1.55] text-muted-foreground/75">
-        {entry.content}
-      </pre>
+      <ScrollArea className="max-h-[160px]">
+        <pre className="whitespace-pre-wrap font-mono text-[11px] leading-[1.55] text-muted-foreground/75">
+          {entry.content}
+        </pre>
+      </ScrollArea>
     </div>
   );
 }, (prevProps, nextProps) => prevProps.entry === nextProps.entry && prevProps.index === nextProps.index && prevProps.label === nextProps.label);
+
+function ToolInputContext({ block }: { block: ConversationContentBlock }) {
+  const input = block.input as Record<string, unknown> | undefined;
+  if (!input || typeof input !== 'object') return null;
+
+  const fields: { label: string; value: string }[] = [];
+
+  switch (block.name) {
+    case 'Grep': {
+      const pattern = typeof input.pattern === 'string' ? input.pattern : '';
+      const path = typeof input.path === 'string' ? input.path : '';
+      const glob = typeof input.glob === 'string' ? input.glob : '';
+      if (pattern) fields.push({ label: 'pattern', value: pattern });
+      if (path) fields.push({ label: 'in', value: path });
+      if (glob) fields.push({ label: 'filter', value: glob });
+      break;
+    }
+    case 'Read': {
+      const fp = typeof input.file_path === 'string' ? input.file_path : '';
+      const offset = typeof input.offset === 'number' ? input.offset : undefined;
+      const limit = typeof input.limit === 'number' ? input.limit : undefined;
+      if (fp) fields.push({ label: 'file', value: fp });
+      if (offset !== undefined) fields.push({ label: 'offset', value: String(offset) });
+      if (limit !== undefined) fields.push({ label: 'limit', value: String(limit) });
+      break;
+    }
+    case 'Write': {
+      const fp = typeof input.file_path === 'string' ? input.file_path : '';
+      if (fp) fields.push({ label: 'file', value: fp });
+      break;
+    }
+    case 'Glob': {
+      const pattern = typeof input.pattern === 'string' ? input.pattern : '';
+      const path = typeof input.path === 'string' ? input.path : '';
+      if (pattern) fields.push({ label: 'pattern', value: pattern });
+      if (path) fields.push({ label: 'in', value: path });
+      break;
+    }
+    case 'Bash': {
+      const cmd = typeof input.command === 'string' ? input.command : '';
+      if (cmd && cmd.length > 120) {
+        fields.push({ label: 'command', value: `${cmd.slice(0, 117)}...` });
+      } else if (cmd) {
+        fields.push({ label: 'command', value: cmd });
+      }
+      break;
+    }
+    case 'WebFetch': {
+      const url = typeof input.url === 'string' ? input.url : '';
+      if (url) fields.push({ label: 'url', value: url });
+      break;
+    }
+    default:
+      break;
+  }
+
+  if (fields.length === 0) return null;
+
+  return (
+    <div className="workspace-tool-payload-virtualized rounded-md bg-[hsl(var(--tool-input-bg))] mb-1.5 px-2.5 py-2">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 font-mono text-[10px] leading-[1.5]">
+        {fields.map((f) => (
+          <span key={f.label}>
+            <span className="text-muted-foreground/45">{f.label}: </span>
+            <span className="text-muted-foreground/70">{f.value}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const MAX_DIFF_CHARS = 800;
+
+function EditDiff({ oldText, newText }: { oldText: string; newText: string }) {
+  const total = oldText.length + newText.length;
+  const truncated = total > MAX_DIFF_CHARS;
+  const displayOld = truncated ? oldText.slice(0, MAX_DIFF_CHARS / 2) : oldText;
+  const displayNew = truncated ? newText.slice(0, MAX_DIFF_CHARS / 2) : newText;
+
+  return (
+    <div className="workspace-tool-payload-virtualized overflow-hidden rounded-md bg-[hsl(var(--tool-input-bg))]">
+      {displayOld ? (
+        <div className="border-b border-destructive/10 px-2.5 py-1.5">
+          <pre className="whitespace-pre-wrap font-mono text-[10px] leading-[1.45] text-muted-foreground/55 line-through">
+            {displayOld}{truncated ? '…' : ''}
+          </pre>
+        </div>
+      ) : null}
+      <div className="px-2.5 py-1.5">
+        <pre className="whitespace-pre-wrap font-mono text-[10px] leading-[1.45] text-success/75">
+          {displayNew}{truncated ? '…' : ''}
+        </pre>
+      </div>
+      {truncated ? (
+        <div className="border-t border-border/20 px-2.5 py-1.5 text-[10px] text-muted-foreground/50">
+          Diff too large — open in editor to review
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 const ToolCallRow = memo(function ToolCallRow({
   block,
@@ -565,6 +669,21 @@ const ToolCallRow = memo(function ToolCallRow({
   const hasResult = '_result' in block;
   const isError = block._resultError === true;
   const detail = useMemo(() => extractToolSummary(block.name, block.input), [block.input, block.name]);
+  const isEdit = block.name === 'Edit';
+  const isSearchTool = block.name === 'Grep' || block.name === 'Glob' || block.name === 'Bash' || block.name === 'WebFetch'
+    || block.name === 'Read' || block.name === 'Write';
+  const editDiff = useMemo(() => {
+    if (!isEdit || !block.input || typeof block.input !== 'object') return null;
+    const input = block.input as Record<string, unknown>;
+    const oldStr = typeof input.old_string === 'string' ? input.old_string : '';
+    const newStr = typeof input.new_string === 'string' ? input.new_string : '';
+    if (!oldStr && !newStr) return null;
+    return { oldText: oldStr, newText: newStr };
+  }, [isEdit, block.input]);
+
+  const toolLabel = detail
+    ? `${block.name || 'Tool'}(${detail})`
+    : (block.name || 'Tool');
 
   return (
     <div className="workspace-tool-row-virtualized">
@@ -572,6 +691,7 @@ const ToolCallRow = memo(function ToolCallRow({
         type="button"
         aria-expanded={open}
         onClick={() => {
+          if (!hasResult) return;
           setOpen((current) => {
             if (!current && !hasRenderedBody) {
               startTransition(() => setHasRenderedBody(true));
@@ -579,38 +699,38 @@ const ToolCallRow = memo(function ToolCallRow({
             return !current;
           });
         }}
-        className="flex w-full items-center gap-2 py-1 text-left transition-colors"
+        className={cn(
+          'flex w-full items-center gap-1.5 py-0.5 text-left transition-colors',
+          hasResult && 'cursor-pointer',
+        )}
       >
         <Circle
           className={cn(
-            'h-2 w-2 shrink-0 fill-current',
-            isError ? 'text-destructive/70' : 'text-success/70',
+            'h-1.5 w-1.5 shrink-0 fill-current',
+            isError ? 'text-destructive/65' : hasResult ? 'text-success/60' : 'text-muted-foreground/30',
           )}
         />
-        <span className="text-[12px] font-medium text-foreground/75">
-          {block.name || 'Tool'}
+        <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground/60">
+          {toolLabel}
         </span>
-        {detail ? (
-          <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground/55">
-            {detail}
-          </span>
-        ) : null}
         {hasResult ? (
           <span
             className={cn(
-              'ml-auto shrink-0 text-[11px] font-medium',
-              isError ? 'text-destructive/70' : 'text-success/65',
+              'shrink-0 text-[10px]',
+              isError ? 'text-destructive/65' : 'text-success/55',
             )}
           >
             {isError ? t('workspace.toolFailedState') : t('workspace.toolDone')}
           </span>
         ) : null}
-        <ChevronDown
-          className={cn(
-            'h-3.5 w-3.5 shrink-0 text-muted-foreground/35 transition-transform duration-200 ease-out',
-            open && 'rotate-180',
-          )}
-        />
+        {hasResult ? (
+          <ChevronDown
+            className={cn(
+              'h-3 w-3 shrink-0 text-muted-foreground/30 transition-transform duration-200 ease-out',
+              open && 'rotate-180',
+            )}
+          />
+        ) : null}
       </button>
       {hasRenderedBody ? (
         <div
@@ -619,13 +739,15 @@ const ToolCallRow = memo(function ToolCallRow({
             open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
           )}
         >
-          <div className="overflow-hidden">
-            <div className="space-y-2 py-2 pl-4">
-              <ToolPayloadPanel label={t('history.toolInput')} value={block.input} />
-              {hasResult ? (
-                <ToolPayloadPanel label={t('history.toolOutput')} value={block._result} />
-              ) : null}
-            </div>
+          <div className="overflow-hidden pt-1">
+            {editDiff ? (
+              <EditDiff oldText={editDiff.oldText} newText={editDiff.newText} />
+            ) : (
+              <>
+                {isSearchTool ? <ToolInputContext block={block} /> : null}
+                <ToolPayloadPanel value={block._result} />
+              </>
+            )}
           </div>
         </div>
       ) : null}
@@ -732,7 +854,7 @@ function WorkspaceToolDigestComponent({
             {t('workspace.processedLabel')}
           </span>
           {durationLabel ? (
-            <span className="font-normal text-muted-foreground/55">{durationLabel}</span>
+            <span className="text-[12px] font-normal text-muted-foreground/55">{durationLabel}</span>
           ) : null}
           <span className="min-w-0 truncate text-[12px] text-muted-foreground/55">{summary}</span>
         </div>

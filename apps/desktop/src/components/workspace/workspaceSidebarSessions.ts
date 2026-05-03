@@ -16,7 +16,7 @@ export interface WorkspaceSidebarLiveSessionEntry {
   initialPrompt?: string | null;
 }
 
-const TERMINAL_NATIVE_STATUSES = new Set(['stopped', 'error', 'handoff', 'interrupted']);
+const TERMINAL_NATIVE_STATUSES = new Set(['stopped', 'error', 'handoff']);
 
 function toHistorySource(provider: NativeProvider): HistorySource {
   return provider === 'codex' ? 'codex' : 'claude';

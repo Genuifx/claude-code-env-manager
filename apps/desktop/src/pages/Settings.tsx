@@ -53,10 +53,11 @@ function normalizePerformanceMode(value: unknown): PerformancePreference {
 }
 
 export function Settings() {
-  const { defaultMode, setDefaultMode, isLoadingSettings, defaultWorkingDir, environments } = useAppStore(
+  const { defaultMode, setDefaultMode, setPermissionMode, isLoadingSettings, defaultWorkingDir, environments } = useAppStore(
     (state) => ({
       defaultMode: state.defaultMode,
       setDefaultMode: state.setDefaultMode,
+      setPermissionMode: state.setPermissionMode,
       isLoadingSettings: state.isLoadingSettings,
       defaultWorkingDir: state.defaultWorkingDir,
       environments: state.environments,
@@ -168,6 +169,7 @@ export function Settings() {
         }));
         if (settings.defaultMode) {
           setDefaultMode(settings.defaultMode as PermissionModeName);
+          setPermissionMode(settings.defaultMode as PermissionModeName);
         }
       } catch {
         // Fallback: load from localStorage
@@ -563,7 +565,7 @@ export function Settings() {
               <button
                 key={key}
                 type="button"
-                onClick={() => setDefaultMode(mode)}
+                onClick={() => { setDefaultMode(mode); setPermissionMode(mode); }}
                 className={`text-left p-3.5 rounded-lg cursor-pointer glass-mode-card ${
                   isActive ? 'active' : ''
                 }`}

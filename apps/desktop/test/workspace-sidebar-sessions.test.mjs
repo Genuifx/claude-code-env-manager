@@ -113,3 +113,21 @@ test('omits terminal native sessions from the workspace sidebar', async () => {
   assert.equal(sessions[0].id, 'native-running');
   assert.equal(sessions[0].display, '还在运行的任务');
 });
+
+test('keeps interrupted native sessions in the workspace sidebar for recovery', async () => {
+  const { buildWorkspaceSidebarSessions } = await importWorkspaceSidebarSessions();
+
+  const sessions = buildWorkspaceSidebarSessions([], [
+    {
+      session: nativeSession({
+        runtime_id: 'native-interrupted',
+        status: 'interrupted',
+      }),
+      initialPrompt: '可以恢复输入的任务',
+    },
+  ]);
+
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0].id, 'native-interrupted');
+  assert.equal(sessions[0].display, '可以恢复输入的任务');
+});

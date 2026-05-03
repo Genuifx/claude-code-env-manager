@@ -564,6 +564,12 @@
   border-left: none;
 }
 
+/* === Radix ScrollArea — constrain inner table wrapper === */
+[data-radix-scroll-area-viewport] > div {
+  display: block !important;
+  max-width: 100% !important;
+}
+
 /* === Page Transition === */
 @keyframes page-enter {
   from { opacity: 0; transform: translateY(16px); }
@@ -2007,25 +2013,16 @@
   contain-intrinsic-size: 56px;
 }
 
-/* Paint skipping for long live workspace transcripts */
+/* Keep live workspace transcripts stable while scrolling. */
+.workspace-transcript-scroll [data-radix-scroll-area-viewport] {
+  overflow-anchor: none;
+}
+
 .workspace-msg-virtualized,
 .workspace-tool-payload-virtualized,
 .workspace-tool-row-virtualized,
 .workspace-tool-digest-virtualized {
-  content-visibility: auto;
-}
-
-.workspace-msg-virtualized {
-  contain-intrinsic-size: auto 180px;
-}
-
-.workspace-tool-payload-virtualized {
-  contain-intrinsic-size: auto 120px;
-}
-
-.workspace-tool-row-virtualized,
-.workspace-tool-digest-virtualized {
-  contain-intrinsic-size: auto 56px;
+  contain: layout paint;
 }
 
 /* === Reduced Performance Mode === */

@@ -43,7 +43,8 @@ impl NativeEventLog {
                 .lock()
                 .map_err(|_| "Failed to lock pending native event log records".to_string())?;
             pending.push(record.clone());
-            pending.len() >= EVENT_LOG_FLUSH_BATCH_SIZE || should_flush_after_append(&record.payload)
+            pending.len() >= EVENT_LOG_FLUSH_BATCH_SIZE
+                || should_flush_after_append(&record.payload)
         };
 
         if should_flush {
@@ -119,9 +120,9 @@ impl NativeEventLog {
 
     fn write_records(&self, records: &[SessionEventRecord]) -> Result<(), String> {
         self.with_conn(|conn| {
-            let tx = conn
-                .transaction()
-                .map_err(|error| format!("Failed to begin native event log transaction: {}", error))?;
+            let tx = conn.transaction().map_err(|error| {
+                format!("Failed to begin native event log transaction: {}", error)
+            })?;
             {
                 let mut stmt = tx
                     .prepare_cached(
@@ -148,18 +149,20 @@ impl NativeEventLog {
                         payload_json,
                         created_at,
                     ])
-                    .map_err(|error| {
-                        format!("Failed to append native session event: {}", error)
-                    })?;
+                    .map_err(|error| format!("Failed to append native session event: {}", error))?;
                 }
             }
-            tx.commit()
-                .map_err(|error| format!("Failed to commit native event log transaction: {}", error))?;
+            tx.commit().map_err(|error| {
+                format!("Failed to commit native event log transaction: {}", error)
+            })?;
             Ok(())
         })
     }
 
-    fn with_conn<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T, String>) -> Result<T, String> {
+    fn with_conn<T>(
+        &self,
+        f: impl FnOnce(&mut Connection) -> Result<T, String>,
+    ) -> Result<T, String> {
         let mut guard = self
             .conn
             .lock()
@@ -263,14 +266,20 @@ fn query_events_since(
     if let Some(limit) = limit.filter(|value| *value > 0) {
         let mut stmt = conn
             .prepare(
-                "SELECT seq, occurred_at, payload_json
-                 FROM (
-                     SELECT seq, occurred_at, payload_json
+                "WITH tail AS (
+                     SELECT seq
                      FROM native_session_events
                      WHERE runtime_id = ?1
                      ORDER BY seq DESC
                      LIMIT ?2
                  )
+                 SELECT seq, occurred_at, payload_json
+                 FROM native_session_events
+                 WHERE runtime_id = ?1
+                   AND (
+                     seq IN (SELECT seq FROM tail)
+                     OR payload_json LIKE '{\"type\":\"user_prompt\"%'
+                   )
                  ORDER BY seq ASC",
             )
             .map_err(|error| format!("Failed to prepare native event tail replay: {}", error))?;
@@ -352,7 +361,8 @@ fn should_flush_after_append(payload: &SessionEventPayload) -> bool {
         SessionEventPayload::Lifecycle { stage, .. } => {
             matches!(stage.as_str(), "error" | "stopped" | "handoff")
         }
-        SessionEventPayload::SessionCompleted { .. }
+        SessionEventPayload::UserPrompt { .. }
+        | SessionEventPayload::SessionCompleted { .. }
         | SessionEventPayload::PermissionRequired { .. }
         | SessionEventPayload::PermissionResponded { .. }
         | SessionEventPayload::TerminalPromptRequired { .. }
@@ -399,9 +409,7 @@ mod tests {
         drop(log);
 
         let reopened = NativeEventLog::new(db_path.clone());
-        let replay = reopened
-            .replay("runtime-1", Some(1), None)
-            .expect("replay");
+        let replay = reopened.replay("runtime-1", Some(1), None).expect("replay");
 
         assert!(!replay.gap_detected);
         assert_eq!(replay.oldest_available_seq, Some(1));
@@ -441,9 +449,7 @@ mod tests {
         })
         .expect("append raw jsonl payload");
 
-        let replay = log
-            .replay("runtime-jsonl", None, None)
-            .expect("replay all");
+        let replay = log.replay("runtime-jsonl", None, None).expect("replay all");
         assert_eq!(replay.events.len(), 1);
         assert_eq!(
             replay.events[0].payload,
@@ -482,7 +488,11 @@ mod tests {
         assert_eq!(replay.oldest_available_seq, Some(1));
         assert_eq!(replay.newest_available_seq, Some(5));
         assert_eq!(
-            replay.events.iter().map(|event| event.seq).collect::<Vec<_>>(),
+            replay
+                .events
+                .iter()
+                .map(|event| event.seq)
+                .collect::<Vec<_>>(),
             vec![4, 5],
         );
 
@@ -495,6 +505,53 @@ mod tests {
             )
             .unwrap_or(false);
         assert!(!duplicate_index_exists);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn native_event_log_keeps_user_prompt_anchors_in_limited_replay() {
+        let db_path = std::env::temp_dir().join(format!(
+            "ccem-native-event-log-user-anchor-test-{}.sqlite",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default(),
+        ));
+        let log = NativeEventLog::new(db_path.clone());
+
+        log.append(&SessionEventRecord {
+            runtime_id: "runtime-tail-anchor".to_string(),
+            seq: 1,
+            occurred_at: Utc::now(),
+            payload: SessionEventPayload::UserPrompt {
+                text: "start here".to_string(),
+                image_count: 0,
+            },
+        })
+        .expect("append prompt");
+
+        for seq in 2..=5 {
+            log.append(&SessionEventRecord {
+                runtime_id: "runtime-tail-anchor".to_string(),
+                seq,
+                occurred_at: Utc::now(),
+                payload: SessionEventPayload::AssistantChunk {
+                    text: format!("chunk-{seq}"),
+                },
+            })
+            .expect("append chunk");
+        }
+
+        let replay = log
+            .replay("runtime-tail-anchor", None, Some(2))
+            .expect("replay tail");
+
+        assert_eq!(
+            replay
+                .events
+                .iter()
+                .map(|event| event.seq)
+                .collect::<Vec<_>>(),
+            vec![1, 4, 5],
+        );
 
         let _ = std::fs::remove_file(db_path);
     }
