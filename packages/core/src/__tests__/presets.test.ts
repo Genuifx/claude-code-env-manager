@@ -30,9 +30,12 @@ describe('presets', () => {
       expect(ENV_PRESETS.MiniMax.ANTHROPIC_BASE_URL).toContain('minimaxi.com');
     });
 
-    it('should have DeepSeek preset with correct structure', () => {
+    it('should have DeepSeek preset with correct structure and 1M context', () => {
       expect(ENV_PRESETS.DeepSeek).toBeDefined();
       expect(ENV_PRESETS.DeepSeek.ANTHROPIC_BASE_URL).toContain('deepseek.com');
+      expect(ENV_PRESETS.DeepSeek.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe('deepseek-v4-pro[1m]');
+      expect(ENV_PRESETS.DeepSeek.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('deepseek-v4-pro[1m]');
+      expect(ENV_PRESETS.DeepSeek.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('deepseek-v4-flash');
     });
 
     it('should include new preset providers', () => {
