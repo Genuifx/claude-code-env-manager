@@ -16539,6 +16539,25 @@ function buildAskUserQuestionUpdatedInput(input, answers, annotations) {
   }
   return updatedInput;
 }
+function summarizeAskUserQuestionAnswers(answers, annotations) {
+  const parts = Object.entries(answers).map(([question, answer]) => {
+    const trimmedQuestion = question.trim();
+    const trimmedAnswer = answer.trim();
+    if (!trimmedAnswer) {
+      return null;
+    }
+    const note = annotations?.[question]?.notes?.trim();
+    const base = trimmedQuestion ? `"${trimmedQuestion}"="${trimmedAnswer}"` : `"${trimmedAnswer}"`;
+    return note ? `${base} user notes: ${note}` : base;
+  }).filter((value) => Boolean(value));
+  if (parts.length === 0) {
+    return "User answered AskUserQuestion.";
+  }
+  return truncateSummary(
+    `User has answered your questions: ${parts.join(", ")}. You can now continue with the user's answers in mind.`,
+    240
+  );
+}
 async function waitForAskUserQuestionResponse(input, toolUseId) {
   return await new Promise((resolve) => {
     pendingClaudeInteractivePrompts.set(toolUseId, {
@@ -17234,6 +17253,11 @@ async function handleCommand(command) {
       });
       return;
     }
+    emitClaudeToolUseCompleted(
+      command.tool_use_id,
+      summarizeAskUserQuestionAnswers(command.answers, command.annotations),
+      true
+    );
     pending.resolve(
       buildAllowedClaudeToolResult(
         buildAskUserQuestionUpdatedInput(

@@ -960,6 +960,9 @@ export function WorkspaceNativeSessionView({
   const [isStopping, setIsStopping] = useState(false);
   const [isHandingOff, setIsHandingOff] = useState(false);
   const [respondingRequestId, setRespondingRequestId] = useState<string | null>(null);
+  const [locallyDismissedPromptIds, setLocallyDismissedPromptIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [queuedMessages, setQueuedMessages] = useState<Array<{
     id: string;
     text: string;
@@ -996,6 +999,7 @@ export function WorkspaceNativeSessionView({
     setComposerPlanModeEnabled(session.perm_mode === 'plan');
     setQueuedMessages([]);
     setLocalUserPrompts(initialPrompts);
+    setLocallyDismissedPromptIds(new Set());
   }, [session.runtime_id]);
 
   useEffect(() => {
@@ -1115,10 +1119,39 @@ export function WorkspaceNativeSessionView({
     return hasSummaryBoundaryEvent(batch.events);
   }, [getNativeSessionEvents, session.runtime_id]);
 
-  const attentionState = useMemo(
+  const rawAttentionState = useMemo(
     () => extractAttentionState(events),
     [events],
   );
+  const attentionState = useMemo(() => {
+    if (locallyDismissedPromptIds.size === 0) {
+      return rawAttentionState;
+    }
+
+    const prompts = rawAttentionState.prompts.filter(
+      (entry) => !locallyDismissedPromptIds.has(entry.toolUseId),
+    );
+
+    return {
+      ...rawAttentionState,
+      prompts,
+    };
+  }, [locallyDismissedPromptIds, rawAttentionState]);
+
+  useEffect(() => {
+    if (locallyDismissedPromptIds.size === 0) {
+      return;
+    }
+
+    const activePromptIds = new Set(rawAttentionState.prompts.map((entry) => entry.toolUseId));
+    setLocallyDismissedPromptIds((previous) => {
+      const next = new Set(
+        Array.from(previous).filter((toolUseId) => activePromptIds.has(toolUseId)),
+      );
+      return next.size === previous.size ? previous : next;
+    });
+  }, [locallyDismissedPromptIds.size, rawAttentionState.prompts]);
+
   const pollIntervalMs = isSending
     || session.status === 'initializing'
     || session.status === 'processing'
@@ -1429,6 +1462,15 @@ export function WorkspaceNativeSessionView({
     if (payload.kind === 'text') {
       setComposerText('');
       setComposerPlanModeEnabled(sessionRuntimePermMode === 'plan');
+    } else {
+      setLocallyDismissedPromptIds((previous) => {
+        if (previous.has(payload.toolUseId)) {
+          return previous;
+        }
+        const next = new Set(previous);
+        next.add(payload.toolUseId);
+        return next;
+      });
     }
 
     try {
@@ -1451,6 +1493,16 @@ export function WorkspaceNativeSessionView({
       setLocalUserPrompts((previous) =>
         previous.filter((prompt) => prompt.id !== promptEntry.id),
       );
+      if (payload.kind === 'ask_user_question') {
+        setLocallyDismissedPromptIds((previous) => {
+          if (!previous.has(payload.toolUseId)) {
+            return previous;
+          }
+          const next = new Set(previous);
+          next.delete(payload.toolUseId);
+          return next;
+        });
+      }
       toast.error(t('workspace.nativeSendFailed'));
       return false;
     } finally {

@@ -1284,7 +1284,10 @@ fn summarize_interactive_prompt_response(
     display_text: Option<&str>,
     answers: &HashMap<String, String>,
 ) -> Option<String> {
-    if let Some(text) = display_text.map(str::trim).filter(|value| !value.is_empty()) {
+    if let Some(text) = display_text
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         return Some(text.to_string());
     }
 
@@ -1676,10 +1679,7 @@ mod tests {
     fn interactive_prompt_response_is_replayable_as_user_prompt() {
         let runtime_id = "native-interactive-response";
         let manager = manager_with_handle(runtime_id);
-        let answers = HashMap::from([(
-            "Pick one".to_string(),
-            "Use the SQLite path".to_string(),
-        )]);
+        let answers = HashMap::from([("Pick one".to_string(), "Use the SQLite path".to_string())]);
 
         manager
             .append_interactive_prompt_response_event(
