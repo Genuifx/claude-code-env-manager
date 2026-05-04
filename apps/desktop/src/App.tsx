@@ -14,6 +14,8 @@ import type { UsageStats } from '@/types/analytics';
 import { shallow } from 'zustand/shallow';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { scheduleAfterFirstPaint } from '@/lib/idle';
+import { EnvironmentsSkeleton } from '@/components/ui/skeleton-states';
+import { StartupSplash } from '@/components/layout/StartupSplash';
 
 const AnalyticsPage = lazy(async () =>
   import('@/pages/Analytics').then((m) => ({ default: m.Analytics }))
@@ -70,6 +72,7 @@ function App() {
   const [dialogMode, setDialogMode] = useState<'add' | 'edit'>('add');
   const [editingEnvName, setEditingEnvName] = useState<string | undefined>();
   const [pendingDeleteEnv, setPendingDeleteEnv] = useState<string | null>(null);
+  const [startupReady, setStartupReady] = useState(false);
   const lastFocusSyncAtRef = useRef(0);
   const [, startTransition] = useTransition();
 
@@ -319,11 +322,59 @@ function App() {
     setCompanion,
   ]);
 
-  // Keep the cold-start path minimal: render the dashboard first, then fill in
-  // sessions and analytics once the initial paint is complete.
+  // Keep cold-start intentional: show the branded glass splash until critical
+  // config is ready, then fill in sessions and analytics after the first app paint.
   useEffect(() => {
     let cancelled = false;
-    void refreshCriticalData();
+    let minimumTimerId: number | null = null;
+    let maxTimerId: number | null = null;
+    const startedAt = performance.now();
+    const minSplashMs = 760;
+    const maxSplashMs = 4800;
+
+    const finishStartup = () => {
+      if (cancelled) {
+        return;
+      }
+      if (maxTimerId !== null) {
+        window.clearTimeout(maxTimerId);
+        maxTimerId = null;
+      }
+
+      const elapsedMs = performance.now() - startedAt;
+      const remainingMs = Math.max(0, minSplashMs - elapsedMs);
+      minimumTimerId = window.setTimeout(() => {
+        if (!cancelled) {
+          setStartupReady(true);
+        }
+      }, remainingMs);
+    };
+
+    maxTimerId = window.setTimeout(() => {
+      if (!cancelled) {
+        setStartupReady(true);
+      }
+    }, maxSplashMs);
+
+    void refreshCriticalData().finally(finishStartup);
+
+    return () => {
+      cancelled = true;
+      if (minimumTimerId !== null) {
+        window.clearTimeout(minimumTimerId);
+      }
+      if (maxTimerId !== null) {
+        window.clearTimeout(maxTimerId);
+      }
+    };
+  }, [refreshCriticalData]);
+
+  useEffect(() => {
+    if (!startupReady) {
+      return;
+    }
+
+    let cancelled = false;
 
     const cancelDeferredRefresh = scheduleAfterFirstPaint(() => {
       if (!cancelled) {
@@ -335,7 +386,7 @@ function App() {
       cancelled = true;
       cancelDeferredRefresh();
     };
-  }, [refreshCriticalData, refreshDeferredData]);
+  }, [startupReady, refreshDeferredData]);
 
   // Re-sync with CLI config when window regains focus
   // This ensures desktop stays in sync when user modifies env via `ccem add/del/use` in terminal
@@ -532,32 +583,36 @@ function App() {
   return (
     <LocaleProvider>
       <TooltipProvider delayDuration={120}>
-        <AppLayout
-          activeTab={activeTab}
-          onTabChange={navigateToTab}
-          onTabPrefetch={prefetchTab}
-          fullBleed={activeTab === 'history' || activeTab === 'workspace'}
-        >
-          <>
-            <div
-              className={activeTab === 'workspace' ? 'h-full w-full' : 'hidden'}
-              hidden={activeTab !== 'workspace'}
-              aria-hidden={activeTab !== 'workspace'}
-            >
-              <Workspace
-                isActive={activeTab === 'workspace'}
-                onNavigate={navigateToTab}
-                onLaunchWithDir={handleLaunchWithDir}
-              />
-            </div>
+        {startupReady ? (
+          <AppLayout
+            activeTab={activeTab}
+            onTabChange={navigateToTab}
+            onTabPrefetch={prefetchTab}
+            fullBleed={activeTab === 'history' || activeTab === 'workspace'}
+          >
+            <>
+              <div
+                className={activeTab === 'workspace' ? 'h-full w-full' : 'hidden'}
+                hidden={activeTab !== 'workspace'}
+                aria-hidden={activeTab !== 'workspace'}
+              >
+                <Workspace
+                  isActive={activeTab === 'workspace'}
+                  onNavigate={navigateToTab}
+                  onLaunchWithDir={handleLaunchWithDir}
+                />
+              </div>
 
-            {activeTab !== 'workspace' ? (
-              <Suspense fallback={<PageFallback />}>
-                {renderActivePage()}
-              </Suspense>
-            ) : null}
-          </>
-        </AppLayout>
+              {activeTab !== 'workspace' ? (
+                <Suspense fallback={<PageFallback activeTab={activeTab} />}>
+                  {renderActivePage()}
+                </Suspense>
+              ) : null}
+            </>
+          </AppLayout>
+        ) : (
+          <StartupSplash />
+        )}
 
         {/* Environment Dialog */}
         {dialogOpen ? (
@@ -589,9 +644,13 @@ function App() {
   );
 }
 
-function PageFallback() {
+function PageFallback({ activeTab }: { activeTab: string }) {
+  if (activeTab === 'environments') {
+    return <EnvironmentsSkeleton />;
+  }
+
   return (
-    <div className="h-full w-full flex items-center justify-center text-sm text-muted-foreground">
+    <div className="min-h-[320px] w-full flex items-center justify-center text-sm text-muted-foreground">
       Loading...
     </div>
   );

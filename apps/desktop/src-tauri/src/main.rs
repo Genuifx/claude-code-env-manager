@@ -94,7 +94,9 @@ use workspace_search::search_workspace_files;
 
 /// Global flag: when true, CloseRequested should NOT be intercepted.
 static FORCE_QUIT: AtomicBool = AtomicBool::new(false);
-use tauri::{window::Color, Listener, Manager, RunEvent, State, WindowEvent};
+use tauri::{
+    webview::PageLoadEvent, window::Color, Listener, Manager, RunEvent, State, WindowEvent,
+};
 use terminal::{
     ArrangeLayout, ArrangeSessionInfo, TerminalInfo, TerminalType, TmuxAttachTerminalInfo,
     TmuxAttachTerminalType,
@@ -2925,6 +2927,8 @@ fn main() {
     let weixin_manager_for_setup = weixin_bridge_manager.clone();
     let weixin_manager_for_run = weixin_bridge_manager.clone();
     let notification_prefs_state = notifications::NotificationPrefsState::new();
+    let main_window_boot_shown = Arc::new(AtomicBool::new(false));
+    let main_window_boot_shown_for_page_load = main_window_boot_shown.clone();
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -2950,6 +2954,29 @@ fn main() {
         .manage(weixin_bridge_manager.clone())
         .manage(proxy_debug_manager.clone())
         .manage(notification_prefs_state)
+        .on_page_load(move |webview, payload| {
+            if webview.window().label() != "main" || payload.event() != PageLoadEvent::Finished {
+                return;
+            }
+            if main_window_boot_shown_for_page_load.swap(true, Ordering::SeqCst) {
+                return;
+            }
+
+            let start_minimized = config::read_settings()
+                .map(|settings| settings.start_minimized)
+                .unwrap_or(false);
+            if start_minimized {
+                return;
+            }
+
+            let main_window = webview.window();
+            if let Err(error) = main_window.show() {
+                eprintln!("Main window boot show warning: {}", error);
+            }
+            if let Err(error) = main_window.set_focus() {
+                eprintln!("Main window boot focus warning: {}", error);
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             companion::get_companion,
             greet,

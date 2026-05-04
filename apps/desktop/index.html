@@ -5,27 +5,259 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CCEM Desktop</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  </head>
-  <body>
-    <div id="root"></div>
     <script>
-      // Sync theme before React loads to prevent dark-mode flash
+      // Sync theme before the first paint so the static boot splash matches React.
       (function() {
         try {
           var saved = localStorage.getItem('ccem-settings');
-          var theme = 'light';
+          var theme = 'system';
           if (saved) {
-            theme = JSON.parse(saved).theme || 'light';
+            theme = JSON.parse(saved).theme || 'system';
           }
-          if (theme === 'light' || (theme === 'system' && !window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          if (theme === 'light' || (theme === 'system' && !prefersDark)) {
             document.documentElement.classList.add('light');
           }
         } catch (e) {}
       })();
     </script>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      .light {
+        color-scheme: light;
+      }
+      html,
+      body,
+      #root {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        overflow: hidden;
+        background: hsl(30 5% 6%);
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .light body {
+        background: hsl(210 40% 96%);
+      }
+      .ccem-boot {
+        position: relative;
+        display: grid;
+        width: 100%;
+        min-height: 100%;
+        place-items: center;
+        overflow: hidden;
+        isolation: isolate;
+        color: hsl(0 0% 90%);
+        background:
+          radial-gradient(circle at 50% 42%, hsl(211 58% 12% / 0.82) 0%, transparent 34%),
+          linear-gradient(135deg, hsl(30 5% 5%) 0%, hsl(204 24% 7%) 48%, hsl(30 5% 6%) 100%);
+      }
+      .ccem-boot::before {
+        content: "";
+        position: absolute;
+        inset: -18%;
+        z-index: -3;
+        background:
+          conic-gradient(
+            from 215deg at 50% 48%,
+            hsl(211 85% 44% / 0.12),
+            hsl(186 48% 34% / 0.08),
+            hsl(38 72% 44% / 0.045),
+            hsl(211 85% 44% / 0.12)
+          );
+        filter: blur(74px);
+        opacity: 0.56;
+        animation: ccem-boot-liquid-drift 7.5s ease-in-out infinite alternate;
+      }
+      .ccem-boot::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: -2;
+        background:
+          linear-gradient(115deg, hsl(0 0% 100% / 0.035), transparent 30% 70%, hsl(0 0% 100% / 0.025)),
+          repeating-linear-gradient(92deg, hsl(0 0% 100% / 0.014) 0 1px, transparent 1px 18px);
+        opacity: 0.42;
+      }
+      .ccem-boot-grain {
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        background-image:
+          linear-gradient(90deg, hsl(0 0% 100% / 0.012) 1px, transparent 1px),
+          linear-gradient(180deg, hsl(0 0% 100% / 0.009) 1px, transparent 1px);
+        background-size: 72px 72px;
+        opacity: 0.24;
+      }
+      .ccem-boot-sheen {
+        position: absolute;
+        inset: -30% -15%;
+        z-index: -1;
+        background:
+          linear-gradient(
+            112deg,
+            transparent 26%,
+            hsl(0 0% 100% / 0.034) 42%,
+            transparent 58%
+          );
+        animation: ccem-boot-sheen 4.8s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+      }
+      .ccem-boot-center {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 15px;
+        animation: ccem-boot-breathe 2.6s ease-in-out infinite;
+      }
+      .ccem-boot-aura {
+        position: absolute;
+        width: 146px;
+        height: 146px;
+        top: -28px;
+        border-radius: 50%;
+        background:
+          conic-gradient(
+            from 180deg,
+            hsl(211 85% 52% / 0.34),
+            hsl(186 52% 38% / 0.20),
+            hsl(38 72% 42% / 0.11),
+            hsl(211 85% 52% / 0.34)
+          );
+        filter: blur(30px);
+        opacity: 0.58;
+        animation: ccem-boot-aura-breathe 2.6s ease-in-out infinite;
+      }
+      .ccem-boot-logo {
+        position: relative;
+        z-index: 1;
+        width: 86px;
+        height: 86px;
+        border-radius: 21px;
+        object-fit: cover;
+        filter:
+          drop-shadow(0 22px 46px hsl(0 0% 0% / 0.32))
+          drop-shadow(0 0 24px hsl(211 85% 52% / 0.18));
+      }
+      .ccem-boot-brand {
+        position: relative;
+        color: hsl(0 0% 90% / 0.86);
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        line-height: 1;
+        text-indent: 0.18em;
+      }
+      .light .ccem-boot {
+        color: hsl(220 18% 14%);
+        background:
+          radial-gradient(circle at 50% 42%, hsl(211 100% 88% / 0.74) 0%, transparent 34%),
+          radial-gradient(circle at 22% 18%, hsl(42 86% 82% / 0.58) 0%, transparent 32%),
+          radial-gradient(circle at 78% 72%, hsl(169 58% 78% / 0.42) 0%, transparent 36%),
+          linear-gradient(135deg, hsl(42 30% 98%) 0%, hsl(210 40% 96%) 48%, hsl(40 28% 97%) 100%);
+      }
+      .light .ccem-boot::before {
+        background:
+          conic-gradient(
+            from 215deg at 50% 48%,
+            hsl(211 100% 66% / 0.25),
+            hsl(184 62% 58% / 0.16),
+            hsl(38 88% 68% / 0.18),
+            hsl(211 100% 66% / 0.25)
+          );
+        opacity: 0.88;
+      }
+      .light .ccem-boot::after {
+        background:
+          linear-gradient(115deg, hsl(0 0% 100% / 0.38), transparent 32% 68%, hsl(0 0% 100% / 0.26)),
+          repeating-linear-gradient(92deg, hsl(215 24% 18% / 0.028) 0 1px, transparent 1px 18px);
+        opacity: 0.72;
+      }
+      .light .ccem-boot-grain {
+        background-image:
+          linear-gradient(90deg, hsl(220 18% 20% / 0.028) 1px, transparent 1px),
+          linear-gradient(180deg, hsl(220 18% 20% / 0.022) 1px, transparent 1px);
+        opacity: 0.32;
+      }
+      .light .ccem-boot-sheen {
+        background:
+          linear-gradient(
+            112deg,
+            transparent 26%,
+            hsl(0 0% 100% / 0.42) 42%,
+            transparent 58%
+          );
+      }
+      .light .ccem-boot-aura {
+        background:
+          conic-gradient(
+            from 180deg,
+            hsl(211 100% 62% / 0.36),
+            hsl(178 62% 58% / 0.26),
+            hsl(38 92% 66% / 0.22),
+            hsl(211 100% 62% / 0.36)
+          );
+        opacity: 0.70;
+      }
+      .light .ccem-boot-logo {
+        filter:
+          drop-shadow(0 20px 42px hsl(214 42% 46% / 0.18))
+          drop-shadow(0 0 26px hsl(211 100% 62% / 0.24));
+      }
+      .light .ccem-boot-brand {
+        color: hsl(220 18% 14% / 0.78);
+      }
+      @keyframes ccem-boot-liquid-drift {
+        from { transform: translate3d(-2%, -1%, 0) rotate(-4deg) scale(1); }
+        to { transform: translate3d(2%, 1.5%, 0) rotate(4deg) scale(1.06); }
+      }
+      @keyframes ccem-boot-sheen {
+        0% { transform: translateX(-38%) rotate(-8deg); opacity: 0; }
+        22% { opacity: 0.42; }
+        58%,
+        100% { transform: translateX(38%) rotate(-8deg); opacity: 0; }
+      }
+      @keyframes ccem-boot-breathe {
+        0%,
+        100% { transform: translateY(0) scale(1); }
+        50% { transform: translateY(-2px) scale(1.012); }
+      }
+      @keyframes ccem-boot-aura-breathe {
+        0%,
+        100% { opacity: 0.42; transform: scale(0.96); }
+        50% { opacity: 0.68; transform: scale(1.08); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .ccem-boot,
+        .ccem-boot::before,
+        .ccem-boot-sheen,
+        .ccem-boot-center,
+        .ccem-boot-aura {
+          animation: none !important;
+        }
+      }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <div id="root">
+      <div class="ccem-boot" data-tauri-drag-region aria-label="CCEM loading">
+        <div class="ccem-boot-grain" aria-hidden="true"></div>
+        <div class="ccem-boot-sheen" aria-hidden="true"></div>
+        <div class="ccem-boot-center">
+          <div class="ccem-boot-aura" aria-hidden="true"></div>
+          <img src="/logo.png" alt="CCEM" class="ccem-boot-logo" />
+          <div class="ccem-boot-brand" aria-hidden="true">CCEM</div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

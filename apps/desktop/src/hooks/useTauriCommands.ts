@@ -174,6 +174,7 @@ export function useTauriCommands() {
     setEnvironments,
     setCurrentEnv,
     setLoading,
+    setLoadingEnvs,
     setError,
     addSession,
     setSessions,
@@ -193,6 +194,7 @@ export function useTauriCommands() {
       setEnvironments: state.setEnvironments,
       setCurrentEnv: state.setCurrentEnv,
       setLoading: state.setLoading,
+      setLoadingEnvs: state.setLoadingEnvs,
       setError: state.setError,
       addSession: state.addSession,
       setSessions: state.setSessions,
@@ -220,6 +222,7 @@ export function useTauriCommands() {
     const silent = options?.silent ?? false;
     if (!silent) {
       setLoading(true);
+      setLoadingEnvs(true);
     }
     try {
       const envs = await invoke<Record<string, TauriEnvConfig>>('get_environments');
@@ -241,9 +244,10 @@ export function useTauriCommands() {
     } finally {
       if (!silent) {
         setLoading(false);
+        setLoadingEnvs(false);
       }
     }
-  }, [setEnvironments, setLoading, setError]);
+  }, [setEnvironments, setLoading, setLoadingEnvs, setError]);
 
   const loadCurrentEnv = useCallback(async () => {
     try {
