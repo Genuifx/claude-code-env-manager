@@ -181,7 +181,7 @@ export function ComposerControls({
                 {level === effort && <Check className="h-3.5 w-3.5 text-primary" />}
               </button>
             ))}
-            <div className="mx-2 my-1.5 h-px border-t border-white/[0.06]" />
+            <div className="mx-2 my-1.5 h-px border-t border-border/50" />
             <div className="px-2 py-1.5 text-2xs uppercase tracking-wider font-medium text-muted-foreground/70">
               {t('workspace.environmentLabel')}
             </div>
@@ -275,7 +275,7 @@ export function ComposerControls({
                 </SelectItem>
               ))}
             </div>
-            <div className="w-px self-stretch bg-white/[0.08]" />
+            <div className="w-px self-stretch bg-border/80" />
             <div className="flex w-[248px] flex-col justify-center px-3 py-2 text-left">
               <div
                 className={cn(

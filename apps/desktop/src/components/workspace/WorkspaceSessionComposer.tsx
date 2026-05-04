@@ -201,7 +201,7 @@ function ComposerTextareaHighlight({
       {parts.map((part, index) => part.kind === 'image' ? (
         <span
           key={`${part.text}-${index}`}
-          className="rounded-[5px] bg-primary/[0.12] font-medium text-primary ring-1 ring-inset ring-primary/[0.35] shadow-[0_0_0_1px_rgba(255,255,255,0.04)_inset]"
+          className="rounded-[5px] bg-primary/[0.12] font-medium text-primary ring-1 ring-inset ring-primary/[0.35] shadow-[inset_0_0_0_1px_hsl(30_8%_82%/0.04)]"
         >
           {part.text}
         </span>
@@ -247,7 +247,7 @@ function ComposerAttachmentChip({
 
   return (
     <span
-      className="inline-flex max-w-full items-center gap-2 rounded-[16px] bg-muted/45 px-2.5 py-1.5 text-left text-foreground"
+      className="inline-flex max-w-full items-center gap-2 rounded-xl bg-muted/55 px-2.5 py-1.5 text-left text-foreground"
       title={title}
     >
       {thumbnail}
@@ -355,7 +355,7 @@ function ComposerQuickMenu({
 
         {planButtonVisible ? (
           <>
-            <div className="mx-2 my-1.5 h-px border-t border-white/[0.06]" />
+            <div className="mx-2 my-1.5 h-px border-t border-border/50" />
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -1018,8 +1018,8 @@ export function WorkspaceSessionComposer({
           'rounded-t-[18px] rounded-b-none border-x border-t bg-surface-raised px-2.5 pt-2 pb-6 transition-[border-color,box-shadow] duration-300',
           'motion-reduce:transition-none',
           hasInterruption
-            ? 'border-border/70 shadow-[0_2px_4px_rgba(0,0,0,0.06),0_10px_28px_-12px_rgba(0,0,0,0.16),inset_0_0.5px_0_rgba(255,255,255,0.05)]'
-            : 'border-border/40 shadow-[0_1px_3px_rgba(0,0,0,0.05),0_4px_12px_rgba(0,0,0,0.07),inset_0_0.5px_0_rgba(255,255,255,0.03)]',
+            ? 'border-border/70 shadow-[0_2px_4px_rgba(0,0,0,0.06),0_10px_28px_-12px_rgba(0,0,0,0.16),inset_0_0.5px_0_hsl(30_8%_82%/0.06)]'
+            : 'border-border/40 shadow-[0_1px_3px_rgba(0,0,0,0.05),0_4px_12px_rgba(0,0,0,0.07),inset_0_0.5px_0_hsl(30_8%_82%/0.04)]',
         )}
         style={{ transitionTimingFunction: 'cubic-bezier(0.25, 1, 0.5, 1)' }}
       >
@@ -1061,9 +1061,18 @@ export function WorkspaceSessionComposer({
         ) : null}
 
         <div className={cn(
-          'relative z-20 rounded-[20px] border border-border/60 bg-surface-raised px-5 py-3 shadow-[0_40px_120px_-70px_rgba(0,0,0,0.38)] transition-colors',
+          'relative z-20 rounded-[20px] border border-border/40 bg-surface-raised px-5 py-3 shadow-[0_40px_120px_-70px_rgba(0,0,0,0.38)] transition-[border-color,box-shadow] duration-300',
           isDragTarget && 'border-primary/45 bg-primary/[0.035]',
+          planModeEnabled && 'border-primary/15',
         )}>
+          {planModeEnabled ? (
+            <div className="mb-3 flex items-center">
+              <span className="inline-flex items-center gap-1.5 rounded-[6px] bg-primary/[0.06] px-2 py-0.5 text-[10px] font-medium leading-5 text-primary/70">
+                <ListChecks className="h-3 w-3" />
+                {t('workspace.composerPlanModeShort')}
+              </span>
+            </div>
+          ) : null}
           {aboveTextarea ? (
             <div className="mb-3">
               {aboveTextarea}
@@ -1072,16 +1081,16 @@ export function WorkspaceSessionComposer({
 
           {(attachments.length > 0 || isDragTarget) ? (
             <div className={cn(
-              'mb-3 rounded-[18px] border border-dashed px-3 py-2.5',
+              'mb-3 rounded-xl border border-dashed bg-surface px-3 py-2.5',
               isDragTarget
-                ? 'border-primary/40 bg-primary/[0.045]'
-                : 'border-border/45 bg-background/35',
+                ? 'border-primary/45 bg-primary/[0.045]'
+                : 'border-border/30',
             )}>
-              <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/75">
+              <div className="flex items-center gap-2 text-[11px] font-medium text-muted-foreground">
                 <Paperclip className="h-3.5 w-3.5" />
                 <span>{isDragTarget ? t('workspace.composerAttachmentDropHint') : t('workspace.composerAttachmentsLabel')}</span>
                 {isDragTarget && draggedFileCount > 0 ? (
-                  <span>{draggedFileCount}</span>
+                  <span className="tabular-nums">{draggedFileCount}</span>
                 ) : null}
               </div>
 

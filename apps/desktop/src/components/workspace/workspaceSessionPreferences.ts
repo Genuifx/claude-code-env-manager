@@ -10,7 +10,7 @@ export interface WorkspaceHistorySessionPreference {
 
 export type WorkspaceHistorySessionPreferences = Record<string, WorkspaceHistorySessionPreference>;
 
-const DEFAULT_EFFORT: EffortLevel = 'high';
+const DEFAULT_EFFORT: EffortLevel = 'max';
 const PERMISSION_MODES = new Set(['yolo', 'dev', 'readonly', 'safe', 'ci', 'audit']);
 const CLAUDE_EFFORT_LEVELS = new Set<EffortLevel>(['low', 'medium', 'high', 'xhigh', 'max']);
 const CODEX_EFFORT_LEVELS = new Set<EffortLevel>(['minimal', 'low', 'medium', 'high', 'xhigh']);
@@ -38,11 +38,12 @@ export function normalizeEffortForProvider(
   provider: HistorySource | string | null | undefined,
 ): EffortLevel {
   if (!isEffortLevel(effort)) {
+    if (provider === 'codex') return 'high';
     return DEFAULT_EFFORT;
   }
 
   if (provider === 'codex' && !CODEX_EFFORT_LEVELS.has(effort)) {
-    return DEFAULT_EFFORT;
+    return 'high';
   }
 
   if (provider !== 'codex' && !CLAUDE_EFFORT_LEVELS.has(effort)) {

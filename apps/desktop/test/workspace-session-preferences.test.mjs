@@ -56,7 +56,7 @@ test('keeps history composer permission and effort per selected session', async 
   }), {
     envName: 'Kimi',
     permMode: 'dev',
-    effort: 'high',
+    effort: 'max',
   });
 
   assert.deepEqual(resolveHistorySessionControls({
@@ -76,5 +76,5 @@ test('normalizes unsupported effort levels for the selected provider', async () 
 
   assert.equal(normalizeEffortForProvider('max', 'codex'), 'high');
   assert.equal(normalizeEffortForProvider('max', 'claude'), 'max');
-  assert.equal(normalizeEffortForProvider(null, 'claude'), 'high');
+  assert.equal(normalizeEffortForProvider(null, 'claude'), 'max');
 });

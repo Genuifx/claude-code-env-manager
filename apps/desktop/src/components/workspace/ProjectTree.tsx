@@ -231,7 +231,7 @@ export const ProjectTree = memo(function ProjectTree({
   }, [decorationsBySessionKey, resolveEnvironment, t]);
 
   return (
-    <div className="w-[280px] shrink-0 flex flex-col border-r border-border/40 bg-surface backdrop-blur-xl">
+    <div className="w-[280px] shrink-0 flex flex-col bg-sidebar backdrop-blur-xl">
       {/* Header: Dual Launch Button + Search */}
       <div className="shrink-0 p-3 flex flex-col gap-2">
         <AgentLaunchSplitButton
@@ -428,7 +428,7 @@ export const ProjectTree = memo(function ProjectTree({
 
       {/* Footer stats */}
       {totalSessions > 0 && (
-        <div className="shrink-0 px-3 py-2 border-t border-border-subtle text-2xs text-muted-foreground">
+        <div className="shrink-0 px-3 py-2 border-t border-border/60 text-2xs text-muted-foreground">
           {totalProjects} {t('history.allProjects').toLowerCase()} · {totalSessions}{' '}
           {t('workspace.projectSessions')}
         </div>
