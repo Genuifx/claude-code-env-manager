@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.33
+
+### Patch Changes
+
+- Add a cold-start splash screen and settle native interactive prompt replies.
+
 ## 2.0.0-beta.32
 
 ### Patch Changes
