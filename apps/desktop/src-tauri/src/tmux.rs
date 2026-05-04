@@ -413,7 +413,7 @@ impl TmuxManager {
         resolve_tmux_binary().map(|_| ())
     }
 
-    fn has_session(&self, session_name: &str) -> Result<bool, String> {
+    pub fn has_session(&self, session_name: &str) -> Result<bool, String> {
         let status = tmux_command()?
             .args(["has-session", "-t", session_name])
             .stdin(Stdio::null())

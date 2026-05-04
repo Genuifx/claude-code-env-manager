@@ -194,24 +194,26 @@ export function extractToolSummary(name: string | undefined, input: unknown): st
     case 'Read':
     case 'Write':
     case 'Edit': {
-      const fp = obj.file_path as string | undefined;
+      const fp = (obj.file_path as string) || (typeof obj.summary === 'string' ? obj.summary : '');
       if (!fp) return '';
       const parts = fp.split('/');
       return parts.length > 2 ? parts.slice(-2).join('/') : fp;
     }
     case 'Bash': {
-      const cmd = (obj.command as string) || '';
+      const cmd = ((obj.command as string) || (typeof obj.summary === 'string' ? obj.summary : ''));
       return cmd.length > 60 ? `${cmd.slice(0, 57)}...` : cmd;
     }
     case 'Glob':
-    case 'Grep':
-      return (obj.pattern as string) || '';
+    case 'Grep': {
+      const pat = (obj.pattern as string) || (typeof obj.summary === 'string' ? obj.summary : '');
+      return pat || '';
+    }
     case 'Task': {
-      const desc = (obj.description as string) || (obj.prompt as string) || '';
+      const desc = (obj.description as string) || (obj.prompt as string) || (typeof obj.summary === 'string' ? obj.summary : '') || '';
       return desc.length > 50 ? `${desc.slice(0, 47)}...` : desc;
     }
     case 'WebFetch': {
-      const url = (obj.url as string) || '';
+      const url = (obj.url as string) || (typeof obj.summary === 'string' ? obj.summary : '') || '';
       return url.length > 50 ? `${url.slice(0, 47)}...` : url;
     }
     default: {

@@ -22,6 +22,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { PERMISSION_PRESETS } from '@ccem/core/browser';
@@ -185,31 +186,33 @@ export function ComposerControls({
               {t('workspace.environmentLabel')}
             </div>
           </div>
-          <div className="min-h-0 overflow-y-auto p-1.5 pt-0">
-            {environments.map((environment) => (
-              <button
-                key={environment.name}
-                type="button"
-                className={cn(
-                  'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm outline-none',
-                  'cursor-pointer transition-colors',
-                  'glass-dropdown-item',
-                  environment.name === envName && 'text-primary',
-                )}
-                onClick={() => {
-                  onEnvChange(environment.name);
-                  setEnvEffortOpen(false);
-                }}
-              >
-                <EnvironmentLobeIcon
-                  hint={resolveEnvironmentIconHint(environment)}
-                  size={13}
-                />
-                <span className="flex-1 text-left">{environment.name}</span>
-                {environment.name === envName && <Check className="h-3.5 w-3.5 text-primary" />}
-              </button>
-            ))}
-          </div>
+          <ScrollArea className="min-h-0 max-h-[200px]">
+            <div className="p-1.5 pt-0">
+              {environments.map((environment) => (
+                <button
+                  key={environment.name}
+                  type="button"
+                  className={cn(
+                    'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm outline-none',
+                    'cursor-pointer transition-colors',
+                    'glass-dropdown-item',
+                    environment.name === envName && 'text-primary',
+                  )}
+                  onClick={() => {
+                    onEnvChange(environment.name);
+                    setEnvEffortOpen(false);
+                  }}
+                >
+                  <EnvironmentLobeIcon
+                    hint={resolveEnvironmentIconHint(environment)}
+                    size={13}
+                  />
+                  <span className="flex-1 text-left">{environment.name}</span>
+                  {environment.name === envName && <Check className="h-3.5 w-3.5 text-primary" />}
+                </button>
+              ))}
+            </div>
+          </ScrollArea>
         </PopoverContent>
       </Popover>
 

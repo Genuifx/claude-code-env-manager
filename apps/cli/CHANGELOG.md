@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.32
+
+### Patch Changes
+
+- Persist interactive prompt replies and keep workspace transcript order stable.
+
 ## 2.0.0-beta.31
 
 ### Patch Changes

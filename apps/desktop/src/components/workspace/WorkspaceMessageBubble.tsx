@@ -26,6 +26,10 @@ import type {
   ConversationContentBlock,
   ConversationMessageData,
 } from '@/features/conversations/types';
+import {
+  COMPACT_FAILED_SUMMARY_TOKEN,
+  COMPACTING_SUMMARY_TOKEN,
+} from './workspaceEventTranscript';
 
 interface WorkspaceMessageBubbleProps {
   message: ConversationMessageData;
@@ -560,6 +564,7 @@ function ToolInputContext({ block }: { block: ConversationContentBlock }) {
   const input = block.input as Record<string, unknown> | undefined;
   if (!input || typeof input !== 'object') return null;
 
+  const summaryStr = typeof input.summary === 'string' && input.summary.length > 0 ? input.summary : undefined;
   const fields: { label: string; value: string }[] = [];
 
   switch (block.name) {
@@ -568,6 +573,7 @@ function ToolInputContext({ block }: { block: ConversationContentBlock }) {
       const path = typeof input.path === 'string' ? input.path : '';
       const glob = typeof input.glob === 'string' ? input.glob : '';
       if (pattern) fields.push({ label: 'pattern', value: pattern });
+      else if (summaryStr) fields.push({ label: 'summary', value: summaryStr });
       if (path) fields.push({ label: 'in', value: path });
       if (glob) fields.push({ label: 'filter', value: glob });
       break;
@@ -577,6 +583,7 @@ function ToolInputContext({ block }: { block: ConversationContentBlock }) {
       const offset = typeof input.offset === 'number' ? input.offset : undefined;
       const limit = typeof input.limit === 'number' ? input.limit : undefined;
       if (fp) fields.push({ label: 'file', value: fp });
+      else if (summaryStr) fields.push({ label: 'file', value: summaryStr });
       if (offset !== undefined) fields.push({ label: 'offset', value: String(offset) });
       if (limit !== undefined) fields.push({ label: 'limit', value: String(limit) });
       break;
@@ -584,12 +591,14 @@ function ToolInputContext({ block }: { block: ConversationContentBlock }) {
     case 'Write': {
       const fp = typeof input.file_path === 'string' ? input.file_path : '';
       if (fp) fields.push({ label: 'file', value: fp });
+      else if (summaryStr) fields.push({ label: 'file', value: summaryStr });
       break;
     }
     case 'Glob': {
       const pattern = typeof input.pattern === 'string' ? input.pattern : '';
       const path = typeof input.path === 'string' ? input.path : '';
       if (pattern) fields.push({ label: 'pattern', value: pattern });
+      else if (summaryStr) fields.push({ label: 'summary', value: summaryStr });
       if (path) fields.push({ label: 'in', value: path });
       break;
     }
@@ -599,15 +608,19 @@ function ToolInputContext({ block }: { block: ConversationContentBlock }) {
         fields.push({ label: 'command', value: `${cmd.slice(0, 117)}...` });
       } else if (cmd) {
         fields.push({ label: 'command', value: cmd });
+      } else if (summaryStr) {
+        fields.push({ label: 'command', value: summaryStr });
       }
       break;
     }
     case 'WebFetch': {
       const url = typeof input.url === 'string' ? input.url : '';
       if (url) fields.push({ label: 'url', value: url });
+      else if (summaryStr) fields.push({ label: 'url', value: summaryStr });
       break;
     }
     default:
+      if (summaryStr) fields.push({ label: 'input', value: summaryStr });
       break;
   }
 
@@ -854,7 +867,7 @@ function WorkspaceToolDigestComponent({
             {t('workspace.processedLabel')}
           </span>
           {durationLabel ? (
-            <span className="text-[12px] font-normal text-muted-foreground/55">{durationLabel}</span>
+            <span className="shrink-0 whitespace-nowrap text-[12px] font-normal text-muted-foreground/55">{durationLabel}</span>
           ) : null}
           <span className="min-w-0 truncate text-[12px] text-muted-foreground/55">{summary}</span>
         </div>
@@ -1080,6 +1093,12 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
   const { t } = useLocale();
   const isUser = message.msgType === 'user' || message.msgType === 'human';
   const isSummary = message.msgType === 'summary';
+  const isCompactingSummary = message.summary === COMPACTING_SUMMARY_TOKEN;
+  const summaryLabel = isCompactingSummary
+    ? t('history.compactInProgress')
+    : message.summary === COMPACT_FAILED_SUMMARY_TOKEN
+      ? t('history.compactFailed')
+      : message.summary || t('history.summaryLabel');
   const currentRole = isUser ? 'user' : 'assistant';
   const spacingClass = prevRole == null ? 'mt-0' : prevRole === currentRole ? 'mt-4' : 'mt-8';
 
@@ -1124,8 +1143,9 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
   if (isSummary) {
     return (
       <div className="my-6 flex justify-center">
-        <div className="rounded-full border border-border/50 bg-surface px-3 py-1.5 text-[11px] text-muted-foreground/80">
-          {message.summary || t('history.summaryLabel')}
+        <div className="inline-flex items-center gap-2 rounded-full border border-border/50 bg-surface px-3 py-1.5 text-[11px] text-muted-foreground/80">
+          {isCompactingSummary ? <LoaderCircle className="h-3 w-3 animate-spin" /> : null}
+          {summaryLabel}
         </div>
       </div>
     );

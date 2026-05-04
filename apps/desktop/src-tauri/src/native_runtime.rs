@@ -539,11 +539,6 @@ impl NativeRuntimeManager {
     }
 
     pub fn stop_session(self: &Arc<Self>, runtime_id: &str) -> Result<(), String> {
-        self.update_record(runtime_id, |record| {
-            record.status = "stopped".to_string();
-            record.is_active = false;
-            record.updated_at = Utc::now();
-        })?;
         self.append_event(
             runtime_id,
             SessionEventPayload::SessionCompleted {
@@ -551,8 +546,19 @@ impl NativeRuntimeManager {
             },
         )?;
         if self.request_child_stop(runtime_id)? {
-            self.schedule_force_kill(runtime_id.to_string());
+            // Graceful stop — the helper aborts the current turn and stays alive.
+            // Mark as interrupted so the frontend re-enables the composer for continued use.
+            self.update_record(runtime_id, |record| {
+                record.status = "interrupted".to_string();
+                record.updated_at = Utc::now();
+            })?;
         } else {
+            // Hard stop — the child process was already gone.
+            self.update_record(runtime_id, |record| {
+                record.status = "stopped".to_string();
+                record.is_active = false;
+                record.updated_at = Utc::now();
+            })?;
             self.kill_child(runtime_id)?;
             self.remove_handle(runtime_id)?;
         }

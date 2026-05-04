@@ -16605,6 +16605,56 @@ function handleClaudePartialEvent(rawEvent) {
     });
   }
 }
+function handleClaudeCompactBoundary(message) {
+  const metadata = message.compact_metadata && typeof message.compact_metadata === "object" ? message.compact_metadata : {};
+  const trigger = typeof metadata.trigger === "string" ? metadata.trigger : void 0;
+  const preTokens = typeof metadata.pre_tokens === "number" ? metadata.pre_tokens : void 0;
+  const postTokens = typeof metadata.post_tokens === "number" ? metadata.post_tokens : void 0;
+  const parts = ["Claude compacted the context."];
+  if (trigger === "manual" || trigger === "auto") {
+    parts.push(`trigger=${trigger}`);
+  }
+  if (preTokens !== void 0) {
+    parts.push(`pre_tokens=${preTokens}`);
+  }
+  if (postTokens !== void 0) {
+    parts.push(`post_tokens=${postTokens}`);
+  }
+  emitEvent({
+    type: "lifecycle",
+    stage: "compact_completed",
+    detail: parts.join(" ")
+  });
+}
+function handleClaudeStatusMessage(message) {
+  const compactResult = message.compact_result;
+  if (compactResult === "success") {
+    emitEvent({
+      type: "lifecycle",
+      stage: "compact_completed",
+      detail: "Claude compacted the context."
+    });
+    return true;
+  }
+  if (compactResult === "failed") {
+    const compactError = typeof message.compact_error === "string" && message.compact_error.trim() ? message.compact_error.trim() : "Claude failed to compact the context.";
+    emitEvent({
+      type: "lifecycle",
+      stage: "compact_failed",
+      detail: compactError
+    });
+    return true;
+  }
+  if (message.status === "compacting") {
+    emitEvent({
+      type: "lifecycle",
+      stage: "compacting",
+      detail: "Claude is compacting the context."
+    });
+    return true;
+  }
+  return false;
+}
 function applySettingsToInitCommand(settings) {
   if (!initCommand) return false;
   if (settings.permMode !== void 0) initCommand.perm_mode = settings.permMode;
@@ -16769,7 +16819,14 @@ async function consumeClaudeMessages() {
       }
       continue;
     }
+    if (message.type === "system" && message.subtype === "compact_boundary") {
+      handleClaudeCompactBoundary(message);
+      continue;
+    }
     if (message.type === "system" && message.subtype === "status") {
+      if (handleClaudeStatusMessage(message)) {
+        continue;
+      }
       const statusLabel = message.status || "idle";
       emitEvent({
         type: "lifecycle",
@@ -16844,7 +16901,8 @@ async function ensureClaudeSession() {
   }
   if (!claudeConsumeLoop) {
     claudeConsumeLoop = consumeClaudeMessages().catch((error) => {
-      if (stopped) {
+      const isAbort = error instanceof Error && error.name === "AbortError";
+      if (stopped || isAbort) {
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
@@ -17096,16 +17154,19 @@ async function runQueuedTurns() {
       emitStatus("ready", "Ready for the next prompt.");
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    emitEvent({
-      type: "stderr_line",
-      line: message
-    });
-    emitEvent({
-      type: "session_completed",
-      reason: message
-    });
-    emitStatus("error", message);
+    const isAbort = error instanceof Error && error.name === "AbortError";
+    if (!isAbort) {
+      const message = error instanceof Error ? error.message : String(error);
+      emitEvent({
+        type: "stderr_line",
+        line: message
+      });
+      emitEvent({
+        type: "session_completed",
+        reason: message
+      });
+      emitStatus("error", message);
+    }
   } finally {
     activeTurn = false;
     currentAbortController = null;
@@ -17229,8 +17290,13 @@ async function handleCommand(command) {
     pendingClaudeInteractivePrompts.clear();
     claudeInputQueue?.close();
     currentClaudeQuery?.close();
-    emitStatus("stopped", "Native runtime helper stopped.");
-    setTimeout(() => process2.exit(0), 20);
+    teardownClaudeSession();
+    teardownCodexSession(false);
+    activeTurn = false;
+    currentAbortController = null;
+    stopped = false;
+    emitStatus("ready", "Turn interrupted. Ready for the next prompt.");
+    return;
   }
 }
 var rl = createInterface({

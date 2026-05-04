@@ -179,6 +179,10 @@ function hasImmediateAttentionEvent(events: SessionEventRecord[]) {
 function hasSummaryBoundaryEvent(events: SessionEventRecord[]) {
   return events.some((event) =>
     event.payload.type === 'session_completed'
+    || (
+      event.payload.type === 'lifecycle'
+      && ['compacting', 'compact_completed', 'compact_failed'].includes(event.payload.stage)
+    )
     || event.payload.type === 'permission_required'
     || event.payload.type === 'permission_responded'
     || event.payload.type === 'terminal_prompt_required'

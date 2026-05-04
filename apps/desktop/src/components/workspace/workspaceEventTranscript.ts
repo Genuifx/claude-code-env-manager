@@ -4,6 +4,9 @@ import type {
 } from '@/features/conversations/types';
 import type { SessionEventRecord } from '@/lib/tauri-ipc';
 
+export const COMPACTING_SUMMARY_TOKEN = '__ccem_context_compacting__';
+export const COMPACT_FAILED_SUMMARY_TOKEN = '__ccem_context_compact_failed__';
+
 export interface LocalUserPrompt {
   id: string;
   text: string;
@@ -194,6 +197,36 @@ function createAssistantTextMessage(
     timestamp: occurredAt,
     segmentIndex: 0,
     isCompactBoundary: false,
+  };
+}
+
+function createSummaryMessage(
+  id: string,
+  summary: string,
+  occurredAt?: number,
+): ConversationMessageData {
+  return {
+    msgType: 'summary',
+    uuid: id,
+    content: null,
+    summary,
+    timestamp: occurredAt,
+    segmentIndex: 0,
+    isCompactBoundary: false,
+  };
+}
+
+function createCompactBoundaryMessage(
+  id: string,
+  occurredAt?: number,
+): ConversationMessageData {
+  return {
+    msgType: 'compact_boundary',
+    uuid: id,
+    content: 'Conversation compacted',
+    timestamp: occurredAt,
+    segmentIndex: 0,
+    isCompactBoundary: true,
   };
 }
 
@@ -626,6 +659,30 @@ export function buildMessagesFromEvents(
     next.push(createAssistantTextMessage(id, trimmedText, occurredAt));
   };
 
+  const removeTrailingCompactingSummary = () => {
+    const last = next[next.length - 1];
+    if (last?.msgType === 'summary' && last.summary === COMPACTING_SUMMARY_TOKEN) {
+      next.pop();
+    }
+  };
+
+  const appendCompactingSummary = (event: SessionEventRecord, occurredAt?: number) => {
+    const last = next[next.length - 1];
+    if (last?.msgType === 'summary' && last.summary === COMPACTING_SUMMARY_TOKEN) {
+      return;
+    }
+    next.push(createSummaryMessage(`compact-status-${event.seq}`, COMPACTING_SUMMARY_TOKEN, occurredAt));
+  };
+
+  const appendCompactBoundary = (event: SessionEventRecord, occurredAt?: number) => {
+    removeTrailingCompactingSummary();
+    const last = next[next.length - 1];
+    if (last?.isCompactBoundary) {
+      return;
+    }
+    next.push(createCompactBoundaryMessage(`compact-boundary-${event.seq}`, occurredAt));
+  };
+
   const consumeMatchingPrompt = (text: string) => {
     const key = promptTextKey(text);
     if (!key || promptQueue.length === 0) {
@@ -756,6 +813,29 @@ export function buildMessagesFromEvents(
       case 'lifecycle': {
         if (event.payload.stage === 'error') {
           appendErrorMessage(`runtime-error-${event.seq}`, event.payload.detail, occurredAt);
+          break;
+        }
+        if (event.payload.stage === 'compacting') {
+          flushPendingTurn();
+          appendCompactingSummary(event, occurredAt);
+          break;
+        }
+        if (event.payload.stage === 'compact_completed') {
+          flushPendingTurn();
+          appendCompactBoundary(event, occurredAt);
+          break;
+        }
+        if (event.payload.stage === 'compact_failed') {
+          flushPendingTurn();
+          removeTrailingCompactingSummary();
+          const compactFailureDetail = event.payload.detail?.trim();
+          next.push(createSummaryMessage(
+            `compact-failed-${event.seq}`,
+            compactFailureDetail && compactFailureDetail !== 'Claude failed to compact the context.'
+              ? compactFailureDetail
+              : COMPACT_FAILED_SUMMARY_TOKEN,
+            occurredAt,
+          ));
           break;
         }
         if (event.payload.stage === 'turn_started' || event.payload.stage === 'turn_completed') {

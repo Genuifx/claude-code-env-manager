@@ -99,6 +99,37 @@ test('live transcript appends streaming thinking deltas without inserting paragr
   ]);
 });
 
+test('live transcript renders context compaction progress and replaces it with a boundary', async () => {
+  const {
+    buildMessagesFromEvents,
+    COMPACTING_SUMMARY_TOKEN,
+  } = await importWorkspaceEventTranscript();
+
+  const base = [
+    { msgType: 'user', uuid: 'user-1', content: 'long task', segmentIndex: 0, isCompactBoundary: false },
+  ];
+  const compacting = buildMessagesFromEvents(base, [], [
+    event(1, { type: 'lifecycle', stage: 'turn_started', detail: '' }),
+    event(2, { type: 'assistant_chunk', text: 'Working before compact.' }),
+    event(3, { type: 'lifecycle', stage: 'compacting', detail: 'Claude is compacting the context.' }),
+  ]);
+
+  assert.equal(compacting[1].msgType, 'assistant');
+  assert.equal(compacting[2].msgType, 'summary');
+  assert.equal(compacting[2].summary, COMPACTING_SUMMARY_TOKEN);
+
+  const completed = buildMessagesFromEvents(base, [], [
+    event(1, { type: 'lifecycle', stage: 'turn_started', detail: '' }),
+    event(2, { type: 'assistant_chunk', text: 'Working before compact.' }),
+    event(3, { type: 'lifecycle', stage: 'compacting', detail: 'Claude is compacting the context.' }),
+    event(4, { type: 'lifecycle', stage: 'compact_completed', detail: 'Claude compacted the context.' }),
+  ]);
+
+  assert.equal(completed[2].msgType, 'compact_boundary');
+  assert.equal(completed[2].isCompactBoundary, true);
+  assert.equal(completed.some((message) => message.summary === COMPACTING_SUMMARY_TOKEN), false);
+});
+
 test('live transcript records process timing metadata for duration display', async () => {
   const { buildMessagesFromEvents } = await importWorkspaceEventTranscript();
 
