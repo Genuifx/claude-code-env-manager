@@ -1187,7 +1187,6 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     <div className="flex h-full min-h-0 flex-col items-center px-8">
       <div className="flex flex-1 flex-col items-center justify-end">
         <div className="mb-6 flex items-center justify-center gap-3">
-          <img src="/logo.png" alt="" aria-hidden="true" className="h-10 w-10 rounded-xl" />
           <h2 className="text-2xl font-semibold tracking-tight text-foreground">
             {t('workspace.composeTitle')}
           </h2>

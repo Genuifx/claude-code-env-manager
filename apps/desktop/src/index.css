@@ -454,11 +454,13 @@
 }
 
 :root {
+  --ccem-titlebar-height: 48px;
   --ccem-sidebar-toggle-size: 28px;
   --ccem-sidebar-toggle-gap: 4px;
   --ccem-sidebar-toggle-clearance: 10px;
   --ccem-window-controls-inset-left: 24px;
-  --ccem-window-controls-top: 11px;
+  --ccem-window-controls-size: 12px;
+  --ccem-window-controls-top: 18px;
   --ccem-sidebar-toggle-leading-space: calc(
     var(--ccem-window-controls-width, 0px)
     + var(--ccem-sidebar-toggle-gap)
@@ -491,8 +493,8 @@
 }
 
 .mac-window-controls-button {
-  width: 12px;
-  height: 12px;
+  width: var(--ccem-window-controls-size);
+  height: var(--ccem-window-controls-size);
   border: none;
   border-radius: 999px;
   padding: 0;
@@ -580,8 +582,8 @@
   display: none;
 }
 
-/* Constrain the Radix content wrapper only for transcript surfaces with wide code blocks. */
-.workspace-transcript-scroll [data-radix-scroll-area-viewport] > div {
+/* Keep Radix's generated content wrapper from sizing narrow panels by content. */
+.ccem-scroll-area-viewport > div {
   display: block !important;
   max-width: 100% !important;
 }
