@@ -1,5 +1,40 @@
 # ccem
 
+## 2.0.0
+
+### Patch Changes
+
+- b8bf1ca: prepare build for next generation
+- ea9fc00: Run CI and release workflows on Node 22 for pnpm compatibility.
+- ec6e06b: Fix Desktop tmux detection for macOS GUI launches that do not inherit the user's shell PATH.
+- f910708: Improve workspace history, session title handling, and desktop dashboard polish.
+- 2da23d7: Add a cold-start splash screen and settle native interactive prompt replies.
+- b56be3e: Ship the GitHub release backed desktop updater in the next beta.
+- f740ecb: Use an Intel macOS runner for desktop x64 release builds.
+- 17d40c2: Fix desktop release notes generation in GitHub Actions.
+- 75dd7fc: Ship the redesigned workspace native sessions, live tool call rendering fixes, and supporting desktop workflow polish in the next beta release.
+- 096b967: Prefer the newest installed Claude CLI when launching desktop native workspace sessions.
+- 8386b41: Trigger the next beta release for the latest CLI and Desktop changes.
+- dcd99b3: Ship the workspace/history view split and the new minimal workspace transcript in the next beta release.
+- ad30d8a: Prepare next beta release for ccem.
+- 6597b73: Persist interactive prompt replies and keep workspace transcript order stable.
+- c37d7cd: Improve desktop glass rendering stability and overall UI responsiveness on macOS.
+- 7824155: Stabilize live workspace transcript ordering, streaming thinking reduction, image prompts, and process duration display.
+- 323e4fd: Ship the next beta with OpenCode desktop integration and the latest desktop runtime improvements.
+- c0702d8: Fix production desktop native session creation by resolving the packaged native runtime helper resource path.
+- 6f6a50e: Fix production desktop native workspace chat handling when helper output arrives as JSONL chunks or reports startup errors.
+- fd4d862: Fix production desktop native Claude sessions by passing the user's shell PATH to the native runtime helper.
+- 26edd77: Improve desktop performance, reduce unnecessary re-renders, and remove the window blur fallback on focus changes.
+- 9dc7194: Publish a clean beta release after fixing the GLM preset test expectation.
+- 24ced8a: Update GitHub Actions pnpm setup runtime for Node 24 compatibility.
+- 65e42f8: Release the desktop AskUserQuestion parity work, including multi-select answers, inline custom feedback, and structured prompt submission.
+- 3c15af8: Add Wechat support though official channel.
+- ecd8156: Release the sidebar collapse, window control spacing, and titlebar toggle polish in the next beta.
+- 3450b0c: Release the workspace session icon upgrade, loading indicators, provenance tracking, and fullscreen window chrome fixes in the next beta.
+- 5a8ab6e: Stabilize native workspace session terminal handling and clean up orphaned CCEM tmux sessions on startup.
+- 22a3a4e: Release the workspace scroll, fullscreen chrome alignment, and compose header polish in the next beta.
+- d885099: Stabilize workspace transcript rendering and native session replay.
+
 ## 2.0.0-beta.35
 
 ### Patch Changes
