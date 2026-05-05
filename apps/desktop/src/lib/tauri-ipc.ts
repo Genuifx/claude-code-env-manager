@@ -49,6 +49,10 @@ export interface TauriCommands {
 
   // 应用配置
   get_app_config: [void, AppConfig];
+  get_app_version: [void, string];
+  check_app_update: [void, AppUpdateMetadata | null];
+  install_app_update: [void, void];
+  restart_app: [void, void];
   add_favorite: [{ path: string; name: string }, void];
   remove_favorite: [{ path: string }, void];
   add_recent: [{ path: string }, void];
@@ -425,6 +429,16 @@ export interface AppConfig {
   vscodeProjects: VSCodeProject[];
   jetbrainsProjects: JetBrainsProject[];
   defaultWorkingDir?: string;
+}
+
+export interface AppUpdateMetadata {
+  version: string;
+  currentVersion: string;
+  channel: 'beta' | 'stable';
+  releaseTag: string;
+  releaseUrl: string;
+  date?: string | null;
+  body?: string | null;
 }
 
 export interface FavoriteProject {

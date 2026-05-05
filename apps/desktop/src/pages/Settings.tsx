@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Moon, Sun, MonitorSmartphone, Lightbulb, Terminal, CheckCircle2, XCircle, Copy, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search, FolderOpen, X, Sparkles, Clock, Image, BellRing } from 'lucide-react';
+import { Moon, Sun, MonitorSmartphone, Lightbulb, Terminal, CheckCircle2, XCircle, Copy, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search, FolderOpen, X, Sparkles, Clock, Image, BellRing, RefreshCw, Download, RotateCw } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
@@ -13,6 +13,7 @@ import { SettingsSkeleton } from '@/components/ui/skeleton-states';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { setPerformancePreference as applyPerformancePreference, type PerformancePreference } from '@/lib/performance';
 import { scheduleAfterFirstPaint } from '@/lib/idle';
+import type { AppUpdateMetadata } from '@/lib/tauri-ipc';
 import { shallow } from 'zustand/shallow';
 
 const MODE_DISPLAY_NAMES: Record<PermissionModeName, string> = {
@@ -44,12 +45,23 @@ interface InstallStatusState {
   tmux: boolean | null;
 }
 
+type UpdateStatus = 'idle' | 'checking' | 'available' | 'installing' | 'ready';
+
+const CCEM_REPO_URL = 'https://github.com/Genuifx/claude-code-env-manager';
+
 function normalizePerformanceMode(value: unknown): PerformancePreference {
   if (value === 'default' || value === 'reduced' || value === 'auto') {
     return value;
   }
 
   return 'auto';
+}
+
+function formatMessage(template: string, values: Record<string, string>) {
+  return Object.entries(values).reduce(
+    (message, [key, value]) => message.split(`{${key}}`).join(value),
+    template
+  );
 }
 
 export function Settings() {
@@ -88,6 +100,10 @@ export function Settings() {
   const [aiEnhanced, setAiEnhanced] = useState(false);
   const [aiEnvName, setAiEnvName] = useState<string | null>(null);
   const [webkitVersion, setWebkitVersion] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>('idle');
+  const [updateInfo, setUpdateInfo] = useState<AppUpdateMetadata | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
   const loaded = useRef(false);
 
   // Load CLI install status in parallel so the About card updates once.
@@ -130,6 +146,29 @@ export function Settings() {
   useEffect(() => {
     const match = navigator.userAgent.match(/AppleWebKit\/([\d.]+)/i);
     setWebkitVersion(match?.[1] ?? null);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAppVersion = async () => {
+      try {
+        const version = await invoke<string>('get_app_version');
+        if (!cancelled) {
+          setAppVersion(version);
+        }
+      } catch {
+        if (!cancelled) {
+          setAppVersion(null);
+        }
+      }
+    };
+
+    void loadAppVersion();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Load settings on mount
@@ -220,6 +259,53 @@ export function Settings() {
   useEffect(() => {
     applyPerformancePreference(performanceMode);
   }, [performanceMode]);
+
+  const handleCheckUpdate = async () => {
+    setUpdateStatus('checking');
+    setUpdateError(null);
+
+    try {
+      const nextUpdate = await invoke<AppUpdateMetadata | null>('check_app_update');
+
+      if (!nextUpdate) {
+        setUpdateInfo(null);
+        setUpdateStatus('idle');
+        toast.info(t('settings.upToDate'));
+        return;
+      }
+
+      setUpdateInfo(nextUpdate);
+      setUpdateStatus('available');
+      toast.success(formatMessage(t('settings.updateAvailableToast'), {
+        version: nextUpdate.version,
+      }));
+    } catch (error) {
+      const message = String(error);
+      setUpdateError(message);
+      setUpdateStatus('idle');
+      toast.error(formatMessage(t('settings.updateCheckFailed'), { error: message }));
+    }
+  };
+
+  const handleInstallUpdate = async () => {
+    setUpdateStatus('installing');
+    setUpdateError(null);
+
+    try {
+      await invoke('install_app_update');
+      setUpdateStatus('ready');
+      toast.success(t('settings.updateInstalled'));
+    } catch (error) {
+      const message = String(error);
+      setUpdateError(message);
+      setUpdateStatus(updateInfo ? 'available' : 'idle');
+      toast.error(formatMessage(t('settings.updateInstallFailed'), { error: message }));
+    }
+  };
+
+  const handleRestartForUpdate = async () => {
+    await invoke('restart_app');
+  };
 
   // Auto-save whenever settings change (skip initial load)
   useEffect(() => {
@@ -604,7 +690,7 @@ export function Settings() {
               {t('settings.version')}
             </span>
             <span className="text-sm font-medium text-foreground">
-              v2.0.0
+              {appVersion ? `v${appVersion}` : t('settings.notAvailable')}
             </span>
           </div>
           <div className="flex items-center justify-between">
@@ -686,14 +772,57 @@ export function Settings() {
               {t('settings.tmuxInstallHint')}
             </p>
           )}
-          <div className="flex gap-2 pt-1">
-            <Button variant="outline" size="sm" className="glass-btn-outline" onClick={() => toast.info(t('settings.upToDate'))}>
-              {t('settings.checkUpdate')}
+          {updateInfo && (
+            <div className="rounded-lg glass-subtle px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground">
+                  {formatMessage(t('settings.updateAvailable'), { version: updateInfo.version })}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {updateInfo.channel === 'beta' ? t('settings.updateChannelBeta') : t('settings.updateChannelStable')}
+                  <span className="mx-1">·</span>
+                  <span className="font-mono">{updateInfo.releaseTag}</span>
+                </p>
+              </div>
+              {updateStatus === 'ready' ? (
+                <Button variant="outline" size="sm" className="glass-btn-outline shrink-0" onClick={handleRestartForUpdate}>
+                  <RotateCw className="w-3.5 h-3.5 mr-1.5" />
+                  {t('settings.restartToUpdate')}
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="glass-btn-outline shrink-0"
+                  disabled={updateStatus === 'installing'}
+                  onClick={handleInstallUpdate}
+                >
+                  <Download className="w-3.5 h-3.5 mr-1.5" />
+                  {updateStatus === 'installing' ? t('settings.installingUpdate') : t('settings.downloadUpdate')}
+                </Button>
+              )}
+            </div>
+          )}
+          {updateError && (
+            <p className="text-xs text-destructive">
+              {updateError}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2 pt-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="glass-btn-outline"
+              disabled={updateStatus === 'checking' || updateStatus === 'installing'}
+              onClick={handleCheckUpdate}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${updateStatus === 'checking' ? 'animate-spin' : ''}`} />
+              {updateStatus === 'checking' ? t('settings.checkingUpdate') : t('settings.checkUpdate')}
             </Button>
-            <Button variant="outline" size="sm" className="glass-btn-outline" onClick={() => window.open('https://github.com/anthropics/claude-code-env-manager', '_blank')}>
+            <Button variant="outline" size="sm" className="glass-btn-outline" onClick={() => window.open(updateInfo?.releaseUrl ?? CCEM_REPO_URL, '_blank')}>
               GitHub
             </Button>
-            <Button variant="outline" size="sm" className="glass-btn-outline" onClick={() => window.open('https://github.com/anthropics/claude-code-env-manager/issues', '_blank')}>
+            <Button variant="outline" size="sm" className="glass-btn-outline" onClick={() => window.open(`${CCEM_REPO_URL}/issues`, '_blank')}>
               {t('settings.feedback')}
             </Button>
           </div>
