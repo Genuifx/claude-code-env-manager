@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.34
+
+### Patch Changes
+
+- Ship the GitHub release backed desktop updater in the next beta.
+
 ## 2.0.0-beta.33
 
 ### Patch Changes
