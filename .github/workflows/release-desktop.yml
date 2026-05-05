@@ -28,6 +28,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release_body: ${{ steps.release-notes.outputs.release_body }}
+      current_tag: ${{ steps.release-notes.outputs.current_tag }}
+      version: ${{ steps.release-notes.outputs.version }}
 
     steps:
       - uses: actions/checkout@v6
@@ -51,6 +53,9 @@ jobs:
 
           previous_tag="$(git describe --tags --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
           version="${current_tag#v}"
+
+          echo "current_tag=${current_tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
 
           delimiter="CCEM_RELEASE_BODY_$(date +%s)"
 
@@ -145,6 +150,17 @@ jobs:
             echo "Apple code signing not configured; building unsigned artifacts"
           fi
 
+      - name: Validate updater signing config
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY is required because updater artifacts are enabled." >&2
+            echo "Generate it with: cd apps/desktop && pnpm tauri signer generate -w ~/.tauri/ccem-updater.key" >&2
+            exit 1
+          fi
+
       - name: Build and release (signed)
         if: ${{ steps.apple-signing.outputs.enabled == 'true' }}
         uses: tauri-apps/tauri-action@v0
@@ -156,6 +172,8 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
           tagName: v__VERSION__
@@ -163,6 +181,7 @@ jobs:
           releaseBody: ${{ needs.prepare-release.outputs.release_body }}
           releaseDraft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || 'false' }}
           prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
+          includeUpdaterJson: true
           args: ${{ matrix.args }}
 
       - name: Build and release (unsigned)
@@ -170,6 +189,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
           tagName: v__VERSION__
@@ -177,7 +198,107 @@ jobs:
           releaseBody: ${{ needs.prepare-release.outputs.release_body }}
           releaseDraft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || 'false' }}
           prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
+          includeUpdaterJson: true
           args: ${{ matrix.args }}
+
+  publish-updater-manifest:
+    name: Publish Updater Manifest
+    needs: [prepare-release, build-desktop]
+    runs-on: ubuntu-latest
+    if: ${{ !cancelled() && needs.build-desktop.result == 'success' }}
+
+    steps:
+      - name: Publish combined latest.json
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG_NAME: ${{ needs.prepare-release.outputs.current_tag }}
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          api="https://api.github.com/repos/${REPO}"
+          auth_headers=(
+            -H "Authorization: Bearer ${GITHUB_TOKEN}"
+            -H "Accept: application/vnd.github+json"
+            -H "X-GitHub-Api-Version: 2022-11-28"
+          )
+
+          release_json="$(mktemp)"
+          curl -fsSL "${auth_headers[@]}" "${api}/releases/tags/${TAG_NAME}" > "$release_json"
+
+          release_id="$(jq -r '.id' "$release_json")"
+          upload_url="$(jq -r '.upload_url' "$release_json" | sed 's/{.*//')"
+
+          asset_url() {
+            jq -r --arg name "$1" '.assets[] | select(.name == $name) | .browser_download_url' "$release_json" | head -n1
+          }
+
+          asset_url_any() {
+            local candidate
+            for candidate in "$@"; do
+              local url
+              url="$(asset_url "$candidate")"
+              if [[ -n "$url" && "$url" != "null" ]]; then
+                echo "$url"
+                return 0
+              fi
+            done
+          }
+
+          aarch64_bundle_url="$(asset_url_any 'CCEM.Desktop_aarch64.app.tar.gz' 'CCEM Desktop_aarch64.app.tar.gz')"
+          aarch64_sig_url="$(asset_url_any 'CCEM.Desktop_aarch64.app.tar.gz.sig' 'CCEM Desktop_aarch64.app.tar.gz.sig')"
+          x64_bundle_url="$(asset_url_any 'CCEM.Desktop_x64.app.tar.gz' 'CCEM Desktop_x64.app.tar.gz')"
+          x64_sig_url="$(asset_url_any 'CCEM.Desktop_x64.app.tar.gz.sig' 'CCEM Desktop_x64.app.tar.gz.sig')"
+
+          for value in "$aarch64_bundle_url" "$aarch64_sig_url" "$x64_bundle_url" "$x64_sig_url"; do
+            if [[ -z "$value" || "$value" == "null" ]]; then
+              echo "Missing updater bundle or signature asset for ${TAG_NAME}" >&2
+              jq -r '.assets[].name' "$release_json" >&2
+              exit 1
+            fi
+          done
+
+          aarch64_sig="$(curl -fsSL "$aarch64_sig_url" | tr -d '\r\n')"
+          x64_sig="$(curl -fsSL "$x64_sig_url" | tr -d '\r\n')"
+          pub_date="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          notes="See https://github.com/${REPO}/releases/tag/${TAG_NAME}"
+
+          jq -n \
+            --arg version "$VERSION" \
+            --arg notes "$notes" \
+            --arg pub_date "$pub_date" \
+            --arg aarch64_url "$aarch64_bundle_url" \
+            --arg aarch64_sig "$aarch64_sig" \
+            --arg x64_url "$x64_bundle_url" \
+            --arg x64_sig "$x64_sig" \
+            '{
+              version: $version,
+              notes: $notes,
+              pub_date: $pub_date,
+              platforms: {
+                "darwin-aarch64": {
+                  signature: $aarch64_sig,
+                  url: $aarch64_url
+                },
+                "darwin-x86_64": {
+                  signature: $x64_sig,
+                  url: $x64_url
+                }
+              }
+            }' > latest.json
+
+          existing_latest_id="$(jq -r '.assets[] | select(.name == "latest.json") | .id' "$release_json" | head -n1)"
+          if [[ -n "$existing_latest_id" && "$existing_latest_id" != "null" ]]; then
+            curl -fsSL -X DELETE "${auth_headers[@]}" "${api}/releases/assets/${existing_latest_id}"
+          fi
+
+          curl -fsSL -X POST \
+            "${auth_headers[@]}" \
+            -H "Content-Type: application/json" \
+            --data-binary @latest.json \
+            "${upload_url}?name=latest.json"
 
   # Universal binary (optional — combines both architectures)
   create-universal:

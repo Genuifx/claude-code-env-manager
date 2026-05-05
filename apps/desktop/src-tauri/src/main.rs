@@ -4,6 +4,7 @@
 #![allow(clippy::too_many_arguments)]
 
 mod analytics;
+mod app_updates;
 mod channel;
 mod companion;
 mod config;
@@ -2934,6 +2935,7 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_decorum::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -2953,6 +2955,7 @@ fn main() {
         .manage(telegram_bridge_manager.clone())
         .manage(weixin_bridge_manager.clone())
         .manage(proxy_debug_manager.clone())
+        .manage(app_updates::PendingUpdate::default())
         .manage(notification_prefs_state)
         .on_page_load(move |webview, payload| {
             if webview.window().label() != "main" || payload.event() != PageLoadEvent::Finished {
@@ -2979,6 +2982,10 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             companion::get_companion,
+            app_updates::get_app_version,
+            app_updates::check_app_update,
+            app_updates::install_app_update,
+            app_updates::restart_app,
             greet,
             get_system_username,
             get_environments,
