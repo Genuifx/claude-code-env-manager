@@ -1,5 +1,11 @@
 # ccem
 
+## 2.1.1
+
+### Patch Changes
+
+- 361776b: Check desktop updates from the signed updater manifest instead of the GitHub Releases API.
+
 ## 2.1.0
 
 ### Minor Changes
