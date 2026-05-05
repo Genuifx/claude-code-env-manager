@@ -1,5 +1,11 @@
 # ccem
 
+## 2.0.0-beta.35
+
+### Patch Changes
+
+- Release the workspace scroll, fullscreen chrome alignment, and compose header polish in the next beta.
+
 ## 2.0.0-beta.34
 
 ### Patch Changes
