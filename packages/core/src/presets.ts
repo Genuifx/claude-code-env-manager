@@ -73,6 +73,20 @@ export const ENV_PRESETS: Record<
     ANTHROPIC_DEFAULT_HAIKU_MODEL: 'gemma4:e4b',
     ANTHROPIC_MODEL: 'opus'
   },
+  'MiMo': {
+    ANTHROPIC_BASE_URL: 'https://api.xiaomimimo.com/anthropic',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'mimo-v2.5-pro',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'mimo-v2.5-pro',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'mimo-v2.5',
+    ANTHROPIC_MODEL: 'opus'
+  },
+  'MiMoTokenPlan': {
+    ANTHROPIC_BASE_URL: 'https://token-plan-cn.xiaomimimo.com/anthropic',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'mimo-v2.5-pro',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'mimo-v2.5-pro',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'mimo-v2.5',
+    ANTHROPIC_MODEL: 'opus'
+  },
 };
 
 export const ENV_PRESET_METADATA: Record<string, EnvPresetMetadata> = {
@@ -120,6 +134,16 @@ export const ENV_PRESET_METADATA: Record<string, EnvPresetMetadata> = {
     displayName: { zh: 'Ollama', en: 'Ollama' },
     description: { zh: '本地运行的开源大模型', en: 'Local open-source LLM runtime' },
     credentialUrl: 'https://ollama.com/',
+  },
+  'MiMo': {
+    displayName: { zh: 'MiMo', en: 'MiMo' },
+    description: { zh: '小米 MiMo 大模型按量付费', en: 'Xiaomi MiMo pay-as-you-go API' },
+    credentialUrl: 'https://platform.xiaomimimo.com/#/console/api-keys',
+  },
+  'MiMoTokenPlan': {
+    displayName: { zh: 'MiMo Token Plan', en: 'MiMo Token Plan' },
+    description: { zh: '小米 MiMo Token Plan 订阅套餐', en: 'Xiaomi MiMo Token Plan subscription' },
+    credentialUrl: 'https://platform.xiaomimimo.com/#/console/plan-manage',
   },
 };
 

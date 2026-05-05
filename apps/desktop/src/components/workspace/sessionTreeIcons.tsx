@@ -40,6 +40,7 @@ function hintFromBaseUrl(baseUrl: string | undefined): string | undefined {
   if (normalized.includes('dashscope') || normalized.includes('aliyuncs.com')) return 'qwen';
   if (normalized.includes('11434') || normalized.includes('ollama')) return 'ollama';
   if (normalized.includes('googleapis.com') || normalized.includes('generativelanguage')) return 'gemini';
+  if (normalized.includes('xiaomimimo.com')) return 'mimo';
   if (normalized.includes('anthropic.com')) return 'claude';
   return undefined;
 }

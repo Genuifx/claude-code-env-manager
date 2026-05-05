@@ -31,20 +31,59 @@ import {
   Zap,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Zhipu, Moonshot, Minimax, DeepSeek, Qwen, OpenRouter as OpenRouterIcon, Ollama } from "@lobehub/icons";
+import { Zhipu, Moonshot, Minimax, DeepSeek, Qwen, OpenRouter as OpenRouterIcon, Ollama, XiaomiMiMo } from "@lobehub/icons";
 import type { Environment } from "@/store";
 
-const PRESET_ICONS: Record<string, { icon: any; color?: string; needsContrastBg?: boolean }> = {
+type PresetIconEntry = {
+  icon: any;
+  color?: string;
+  contrastSurface?: "dark";
+  variant?: "avatar";
+};
+
+const PRESET_ICONS: Record<string, PresetIconEntry> = {
   GLM:            { icon: Zhipu,          color: '#3859FF' },
-  KIMI:           { icon: Moonshot,       color: '#fff', needsContrastBg: true },
-  KimiCodePlan:   { icon: Moonshot,       color: '#fff', needsContrastBg: true },
+  KIMI:           { icon: Moonshot,       color: '#fff', contrastSurface: "dark" },
+  KimiCodePlan:   { icon: Moonshot,       color: '#fff', contrastSurface: "dark" },
   MiniMax:        { icon: Minimax,        color: '#F23F5D' },
   DeepSeek:       { icon: DeepSeek,       color: '#4D6BFE' },
   Bailian:        { icon: Qwen,           color: '#615CED' },
   BailianCodePlan:{ icon: Qwen,           color: '#615CED' },
   OpenRouter:     { icon: OpenRouterIcon, color: '#6467F2' },
-  Ollama:         { icon: Ollama,         color: '#fff', needsContrastBg: true },
+  Ollama:         { icon: Ollama,         color: '#fff', contrastSurface: "dark" },
+  MiMo:           { icon: XiaomiMiMo,     variant: "avatar" },
+  MiMoTokenPlan:  { icon: XiaomiMiMo,     variant: "avatar" },
 };
+
+function PresetProviderIcon({ entry }: { entry?: PresetIconEntry }) {
+  if (!entry) {
+    return <Bot className="h-5 w-5 text-muted-foreground" />;
+  }
+
+  const IconComp = entry.icon;
+
+  if (entry.variant === "avatar") {
+    const AvatarIcon = IconComp.Avatar;
+    return <AvatarIcon size={20} shape="square" />;
+  }
+
+  const iconEl = (
+    <IconComp
+      size={20}
+      style={entry.color ? { color: entry.color } : undefined}
+    />
+  );
+
+  if (entry.contrastSurface === "dark") {
+    return (
+      <span className="inline-flex items-center justify-center rounded-md bg-black/75 p-0.5 dark:bg-black/50">
+        {iconEl}
+      </span>
+    );
+  }
+
+  return iconEl;
+}
 
 interface EnvironmentDialogProps {
   open: boolean;
@@ -452,20 +491,7 @@ export function EnvironmentDialog({
                       >
                         <div className="flex w-full items-center justify-between">
                           <div className="flex items-center gap-2">
-                            {(() => {
-                              const entry = PRESET_ICONS[key];
-                              if (!entry) return <Bot className="h-5 w-5 text-muted-foreground" />;
-                              const IconComp = entry.icon;
-                              const iconEl = <IconComp size={20} style={entry.color ? { color: entry.color } : undefined} />;
-                              if (entry.needsContrastBg) {
-                                return (
-                                  <span className="inline-flex items-center justify-center rounded-md bg-black/75 dark:bg-black/50 p-0.5">
-                                    {iconEl}
-                                  </span>
-                                );
-                              }
-                              return iconEl;
-                            })()}
+                            <PresetProviderIcon entry={PRESET_ICONS[key]} />
                             <span className="text-sm font-medium text-foreground">
                               {metadata?.displayName[lang] ?? key}
                             </span>

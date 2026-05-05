@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { Bot } from 'lucide-react';
-import { Claude, Codex, OpenAI, DeepSeek, Minimax, Moonshot, Zhipu, Gemini, Ollama, OpenRouter as OpenRouterIcon, Qwen } from '@lobehub/icons';
+import { Claude, Codex, OpenAI, DeepSeek, Minimax, Moonshot, Zhipu, Gemini, Ollama, OpenRouter as OpenRouterIcon, Qwen, XiaomiMiMo } from '@lobehub/icons';
 
 interface ModelIconProps {
   model?: string;
@@ -16,7 +16,7 @@ interface ModelIconProps {
 export type IconEntry = {
   icon: any;
   color?: string;
-  variant?: 'color';
+  variant?: 'color' | 'avatar';
   /** 图标是否需要深色背景衬托（用于白色/浅色图标） */
   needsContrastBg?: boolean;
 };
@@ -33,6 +33,7 @@ export function resolveIcon(model: string | undefined): IconEntry | null {
   if (m.includes('deepseek')) return { icon: DeepSeek, color: '#4D6BFE' };
   if (m.includes('minimax') || m.includes('abab')) return { icon: Minimax, color: '#F23F5D' };
   if (m.includes('moonshot') || m.includes('kimi')) return { icon: Moonshot, color: '#16191E' };
+  if (m.includes('mimo') || m.includes('xiaomimimo')) return { icon: XiaomiMiMo, variant: 'avatar' };
   if (m.includes('qwen') || m.includes('qwq') || m.includes('dashscope') || m.includes('tongyi')) return { icon: Qwen, color: '#615CED' };
   if (m.includes('glm') || m.includes('zhipu') || m.includes('chatglm')) return { icon: Zhipu, color: '#3859FF' };
   if (m.includes('gemini') || m.includes('google')) return { icon: Gemini, color: '#4285F4' };
@@ -56,6 +57,11 @@ export const ModelIcon = memo(function ModelIcon({
 
   if (entry.variant === 'color') {
     return <entry.icon.Color className={className} size={size} />;
+  }
+
+  if (entry.variant === 'avatar') {
+    const AvatarIcon = entry.icon.Avatar;
+    return <AvatarIcon className={className} size={size} shape="square" />;
   }
 
   const style = entry.color ? { color: entry.color } : undefined;
