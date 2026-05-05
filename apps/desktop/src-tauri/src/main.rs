@@ -1180,11 +1180,7 @@ fn set_native_session_runtime_perm_mode(
     runtime_id: String,
     runtime_perm_mode: Option<String>,
 ) -> Result<(), String> {
-    native_state.update_session_runtime_perm_mode(
-        &app,
-        &runtime_id,
-        runtime_perm_mode.as_deref(),
-    )
+    native_state.update_session_runtime_perm_mode(&app, &runtime_id, runtime_perm_mode.as_deref())
 }
 
 #[tauri::command]
@@ -1585,11 +1581,23 @@ fn open_interactive_session_in_terminal(
         );
     }
 
-    let target = session
-        .resolved_tmux_target()
-        .map(str::to_string)
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| format!("Session {} does not have a tmux target", session_id))?;
+    if session.status != "running" {
+        return Err(format!("Interactive session {} is not running", session_id));
+    }
+
+    let persisted_target = session.resolved_tmux_target();
+    let target = match tmux::TmuxManager::default()
+        .resolve_live_attach_target(&session_id, persisted_target)
+    {
+        Ok(target) => target,
+        Err(error) => {
+            state.update_session_status(&session_id, "stopped");
+            return Err(format!(
+                "Interactive session {} is no longer available: {}",
+                session_id, error
+            ));
+        }
+    };
 
     let attach_terminal =
         terminal_type.unwrap_or_else(|| match terminal::get_preferred_terminal() {

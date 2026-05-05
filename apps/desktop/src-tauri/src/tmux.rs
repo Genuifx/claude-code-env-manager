@@ -312,6 +312,35 @@ impl TmuxManager {
         Ok(self.get_window_info(runtime_id)?.target)
     }
 
+    pub fn resolve_live_attach_target(
+        &self,
+        runtime_id: &str,
+        persisted_target: Option<&str>,
+    ) -> Result<String, String> {
+        Self::check_tmux_installed()?;
+        let candidates = attach_target_candidates_for_runtime(
+            runtime_id,
+            &self.session_prefix,
+            persisted_target,
+        );
+
+        for target in &candidates {
+            if self.target_exists(target)? {
+                return Ok(target.clone());
+            }
+        }
+
+        Err(format!(
+            "tmux target not found for runtime {}{}",
+            runtime_id,
+            if candidates.is_empty() {
+                String::new()
+            } else {
+                format!(" (checked: {})", candidates.join(", "))
+            }
+        ))
+    }
+
     pub fn stop_session(&self, runtime_id: &str) -> Result<(), String> {
         let info = match self.get_window_info(runtime_id) {
             Ok(info) => info,
@@ -436,8 +465,6 @@ impl TmuxManager {
                 "#{session_name}\t#{window_name}\t#{window_index}\t#{pane_pid}\t#{session_attached}",
             ])
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
             .output()
             .map_err(|error| format!("Failed to inspect tmux target {}: {}", target, error))?;
 
@@ -449,19 +476,36 @@ impl TmuxManager {
             ));
         }
 
-        parse_target_line(&String::from_utf8_lossy(&output.stdout), target)
-            .ok_or_else(|| format!("Failed to parse tmux target metadata for {}", target))
+        let info = parse_target_line(&String::from_utf8_lossy(&output.stdout))
+            .ok_or_else(|| format!("Failed to parse tmux target metadata for {}", target))?;
+        if info.target == target {
+            Ok(info)
+        } else {
+            Err(format!(
+                "tmux target lookup for {} resolved to {}",
+                target, info.target
+            ))
+        }
     }
 
     fn target_exists(&self, target: &str) -> Result<bool, String> {
-        let status = tmux_command()?
-            .args(["display-message", "-p", "-t", target, "#{window_name}"])
+        let output = tmux_command()?
+            .args([
+                "display-message",
+                "-p",
+                "-t",
+                target,
+                "#{session_name}\t#{window_name}\t#{window_index}\t#{pane_pid}\t#{session_attached}",
+            ])
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
+            .output()
             .map_err(|error| format!("Failed to inspect tmux target {}: {}", target, error))?;
-        Ok(status.success())
+        if !output.status.success() {
+            return Ok(false);
+        }
+
+        Ok(parse_target_line(&String::from_utf8_lossy(&output.stdout))
+            .is_some_and(|info| info.target == target))
     }
 
     fn kill_window_target(&self, target: &str) -> Result<(), String> {
@@ -665,6 +709,32 @@ fn target_candidates_for_runtime(runtime_id: &str, session_prefix: &str) -> Vec<
     targets
 }
 
+fn attach_target_candidates_for_runtime(
+    runtime_id: &str,
+    session_prefix: &str,
+    persisted_target: Option<&str>,
+) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut candidates = Vec::new();
+
+    if let Some(target) = persisted_target
+        .map(str::trim)
+        .filter(|target| !target.is_empty())
+    {
+        if seen.insert(target.to_string()) {
+            candidates.push(target.to_string());
+        }
+    }
+
+    for target in target_candidates_for_runtime(runtime_id, session_prefix) {
+        if seen.insert(target.clone()) {
+            candidates.push(target);
+        }
+    }
+
+    candidates
+}
+
 fn orphaned_managed_tmux_targets(
     windows: &[TmuxWindowInfo],
     active_runtime_ids: &[String],
@@ -794,7 +864,7 @@ fn parse_window_line(session_name: &str, line: &str) -> Option<TmuxWindowInfo> {
     })
 }
 
-fn parse_target_line(line: &str, fallback_target: &str) -> Option<TmuxWindowInfo> {
+fn parse_target_line(line: &str) -> Option<TmuxWindowInfo> {
     let mut parts = line.trim().split('\t');
     let session_name = parts.next()?.to_string();
     let window_name = parts.next()?.to_string();
@@ -805,12 +875,12 @@ fn parse_target_line(line: &str, fallback_target: &str) -> Option<TmuxWindowInfo
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(0);
     Some(TmuxWindowInfo {
+        target: format!("{}:{}", session_name, window_name),
         session_name,
         window_name,
         window_index,
         pane_pid,
         session_attached_clients,
-        target: fallback_target.to_string(),
     })
 }
 
@@ -952,14 +1022,16 @@ fn is_tmux_session_create_race_error(error: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_status_left_format, build_status_right_format, build_tmux_launch_command,
-        build_tmux_launch_spec, compact_model_label, detect_state_from_capture,
-        is_managed_session_name, is_missing_tmux_session_error, is_tmux_session_create_race_error,
-        merge_path_entries, orphaned_managed_tmux_targets, parse_target_line, parse_window_line,
-        session_name_for_runtime, target_candidates_for_runtime, window_name_for_runtime,
-        ClaudeTerminalState, ManagedTmuxTargetAction, TmuxWindowInfo,
+        attach_target_candidates_for_runtime, build_status_left_format, build_status_right_format,
+        build_tmux_launch_command, build_tmux_launch_spec, compact_model_label,
+        detect_state_from_capture, is_managed_session_name, is_missing_tmux_session_error,
+        is_tmux_session_create_race_error, merge_path_entries, orphaned_managed_tmux_targets,
+        parse_target_line, parse_window_line, session_name_for_runtime,
+        target_candidates_for_runtime, tmux_command, window_name_for_runtime, ClaudeTerminalState,
+        ManagedTmuxTargetAction, TmuxManager, TmuxWindowInfo,
     };
     use std::collections::HashMap;
+    use std::process::Stdio;
 
     #[test]
     fn detect_state_flags_waiting_approval() {
@@ -1056,6 +1128,120 @@ mod tests {
                 "ccem:ccem-session-".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn attach_target_candidates_try_persisted_target_first_without_duplicates() {
+        assert_eq!(
+            attach_target_candidates_for_runtime(
+                "session-1772984434305",
+                "ccem",
+                Some("ccem-session1772984434305:main"),
+            ),
+            vec![
+                "ccem-session1772984434305:main".to_string(),
+                "ccem:ccem-84434305".to_string(),
+                "ccem:ccem-session-".to_string(),
+            ]
+        );
+
+        assert_eq!(
+            attach_target_candidates_for_runtime(
+                "session-1772984434305",
+                "ccem",
+                Some("ccem:legacy-window"),
+            ),
+            vec![
+                "ccem:legacy-window".to_string(),
+                "ccem-session1772984434305:main".to_string(),
+                "ccem:ccem-84434305".to_string(),
+                "ccem:ccem-session-".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_live_attach_target_checks_real_tmux_targets_before_attach() {
+        if TmuxManager::check_tmux_installed().is_err() {
+            return;
+        }
+
+        let runtime_id = format!("session-test-{}", std::process::id());
+        let session_prefix = format!("ccem-test-{}", std::process::id());
+        let session_name = session_name_for_runtime(&runtime_id, &session_prefix);
+        let target = format!("{session_name}:main");
+
+        let _ = tmux_command().and_then(|mut command| {
+            command
+                .args(["kill-session", "-t", &session_name])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map(|_| ())
+                .map_err(|error| {
+                    format!(
+                        "Failed to clean stale test tmux session {}: {}",
+                        session_name, error
+                    )
+                })
+        });
+
+        struct TmuxSessionGuard {
+            session_name: String,
+        }
+
+        impl Drop for TmuxSessionGuard {
+            fn drop(&mut self) {
+                let _ = tmux_command().and_then(|mut command| {
+                    command
+                        .args(["kill-session", "-t", &self.session_name])
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .status()
+                        .map(|_| ())
+                        .map_err(|error| {
+                            format!(
+                                "Failed to clean test tmux session {}: {}",
+                                self.session_name, error
+                            )
+                        })
+                });
+            }
+        }
+
+        let status = tmux_command()
+            .expect("tmux command should be available")
+            .args([
+                "new-session",
+                "-d",
+                "-s",
+                &session_name,
+                "-n",
+                "main",
+                "sleep 30",
+            ])
+            .status()
+            .expect("test tmux session should be created");
+        assert!(status.success());
+        let _guard = TmuxSessionGuard {
+            session_name: session_name.clone(),
+        };
+
+        let manager = TmuxManager { session_prefix };
+        assert_eq!(
+            manager
+                .resolve_live_attach_target(&runtime_id, Some(&target))
+                .expect("live target should resolve"),
+            target
+        );
+
+        let missing_runtime_id = format!("session-missing-{}", std::process::id());
+        let missing_error = manager
+            .resolve_live_attach_target(&missing_runtime_id, Some("ccem-missing:main"))
+            .expect_err("missing target should fail before opening Terminal");
+        assert!(missing_error.contains("tmux target not found"));
     }
 
     #[test]
@@ -1163,9 +1349,9 @@ mod tests {
         let window = parse_window_line("ccem-session222", "0\tmain\t202\t1").unwrap();
         assert_eq!(window.session_attached_clients, 1);
 
-        let target =
-            parse_target_line("ccem-session222\tmain\t0\t202\t2", "ccem-session222:main").unwrap();
+        let target = parse_target_line("ccem-session222\tmain\t0\t202\t2").unwrap();
         assert_eq!(target.session_attached_clients, 2);
+        assert_eq!(target.target, "ccem-session222:main");
     }
 
     #[test]
