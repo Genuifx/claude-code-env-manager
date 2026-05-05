@@ -3,6 +3,7 @@ import {
   Check,
   ChevronDown,
   Gauge,
+  ListChecks,
   Search,
   Shield,
   ShieldAlert,
@@ -29,15 +30,15 @@ import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 import type { Environment } from '@/store';
 import { resolveEnvironmentIconHint } from '@/components/workspace/sessionTreeIcons';
+import {
+  getWorkspacePermissionModeDisplayName,
+  normalizeWorkspacePermissionModeName,
+  type WorkspacePermissionModeName,
+} from '@/components/workspace/workspacePermissionModes';
 
 export type EffortLevel = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
-export function normalizePermissionModeName(mode: string | null | undefined): PermissionModeName {
-  if (mode && mode in PERMISSION_PRESETS) {
-    return mode as PermissionModeName;
-  }
-  return 'readonly';
-}
+export const normalizePermissionModeName = normalizeWorkspacePermissionModeName;
 
 const CLAUDE_EFFORT_LEVELS: EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 const CODEX_EFFORT_LEVELS: EffortLevel[] = ['minimal', 'low', 'medium', 'high', 'xhigh'];
@@ -51,28 +52,20 @@ const EFFORT_I18N_KEYS: Record<EffortLevel, string> = {
   max: 'workspace.effortMax',
 };
 
-const MODE_DISPLAY_NAMES: Record<PermissionModeName, string> = {
-  yolo: 'YOLO',
-  dev: 'Developer',
-  readonly: 'Read Only',
-  safe: 'Safe',
-  ci: 'CI / CD',
-  audit: 'Audit',
-};
-
-function getModeIcon(mode: PermissionModeName): typeof Shield {
-  const iconMap: Record<PermissionModeName, typeof Shield> = {
+function getModeIcon(mode: WorkspacePermissionModeName): typeof Shield {
+  const iconMap: Record<WorkspacePermissionModeName, typeof Shield> = {
     yolo: ShieldOff,
     dev: ShieldCheck,
     readonly: ShieldBan,
     safe: ShieldAlert,
     ci: ShieldCheck,
     audit: Search,
+    plan: ListChecks,
   };
   return iconMap[mode] || Shield;
 }
 
-function isRiskyPermissionMode(mode: PermissionModeName) {
+function isRiskyPermissionMode(mode: WorkspacePermissionModeName) {
   return mode === 'yolo';
 }
 
@@ -89,7 +82,7 @@ function EnvironmentLobeIcon({ hint, size = 14 }: { hint?: string; size?: number
 export interface ComposerControlsProps {
   provider: string;
   envName: string;
-  permMode: PermissionModeName;
+  permMode: WorkspacePermissionModeName;
   effort: EffortLevel;
   environments: Environment[];
   onEnvChange: (envName: string) => void;
@@ -108,7 +101,7 @@ export function ComposerControls({
   onEffortChange,
 }: ComposerControlsProps) {
   const { t } = useLocale();
-  const [permissionPreviewMode, setPermissionPreviewMode] = useState<PermissionModeName>(permMode);
+  const [permissionPreviewMode, setPermissionPreviewMode] = useState<WorkspacePermissionModeName>(permMode);
   const [permissionSelectOpen, setPermissionSelectOpen] = useState(false);
   const [envEffortOpen, setEnvEffortOpen] = useState(false);
 
@@ -125,10 +118,15 @@ export function ComposerControls({
 
   const currentEnvironment = environments.find((e) => e.name === envName);
   const currentEnvironmentIconHint = resolveEnvironmentIconHint(currentEnvironment);
-  const permissionPreview = {
-    desc: t(`environments.permMode_${permissionPreviewMode}_desc`),
-    detail: t(`environments.permMode_${permissionPreviewMode}_detail`),
-  };
+  const permissionPreview = permissionPreviewMode === 'plan'
+    ? {
+        desc: t('workspace.nativePlanModeActive'),
+        detail: t('workspace.composerPlanModeHintClaudeLocked'),
+      }
+    : {
+        desc: t(`environments.permMode_${permissionPreviewMode}_desc`),
+        detail: t(`environments.permMode_${permissionPreviewMode}_detail`),
+      };
 
   const effortLevels = provider === 'codex' ? CODEX_EFFORT_LEVELS : CLAUDE_EFFORT_LEVELS;
 
@@ -248,7 +246,9 @@ export function ComposerControls({
                     isRiskyPermissionMode(permMode) && 'text-destructive',
                   )}
                 />
-                <span className="truncate">{MODE_DISPLAY_NAMES[permMode]}</span>
+                <span className="truncate">
+                  {getWorkspacePermissionModeDisplayName(permMode)}
+                </span>
               </span>
             );
           })()}
@@ -271,7 +271,7 @@ export function ComposerControls({
                   onFocus={() => setPermissionPreviewMode(mode)}
                   onPointerMove={() => setPermissionPreviewMode(mode)}
                 >
-                  {MODE_DISPLAY_NAMES[mode]}
+                  {getWorkspacePermissionModeDisplayName(mode)}
                 </SelectItem>
               ))}
             </div>
@@ -295,7 +295,7 @@ export function ComposerControls({
                   );
                 })()}
                 <span className="text-[15px] font-semibold">
-                  {MODE_DISPLAY_NAMES[permissionPreviewMode]}
+                  {getWorkspacePermissionModeDisplayName(permissionPreviewMode)}
                 </span>
               </div>
               <p

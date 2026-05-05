@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { buildPromptContentParts, type PromptImage } from './promptContent';
+import { normalizeClaudePermissionMode, normalizeCodexSandboxMode } from './permissionModes';
 
 type NativeProvider = 'claude' | 'codex';
 
@@ -595,48 +596,6 @@ function summarizeClaudeToolResult(block: Record<string, unknown>) {
   }
 
   return truncateSummary(compactJson(content ?? block));
-}
-
-function normalizeClaudePermissionMode(permMode: string) {
-  switch (permMode) {
-    case 'yolo':
-      return {
-        permissionMode: 'bypassPermissions' as const,
-        allowDangerouslySkipPermissions: true,
-      };
-    case 'readonly':
-    case 'safe':
-    case 'audit':
-    case 'ci':
-      return {
-        permissionMode: 'dontAsk' as const,
-        allowDangerouslySkipPermissions: false,
-      };
-    default:
-      return {
-        permissionMode: 'default' as const,
-        allowDangerouslySkipPermissions: false,
-      };
-  }
-}
-
-function normalizeCodexSandboxMode(permMode: string) {
-  if (permMode === 'yolo') {
-    return {
-      sandboxMode: 'danger-full-access' as const,
-      approvalPolicy: 'never' as const,
-    };
-  }
-  if (permMode === 'readonly' || permMode === 'audit' || permMode === 'ci') {
-    return {
-      sandboxMode: 'read-only' as const,
-      approvalPolicy: 'never' as const,
-    };
-  }
-  return {
-    sandboxMode: 'workspace-write' as const,
-    approvalPolicy: 'on-request' as const,
-  };
 }
 
 function buildAllowedClaudeToolResult(
