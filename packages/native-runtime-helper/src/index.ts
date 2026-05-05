@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { buildClaudeQueryEnv } from './claudeEnv';
+import { applyClaudePermissionModeToQuery } from './claudePermissionControl';
 import { buildPromptContentParts, type PromptImage } from './promptContent';
 import { normalizeClaudePermissionMode, normalizeCodexSandboxMode } from './permissionModes';
 
@@ -855,6 +856,23 @@ function queuePendingSettings(command: UpdateSettingsCommand) {
   };
 }
 
+function isClaudePermissionOnlySettingsCommand(command: UpdateSettingsCommand) {
+  return command.perm_mode !== undefined
+    && command.env_name === undefined
+    && command.env_vars === undefined
+    && command.effort === undefined;
+}
+
+async function applyClaudePermissionSettingsCommand(command: UpdateSettingsCommand) {
+  if (!initCommand || initCommand.provider !== 'claude' || !isClaudePermissionOnlySettingsCommand(command)) {
+    return false;
+  }
+
+  await applyClaudePermissionModeToQuery(currentClaudeQuery, command.perm_mode!);
+  applySettingsCommand(command);
+  return true;
+}
+
 function canApplySettingsImmediately() {
   if (!initCommand) return false;
   if (initCommand.provider === 'codex') {
@@ -1498,6 +1516,11 @@ async function handleCommand(command: InputCommand) {
 
   if (command.type === 'update_settings') {
     if (!initCommand) return;
+
+    if (await applyClaudePermissionSettingsCommand(command)) {
+      emitStatus('ready', 'Settings applied.');
+      return;
+    }
 
     if (canApplySettingsImmediately()) {
       applySettingsCommand(command);

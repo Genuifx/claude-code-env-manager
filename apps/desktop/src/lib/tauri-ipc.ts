@@ -309,6 +309,13 @@ export interface TauriCommands {
     },
     void
   ];
+  set_native_session_runtime_perm_mode: [
+    {
+      runtimeId: string;
+      runtimePermMode?: string | null;
+    },
+    void
+  ];
   handoff_native_session_to_terminal: [
     {
       runtimeId: string;

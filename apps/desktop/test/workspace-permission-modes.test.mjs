@@ -46,6 +46,10 @@ async function importWorkspaceComposerDispatch() {
   );
 }
 
+async function importWorkspaceRuntimePlanMode() {
+  return importWorkspaceModule('workspaceRuntimePlanMode.ts');
+}
+
 test('keeps Claude plan runtime out of the permission dropdown', async () => {
   const { normalizeWorkspacePermissionModeName } = await importWorkspacePermissionModes();
 
@@ -107,4 +111,12 @@ test('keeps Codex plan as prompt text without changing runtime permission', asyn
     permMode: 'dev',
     runtimePermMode: null,
   });
+});
+
+test('uses Claude runtime permission mode when toggling plan in a live session', async () => {
+  const { resolveWorkspaceRuntimePlanMode } = await importWorkspaceRuntimePlanMode();
+
+  assert.equal(resolveWorkspaceRuntimePlanMode('claude', true), 'plan');
+  assert.equal(resolveWorkspaceRuntimePlanMode('claude', false), null);
+  assert.equal(resolveWorkspaceRuntimePlanMode('codex', true), null);
 });

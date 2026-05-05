@@ -793,6 +793,16 @@ export function useTauriCommands() {
     });
   }, []);
 
+  const setNativeSessionRuntimePermMode = useCallback(async (
+    runtimeId: string,
+    runtimePermMode?: string | null,
+  ): Promise<void> => {
+    await invoke('set_native_session_runtime_perm_mode', {
+      runtimeId,
+      runtimePermMode: runtimePermMode ?? null,
+    });
+  }, []);
+
   const handoffNativeSessionToTerminal = useCallback(async (
     runtimeId: string,
     terminalType?: NativeTerminalType,
@@ -1218,6 +1228,7 @@ export function useTauriCommands() {
     getNativeSessionEvents,
     stopNativeSession,
     updateNativeSessionSettings,
+    setNativeSessionRuntimePermMode,
     handoffNativeSessionToTerminal,
     launchOpenCodeWeb,
     loadAppConfig,

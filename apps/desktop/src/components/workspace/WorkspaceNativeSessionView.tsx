@@ -56,6 +56,7 @@ import {
 } from './ComposerControls';
 import type { EffortLevel } from './ComposerControls';
 import { normalizeEffortForProvider } from './workspaceSessionPreferences';
+import { resolveWorkspaceRuntimePlanMode } from './workspaceRuntimePlanMode';
 import {
   appendSessionEvents,
   buildBaseMessages,
@@ -940,6 +941,7 @@ export function WorkspaceNativeSessionView({
     respondNativeSessionPrompt,
     stopNativeSession,
     updateNativeSessionSettings,
+    setNativeSessionRuntimePermMode,
     handoffNativeSessionToTerminal,
     listNativeSessions,
     searchWorkspaceFiles,
@@ -1337,6 +1339,9 @@ export function WorkspaceNativeSessionView({
   const hasQuickReplyPrompt = attentionState.prompts.some(
     (entry) => entry.prompt.prompt_type !== 'ask_user_question',
   );
+  const hasPlanExitPrompt = attentionState.prompts.some(
+    (entry) => entry.prompt.prompt_type === 'plan_exit',
+  );
   const hasHardBlockingAttention = attentionState.permissions.length > 0
     || Boolean(attentionState.terminalPrompt)
     || hasAskUserQuestionPrompt;
@@ -1459,6 +1464,47 @@ export function WorkspaceNativeSessionView({
     }
   }, [buildQueuedBatchText, pollEvents, refreshSummary, sendNativeSessionInput, session.runtime_id]);
 
+  const applyRuntimePlanModeChange = useCallback(async (
+    enabled: boolean,
+    options?: { refreshSummaryAfterChange?: boolean },
+  ) => {
+    if (session.provider !== 'claude') {
+      setComposerPlanModeEnabled(enabled);
+      return true;
+    }
+
+    const previousRuntimeMode = sessionRuntimePermMode;
+    const previousPlanMode = composerPlanModeEnabled;
+    const nextRuntimePermMode = resolveWorkspaceRuntimePlanMode(session.provider, enabled);
+    const nextSessionRuntimeMode = nextRuntimePermMode ?? sessionDisplayPermMode;
+
+    setComposerPlanModeEnabled(enabled);
+    setSessionRuntimePermMode(nextSessionRuntimeMode);
+
+    try {
+      await setNativeSessionRuntimePermMode(session.runtime_id, nextRuntimePermMode);
+      if (options?.refreshSummaryAfterChange ?? true) {
+        await refreshSummary({ force: true });
+      }
+      return true;
+    } catch (error) {
+      console.error('Failed to update native session plan mode:', error);
+      setComposerPlanModeEnabled(previousPlanMode);
+      setSessionRuntimePermMode(previousRuntimeMode);
+      toast.error(t('workspace.nativeSettingsFailed'));
+      return false;
+    }
+  }, [
+    composerPlanModeEnabled,
+    refreshSummary,
+    session.provider,
+    session.runtime_id,
+    sessionDisplayPermMode,
+    sessionRuntimePermMode,
+    setNativeSessionRuntimePermMode,
+    t,
+  ]);
+
   const sendInteractivePromptReply = useCallback(async (
     payload: InteractivePromptReplyPayload,
   ) => {
@@ -1482,11 +1528,27 @@ export function WorkspaceNativeSessionView({
       }
     }
 
+    let exitedPlanModeForPrompt = false;
+    if (
+      payload.kind === 'text'
+      && hasPlanExitPrompt
+      && session.provider === 'claude'
+      && sessionRuntimePermMode === 'plan'
+    ) {
+      const exitedPlanMode = await applyRuntimePlanModeChange(false, {
+        refreshSummaryAfterChange: false,
+      });
+      if (!exitedPlanMode) {
+        return false;
+      }
+      exitedPlanModeForPrompt = true;
+    }
+
     setIsSending(true);
     setLocalUserPrompts((previous) => [...previous, promptEntry]);
     if (payload.kind === 'text') {
       setComposerText('');
-      setComposerPlanModeEnabled(sessionRuntimePermMode === 'plan');
+      setComposerPlanModeEnabled(exitedPlanModeForPrompt ? false : sessionRuntimePermMode === 'plan');
     } else {
       setLocallyDismissedPromptIds((previous) => {
         if (previous.has(payload.toolUseId)) {
@@ -1535,9 +1597,12 @@ export function WorkspaceNativeSessionView({
     }
   }, [
     pollEvents,
+    applyRuntimePlanModeChange,
     refreshSummary,
     respondNativeSessionPrompt,
     sendNativeSessionInput,
+    hasPlanExitPrompt,
+    session.provider,
     sessionRuntimePermMode,
     session.runtime_id,
     t,
@@ -1578,6 +1643,10 @@ export function WorkspaceNativeSessionView({
     t,
     updateNativeSessionSettings,
   ]);
+
+  const handlePlanModeEnabledChange = useCallback((enabled: boolean) => {
+    void applyRuntimePlanModeChange(enabled);
+  }, [applyRuntimePlanModeChange]);
 
   const handleEffortChange = useCallback((effort: EffortLevel) => {
     const nextEffort = normalizeEffortForProvider(effort, session.provider);
@@ -1811,7 +1880,7 @@ export function WorkspaceNativeSessionView({
         workingDir={session.project_dir}
         searchWorkspaceFiles={searchWorkspaceFiles}
         planModeEnabled={composerPlanModeEnabled}
-        onPlanModeEnabledChange={setComposerPlanModeEnabled}
+        onPlanModeEnabledChange={handlePlanModeEnabledChange}
         planModeHint={session.provider === 'claude' && sessionRuntimePermMode === 'plan'
           ? t('workspace.composerPlanModeHintClaudeLocked')
           : undefined}

@@ -1,4 +1,4 @@
-type ClaudePermissionMode =
+export type ClaudePermissionMode =
   | 'default'
   | 'acceptEdits'
   | 'bypassPermissions'

@@ -1174,6 +1174,20 @@ fn update_native_session_settings(
 }
 
 #[tauri::command]
+fn set_native_session_runtime_perm_mode(
+    app: tauri::AppHandle,
+    native_state: State<'_, Arc<NativeRuntimeManager>>,
+    runtime_id: String,
+    runtime_perm_mode: Option<String>,
+) -> Result<(), String> {
+    native_state.update_session_runtime_perm_mode(
+        &app,
+        &runtime_id,
+        runtime_perm_mode.as_deref(),
+    )
+}
+
+#[tauri::command]
 fn stop_native_session(
     native_state: State<'_, Arc<NativeRuntimeManager>>,
     runtime_id: String,
@@ -3045,6 +3059,7 @@ fn main() {
             respond_native_session_prompt,
             get_native_session_events,
             update_native_session_settings,
+            set_native_session_runtime_perm_mode,
             stop_native_session,
             handoff_native_session_to_terminal,
             launch_opencode_web,

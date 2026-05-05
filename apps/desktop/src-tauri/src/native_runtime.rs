@@ -547,6 +547,43 @@ impl NativeRuntimeManager {
         Ok(())
     }
 
+    pub fn update_session_runtime_perm_mode(
+        self: &Arc<Self>,
+        app: &AppHandle,
+        runtime_id: &str,
+        runtime_perm_mode: Option<&str>,
+    ) -> Result<(), String> {
+        let handle = self.ensure_handle(app.clone(), runtime_id)?;
+        let display_perm_mode = {
+            let record = handle
+                .record
+                .lock()
+                .map_err(|_| "Failed to lock native session record".to_string())?;
+            record.perm_mode.clone()
+        };
+        let normalized_runtime_perm_mode = runtime_perm_mode
+            .map(|mode| mode.trim().to_string())
+            .filter(|mode| !mode.is_empty() && mode != &display_perm_mode);
+        let helper_perm_mode = normalized_runtime_perm_mode
+            .as_deref()
+            .unwrap_or(display_perm_mode.as_str());
+
+        self.write_to_child(
+            &handle,
+            &HelperInputCommand::UpdateSettings {
+                env_name: None,
+                perm_mode: Some(helper_perm_mode),
+                env_vars: None,
+                effort: None,
+            },
+        )?;
+        self.update_record(runtime_id, |record| {
+            record.runtime_perm_mode = normalized_runtime_perm_mode;
+            record.updated_at = Utc::now();
+        })?;
+        Ok(())
+    }
+
     pub fn stop_session(self: &Arc<Self>, runtime_id: &str) -> Result<(), String> {
         self.append_event(
             runtime_id,

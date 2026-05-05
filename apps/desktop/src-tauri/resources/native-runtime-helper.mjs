@@ -16098,6 +16098,80 @@ function buildClaudeQueryEnv({
   return env;
 }
 
+// src/permissionModes.ts
+function normalizeClaudePermissionMode(permMode) {
+  switch (permMode) {
+    case "yolo":
+    case "bypassPermissions":
+      return {
+        permissionMode: "bypassPermissions",
+        allowDangerouslySkipPermissions: true
+      };
+    case "dev":
+    case "acceptEdits":
+      return {
+        permissionMode: "acceptEdits",
+        allowDangerouslySkipPermissions: false
+      };
+    case "readonly":
+    case "audit":
+    case "plan":
+      return {
+        permissionMode: "plan",
+        allowDangerouslySkipPermissions: false
+      };
+    case "safe":
+    case "ci":
+    case "default":
+      return {
+        permissionMode: "default",
+        allowDangerouslySkipPermissions: false
+      };
+    case "dontAsk":
+      return {
+        permissionMode: "dontAsk",
+        allowDangerouslySkipPermissions: false
+      };
+    case "auto":
+      return {
+        permissionMode: "auto",
+        allowDangerouslySkipPermissions: false
+      };
+    default:
+      return {
+        permissionMode: "default",
+        allowDangerouslySkipPermissions: false
+      };
+  }
+}
+function normalizeCodexSandboxMode(permMode) {
+  if (permMode === "yolo" || permMode === "danger-full-access") {
+    return {
+      sandboxMode: "danger-full-access",
+      approvalPolicy: "never"
+    };
+  }
+  if (permMode === "readonly" || permMode === "audit" || permMode === "ci" || permMode === "plan" || permMode === "read-only") {
+    return {
+      sandboxMode: "read-only",
+      approvalPolicy: "never"
+    };
+  }
+  return {
+    sandboxMode: "workspace-write",
+    approvalPolicy: "on-request"
+  };
+}
+
+// src/claudePermissionControl.ts
+async function applyClaudePermissionModeToQuery(query, permMode) {
+  const permission = normalizeClaudePermissionMode(permMode);
+  if (query) {
+    await query.setPermissionMode(permission.permissionMode);
+  }
+  return permission;
+}
+
 // src/promptContent.ts
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -16164,71 +16238,6 @@ function buildPromptContentParts(text, images) {
     }
   }
   return parts;
-}
-
-// src/permissionModes.ts
-function normalizeClaudePermissionMode(permMode) {
-  switch (permMode) {
-    case "yolo":
-    case "bypassPermissions":
-      return {
-        permissionMode: "bypassPermissions",
-        allowDangerouslySkipPermissions: true
-      };
-    case "dev":
-    case "acceptEdits":
-      return {
-        permissionMode: "acceptEdits",
-        allowDangerouslySkipPermissions: false
-      };
-    case "readonly":
-    case "audit":
-    case "plan":
-      return {
-        permissionMode: "plan",
-        allowDangerouslySkipPermissions: false
-      };
-    case "safe":
-    case "ci":
-    case "default":
-      return {
-        permissionMode: "default",
-        allowDangerouslySkipPermissions: false
-      };
-    case "dontAsk":
-      return {
-        permissionMode: "dontAsk",
-        allowDangerouslySkipPermissions: false
-      };
-    case "auto":
-      return {
-        permissionMode: "auto",
-        allowDangerouslySkipPermissions: false
-      };
-    default:
-      return {
-        permissionMode: "default",
-        allowDangerouslySkipPermissions: false
-      };
-  }
-}
-function normalizeCodexSandboxMode(permMode) {
-  if (permMode === "yolo" || permMode === "danger-full-access") {
-    return {
-      sandboxMode: "danger-full-access",
-      approvalPolicy: "never"
-    };
-  }
-  if (permMode === "readonly" || permMode === "audit" || permMode === "ci" || permMode === "plan" || permMode === "read-only") {
-    return {
-      sandboxMode: "read-only",
-      approvalPolicy: "never"
-    };
-  }
-  return {
-    sandboxMode: "workspace-write",
-    approvalPolicy: "on-request"
-  };
 }
 
 // src/index.ts
@@ -16750,6 +16759,17 @@ function queuePendingSettings(command) {
     ...command.env_vars !== void 0 ? { envVars: command.env_vars } : {},
     ...command.effort !== void 0 ? { effort: command.effort } : {}
   };
+}
+function isClaudePermissionOnlySettingsCommand(command) {
+  return command.perm_mode !== void 0 && command.env_name === void 0 && command.env_vars === void 0 && command.effort === void 0;
+}
+async function applyClaudePermissionSettingsCommand(command) {
+  if (!initCommand || initCommand.provider !== "claude" || !isClaudePermissionOnlySettingsCommand(command)) {
+    return false;
+  }
+  await applyClaudePermissionModeToQuery(currentClaudeQuery, command.perm_mode);
+  applySettingsCommand(command);
+  return true;
 }
 function canApplySettingsImmediately() {
   if (!initCommand) return false;
@@ -17316,6 +17336,10 @@ async function handleCommand(command) {
   }
   if (command.type === "update_settings") {
     if (!initCommand) return;
+    if (await applyClaudePermissionSettingsCommand(command)) {
+      emitStatus("ready", "Settings applied.");
+      return;
+    }
     if (canApplySettingsImmediately()) {
       applySettingsCommand(command);
       if (initCommand.provider === "claude" && claudeConsumeLoop) {
