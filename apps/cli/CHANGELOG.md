@@ -1,5 +1,11 @@
 # ccem
 
+## 2.1.0
+
+### Minor Changes
+
+- Ship desktop workspace runtime stability improvements, including Claude plan review controls, non-interactive key handling, safer terminal attach validation, and cold-start workspace session refresh fixes.
+
 ## 2.0.0
 
 ### Patch Changes
