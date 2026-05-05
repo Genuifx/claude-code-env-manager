@@ -7,6 +7,10 @@ import path from 'node:path';
 import process from 'node:process';
 import { buildClaudeQueryEnv } from './claudeEnv';
 import { applyClaudePermissionModeToQuery } from './claudePermissionControl';
+import {
+  buildClaudePlanModeHooks,
+  type ClaudePlanModeBlockedTool,
+} from './claudePlanGuard';
 import { buildPromptContentParts, type PromptImage } from './promptContent';
 import { normalizeClaudePermissionMode, normalizeCodexSandboxMode } from './permissionModes';
 
@@ -123,6 +127,7 @@ let claudeLastSessionState: 'idle' | 'running' | 'requires_action' | null = null
 let claudeSawPartialText = false;
 let claudeSawPartialThinking = false;
 let claudeTurnCompletionEmitted = false;
+let claudePlanExitPromptPending = false;
 let codexClient: Codex | null = null;
 let codexThread: any = null;
 let pendingSettings: RuntimeSettingsPatch | null = null;
@@ -564,6 +569,33 @@ function emitClaudeToolUseCompleted(toolUseId: string, resultSummary: string, su
   });
 }
 
+function emitClaudePlanExitPromptForBlockedTool(blockedTool: ClaudePlanModeBlockedTool) {
+  if (claudePlanExitPromptPending) {
+    return;
+  }
+  claudePlanExitPromptPending = true;
+
+  const inputSummary = summarizeClaudeToolInput(blockedTool.toolName, blockedTool.input);
+  const syntheticToolUseId = `plan-exit:${blockedTool.toolUseId || blockedTool.toolName}:${Date.now()}`;
+  const planSummary = [
+    `Claude is ready to run ${blockedTool.toolName}.`,
+    inputSummary,
+    'Confirm before leaving Plan mode and executing changes.',
+  ].filter(Boolean).join(' ');
+
+  emitClaudeToolUseStarted({
+    toolUseId: syntheticToolUseId,
+    rawName: 'ExitPlanMode',
+    inputSummary: planSummary,
+    needsResponse: true,
+    prompt: {
+      prompt_type: 'plan_exit',
+      allowed_prompts: ['继续执行'],
+      plan_summary: planSummary,
+    },
+  });
+}
+
 function summarizeClaudeToolResult(block: Record<string, unknown>) {
   const content = block.content;
   if (typeof content === 'string' && content.trim()) {
@@ -614,6 +646,19 @@ function buildAllowedClaudeToolResult(
 function isClaudeAskUserQuestionTool(name: string) {
   const category = categorizeClaudeTool(name);
   return category.category === 'user_input' && category.kind === 'question';
+}
+
+function isClaudePlanExitTool(name: string) {
+  const category = categorizeClaudeTool(name);
+  return category.category === 'user_input' && category.kind === 'plan_exit';
+}
+
+function buildDeniedClaudeToolResult(toolUseId: string, message: string) {
+  return {
+    behavior: 'deny' as const,
+    message,
+    toolUseID: toolUseId,
+  };
 }
 
 function buildAskUserQuestionUpdatedInput(
@@ -725,7 +770,7 @@ async function waitForPermission(
 
   return approved
     ? buildAllowedClaudeToolResult(input, toolUseId)
-    : { behavior: 'deny' as const, message: 'Permission denied in desktop workspace.', toolUseID: toolUseId };
+    : buildDeniedClaudeToolResult(toolUseId, 'Permission denied in desktop workspace.');
 }
 
 function handleClaudePartialEvent(rawEvent: Record<string, unknown>) {
@@ -823,7 +868,10 @@ function handleClaudeStatusMessage(message: Record<string, unknown>) {
 
 function applySettingsToInitCommand(settings: RuntimeSettingsPatch) {
   if (!initCommand) return false;
-  if (settings.permMode !== undefined) initCommand.perm_mode = settings.permMode;
+  if (settings.permMode !== undefined) {
+    initCommand.perm_mode = settings.permMode;
+    claudePlanExitPromptPending = false;
+  }
   if (settings.envVars !== undefined) initCommand.env_vars = settings.envVars;
   if (settings.envName !== undefined) initCommand.env_name = settings.envName;
   if (settings.effort !== undefined) initCommand.effort = settings.effort || undefined;
@@ -887,6 +935,7 @@ function teardownClaudeSession() {
   claudeInputQueue = null;
   currentClaudeQuery = null;
   claudeConsumeLoop = null;
+  claudePlanExitPromptPending = false;
   resetClaudeTurnTracking();
 }
 
@@ -900,6 +949,7 @@ async function consumeClaudeMessages() {
     throw new Error('Native runtime helper not initialized');
   }
 
+  claudePlanExitPromptPending = false;
   const permission = normalizeClaudePermissionMode(initCommand.perm_mode);
   const env = buildClaudeQueryEnv({
     envVars: initCommand.env_vars,
@@ -917,9 +967,23 @@ async function consumeClaudeMessages() {
       includePartialMessages: true,
       includeHookEvents: true,
       persistSession: true,
+      hooks: buildClaudePlanModeHooks(
+        () => initCommand?.provider === 'claude' && initCommand.perm_mode === 'plan',
+        emitClaudePlanExitPromptForBlockedTool,
+      ),
       canUseTool: async (toolName, input, options) => {
         if (isClaudeAskUserQuestionTool(toolName)) {
           return waitForAskUserQuestionResponse(input, options.toolUseID);
+        }
+        if (
+          isClaudePlanExitTool(toolName)
+          && initCommand?.provider === 'claude'
+          && initCommand.perm_mode === 'plan'
+        ) {
+          return buildDeniedClaudeToolResult(
+            options.toolUseID,
+            'Plan mode is active. Confirm the plan before leaving Plan mode.',
+          );
         }
         if (isClaudeInteractiveUserInputTool(toolName)) {
           return buildAllowedClaudeToolResult(input, options.toolUseID);

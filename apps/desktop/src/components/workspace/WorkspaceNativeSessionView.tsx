@@ -1339,9 +1339,13 @@ export function WorkspaceNativeSessionView({
   const hasQuickReplyPrompt = attentionState.prompts.some(
     (entry) => entry.prompt.prompt_type !== 'ask_user_question',
   );
-  const hasPlanExitPrompt = attentionState.prompts.some(
-    (entry) => entry.prompt.prompt_type === 'plan_exit',
+  const planExitPromptIds = useMemo(
+    () => attentionState.prompts
+      .filter((entry) => entry.prompt.prompt_type === 'plan_exit')
+      .map((entry) => entry.toolUseId),
+    [attentionState.prompts],
   );
+  const hasPlanExitPrompt = planExitPromptIds.length > 0;
   const hasHardBlockingAttention = attentionState.permissions.length > 0
     || Boolean(attentionState.terminalPrompt)
     || hasAskUserQuestionPrompt;
@@ -1529,6 +1533,7 @@ export function WorkspaceNativeSessionView({
     }
 
     let exitedPlanModeForPrompt = false;
+    let dismissedPlanExitPromptIds: string[] = [];
     if (
       payload.kind === 'text'
       && hasPlanExitPrompt
@@ -1542,6 +1547,7 @@ export function WorkspaceNativeSessionView({
         return false;
       }
       exitedPlanModeForPrompt = true;
+      dismissedPlanExitPromptIds = planExitPromptIds;
     }
 
     setIsSending(true);
@@ -1549,6 +1555,13 @@ export function WorkspaceNativeSessionView({
     if (payload.kind === 'text') {
       setComposerText('');
       setComposerPlanModeEnabled(exitedPlanModeForPrompt ? false : sessionRuntimePermMode === 'plan');
+      if (dismissedPlanExitPromptIds.length > 0) {
+        setLocallyDismissedPromptIds((previous) => {
+          const next = new Set(previous);
+          dismissedPlanExitPromptIds.forEach((toolUseId) => next.add(toolUseId));
+          return next;
+        });
+      }
     } else {
       setLocallyDismissedPromptIds((previous) => {
         if (previous.has(payload.toolUseId)) {
@@ -1580,6 +1593,13 @@ export function WorkspaceNativeSessionView({
       setLocalUserPrompts((previous) =>
         previous.filter((prompt) => prompt.id !== promptEntry.id),
       );
+      if (dismissedPlanExitPromptIds.length > 0) {
+        setLocallyDismissedPromptIds((previous) => {
+          const next = new Set(previous);
+          dismissedPlanExitPromptIds.forEach((toolUseId) => next.delete(toolUseId));
+          return next;
+        });
+      }
       if (payload.kind === 'ask_user_question') {
         setLocallyDismissedPromptIds((previous) => {
           if (!previous.has(payload.toolUseId)) {
@@ -1602,6 +1622,7 @@ export function WorkspaceNativeSessionView({
     respondNativeSessionPrompt,
     sendNativeSessionInput,
     hasPlanExitPrompt,
+    planExitPromptIds,
     session.provider,
     sessionRuntimePermMode,
     session.runtime_id,

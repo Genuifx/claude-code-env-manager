@@ -16073,8 +16073,8 @@ var Codex = class {
 // src/index.ts
 import { createInterface } from "node:readline";
 import fs2 from "node:fs";
-import os2 from "node:os";
-import path3 from "node:path";
+import os3 from "node:os";
+import path4 from "node:path";
 import process3 from "node:process";
 
 // src/claudeEnv.ts
@@ -16172,6 +16172,84 @@ async function applyClaudePermissionModeToQuery(query, permMode) {
   return permission;
 }
 
+// src/claudePlanGuard.ts
+import os2 from "node:os";
+import path3 from "node:path";
+var PLAN_MODE_BLOCKED_TOOLS = /* @__PURE__ */ new Set([
+  "Agent",
+  "Bash",
+  "KillShell",
+  "Task",
+  "Write",
+  "Edit",
+  "MultiEdit",
+  "NotebookEdit"
+]);
+function asRecord(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+function extractPathLikeValue(input) {
+  for (const key of ["file_path", "path", "target_file", "notebook_path"]) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+function isClaudeInternalPlanFile(toolName, input) {
+  if (!["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(toolName)) {
+    return false;
+  }
+  const pathLikeValue = extractPathLikeValue(input);
+  if (!pathLikeValue) {
+    return false;
+  }
+  const resolvedTarget = path3.resolve(pathLikeValue);
+  const planDir = path3.resolve(os2.homedir(), ".claude", "plans");
+  return resolvedTarget === planDir || resolvedTarget.startsWith(`${planDir}${path3.sep}`);
+}
+function shouldBlockClaudeToolInPlanMode(toolName, input) {
+  if (!PLAN_MODE_BLOCKED_TOOLS.has(toolName)) {
+    return false;
+  }
+  return !isClaudeInternalPlanFile(toolName, input);
+}
+function buildClaudePlanModePreToolUseHook(isPlanMode, onBlockedTool) {
+  return async function claudePlanModePreToolUseHook(input) {
+    if (!isPlanMode() || input.hook_event_name !== "PreToolUse") {
+      return { continue: true };
+    }
+    const toolName = input.tool_name ?? "";
+    const toolInput = asRecord(input.tool_input);
+    if (!shouldBlockClaudeToolInPlanMode(toolName, toolInput)) {
+      return { continue: true };
+    }
+    const reason = `Plan mode is active. Confirm the plan before running ${toolName}.`;
+    onBlockedTool?.({
+      toolName,
+      toolUseId: input.tool_use_id ?? "",
+      input: toolInput,
+      reason
+    });
+    return {
+      continue: true,
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: reason
+      }
+    };
+  };
+}
+function buildClaudePlanModeHooks(isPlanMode, onBlockedTool) {
+  return {
+    PreToolUse: [{
+      hooks: [buildClaudePlanModePreToolUseHook(isPlanMode, onBlockedTool)]
+    }]
+  };
+}
+
 // src/promptContent.ts
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -16253,6 +16331,7 @@ var claudeLastSessionState = null;
 var claudeSawPartialText = false;
 var claudeSawPartialThinking = false;
 var claudeTurnCompletionEmitted = false;
+var claudePlanExitPromptPending = false;
 var codexClient = null;
 var codexThread = null;
 var pendingSettings = null;
@@ -16549,6 +16628,30 @@ function emitClaudeToolUseCompleted(toolUseId, resultSummary, success) {
     success
   });
 }
+function emitClaudePlanExitPromptForBlockedTool(blockedTool) {
+  if (claudePlanExitPromptPending) {
+    return;
+  }
+  claudePlanExitPromptPending = true;
+  const inputSummary = summarizeClaudeToolInput(blockedTool.toolName, blockedTool.input);
+  const syntheticToolUseId = `plan-exit:${blockedTool.toolUseId || blockedTool.toolName}:${Date.now()}`;
+  const planSummary = [
+    `Claude is ready to run ${blockedTool.toolName}.`,
+    inputSummary,
+    "Confirm before leaving Plan mode and executing changes."
+  ].filter(Boolean).join(" ");
+  emitClaudeToolUseStarted({
+    toolUseId: syntheticToolUseId,
+    rawName: "ExitPlanMode",
+    inputSummary: planSummary,
+    needsResponse: true,
+    prompt: {
+      prompt_type: "plan_exit",
+      allowed_prompts: ["\u7EE7\u7EED\u6267\u884C"],
+      plan_summary: planSummary
+    }
+  });
+}
 function summarizeClaudeToolResult(block) {
   const content = block.content;
   if (typeof content === "string" && content.trim()) {
@@ -16583,6 +16686,17 @@ function buildAllowedClaudeToolResult(input, toolUseId) {
 function isClaudeAskUserQuestionTool(name) {
   const category = categorizeClaudeTool(name);
   return category.category === "user_input" && category.kind === "question";
+}
+function isClaudePlanExitTool(name) {
+  const category = categorizeClaudeTool(name);
+  return category.category === "user_input" && category.kind === "plan_exit";
+}
+function buildDeniedClaudeToolResult(toolUseId, message) {
+  return {
+    behavior: "deny",
+    message,
+    toolUseID: toolUseId
+  };
 }
 function buildAskUserQuestionUpdatedInput(input, answers, annotations) {
   const updatedInput = {
@@ -16649,7 +16763,7 @@ async function waitForPermission(toolName, input, options) {
   if (!approved) {
     emitClaudeToolUseCompleted(toolUseId, "Permission denied in desktop workspace.", false);
   }
-  return approved ? buildAllowedClaudeToolResult(input, toolUseId) : { behavior: "deny", message: "Permission denied in desktop workspace.", toolUseID: toolUseId };
+  return approved ? buildAllowedClaudeToolResult(input, toolUseId) : buildDeniedClaudeToolResult(toolUseId, "Permission denied in desktop workspace.");
 }
 function handleClaudePartialEvent(rawEvent) {
   if (rawEvent.type === "message_start") {
@@ -16731,7 +16845,10 @@ function handleClaudeStatusMessage(message) {
 }
 function applySettingsToInitCommand(settings) {
   if (!initCommand) return false;
-  if (settings.permMode !== void 0) initCommand.perm_mode = settings.permMode;
+  if (settings.permMode !== void 0) {
+    initCommand.perm_mode = settings.permMode;
+    claudePlanExitPromptPending = false;
+  }
   if (settings.envVars !== void 0) initCommand.env_vars = settings.envVars;
   if (settings.envName !== void 0) initCommand.env_name = settings.envName;
   if (settings.effort !== void 0) initCommand.effort = settings.effort || void 0;
@@ -16784,6 +16901,7 @@ function teardownClaudeSession() {
   claudeInputQueue = null;
   currentClaudeQuery = null;
   claudeConsumeLoop = null;
+  claudePlanExitPromptPending = false;
   resetClaudeTurnTracking();
 }
 function teardownCodexSession(envChanged) {
@@ -16794,6 +16912,7 @@ async function consumeClaudeMessages() {
   if (!initCommand) {
     throw new Error("Native runtime helper not initialized");
   }
+  claudePlanExitPromptPending = false;
   const permission = normalizeClaudePermissionMode(initCommand.perm_mode);
   const env = buildClaudeQueryEnv({
     envVars: initCommand.env_vars,
@@ -16810,9 +16929,19 @@ async function consumeClaudeMessages() {
       includePartialMessages: true,
       includeHookEvents: true,
       persistSession: true,
+      hooks: buildClaudePlanModeHooks(
+        () => initCommand?.provider === "claude" && initCommand.perm_mode === "plan",
+        emitClaudePlanExitPromptForBlockedTool
+      ),
       canUseTool: async (toolName, input, options) => {
         if (isClaudeAskUserQuestionTool(toolName)) {
           return waitForAskUserQuestionResponse(input, options.toolUseID);
+        }
+        if (isClaudePlanExitTool(toolName) && initCommand?.provider === "claude" && initCommand.perm_mode === "plan") {
+          return buildDeniedClaudeToolResult(
+            options.toolUseID,
+            "Plan mode is active. Confirm the plan before leaving Plan mode."
+          );
         }
         if (isClaudeInteractiveUserInputTool(toolName)) {
           return buildAllowedClaudeToolResult(input, options.toolUseID);
@@ -17098,7 +17227,7 @@ async function runCodexTurn(text, images) {
   const parts = buildPromptContentParts(text, images);
   const hasImages = parts.some((part) => part.type === "image");
   if (hasImages) {
-    const tempDir = path3.join(os2.tmpdir(), "ccem-images");
+    const tempDir = path4.join(os3.tmpdir(), "ccem-images");
     fs2.mkdirSync(tempDir, { recursive: true });
     const inputParts = [];
     for (const part of parts) {
@@ -17108,7 +17237,7 @@ async function runCodexTurn(text, images) {
       }
       const ext = part.image.mediaType.split("/")[1] || "png";
       const filename = `paste-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
-      const filePath = path3.join(tempDir, filename);
+      const filePath = path4.join(tempDir, filename);
       fs2.writeFileSync(filePath, Buffer.from(part.image.base64Data, "base64"));
       inputParts.push({ type: "local_image", path: filePath });
     }
