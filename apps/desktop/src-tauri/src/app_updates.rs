@@ -2,13 +2,12 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use semver::Version;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::{AppHandle, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
-const GITHUB_RELEASES_URL: &str =
-    "https://api.github.com/repos/Genuifx/claude-code-env-manager/releases?per_page=50";
-const GITHUB_USER_AGENT: &str = "ccem-desktop-updater";
+const RELEASE_URL_PREFIX: &str =
+    "https://github.com/Genuifx/claude-code-env-manager/releases/tag/v";
 
 #[derive(Default)]
 pub struct PendingUpdate(Mutex<Option<Update>>);
@@ -25,21 +24,6 @@ pub struct AppUpdateMetadata {
     body: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-struct GithubRelease {
-    tag_name: String,
-    html_url: String,
-    draft: bool,
-    prerelease: bool,
-    assets: Vec<GithubAsset>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct GithubAsset {
-    name: String,
-    browser_download_url: String,
-}
-
 #[tauri::command]
 pub fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
@@ -50,23 +34,8 @@ pub async fn check_app_update(
     app: AppHandle,
     pending_update: State<'_, PendingUpdate>,
 ) -> Result<Option<AppUpdateMetadata>, String> {
-    let current_version = parse_version(env!("CARGO_PKG_VERSION"))?;
-    let releases = fetch_github_releases().await?;
-    let Some(release) = select_update_release(&current_version, &releases) else {
-        replace_pending_update(&pending_update, None)?;
-        return Ok(None);
-    };
-
-    let latest_json_url = release
-        .latest_json_url()
-        .ok_or_else(|| format!("Release {} is missing latest.json", release.tag_name))?;
-    let endpoint = reqwest::Url::parse(latest_json_url)
-        .map_err(|error| format!("Invalid update endpoint: {error}"))?;
-
     let update = app
         .updater_builder()
-        .endpoints(vec![endpoint])
-        .map_err(|error| error.to_string())?
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|error| error.to_string())?
@@ -77,9 +46,9 @@ pub async fn check_app_update(
     let metadata = update.as_ref().map(|update| AppUpdateMetadata {
         version: update.version.clone(),
         current_version: update.current_version.clone(),
-        channel: if release.prerelease { "beta" } else { "stable" }.to_string(),
-        release_tag: release.tag_name.clone(),
-        release_url: release.html_url.clone(),
+        channel: version_channel(&update.version),
+        release_tag: release_tag(&update.version),
+        release_url: release_url(&update.version),
         date: update.date.map(|date| date.to_string()),
         body: update.body.clone(),
     });
@@ -103,67 +72,30 @@ pub fn restart_app(app: AppHandle) {
     app.restart();
 }
 
-async fn fetch_github_releases() -> Result<Vec<GithubRelease>, String> {
-    let response = reqwest::Client::new()
-        .get(GITHUB_RELEASES_URL)
-        .header(reqwest::header::USER_AGENT, GITHUB_USER_AGENT)
-        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-        .send()
-        .await
-        .map_err(|error| format!("Failed to query GitHub releases: {error}"))?;
-
-    let status = response.status();
-    if !status.is_success() {
-        return Err(format!(
-            "GitHub releases request failed with status {status}"
-        ));
-    }
-
-    response
-        .json::<Vec<GithubRelease>>()
-        .await
-        .map_err(|error| format!("Failed to parse GitHub releases: {error}"))
-}
-
 fn parse_version(raw: &str) -> Result<Version, String> {
     Version::parse(raw.trim_start_matches('v'))
         .map_err(|error| format!("Invalid app version {raw}: {error}"))
 }
 
-fn select_update_release<'a>(
-    current_version: &Version,
-    releases: &'a [GithubRelease],
-) -> Option<&'a GithubRelease> {
-    releases
-        .iter()
-        .filter(|release| !release.draft && release.latest_json_url().is_some())
-        .filter_map(|release| release.version().map(|version| (release, version)))
-        .filter(|(release, version)| {
-            version > current_version && is_channel_eligible(current_version, release)
+fn release_tag(version: &str) -> String {
+    format!("v{}", version.trim_start_matches('v'))
+}
+
+fn release_url(version: &str) -> String {
+    format!("{RELEASE_URL_PREFIX}{}", version.trim_start_matches('v'))
+}
+
+fn version_channel(version: &str) -> String {
+    parse_version(version)
+        .map(|version| {
+            if version.pre.is_empty() {
+                "stable"
+            } else {
+                "beta"
+            }
         })
-        .max_by(|(_, left), (_, right)| left.cmp(right))
-        .map(|(release, _)| release)
-}
-
-fn is_channel_eligible(current_version: &Version, release: &GithubRelease) -> bool {
-    if current_version.pre.is_empty() {
-        !release.prerelease
-    } else {
-        true
-    }
-}
-
-impl GithubRelease {
-    fn latest_json_url(&self) -> Option<&str> {
-        self.assets
-            .iter()
-            .find(|asset| asset.name == "latest.json")
-            .map(|asset| asset.browser_download_url.as_str())
-    }
-
-    fn version(&self) -> Option<Version> {
-        Version::parse(self.tag_name.trim_start_matches('v')).ok()
-    }
+        .unwrap_or("stable")
+        .to_string()
 }
 
 fn replace_pending_update(
@@ -191,72 +123,31 @@ fn take_pending_update(pending_update: &State<'_, PendingUpdate>) -> Result<Upda
 mod tests {
     use super::*;
 
-    fn release(tag: &str, prerelease: bool, has_manifest: bool) -> GithubRelease {
-        GithubRelease {
-            tag_name: tag.to_string(),
-            html_url: format!(
-                "https://github.com/Genuifx/claude-code-env-manager/releases/tag/{tag}"
-            ),
-            draft: false,
-            prerelease,
-            assets: if has_manifest {
-                vec![GithubAsset {
-                    name: "latest.json".to_string(),
-                    browser_download_url: format!(
-                        "https://github.com/Genuifx/claude-code-env-manager/releases/download/{tag}/latest.json"
-                    ),
-                }]
-            } else {
-                Vec::new()
-            },
-        }
+    #[test]
+    fn release_tag_adds_v_prefix_once() {
+        assert_eq!(release_tag("2.1.0"), "v2.1.0");
+        assert_eq!(release_tag("v2.1.0"), "v2.1.0");
     }
 
     #[test]
-    fn beta_versions_can_update_to_newer_beta() {
-        let current = parse_version("2.0.0-beta.33").unwrap();
-        let releases = vec![
-            release("v2.0.0-beta.34", true, true),
-            release("v2.0.0-beta.33", true, true),
-        ];
-
-        let selected = select_update_release(&current, &releases).unwrap();
-        assert_eq!(selected.tag_name, "v2.0.0-beta.34");
+    fn release_url_points_to_matching_tag() {
+        assert_eq!(
+            release_url("2.1.0"),
+            "https://github.com/Genuifx/claude-code-env-manager/releases/tag/v2.1.0"
+        );
     }
 
     #[test]
-    fn beta_versions_can_graduate_to_stable() {
-        let current = parse_version("2.0.0-beta.34").unwrap();
-        let releases = vec![
-            release("v2.0.0", false, true),
-            release("v2.0.0-beta.34", true, true),
-        ];
-
-        let selected = select_update_release(&current, &releases).unwrap();
-        assert_eq!(selected.tag_name, "v2.0.0");
+    fn version_channel_detects_prereleases() {
+        assert_eq!(version_channel("2.1.0"), "stable");
+        assert_eq!(version_channel("2.1.0-beta.1"), "beta");
     }
 
     #[test]
-    fn stable_versions_ignore_prereleases() {
-        let current = parse_version("2.0.0").unwrap();
-        let releases = vec![
-            release("v2.1.0-beta.1", true, true),
-            release("v2.0.1", false, true),
-        ];
-
-        let selected = select_update_release(&current, &releases).unwrap();
-        assert_eq!(selected.tag_name, "v2.0.1");
-    }
-
-    #[test]
-    fn releases_without_manifest_are_skipped() {
-        let current = parse_version("2.0.0-beta.33").unwrap();
-        let releases = vec![
-            release("v2.0.0-beta.35", true, false),
-            release("v2.0.0-beta.34", true, true),
-        ];
-
-        let selected = select_update_release(&current, &releases).unwrap();
-        assert_eq!(selected.tag_name, "v2.0.0-beta.34");
+    fn parse_version_accepts_optional_v_prefix() {
+        assert_eq!(
+            parse_version("v2.1.0").unwrap(),
+            Version::parse("2.1.0").unwrap()
+        );
     }
 }
