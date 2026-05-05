@@ -774,9 +774,8 @@ function WorkspaceAttentionPanel({
           );
         }
 
-        const Icon = entry.prompt.prompt_type === 'plan_exit'
-          ? ClipboardList
-          : MessageSquareQuote;
+        const isPlanExitPrompt = entry.prompt.prompt_type === 'plan_exit';
+        const Icon = isPlanExitPrompt ? ClipboardList : MessageSquareQuote;
 
         return (
           <div
@@ -806,14 +805,22 @@ function WorkspaceAttentionPanel({
               </p>
             )}
             {quickReplies.length > 0 ? (
-              <div className="mt-2 flex flex-wrap gap-1.5">
+              <div className={cn(
+                'mt-2 flex flex-wrap gap-1.5',
+                isPlanExitPrompt && 'justify-end'
+              )}>
                 {quickReplies.map((reply) => (
                   <Button
                     key={`${entry.toolUseId}-${reply}`}
                     type="button"
                     size="sm"
-                    variant="outline"
-                    className="h-7 rounded-lg border-border/60 px-3 text-[12px] hover:bg-muted/50"
+                    variant={isPlanExitPrompt ? 'default' : 'outline'}
+                    className={cn(
+                      'h-7 rounded-lg px-3 text-[12px]',
+                      isPlanExitPrompt
+                        ? 'min-w-24 gap-1.5 shadow-sm'
+                        : 'border-border/60 hover:bg-muted/50'
+                    )}
                     disabled={isSubmittingPrompt}
                     onClick={() => {
                       void onSubmitPromptReply({
@@ -822,7 +829,8 @@ function WorkspaceAttentionPanel({
                       });
                     }}
                   >
-                    {reply}
+                    {isPlanExitPrompt ? <Check className="h-3.5 w-3.5" /> : null}
+                    <span>{reply}</span>
                   </Button>
                 ))}
               </div>
