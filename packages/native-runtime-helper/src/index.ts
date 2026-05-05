@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { buildClaudeQueryEnv } from './claudeEnv';
 import { buildPromptContentParts, type PromptImage } from './promptContent';
 import { normalizeClaudePermissionMode, normalizeCodexSandboxMode } from './permissionModes';
 
@@ -882,12 +883,10 @@ async function consumeClaudeMessages() {
   }
 
   const permission = normalizeClaudePermissionMode(initCommand.perm_mode);
-  const env = {
-    ...process.env,
-    ...initCommand.env_vars,
-    CLAUDE_AGENT_SDK_CLIENT_APP: 'ccem-desktop',
-    ...(initCommand.effort ? { CLAUDE_CODE_EFFORT_LEVEL: initCommand.effort } : {}),
-  };
+  const env = buildClaudeQueryEnv({
+    envVars: initCommand.env_vars,
+    effort: initCommand.effort,
+  });
 
   claudeInputQueue = new AsyncMessageQueue<SDKUserMessage>();
   currentClaudeQuery = query({

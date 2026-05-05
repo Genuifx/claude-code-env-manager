@@ -16075,7 +16075,28 @@ import { createInterface } from "node:readline";
 import fs2 from "node:fs";
 import os2 from "node:os";
 import path3 from "node:path";
+import process3 from "node:process";
+
+// src/claudeEnv.ts
 import process2 from "node:process";
+var CLAUDE_DESKTOP_CLIENT_APP = "ccem-desktop";
+var CLAUDE_NON_INTERACTIVE_SANDBOX = "1";
+function buildClaudeQueryEnv({
+  envVars,
+  effort,
+  baseEnv = process2.env
+} = {}) {
+  const env = {
+    ...baseEnv,
+    ...envVars,
+    CLAUDE_AGENT_SDK_CLIENT_APP: CLAUDE_DESKTOP_CLIENT_APP,
+    CLAUDE_CODE_SANDBOXED: CLAUDE_NON_INTERACTIVE_SANDBOX
+  };
+  if (effort) {
+    env.CLAUDE_CODE_EFFORT_LEVEL = effort;
+  }
+  return env;
+}
 
 // src/promptContent.ts
 function escapeRegExp(value) {
@@ -16272,7 +16293,7 @@ var AsyncMessageQueue = class {
   }
 };
 function emit(output) {
-  process2.stdout.write(`${JSON.stringify(output)}
+  process3.stdout.write(`${JSON.stringify(output)}
 `);
 }
 function emitStatus(status, detail) {
@@ -16754,12 +16775,10 @@ async function consumeClaudeMessages() {
     throw new Error("Native runtime helper not initialized");
   }
   const permission = normalizeClaudePermissionMode(initCommand.perm_mode);
-  const env = {
-    ...process2.env,
-    ...initCommand.env_vars,
-    CLAUDE_AGENT_SDK_CLIENT_APP: "ccem-desktop",
-    ...initCommand.effort ? { CLAUDE_CODE_EFFORT_LEVEL: initCommand.effort } : {}
-  };
+  const env = buildClaudeQueryEnv({
+    envVars: initCommand.env_vars,
+    effort: initCommand.effort
+  });
   claudeInputQueue = new AsyncMessageQueue();
   currentClaudeQuery = E$$({
     prompt: claudeInputQueue,
@@ -17031,7 +17050,7 @@ async function ensureCodexThread() {
       baseUrl: initCommand.codex_base_url ?? void 0,
       apiKey: initCommand.codex_api_key ?? void 0,
       env: {
-        ...process2.env,
+        ...process3.env,
         ...initCommand.env_vars
       }
     });
@@ -17349,7 +17368,7 @@ async function handleCommand(command) {
   }
 }
 var rl = createInterface({
-  input: process2.stdin,
+  input: process3.stdin,
   crlfDelay: Infinity
 });
 rl.on("line", (line) => {
