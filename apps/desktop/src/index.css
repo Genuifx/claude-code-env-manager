@@ -568,8 +568,20 @@
   border-left: none;
 }
 
-/* === Radix ScrollArea — constrain inner table wrapper === */
-[data-radix-scroll-area-viewport] > div {
+/* === Radix ScrollArea === */
+.ccem-scroll-area-viewport {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.ccem-scroll-area-viewport::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+/* Constrain the Radix content wrapper only for transcript surfaces with wide code blocks. */
+.workspace-transcript-scroll [data-radix-scroll-area-viewport] > div {
   display: block !important;
   max-width: 100% !important;
 }
