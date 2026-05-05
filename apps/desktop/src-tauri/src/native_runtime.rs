@@ -59,6 +59,8 @@ pub struct NativeSessionRecord {
     pub env_name: String,
     pub perm_mode: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_perm_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
     pub status: String,
     pub created_at: DateTime<Utc>,
@@ -80,6 +82,8 @@ pub struct NativeSessionSummary {
     pub env_name: String,
     pub perm_mode: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_perm_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
     pub status: String,
     pub created_at: DateTime<Utc>,
@@ -97,6 +101,7 @@ pub struct NativeSessionOptions {
     pub provider: NativeProvider,
     pub env_name: String,
     pub perm_mode: String,
+    pub runtime_perm_mode: Option<String>,
     pub working_dir: String,
     pub initial_prompt: Option<String>,
     pub display_prompt: Option<String>,
@@ -228,6 +233,7 @@ impl NativeSessionHandle {
             project_dir: record.project_dir,
             env_name: record.env_name,
             perm_mode: record.perm_mode,
+            runtime_perm_mode: record.runtime_perm_mode,
             effort: record.effort,
             status: record.status,
             created_at: record.created_at,
@@ -288,6 +294,7 @@ impl NativeRuntimeManager {
             project_dir: options.working_dir.clone(),
             env_name: options.env_name.clone(),
             perm_mode: options.perm_mode.clone(),
+            runtime_perm_mode: options.runtime_perm_mode.clone(),
             effort: options.effort.clone(),
             status: "initializing".to_string(),
             created_at: now,
@@ -360,6 +367,7 @@ impl NativeRuntimeManager {
                         project_dir: record.project_dir,
                         env_name: record.env_name,
                         perm_mode: record.perm_mode,
+                        runtime_perm_mode: record.runtime_perm_mode,
                         effort: record.effort,
                         status: record.status,
                         created_at: record.created_at,
@@ -529,6 +537,7 @@ impl NativeRuntimeManager {
             }
             if let Some(mode) = perm_mode {
                 record.perm_mode = mode.to_string();
+                record.runtime_perm_mode = None;
             }
             if let Some(next_effort) = effort {
                 record.effort = non_empty_error(next_effort);
@@ -762,7 +771,10 @@ impl NativeRuntimeManager {
             &HelperInputCommand::Init {
                 provider: options.provider.as_str(),
                 env_name: &options.env_name,
-                perm_mode: &options.perm_mode,
+                perm_mode: options
+                    .runtime_perm_mode
+                    .as_deref()
+                    .unwrap_or(options.perm_mode.as_str()),
                 working_dir: &options.working_dir,
                 env_vars: &handle.helper_env_vars,
                 initial_prompt: options.initial_prompt.as_deref(),
@@ -1214,6 +1226,7 @@ impl NativeRuntimeManager {
                 project_dir: record.project_dir,
                 env_name: record.env_name,
                 perm_mode: record.perm_mode,
+                runtime_perm_mode: record.runtime_perm_mode,
                 effort: record.effort,
                 status: record.status,
                 created_at: record.created_at,
@@ -1446,6 +1459,7 @@ fn build_runtime_bootstrap_options(
         provider: record.provider,
         env_name: record.env_name.clone(),
         perm_mode: record.perm_mode.clone(),
+        runtime_perm_mode: record.runtime_perm_mode.clone(),
         working_dir: record.project_dir.clone(),
         initial_prompt: None,
         display_prompt: None,
@@ -1484,6 +1498,7 @@ mod tests {
             project_dir: "/tmp/project".to_string(),
             env_name: "DeepSeek".to_string(),
             perm_mode: "dev".to_string(),
+            runtime_perm_mode: None,
             effort: None,
             status: "processing".to_string(),
             created_at: Utc::now(),
@@ -1546,6 +1561,7 @@ mod tests {
             project_dir: "/tmp/project".to_string(),
             env_name: "DeepSeek".to_string(),
             perm_mode: "dev".to_string(),
+            runtime_perm_mode: None,
             effort: None,
             status: status.to_string(),
             created_at: Utc::now(),

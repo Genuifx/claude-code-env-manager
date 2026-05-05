@@ -247,6 +247,7 @@ export interface TauriCommands {
       provider: 'claude' | 'codex';
       envName: string;
       permMode?: string | null;
+      runtimePermMode?: string | null;
       workingDir?: string | null;
       initialPrompt: string;
       initialDisplayPrompt?: string | null;
@@ -606,6 +607,7 @@ export interface NativeSessionSummary {
   project_dir: string;
   env_name: string;
   perm_mode: string;
+  runtime_perm_mode?: string | null;
   effort?: string | null;
   status: string;
   created_at: string;

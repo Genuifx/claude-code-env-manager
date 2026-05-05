@@ -972,6 +972,7 @@ async fn create_native_session(
     provider: String,
     env_name: String,
     perm_mode: Option<String>,
+    runtime_perm_mode: Option<String>,
     working_dir: Option<String>,
     initial_prompt: String,
     initial_display_prompt: Option<String>,
@@ -982,6 +983,9 @@ async fn create_native_session(
     let provider = parse_native_provider(&provider)?;
     let effective_working_dir = resolve_headless_working_dir(working_dir);
     let effective_perm_mode = perm_mode.unwrap_or_else(|| "dev".to_string());
+    let effective_runtime_perm_mode = runtime_perm_mode
+        .map(|mode| mode.trim().to_string())
+        .filter(|mode| !mode.is_empty() && mode != &effective_perm_mode);
     let initial_images = initial_images.filter(|images| !images.is_empty());
 
     let options = match provider {
@@ -991,6 +995,7 @@ async fn create_native_session(
                 provider,
                 env_name: resolved.env_name,
                 perm_mode: effective_perm_mode,
+                runtime_perm_mode: effective_runtime_perm_mode.clone(),
                 working_dir: effective_working_dir,
                 initial_prompt: Some(initial_prompt),
                 display_prompt: initial_display_prompt.clone(),
@@ -1016,6 +1021,7 @@ async fn create_native_session(
                     resolved.env_name
                 },
                 perm_mode: effective_perm_mode,
+                runtime_perm_mode: effective_runtime_perm_mode,
                 working_dir: effective_working_dir,
                 initial_prompt: Some(initial_prompt),
                 display_prompt: initial_display_prompt.clone(),

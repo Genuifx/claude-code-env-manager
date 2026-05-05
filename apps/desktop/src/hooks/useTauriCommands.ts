@@ -690,6 +690,7 @@ export function useTauriCommands() {
     provider: 'claude' | 'codex';
     envName?: string;
     permMode?: string;
+    runtimePermMode?: string | null;
     workingDir?: string | null;
     initialPrompt: string;
     initialDisplayPrompt?: string | null;
@@ -702,6 +703,7 @@ export function useTauriCommands() {
       provider: options.provider,
       envName: options.envName ?? currentEnv,
       permMode: options.permMode ?? permissionMode,
+      runtimePermMode: options.runtimePermMode ?? null,
       workingDir: options.workingDir ?? selectedWorkingDir ?? null,
       initialPrompt: options.initialPrompt,
       initialDisplayPrompt: options.initialDisplayPrompt ?? null,

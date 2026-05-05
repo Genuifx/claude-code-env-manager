@@ -3,7 +3,6 @@ import {
   Check,
   ChevronDown,
   Gauge,
-  ListChecks,
   Search,
   Shield,
   ShieldAlert,
@@ -60,7 +59,6 @@ function getModeIcon(mode: WorkspacePermissionModeName): typeof Shield {
     safe: ShieldAlert,
     ci: ShieldCheck,
     audit: Search,
-    plan: ListChecks,
   };
   return iconMap[mode] || Shield;
 }
@@ -101,15 +99,18 @@ export function ComposerControls({
   onEffortChange,
 }: ComposerControlsProps) {
   const { t } = useLocale();
-  const [permissionPreviewMode, setPermissionPreviewMode] = useState<WorkspacePermissionModeName>(permMode);
+  const normalizedPermMode = normalizeWorkspacePermissionModeName(permMode);
+  const [permissionPreviewMode, setPermissionPreviewMode] = useState<WorkspacePermissionModeName>(
+    normalizedPermMode,
+  );
   const [permissionSelectOpen, setPermissionSelectOpen] = useState(false);
   const [envEffortOpen, setEnvEffortOpen] = useState(false);
 
   useEffect(() => {
     if (!permissionSelectOpen) {
-      setPermissionPreviewMode(permMode);
+      setPermissionPreviewMode(normalizedPermMode);
     }
-  }, [permMode, permissionSelectOpen]);
+  }, [normalizedPermMode, permissionSelectOpen]);
 
   const permissionModes = useMemo(
     () => Object.keys(PERMISSION_PRESETS) as PermissionModeName[],
@@ -118,15 +119,10 @@ export function ComposerControls({
 
   const currentEnvironment = environments.find((e) => e.name === envName);
   const currentEnvironmentIconHint = resolveEnvironmentIconHint(currentEnvironment);
-  const permissionPreview = permissionPreviewMode === 'plan'
-    ? {
-        desc: t('workspace.nativePlanModeActive'),
-        detail: t('workspace.composerPlanModeHintClaudeLocked'),
-      }
-    : {
-        desc: t(`environments.permMode_${permissionPreviewMode}_desc`),
-        detail: t(`environments.permMode_${permissionPreviewMode}_detail`),
-      };
+  const permissionPreview = {
+    desc: t(`environments.permMode_${permissionPreviewMode}_desc`),
+    detail: t(`environments.permMode_${permissionPreviewMode}_detail`),
+  };
 
   const effortLevels = provider === 'codex' ? CODEX_EFFORT_LEVELS : CLAUDE_EFFORT_LEVELS;
 
@@ -215,12 +211,12 @@ export function ComposerControls({
       </Popover>
 
       <Select
-        value={permMode}
+        value={normalizedPermMode}
         open={permissionSelectOpen}
         onOpenChange={(open) => {
           setPermissionSelectOpen(open);
           if (open) {
-            setPermissionPreviewMode(permMode);
+            setPermissionPreviewMode(normalizedPermMode);
           }
         }}
         onValueChange={(value) => {
@@ -233,21 +229,21 @@ export function ComposerControls({
           variant="plain"
           className={cn(
             'h-8 w-auto min-w-[146px] rounded-xl px-2.5 text-[12px] text-foreground',
-            isRiskyPermissionMode(permMode) && 'text-destructive',
+            isRiskyPermissionMode(normalizedPermMode) && 'text-destructive',
           )}
         >
           {(() => {
-            const ModeIcon = getModeIcon(permMode);
+            const ModeIcon = getModeIcon(normalizedPermMode);
             return (
               <span className="flex min-w-0 items-center gap-2">
                 <ModeIcon
                   className={cn(
                     'h-3.5 w-3.5 shrink-0 text-muted-foreground',
-                    isRiskyPermissionMode(permMode) && 'text-destructive',
+                    isRiskyPermissionMode(normalizedPermMode) && 'text-destructive',
                   )}
                 />
                 <span className="truncate">
-                  {getWorkspacePermissionModeDisplayName(permMode)}
+                  {getWorkspacePermissionModeDisplayName(normalizedPermMode)}
                 </span>
               </span>
             );

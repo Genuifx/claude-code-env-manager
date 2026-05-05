@@ -154,6 +154,14 @@ function isTerminalStatus(status: string) {
   return status === 'stopped' || status === 'error' || status === 'handoff';
 }
 
+function nativeSessionRuntimePermMode(session: NativeSessionSummary) {
+  return session.runtime_perm_mode || session.perm_mode;
+}
+
+function isNativeSessionPlanRuntime(session: NativeSessionSummary) {
+  return nativeSessionRuntimePermMode(session) === 'plan';
+}
+
 function latestEventSeq(events: SessionEventRecord[]): number | null {
   return events[events.length - 1]?.seq ?? null;
 }
@@ -924,6 +932,7 @@ export function WorkspaceNativeSessionView({
 }: WorkspaceNativeSessionViewProps) {
   const { t } = useLocale();
   const environments = useAppStore((state) => state.environments);
+  const defaultPermissionMode = useAppStore((state) => state.permissionMode);
   const {
     getNativeSessionEvents,
     sendNativeSessionInput,
@@ -936,13 +945,20 @@ export function WorkspaceNativeSessionView({
     searchWorkspaceFiles,
   } = useTauriCommands();
   const [sessionEnv, setSessionEnv] = useState(session.env_name);
-  const [sessionRuntimePermMode, setSessionRuntimePermMode] = useState(session.perm_mode);
-  const sessionPermMode = normalizePermissionModeName(sessionRuntimePermMode);
+  const [sessionRuntimePermMode, setSessionRuntimePermMode] = useState(
+    () => nativeSessionRuntimePermMode(session),
+  );
+  const [sessionDisplayPermMode, setSessionDisplayPermMode] = useState(
+    () => normalizePermissionModeName(session.perm_mode, defaultPermissionMode),
+  );
+  const sessionPermMode = sessionDisplayPermMode;
   const [sessionEffort, setSessionEffort] = useState<EffortLevel>(
     () => normalizeEffortForProvider(session.effort, session.provider),
   );
   const [composerText, setComposerText] = useState('');
-  const [composerPlanModeEnabled, setComposerPlanModeEnabled] = useState(session.perm_mode === 'plan');
+  const [composerPlanModeEnabled, setComposerPlanModeEnabled] = useState(
+    () => isNativeSessionPlanRuntime(session),
+  );
   const [events, setEvents] = useState<SessionEventRecord[]>(() =>
     readCachedNativeEvents(session.runtime_id),
   );
@@ -996,7 +1012,7 @@ export function WorkspaceNativeSessionView({
     prevEventCountRef.current = 0;
     setEvents(cachedEvents);
     setComposerText('');
-    setComposerPlanModeEnabled(session.perm_mode === 'plan');
+    setComposerPlanModeEnabled(isNativeSessionPlanRuntime(session));
     setQueuedMessages([]);
     setLocalUserPrompts(initialPrompts);
     setLocallyDismissedPromptIds(new Set());
@@ -1004,9 +1020,18 @@ export function WorkspaceNativeSessionView({
 
   useEffect(() => {
     setSessionEnv(session.env_name);
-    setSessionRuntimePermMode(session.perm_mode);
+    setSessionRuntimePermMode(nativeSessionRuntimePermMode(session));
+    setSessionDisplayPermMode(normalizePermissionModeName(session.perm_mode, defaultPermissionMode));
     setSessionEffort(normalizeEffortForProvider(session.effort, session.provider));
-  }, [session.effort, session.env_name, session.perm_mode, session.provider, session.runtime_id]);
+  }, [
+    defaultPermissionMode,
+    session.effort,
+    session.env_name,
+    session.perm_mode,
+    session.provider,
+    session.runtime_id,
+    session.runtime_perm_mode,
+  ]);
 
   const unconfirmedLocalUserPrompts = useMemo(
     () => filterConfirmedLocalUserPrompts(localUserPrompts, events),
@@ -1531,18 +1556,28 @@ export function WorkspaceNativeSessionView({
   }, [refreshSummary, session.runtime_id, sessionEnv, t, updateNativeSessionSettings]);
 
   const handlePermModeChange = useCallback((mode: PermissionModeName) => {
-    const previousMode = sessionRuntimePermMode;
+    const previousRuntimeMode = sessionRuntimePermMode;
+    const previousDisplayMode = sessionDisplayPermMode;
     setSessionRuntimePermMode(mode);
+    setSessionDisplayPermMode(mode);
     setComposerPlanModeEnabled(false);
     void updateNativeSessionSettings(session.runtime_id, undefined, mode)
       .then(() => refreshSummary({ force: true }))
       .catch((error) => {
         console.error('Failed to update native session permission mode:', error);
-        setSessionRuntimePermMode(previousMode);
-        setComposerPlanModeEnabled(previousMode === 'plan');
+        setSessionRuntimePermMode(previousRuntimeMode);
+        setSessionDisplayPermMode(previousDisplayMode);
+        setComposerPlanModeEnabled(previousRuntimeMode === 'plan');
         toast.error(t('workspace.nativeSettingsFailed'));
       });
-  }, [refreshSummary, session.runtime_id, sessionRuntimePermMode, t, updateNativeSessionSettings]);
+  }, [
+    refreshSummary,
+    session.runtime_id,
+    sessionDisplayPermMode,
+    sessionRuntimePermMode,
+    t,
+    updateNativeSessionSettings,
+  ]);
 
   const handleEffortChange = useCallback((effort: EffortLevel) => {
     const nextEffort = normalizeEffortForProvider(effort, session.provider);

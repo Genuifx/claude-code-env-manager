@@ -60,6 +60,7 @@ import {
   type WorkspaceHistorySessionPreference,
   type WorkspaceHistorySessionPreferences,
 } from '@/components/workspace/workspaceSessionPreferences';
+import { resolveComposerDispatch } from '@/components/workspace/workspaceComposerDispatch';
 import { trimSeedMessagesBeforeFirstUserPrompt } from '@/components/workspace/workspaceEventTranscript';
 
 const LazyHistoryDetail = lazy(async () =>
@@ -87,6 +88,7 @@ function areNativeSessionSummariesEqual(
     && previous.project_dir === next.project_dir
     && previous.env_name === next.env_name
     && previous.perm_mode === next.perm_mode
+    && previous.runtime_perm_mode === next.runtime_perm_mode
     && previous.effort === next.effort
     && previous.status === next.status
     && previous.created_at === next.created_at
@@ -95,35 +97,6 @@ function areNativeSessionSummariesEqual(
     && previous.last_event_seq === next.last_event_seq
     && previous.can_handoff_to_terminal === next.can_handoff_to_terminal
     && previous.last_error === next.last_error;
-}
-
-function resolveComposerDispatch(options: {
-  provider: 'claude' | 'codex';
-  prompt: string;
-  permissionMode: string;
-  planModeEnabled: boolean;
-}) {
-  const trimmedPrompt = options.prompt.trim();
-  if (!options.planModeEnabled) {
-    return {
-      prompt: trimmedPrompt,
-      permMode: options.permissionMode,
-    };
-  }
-
-  if (options.provider === 'claude') {
-    return {
-      prompt: trimmedPrompt,
-      permMode: 'plan',
-    };
-  }
-
-  return {
-    prompt: trimmedPrompt.startsWith('/plan')
-      ? trimmedPrompt
-      : (trimmedPrompt ? `/plan ${trimmedPrompt}` : '/plan'),
-    permMode: options.permissionMode,
-  };
 }
 
 const ACTIVE_LIVE_RUNTIME_STORAGE_KEY = 'ccem-workspace-live-runtime';
@@ -1001,6 +974,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
         provider: composeProvider,
         envName: currentEnv,
         permMode: dispatch.permMode,
+        runtimePermMode: dispatch.runtimePermMode,
         workingDir,
         initialPrompt: dispatch.prompt,
         initialDisplayPrompt: previewPrompt,
@@ -1091,6 +1065,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
         provider,
         envName: historyEnv,
         permMode: dispatch.permMode,
+        runtimePermMode: dispatch.runtimePermMode,
         workingDir: selectedSession.project,
         initialPrompt: dispatch.prompt,
         initialDisplayPrompt: previewPrompt,
