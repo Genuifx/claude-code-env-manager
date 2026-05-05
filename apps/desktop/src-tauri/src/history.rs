@@ -225,7 +225,7 @@ pub async fn get_conversation_history(
         }
 
         sessions = dedupe_history_sessions(sessions);
-        sessions.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        sessions.sort_by_key(|session| std::cmp::Reverse(session.timestamp));
 
         // Overlay user-edited title overrides
         let overrides = crate::title_overrides::TitleOverrides::load();

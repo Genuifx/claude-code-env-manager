@@ -180,7 +180,7 @@ pub fn track_launched_session(
                     .collect();
 
                 if !candidates.is_empty() {
-                    candidates.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+                    candidates.sort_by_key(|session| std::cmp::Reverse(session.updated_at));
                     let selected = candidates
                         .iter()
                         .find(|session| {
@@ -274,7 +274,7 @@ pub fn list_local_sessions() -> Result<Vec<LocalOpenCodeSession>, String> {
     }
 
     let mut sessions: Vec<_> = sessions_by_id.into_values().collect();
-    sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+    sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at));
     Ok(sessions)
 }
 

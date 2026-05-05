@@ -351,7 +351,7 @@ impl RuntimeManager {
             .into_iter()
             .map(|handle| summary_from_handle(&handle))
             .collect::<Vec<_>>();
-        summaries.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        summaries.sort_by_key(|summary| std::cmp::Reverse(summary.created_at));
         summaries
     }
 

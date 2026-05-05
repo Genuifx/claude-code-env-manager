@@ -134,7 +134,7 @@ pub fn discover_jsonl_path(
             })
             .collect::<Vec<_>>();
 
-        candidates.sort_by(|left, right| left.0.cmp(&right.0));
+        candidates.sort_by_key(|left| left.0);
         if let Some((_, path)) = candidates.pop() {
             return Some(path);
         }

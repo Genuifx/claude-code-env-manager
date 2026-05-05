@@ -3129,9 +3129,9 @@ fn main() {
             }
 
             match event {
-                WindowEvent::CloseRequested { api, .. } => {
+                WindowEvent::CloseRequested { api, .. }
                     // Only intercept the main window, and never when force-quit is requested
-                    if !FORCE_QUIT.load(Ordering::SeqCst) {
+                    if !FORCE_QUIT.load(Ordering::SeqCst) => {
                         let close_to_tray = config::read_settings()
                             .map(|s| s.close_to_tray)
                             .unwrap_or(true);
@@ -3140,7 +3140,6 @@ fn main() {
                             let _ = window.hide();
                         }
                     }
-                }
                 #[cfg(target_os = "macos")]
                 WindowEvent::Resized(_) => {
                     if let Some(main_window) = window.app_handle().get_webview_window("main") {

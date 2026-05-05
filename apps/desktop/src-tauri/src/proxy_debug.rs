@@ -467,11 +467,10 @@ impl ProxyDebugManager {
         let metrics_guard = self.metrics.lock().unwrap();
         let route_count = self.routes.read().unwrap().len();
 
-        let avg_response_ms = if metrics_guard.success_requests > 0 {
-            metrics_guard.total_response_ms / metrics_guard.success_requests
-        } else {
-            0
-        };
+        let avg_response_ms = metrics_guard
+            .total_response_ms
+            .checked_div(metrics_guard.success_requests)
+            .unwrap_or(0);
 
         let listen_port = runtime_guard.as_ref().map(|runtime| runtime.port);
 

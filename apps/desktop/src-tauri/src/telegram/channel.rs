@@ -159,15 +159,11 @@ impl TelegramChannel {
                 .lock()
                 .map_err(|_| "Failed to lock Telegram channel state".to_string())?;
             match &event.payload {
-                SessionEventPayload::AssistantChunk { text } => {
-                    if !text.trim().is_empty() {
-                        state.pending_stdout.push(text.clone());
-                    }
+                SessionEventPayload::AssistantChunk { text } if !text.trim().is_empty() => {
+                    state.pending_stdout.push(text.clone());
                 }
-                SessionEventPayload::StdErrLine { line } => {
-                    if !line.trim().is_empty() {
-                        state.pending_stderr.push(line.clone());
-                    }
+                SessionEventPayload::StdErrLine { line } if !line.trim().is_empty() => {
+                    state.pending_stderr.push(line.clone());
                 }
                 SessionEventPayload::Lifecycle { stage, detail } => {
                     if matches!(
@@ -181,47 +177,42 @@ impl TelegramChannel {
                     request_id,
                     tool_name,
                     ..
-                } => {
-                    if state.announced_requests.insert(request_id.clone()) {
-                        if let Ok(sent_message) = send_permission_request_message(
-                            &self.token,
-                            self.chat_id,
-                            self.thread_id,
-                            request_id,
-                            tool_name,
-                        ) {
-                            state
-                                .permission_messages
-                                .insert(request_id.clone(), sent_message);
-                        }
+                } if state.announced_requests.insert(request_id.clone()) => {
+                    if let Ok(sent_message) = send_permission_request_message(
+                        &self.token,
+                        self.chat_id,
+                        self.thread_id,
+                        request_id,
+                        tool_name,
+                    ) {
+                        state
+                            .permission_messages
+                            .insert(request_id.clone(), sent_message);
                     }
                 }
                 SessionEventPayload::PermissionResponded {
                     request_id,
                     approved,
                     responder,
-                } => {
-                    if state.announced_responses.insert(request_id.clone()) {
-                        let text = format!(
-                            "Permission request {request_id} was {} by {responder}.",
-                            if *approved { "approved" } else { "denied" }
-                        );
-                        if let Some(sent_message) = state.permission_messages.remove(request_id) {
-                            if edit_message_text(
-                                &self.token,
-                                self.chat_id,
-                                sent_message.message_id,
-                                &text,
-                                None,
-                            )
-                            .is_err()
-                            {
-                                let _ =
-                                    send_message(&self.token, self.chat_id, self.thread_id, &text);
-                            }
-                        } else {
+                } if state.announced_responses.insert(request_id.clone()) => {
+                    let text = format!(
+                        "Permission request {request_id} was {} by {responder}.",
+                        if *approved { "approved" } else { "denied" }
+                    );
+                    if let Some(sent_message) = state.permission_messages.remove(request_id) {
+                        if edit_message_text(
+                            &self.token,
+                            self.chat_id,
+                            sent_message.message_id,
+                            &text,
+                            None,
+                        )
+                        .is_err()
+                        {
                             let _ = send_message(&self.token, self.chat_id, self.thread_id, &text);
                         }
+                    } else {
+                        let _ = send_message(&self.token, self.chat_id, self.thread_id, &text);
                     }
                 }
                 SessionEventPayload::ClaudeJson {
@@ -251,10 +242,10 @@ impl TelegramChannel {
                     }
                     should_flush = true;
                 }
-                SessionEventPayload::SessionCompleted { reason } => {
-                    if reason != "completed" && reason != "stopped" {
-                        state.pending_stderr.push(reason.clone());
-                    }
+                SessionEventPayload::SessionCompleted { reason }
+                    if reason != "completed" && reason != "stopped" =>
+                {
+                    state.pending_stderr.push(reason.clone());
                 }
                 _ => {}
             }
@@ -270,18 +261,14 @@ impl TelegramChannel {
     ) -> Result<(), String> {
         let mut should_flush = false;
         match &event.payload {
-            SessionEventPayload::AssistantChunk { text } => {
-                if !text.trim().is_empty() {
-                    if let Ok(mut state) = self.state.lock() {
-                        state.pending_lines.push(text.clone());
-                    }
+            SessionEventPayload::AssistantChunk { text } if !text.trim().is_empty() => {
+                if let Ok(mut state) = self.state.lock() {
+                    state.pending_lines.push(text.clone());
                 }
             }
-            SessionEventPayload::SystemMessage { message } => {
-                if !message.trim().is_empty() {
-                    if let Ok(mut state) = self.state.lock() {
-                        state.pending_lines.push(message.clone());
-                    }
+            SessionEventPayload::SystemMessage { message } if !message.trim().is_empty() => {
+                if let Ok(mut state) = self.state.lock() {
+                    state.pending_lines.push(message.clone());
                 }
             }
             SessionEventPayload::ToolUseStarted {

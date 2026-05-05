@@ -1014,9 +1014,7 @@ fn upsert_topic_binding(settings: &mut TelegramSettings, binding: TelegramTopicB
         *existing = binding;
     } else {
         settings.topic_bindings.push(binding);
-        settings
-            .topic_bindings
-            .sort_by(|left, right| left.thread_id.cmp(&right.thread_id));
+        settings.topic_bindings.sort_by_key(|left| left.thread_id);
     }
 }
 
@@ -4692,15 +4690,11 @@ fn monitor_session_completion(
 
             for event in batch.events {
                 match event.payload {
-                    SessionEventPayload::AssistantChunk { text } => {
-                        if !text.trim().is_empty() {
-                            pending_stdout.push(text);
-                        }
+                    SessionEventPayload::AssistantChunk { text } if !text.trim().is_empty() => {
+                        pending_stdout.push(text);
                     }
-                    SessionEventPayload::StdErrLine { line } => {
-                        if !line.trim().is_empty() {
-                            pending_stderr.push(line);
-                        }
+                    SessionEventPayload::StdErrLine { line } if !line.trim().is_empty() => {
+                        pending_stderr.push(line);
                     }
                     SessionEventPayload::Lifecycle { stage, detail } => {
                         if matches!(
@@ -4714,44 +4708,40 @@ fn monitor_session_completion(
                         request_id,
                         tool_name,
                         ..
-                    } => {
-                        if announced_requests.insert(request_id.clone()) {
-                            if let Ok(sent_message) = send_permission_request_message(
-                                &token,
-                                chat_id,
-                                thread_id,
-                                &request_id,
-                                &tool_name,
-                            ) {
-                                permission_messages.insert(request_id.clone(), sent_message);
-                            }
+                    } if announced_requests.insert(request_id.clone()) => {
+                        if let Ok(sent_message) = send_permission_request_message(
+                            &token,
+                            chat_id,
+                            thread_id,
+                            &request_id,
+                            &tool_name,
+                        ) {
+                            permission_messages.insert(request_id.clone(), sent_message);
                         }
                     }
                     SessionEventPayload::PermissionResponded {
                         request_id,
                         approved,
                         responder,
-                    } => {
-                        if announced_responses.insert(request_id.clone()) {
-                            let text = format!(
-                                "Permission request {request_id} was {} by {responder}.",
-                                if approved { "approved" } else { "denied" }
-                            );
-                            if let Some(sent_message) = permission_messages.remove(&request_id) {
-                                if edit_message_text(
-                                    &token,
-                                    chat_id,
-                                    sent_message.message_id,
-                                    &text,
-                                    None,
-                                )
-                                .is_err()
-                                {
-                                    let _ = send_message(&token, chat_id, thread_id, &text);
-                                }
-                            } else {
+                    } if announced_responses.insert(request_id.clone()) => {
+                        let text = format!(
+                            "Permission request {request_id} was {} by {responder}.",
+                            if approved { "approved" } else { "denied" }
+                        );
+                        if let Some(sent_message) = permission_messages.remove(&request_id) {
+                            if edit_message_text(
+                                &token,
+                                chat_id,
+                                sent_message.message_id,
+                                &text,
+                                None,
+                            )
+                            .is_err()
+                            {
                                 let _ = send_message(&token, chat_id, thread_id, &text);
                             }
+                        } else {
+                            let _ = send_message(&token, chat_id, thread_id, &text);
                         }
                     }
                     SessionEventPayload::ClaudeJson {
@@ -4791,10 +4781,10 @@ fn monitor_session_completion(
                         pending_stdout.clear();
                         pending_stderr.clear();
                     }
-                    SessionEventPayload::SessionCompleted { reason } => {
-                        if reason != "completed" && reason != "stopped" {
-                            pending_stderr.push(reason);
-                        }
+                    SessionEventPayload::SessionCompleted { reason }
+                        if reason != "completed" && reason != "stopped" =>
+                    {
+                        pending_stderr.push(reason);
                     }
                     _ => {}
                 }
@@ -4876,15 +4866,13 @@ fn monitor_interactive_session(
 
             for event in batch.events {
                 match event.payload {
-                    SessionEventPayload::AssistantChunk { text } => {
-                        if !text.trim().is_empty() {
-                            pending_lines.push(text);
-                        }
+                    SessionEventPayload::AssistantChunk { text } if !text.trim().is_empty() => {
+                        pending_lines.push(text);
                     }
-                    SessionEventPayload::SystemMessage { message } => {
-                        if !message.trim().is_empty() {
-                            pending_lines.push(message);
-                        }
+                    SessionEventPayload::SystemMessage { message }
+                        if !message.trim().is_empty() =>
+                    {
+                        pending_lines.push(message);
                     }
                     SessionEventPayload::ToolUseStarted {
                         tool_use_id,

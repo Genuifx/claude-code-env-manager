@@ -114,7 +114,9 @@ async fn fetch_github_releases() -> Result<Vec<GithubRelease>, String> {
 
     let status = response.status();
     if !status.is_success() {
-        return Err(format!("GitHub releases request failed with status {status}"));
+        return Err(format!(
+            "GitHub releases request failed with status {status}"
+        ));
     }
 
     response
@@ -135,11 +137,7 @@ fn select_update_release<'a>(
     releases
         .iter()
         .filter(|release| !release.draft && release.latest_json_url().is_some())
-        .filter_map(|release| {
-            release
-                .version()
-                .map(|version| (release, version))
-        })
+        .filter_map(|release| release.version().map(|version| (release, version)))
         .filter(|(release, version)| {
             version > current_version && is_channel_eligible(current_version, release)
         })
@@ -196,7 +194,9 @@ mod tests {
     fn release(tag: &str, prerelease: bool, has_manifest: bool) -> GithubRelease {
         GithubRelease {
             tag_name: tag.to_string(),
-            html_url: format!("https://github.com/Genuifx/claude-code-env-manager/releases/tag/{tag}"),
+            html_url: format!(
+                "https://github.com/Genuifx/claude-code-env-manager/releases/tag/{tag}"
+            ),
             draft: false,
             prerelease,
             assets: if has_manifest {

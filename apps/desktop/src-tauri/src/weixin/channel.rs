@@ -135,17 +135,13 @@ impl WeixinChannel {
                 .lock()
                 .map_err(|_| "Failed to lock Weixin channel state".to_string())?;
             match &event.payload {
-                SessionEventPayload::AssistantChunk { text } => {
-                    if !text.trim().is_empty() {
-                        state.pending_stdout.push(text.clone());
-                        state.saw_stdout_this_turn = true;
-                    }
+                SessionEventPayload::AssistantChunk { text } if !text.trim().is_empty() => {
+                    state.pending_stdout.push(text.clone());
+                    state.saw_stdout_this_turn = true;
                 }
-                SessionEventPayload::StdErrLine { line } => {
-                    if !line.trim().is_empty() {
-                        state.pending_stderr.push(line.clone());
-                        state.saw_stderr_this_turn = true;
-                    }
+                SessionEventPayload::StdErrLine { line } if !line.trim().is_empty() => {
+                    state.pending_stderr.push(line.clone());
+                    state.saw_stderr_this_turn = true;
                 }
                 SessionEventPayload::Lifecycle { stage, detail } => {
                     if matches!(
