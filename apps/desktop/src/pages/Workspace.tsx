@@ -2,6 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 import {
   ChevronDown,
   FolderOpen,
+  LoaderCircle,
   TerminalSquare,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -53,6 +54,7 @@ import {
   findLiveEntryForSidebarSession,
   toLiveHistorySessionItem,
 } from '@/components/workspace/workspaceSidebarSessions';
+import { launchWorkspaceTerminalSession } from '@/components/workspace/workspaceTerminalLaunch';
 import {
   replaceWorkspaceLiveSessionsSnapshot,
   updateWorkspaceLiveSessionsSnapshot,
@@ -214,6 +216,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
   const liveSessionsByRuntimeIdRef = useRef<WorkspaceLiveSessionsByRuntimeId>(liveSessionsByRuntimeId);
   const [activeLiveRuntimeId, setActiveLiveRuntimeId] = useState<string | null>(null);
   const [isCreatingNativeSession, setIsCreatingNativeSession] = useState(false);
+  const [isLaunchingComposeTerminal, setIsLaunchingComposeTerminal] = useState(false);
   const [isResumingHistorySession, setIsResumingHistorySession] = useState(false);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshRequestSeqRef = useRef(0);
@@ -896,6 +899,50 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     }
   }, [openDirectoryPicker, setSelectedWorkingDir]);
 
+  const handleLaunchComposeTerminal = useCallback(async () => {
+    if (isLaunchingComposeTerminal) {
+      return;
+    }
+
+    setIsLaunchingComposeTerminal(true);
+    try {
+      const result = await launchWorkspaceTerminalSession({
+        prompt: composePrompt,
+        provider: composeProvider,
+        currentEnv,
+        workingDir: effectiveComposeDir,
+        pickWorkingDir: openDirectoryPicker,
+        launchTerminal: launchClaudeCode,
+        onWorkingDirResolved: (targetDir) => {
+          setComposeDir(targetDir);
+          setSelectedWorkingDir(targetDir);
+        },
+        scheduleRefresh: scheduleWorkspaceRefresh,
+      });
+      if (!result.launched) {
+        return;
+      }
+
+      toast.success(t('workspace.nativeHandoffDone'));
+    } catch (error) {
+      console.error('Failed to launch workspace terminal session:', error);
+      toast.error(t('workspace.nativeHandoffFailed'));
+    } finally {
+      setIsLaunchingComposeTerminal(false);
+    }
+  }, [
+    composePrompt,
+    composeProvider,
+    currentEnv,
+    effectiveComposeDir,
+    isLaunchingComposeTerminal,
+    launchClaudeCode,
+    openDirectoryPicker,
+    scheduleWorkspaceRefresh,
+    setSelectedWorkingDir,
+    t,
+  ]);
+
   const saveSelectedHistoryPreference = useCallback((patch: WorkspaceHistorySessionPreference) => {
     const key = selectedKeyRef.current;
     if (!key) {
@@ -1179,24 +1226,24 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="h-9 w-9 rounded-full"
-                    onClick={() => {
-                      const prompt = composePrompt.trim() || undefined;
-                      void launchClaudeCode(
-                        effectiveComposeDir || undefined,
-                        undefined,
-                        composeProvider as LaunchClient,
-                        currentEnv || undefined,
-                        prompt,
-                      );
-                    }}
-                  >
-                    <TerminalSquare className="h-4 w-4" />
-                  </Button>
+                  <span className="inline-flex">
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-9 w-9 rounded-full"
+                      aria-label={t('workspace.nativeOpenTerminal')}
+                      title={t('workspace.nativeOpenTerminal')}
+                      disabled={isLaunchingComposeTerminal}
+                      onClick={() => void handleLaunchComposeTerminal()}
+                    >
+                      {isLaunchingComposeTerminal ? (
+                        <LoaderCircle className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <TerminalSquare className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </span>
                 </TooltipTrigger>
                 <TooltipContent side="top">{t('workspace.nativeOpenTerminal')}</TooltipContent>
               </Tooltip>
@@ -1281,24 +1328,28 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="h-9 w-9 rounded-full"
-                    onClick={() => {
-                      void launchClaudeCode(
-                        selectedSession.project || undefined,
-                        selectedSession.id,
-                        historyProvider as LaunchClient,
-                        historyEnv,
-                      )
-                        .then(() => toast.success(t('workspace.nativeHandoffDone')))
-                        .catch(() => toast.error(t('workspace.nativeHandoffFailed')));
-                    }}
-                  >
-                    <TerminalSquare className="h-4 w-4" />
-                  </Button>
+                  <span className="inline-flex">
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-9 w-9 rounded-full"
+                      aria-label={t('workspace.nativeOpenTerminal')}
+                      title={t('workspace.nativeOpenTerminal')}
+                      onClick={() => {
+                        void launchClaudeCode(
+                          selectedSession.project || undefined,
+                          selectedSession.id,
+                          historyProvider as LaunchClient,
+                          historyEnv,
+                        )
+                          .then(() => toast.success(t('workspace.nativeHandoffDone')))
+                          .catch(() => toast.error(t('workspace.nativeHandoffFailed')));
+                      }}
+                    >
+                      <TerminalSquare className="h-4 w-4" />
+                    </Button>
+                  </span>
                 </TooltipTrigger>
                 <TooltipContent side="top">{t('workspace.nativeOpenTerminal')}</TooltipContent>
               </Tooltip>

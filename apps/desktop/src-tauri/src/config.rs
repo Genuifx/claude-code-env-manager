@@ -573,7 +573,6 @@ pub fn build_claude_env_vars(env: &EnvConfig) -> HashMap<String, String> {
     }
     if let Some(token) = &env.auth_token {
         env_vars.insert("ANTHROPIC_AUTH_TOKEN".to_string(), token.clone());
-        env_vars.insert("ANTHROPIC_API_KEY".to_string(), token.clone());
     }
     if let Some(model) = &env.default_opus_model {
         env_vars.insert("ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(), model.clone());
@@ -994,10 +993,7 @@ mod tests {
             env_vars.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str),
             Some("auth-token-123")
         );
-        assert_eq!(
-            env_vars.get("ANTHROPIC_API_KEY").map(String::as_str),
-            Some("auth-token-123")
-        );
+        assert_eq!(env_vars.get("ANTHROPIC_API_KEY"), None);
         assert_eq!(
             env_vars.get("ANTHROPIC_MODEL").map(String::as_str),
             Some("claude-sonnet-test")

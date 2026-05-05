@@ -21,6 +21,10 @@ export function buildClaudeQueryEnv({
     CLAUDE_CODE_SANDBOXED: CLAUDE_NON_INTERACTIVE_SANDBOX,
   };
 
+  if (env.ANTHROPIC_AUTH_TOKEN) {
+    delete env.ANTHROPIC_API_KEY;
+  }
+
   if (effort) {
     env.CLAUDE_CODE_EFFORT_LEVEL = effort;
   }

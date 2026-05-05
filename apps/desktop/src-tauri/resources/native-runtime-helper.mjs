@@ -16092,6 +16092,9 @@ function buildClaudeQueryEnv({
     CLAUDE_AGENT_SDK_CLIENT_APP: CLAUDE_DESKTOP_CLIENT_APP,
     CLAUDE_CODE_SANDBOXED: CLAUDE_NON_INTERACTIVE_SANDBOX
   };
+  if (env.ANTHROPIC_AUTH_TOKEN) {
+    delete env.ANTHROPIC_API_KEY;
+  }
   if (effort) {
     env.CLAUDE_CODE_EFFORT_LEVEL = effort;
   }

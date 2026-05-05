@@ -35,7 +35,7 @@ test('builds a non-interactive Claude query environment for desktop sessions', a
       CLAUDE_CODE_SANDBOXED: '0',
     },
     envVars: {
-      ANTHROPIC_API_KEY: 'sk-ant-test',
+      ANTHROPIC_AUTH_TOKEN: 'sk-ant-test',
       CLAUDE_CONFIG_DIR: '/tmp/ccem-claude-config',
       CLAUDE_CODE_SANDBOXED: '0',
     },
@@ -43,9 +43,27 @@ test('builds a non-interactive Claude query environment for desktop sessions', a
   });
 
   assert.equal(env.PATH, '/usr/bin');
-  assert.equal(env.ANTHROPIC_API_KEY, 'sk-ant-test');
+  assert.equal(env.ANTHROPIC_AUTH_TOKEN, 'sk-ant-test');
+  assert.equal(env.ANTHROPIC_API_KEY, undefined);
   assert.equal(env.CLAUDE_CONFIG_DIR, '/tmp/ccem-claude-config');
   assert.equal(env.CLAUDE_AGENT_SDK_CLIENT_APP, 'ccem-desktop');
   assert.equal(env.CLAUDE_CODE_SANDBOXED, '1');
   assert.equal(env.CLAUDE_CODE_EFFORT_LEVEL, 'high');
+});
+
+test('removes inherited API key when a managed auth token is present', async () => {
+  const { buildClaudeQueryEnv } = await importClaudeEnvModule();
+
+  const env = buildClaudeQueryEnv({
+    baseEnv: {
+      ANTHROPIC_API_KEY: 'inherited-api-key',
+      PATH: '/usr/bin',
+    },
+    envVars: {
+      ANTHROPIC_AUTH_TOKEN: 'managed-auth-token',
+    },
+  });
+
+  assert.equal(env.ANTHROPIC_AUTH_TOKEN, 'managed-auth-token');
+  assert.equal(env.ANTHROPIC_API_KEY, undefined);
 });
