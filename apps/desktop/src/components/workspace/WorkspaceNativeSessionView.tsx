@@ -55,6 +55,10 @@ import {
   providerDisplayName,
 } from './ComposerControls';
 import type { EffortLevel } from './ComposerControls';
+import {
+  extractAttentionState,
+  type NativeSessionAttentionState,
+} from './workspaceNativeAttention';
 import { normalizeEffortForProvider } from './workspaceSessionPreferences';
 import { resolveWorkspaceRuntimePlanMode } from './workspaceRuntimePlanMode';
 import {
@@ -79,29 +83,6 @@ function ProcessingActionIcon({ stopping = false }: { stopping?: boolean }) {
       />
     </span>
   );
-}
-
-interface PendingPermissionRequest {
-  requestId: string;
-  toolName: string;
-  inputSummary?: string;
-}
-
-interface PendingInteractivePrompt {
-  toolUseId: string;
-  rawName: string;
-  prompt: InteractiveToolPrompt;
-}
-
-interface PendingTerminalPrompt {
-  promptKind: string;
-  promptText: string;
-}
-
-interface NativeSessionAttentionState {
-  permissions: PendingPermissionRequest[];
-  prompts: PendingInteractivePrompt[];
-  terminalPrompt: PendingTerminalPrompt | null;
 }
 
 interface InteractivePromptAnswer {
@@ -253,61 +234,6 @@ function writeCachedNativeEvents(runtimeId: string, events: SessionEventRecord[]
   }
 }
 
-function extractAttentionState(events: SessionEventRecord[]): NativeSessionAttentionState {
-  const permissions = new Map<string, PendingPermissionRequest>();
-  const prompts = new Map<string, PendingInteractivePrompt>();
-  let terminalPrompt: PendingTerminalPrompt | null = null;
-
-  for (const event of events) {
-    switch (event.payload.type) {
-      case 'permission_required':
-        permissions.set(event.payload.request_id, {
-          requestId: event.payload.request_id,
-          toolName: event.payload.tool_name,
-          inputSummary: event.payload.input_summary ?? undefined,
-        });
-        break;
-      case 'permission_responded':
-        permissions.delete(event.payload.request_id);
-        break;
-      case 'tool_use_started':
-        if (event.payload.needs_response && event.payload.prompt) {
-          prompts.set(event.payload.tool_use_id, {
-            toolUseId: event.payload.tool_use_id,
-            rawName: event.payload.raw_name,
-            prompt: event.payload.prompt,
-          });
-        }
-        break;
-      case 'tool_use_completed':
-        prompts.delete(event.payload.tool_use_id);
-        break;
-      case 'terminal_prompt_required':
-        terminalPrompt = {
-          promptKind: event.payload.prompt_kind,
-          promptText: event.payload.prompt_text,
-        };
-        break;
-      case 'terminal_prompt_resolved':
-        terminalPrompt = null;
-        break;
-      case 'session_completed':
-        permissions.clear();
-        prompts.clear();
-        terminalPrompt = null;
-        break;
-      default:
-        break;
-    }
-  }
-
-  return {
-    permissions: Array.from(permissions.values()),
-    prompts: Array.from(prompts.values()),
-    terminalPrompt,
-  };
-}
-
 function promptPanelTitle(prompt: InteractiveToolPrompt, t: (key: string) => string) {
   switch (prompt.prompt_type) {
     case 'ask_user_question':
@@ -334,7 +260,12 @@ function promptPanelBody(prompt: InteractiveToolPrompt): string[] {
       ].filter((value): value is string => Boolean(value));
     }
     case 'plan_exit':
-      return prompt.plan_summary?.trim() ? [prompt.plan_summary.trim()] : [];
+      return prompt.plan_summary?.trim()
+        ? prompt.plan_summary
+          .split(/\n+/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+        : [];
     case 'plan_entry':
       return [];
     default:

@@ -212,8 +212,15 @@ function resolveAttentionKind(events: SessionEventRecord[]): WorkspaceAttentionK
           );
         }
         break;
-      case 'tool_use_completed':
-        pendingResponses.delete(event.payload.tool_use_id);
+      case 'tool_use_completed': {
+        const pendingKind = pendingResponses.get(event.payload.tool_use_id);
+        if (!(pendingKind === 'plan_review' && !event.payload.success)) {
+          pendingResponses.delete(event.payload.tool_use_id);
+        }
+        break;
+      }
+      case 'user_prompt':
+        pendingResponses.clear();
         break;
       case 'session_completed':
         pendingPermissions.clear();
