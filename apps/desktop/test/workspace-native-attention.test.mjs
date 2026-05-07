@@ -78,6 +78,34 @@ test('plan review card prefers the detailed ExitPlanMode plan over a synthetic b
   assert.match(attention.prompts[0].prompt.plan_summary, /# Plan: Add copy button/);
 });
 
+test('plan exit prompts always expose a primary approval reply', async () => {
+  const { getPlanExitPrimaryReply } = await importWorkspaceNativeAttention();
+
+  assert.equal(
+    getPlanExitPrimaryReply({
+      prompt_type: 'plan_exit',
+      allowed_prompts: [],
+      plan_summary: '# Plan: Add copy button',
+    }),
+    '继续执行',
+  );
+  assert.equal(
+    getPlanExitPrimaryReply({
+      prompt_type: 'plan_exit',
+      allowed_prompts: ['  通过  '],
+      plan_summary: '# Plan: Add copy button',
+    }),
+    '通过',
+  );
+  assert.equal(
+    getPlanExitPrimaryReply({
+      prompt_type: 'ask_user_question',
+      questions: [],
+    }),
+    null,
+  );
+});
+
 test('user continuation clears persisted plan review prompts', async () => {
   const { extractAttentionState } = await importWorkspaceNativeAttention();
 

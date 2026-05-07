@@ -11,50 +11,78 @@ export type ClaudePermissionSettings = {
   allowDangerouslySkipPermissions: boolean;
 };
 
-export function normalizeClaudePermissionMode(permMode: string): ClaudePermissionSettings {
+type ClaudePermissionModeOptions = {
+  allowDangerouslySkipPermissions?: boolean;
+};
+
+function withClaudePermissionOptions(
+  settings: ClaudePermissionSettings,
+  options?: ClaudePermissionModeOptions,
+): ClaudePermissionSettings {
+  return {
+    ...settings,
+    allowDangerouslySkipPermissions:
+      settings.allowDangerouslySkipPermissions || options?.allowDangerouslySkipPermissions === true,
+  };
+}
+
+export function normalizeClaudePermissionMode(
+  permMode: string,
+  options?: ClaudePermissionModeOptions,
+): ClaudePermissionSettings {
+  let settings: ClaudePermissionSettings;
   switch (permMode) {
     case 'yolo':
     case 'bypassPermissions':
-      return {
+      settings = {
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
       };
+      break;
     case 'dev':
     case 'acceptEdits':
-      return {
+      settings = {
         permissionMode: 'acceptEdits',
         allowDangerouslySkipPermissions: false,
       };
+      break;
     case 'readonly':
     case 'audit':
     case 'plan':
-      return {
+      settings = {
         permissionMode: 'plan',
         allowDangerouslySkipPermissions: false,
       };
+      break;
     case 'safe':
     case 'ci':
     case 'default':
-      return {
+      settings = {
         permissionMode: 'default',
         allowDangerouslySkipPermissions: false,
       };
+      break;
     case 'dontAsk':
-      return {
+      settings = {
         permissionMode: 'dontAsk',
         allowDangerouslySkipPermissions: false,
       };
+      break;
     case 'auto':
-      return {
+      settings = {
         permissionMode: 'auto',
         allowDangerouslySkipPermissions: false,
       };
+      break;
     default:
-      return {
+      settings = {
         permissionMode: 'default',
         allowDangerouslySkipPermissions: false,
       };
+      break;
   }
+
+  return withClaudePermissionOptions(settings, options);
 }
 
 export function normalizeCodexSandboxMode(permMode: string) {

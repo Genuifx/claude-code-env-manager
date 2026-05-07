@@ -21,6 +21,7 @@ type InitCommand = {
   provider: NativeProvider;
   env_name: string;
   perm_mode: string;
+  allow_dangerously_skip_permissions?: boolean;
   working_dir: string;
   env_vars?: Record<string, string>;
   initial_prompt?: string | null;
@@ -42,7 +43,7 @@ type PromptCommand = {
 type InteractivePromptResponseCommand = {
   type: 'interactive_prompt_response';
   tool_use_id: string;
-  prompt_type: 'ask_user_question';
+  prompt_type: 'ask_user_question' | 'plan_exit';
   answers: Record<string, string>;
   annotations?: Record<string, {
     preview?: string;
@@ -708,7 +709,47 @@ function summarizeAskUserQuestionAnswers(
   );
 }
 
+function summarizePlanExitApproval(answers: Record<string, string>) {
+  const approval = Object.values(answers)
+    .map((value) => value.trim())
+    .find(Boolean);
+
+  return approval
+    ? truncateSummary(`User approved the plan: ${approval}`, 240)
+    : 'User approved the plan.';
+}
+
+function planExitResponseApproves(answers: Record<string, string>) {
+  return answers.decision?.trim() === 'approve';
+}
+
+function summarizePlanExitFeedback(answers: Record<string, string>) {
+  const feedback = answers.feedback?.trim()
+    || Object.values(answers)
+      .map((value) => value.trim())
+      .find(Boolean)
+    || 'Please revise the plan.';
+
+  return truncateSummary(`User requested plan changes: ${feedback}`, 240);
+}
+
 async function waitForAskUserQuestionResponse(
+  input: Record<string, unknown>,
+  toolUseId: string,
+) {
+  return await new Promise<ReturnType<typeof buildAllowedClaudeToolResult> | {
+    behavior: 'deny';
+    message: string;
+    toolUseID: string;
+  }>((resolve) => {
+    pendingClaudeInteractivePrompts.set(toolUseId, {
+      input,
+      resolve,
+    });
+  });
+}
+
+async function waitForPlanExitApproval(
   input: Record<string, unknown>,
   toolUseId: string,
 ) {
@@ -950,7 +991,9 @@ async function consumeClaudeMessages() {
   }
 
   claudePlanExitPromptPending = false;
-  const permission = normalizeClaudePermissionMode(initCommand.perm_mode);
+  const permission = normalizeClaudePermissionMode(initCommand.perm_mode, {
+    allowDangerouslySkipPermissions: initCommand.allow_dangerously_skip_permissions === true,
+  });
   const env = buildClaudeQueryEnv({
     envVars: initCommand.env_vars,
     effort: initCommand.effort,
@@ -975,15 +1018,8 @@ async function consumeClaudeMessages() {
         if (isClaudeAskUserQuestionTool(toolName)) {
           return waitForAskUserQuestionResponse(input, options.toolUseID);
         }
-        if (
-          isClaudePlanExitTool(toolName)
-          && initCommand?.provider === 'claude'
-          && initCommand.perm_mode === 'plan'
-        ) {
-          return buildDeniedClaudeToolResult(
-            options.toolUseID,
-            'Plan mode is active. Confirm the plan before leaving Plan mode.',
-          );
+        if (isClaudePlanExitTool(toolName)) {
+          return waitForPlanExitApproval(input, options.toolUseID);
         }
         if (isClaudeInteractiveUserInputTool(toolName)) {
           return buildAllowedClaudeToolResult(input, options.toolUseID);
@@ -1541,7 +1577,7 @@ async function handleCommand(command: InputCommand) {
 
     pendingClaudeInteractivePrompts.delete(command.tool_use_id);
 
-    if (command.prompt_type !== 'ask_user_question') {
+    if (command.prompt_type !== 'ask_user_question' && command.prompt_type !== 'plan_exit') {
       pending.resolve({
         behavior: 'deny',
         message: 'Unsupported interactive prompt response.',
@@ -1556,6 +1592,23 @@ async function handleCommand(command: InputCommand) {
         message: 'User did not answer the question prompt.',
         toolUseID: command.tool_use_id,
       });
+      return;
+    }
+
+    if (command.prompt_type === 'plan_exit') {
+      if (!planExitResponseApproves(command.answers)) {
+        const feedback = summarizePlanExitFeedback(command.answers);
+        emitClaudeToolUseCompleted(command.tool_use_id, feedback, false);
+        pending.resolve(buildDeniedClaudeToolResult(command.tool_use_id, feedback));
+        return;
+      }
+
+      emitClaudeToolUseCompleted(
+        command.tool_use_id,
+        summarizePlanExitApproval(command.answers),
+        true,
+      );
+      pending.resolve(buildAllowedClaudeToolResult(pending.input, command.tool_use_id));
       return;
     }
 
@@ -1664,7 +1717,14 @@ rl.on('line', (line) => {
     return;
   }
 
-  void handleCommand(command);
+  void handleCommand(command).catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    emitEvent({
+      type: 'stderr_line',
+      line: message,
+    });
+    emitStatus('error', message);
+  });
 });
 
 rl.on('close', () => {

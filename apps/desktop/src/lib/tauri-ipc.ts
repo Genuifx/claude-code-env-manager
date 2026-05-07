@@ -279,7 +279,7 @@ export interface TauriCommands {
     {
       runtimeId: string;
       toolUseId: string;
-      promptType: 'ask_user_question';
+      promptType: 'ask_user_question' | 'plan_exit';
       displayText?: string | null;
       answers: Record<string, string>;
       annotations?: Record<string, InteractivePromptAnnotation> | null;

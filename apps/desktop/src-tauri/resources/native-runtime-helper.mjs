@@ -16102,50 +16102,65 @@ function buildClaudeQueryEnv({
 }
 
 // src/permissionModes.ts
-function normalizeClaudePermissionMode(permMode) {
+function withClaudePermissionOptions(settings, options) {
+  return {
+    ...settings,
+    allowDangerouslySkipPermissions: settings.allowDangerouslySkipPermissions || options?.allowDangerouslySkipPermissions === true
+  };
+}
+function normalizeClaudePermissionMode(permMode, options) {
+  let settings;
   switch (permMode) {
     case "yolo":
     case "bypassPermissions":
-      return {
+      settings = {
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true
       };
+      break;
     case "dev":
     case "acceptEdits":
-      return {
+      settings = {
         permissionMode: "acceptEdits",
         allowDangerouslySkipPermissions: false
       };
+      break;
     case "readonly":
     case "audit":
     case "plan":
-      return {
+      settings = {
         permissionMode: "plan",
         allowDangerouslySkipPermissions: false
       };
+      break;
     case "safe":
     case "ci":
     case "default":
-      return {
+      settings = {
         permissionMode: "default",
         allowDangerouslySkipPermissions: false
       };
+      break;
     case "dontAsk":
-      return {
+      settings = {
         permissionMode: "dontAsk",
         allowDangerouslySkipPermissions: false
       };
+      break;
     case "auto":
-      return {
+      settings = {
         permissionMode: "auto",
         allowDangerouslySkipPermissions: false
       };
+      break;
     default:
-      return {
+      settings = {
         permissionMode: "default",
         allowDangerouslySkipPermissions: false
       };
+      break;
   }
+  return withClaudePermissionOptions(settings, options);
 }
 function normalizeCodexSandboxMode(permMode) {
   if (permMode === "yolo" || permMode === "danger-full-access") {
@@ -16730,7 +16745,26 @@ function summarizeAskUserQuestionAnswers(answers, annotations) {
     240
   );
 }
+function summarizePlanExitApproval(answers) {
+  const approval = Object.values(answers).map((value) => value.trim()).find(Boolean);
+  return approval ? truncateSummary(`User approved the plan: ${approval}`, 240) : "User approved the plan.";
+}
+function planExitResponseApproves(answers) {
+  return answers.decision?.trim() === "approve";
+}
+function summarizePlanExitFeedback(answers) {
+  const feedback = answers.feedback?.trim() || Object.values(answers).map((value) => value.trim()).find(Boolean) || "Please revise the plan.";
+  return truncateSummary(`User requested plan changes: ${feedback}`, 240);
+}
 async function waitForAskUserQuestionResponse(input, toolUseId) {
+  return await new Promise((resolve) => {
+    pendingClaudeInteractivePrompts.set(toolUseId, {
+      input,
+      resolve
+    });
+  });
+}
+async function waitForPlanExitApproval(input, toolUseId) {
   return await new Promise((resolve) => {
     pendingClaudeInteractivePrompts.set(toolUseId, {
       input,
@@ -16916,7 +16950,9 @@ async function consumeClaudeMessages() {
     throw new Error("Native runtime helper not initialized");
   }
   claudePlanExitPromptPending = false;
-  const permission = normalizeClaudePermissionMode(initCommand.perm_mode);
+  const permission = normalizeClaudePermissionMode(initCommand.perm_mode, {
+    allowDangerouslySkipPermissions: initCommand.allow_dangerously_skip_permissions === true
+  });
   const env = buildClaudeQueryEnv({
     envVars: initCommand.env_vars,
     effort: initCommand.effort
@@ -16940,11 +16976,8 @@ async function consumeClaudeMessages() {
         if (isClaudeAskUserQuestionTool(toolName)) {
           return waitForAskUserQuestionResponse(input, options.toolUseID);
         }
-        if (isClaudePlanExitTool(toolName) && initCommand?.provider === "claude" && initCommand.perm_mode === "plan") {
-          return buildDeniedClaudeToolResult(
-            options.toolUseID,
-            "Plan mode is active. Confirm the plan before leaving Plan mode."
-          );
+        if (isClaudePlanExitTool(toolName)) {
+          return waitForPlanExitApproval(input, options.toolUseID);
         }
         if (isClaudeInteractiveUserInputTool(toolName)) {
           return buildAllowedClaudeToolResult(input, options.toolUseID);
@@ -17433,7 +17466,7 @@ async function handleCommand(command) {
       return;
     }
     pendingClaudeInteractivePrompts.delete(command.tool_use_id);
-    if (command.prompt_type !== "ask_user_question") {
+    if (command.prompt_type !== "ask_user_question" && command.prompt_type !== "plan_exit") {
       pending.resolve({
         behavior: "deny",
         message: "Unsupported interactive prompt response.",
@@ -17447,6 +17480,21 @@ async function handleCommand(command) {
         message: "User did not answer the question prompt.",
         toolUseID: command.tool_use_id
       });
+      return;
+    }
+    if (command.prompt_type === "plan_exit") {
+      if (!planExitResponseApproves(command.answers)) {
+        const feedback = summarizePlanExitFeedback(command.answers);
+        emitClaudeToolUseCompleted(command.tool_use_id, feedback, false);
+        pending.resolve(buildDeniedClaudeToolResult(command.tool_use_id, feedback));
+        return;
+      }
+      emitClaudeToolUseCompleted(
+        command.tool_use_id,
+        summarizePlanExitApproval(command.answers),
+        true
+      );
+      pending.resolve(buildAllowedClaudeToolResult(pending.input, command.tool_use_id));
       return;
     }
     emitClaudeToolUseCompleted(
@@ -17541,7 +17589,14 @@ rl.on("line", (line) => {
     });
     return;
   }
-  void handleCommand(command);
+  void handleCommand(command).catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    emitEvent({
+      type: "stderr_line",
+      line: message
+    });
+    emitStatus("error", message);
+  });
 });
 rl.on("close", () => {
   if (!stopped) {

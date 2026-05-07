@@ -30,6 +30,20 @@ export function isPlanExitPrompt(prompt?: InteractiveToolPrompt | null) {
   return prompt?.prompt_type === 'plan_exit';
 }
 
+export function getPlanExitPrimaryReply(
+  prompt?: InteractiveToolPrompt | null,
+  fallback = '继续执行',
+) {
+  if (!isPlanExitPrompt(prompt)) {
+    return null;
+  }
+
+  const replies = (prompt.allowed_prompts ?? [])
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return replies[0] ?? fallback;
+}
+
 function isSyntheticPlanExitSummary(summary: string) {
   return /^Claude is ready to run\b/.test(summary.trim());
 }

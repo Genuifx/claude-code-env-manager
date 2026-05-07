@@ -140,6 +140,7 @@ enum HelperInputCommand<'a> {
         provider: &'a str,
         env_name: &'a str,
         perm_mode: &'a str,
+        allow_dangerously_skip_permissions: bool,
         working_dir: &'a str,
         env_vars: &'a HashMap<String, String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -186,6 +187,19 @@ enum HelperInputCommand<'a> {
         effort: Option<&'a str>,
     },
     Stop,
+}
+
+fn is_bypass_permission_mode(mode: &str) -> bool {
+    matches!(mode, "yolo" | "bypassPermissions")
+}
+
+fn native_session_allows_dangerously_skip_permissions(options: &NativeSessionOptions) -> bool {
+    options.provider == NativeProvider::Claude
+        && (is_bypass_permission_mode(&options.perm_mode)
+            || options
+                .runtime_perm_mode
+                .as_deref()
+                .is_some_and(is_bypass_permission_mode))
 }
 
 #[derive(Debug, Deserialize)]
@@ -812,6 +826,8 @@ impl NativeRuntimeManager {
                     .runtime_perm_mode
                     .as_deref()
                     .unwrap_or(options.perm_mode.as_str()),
+                allow_dangerously_skip_permissions:
+                    native_session_allows_dangerously_skip_permissions(options),
                 working_dir: &options.working_dir,
                 env_vars: &handle.helper_env_vars,
                 initial_prompt: options.initial_prompt.as_deref(),
@@ -1515,9 +1531,10 @@ fn build_runtime_bootstrap_options(
 #[cfg(test)]
 mod tests {
     use super::{
-        drain_helper_output_lines, merge_helper_env_path, HelperInputCommand, NativeProvider,
-        NativeRuntimeManager, NativeSessionHandle, NativeSessionRecord, NativeTransport,
-        PromptImage,
+        drain_helper_output_lines, merge_helper_env_path,
+        native_session_allows_dangerously_skip_permissions, HelperInputCommand, NativeProvider,
+        NativeRuntimeManager, NativeSessionHandle, NativeSessionOptions, NativeSessionRecord,
+        NativeTransport, PromptImage,
     };
     use crate::event_bus::{SessionEventPayload, SessionStore};
     use crate::native_event_log::NativeEventLog;
@@ -1609,6 +1626,30 @@ mod tests {
         }
     }
 
+    fn native_session_options(
+        perm_mode: &str,
+        runtime_perm_mode: Option<&str>,
+    ) -> NativeSessionOptions {
+        NativeSessionOptions {
+            provider: NativeProvider::Claude,
+            env_name: "default".to_string(),
+            perm_mode: perm_mode.to_string(),
+            runtime_perm_mode: runtime_perm_mode.map(str::to_string),
+            working_dir: "/tmp/project".to_string(),
+            initial_prompt: None,
+            display_prompt: None,
+            initial_images: None,
+            provider_session_id: None,
+            helper_env_vars: HashMap::new(),
+            terminal_env_vars: HashMap::new(),
+            claude_path: None,
+            codex_path: None,
+            codex_base_url: None,
+            codex_api_key: None,
+            effort: None,
+        }
+    }
+
     #[test]
     fn helper_stdout_accepts_multiple_jsonl_events_in_one_chunk() {
         let runtime_id = "native-jsonl";
@@ -1678,6 +1719,7 @@ mod tests {
             provider: "claude",
             env_name: "default",
             perm_mode: "dev",
+            allow_dangerously_skip_permissions: false,
             working_dir: "/tmp/project",
             env_vars: &env_vars,
             initial_prompt: Some("describe this"),
@@ -1698,6 +1740,47 @@ mod tests {
             "iVBORw0KGgo="
         );
         assert_eq!(serialized["initial_images"][0]["placeholder"], "[Image #1]");
+    }
+
+    #[test]
+    fn helper_init_can_enable_later_bypass_restore_while_starting_in_plan() {
+        let env_vars = HashMap::new();
+        let command = HelperInputCommand::Init {
+            provider: "claude",
+            env_name: "default",
+            perm_mode: "plan",
+            allow_dangerously_skip_permissions: true,
+            working_dir: "/tmp/project",
+            env_vars: &env_vars,
+            initial_prompt: None,
+            initial_images: None,
+            provider_session_id: None,
+            claude_path: None,
+            codex_path: None,
+            codex_base_url: None,
+            codex_api_key: None,
+            effort: None,
+        };
+
+        let serialized = serde_json::to_value(command).expect("serialize init command");
+        assert_eq!(serialized["perm_mode"], "plan");
+        assert_eq!(serialized["allow_dangerously_skip_permissions"], true);
+    }
+
+    #[test]
+    fn yolo_session_started_in_runtime_plan_mode_keeps_bypass_available() {
+        let options = native_session_options("yolo", Some("plan"));
+
+        assert!(native_session_allows_dangerously_skip_permissions(&options));
+    }
+
+    #[test]
+    fn non_yolo_plan_session_does_not_enable_bypass_restore() {
+        let options = native_session_options("dev", Some("plan"));
+
+        assert!(!native_session_allows_dangerously_skip_permissions(
+            &options
+        ));
     }
 
     #[test]

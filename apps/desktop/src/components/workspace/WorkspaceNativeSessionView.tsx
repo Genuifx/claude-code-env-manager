@@ -57,6 +57,7 @@ import {
 import type { EffortLevel } from './ComposerControls';
 import {
   extractAttentionState,
+  getPlanExitPrimaryReply,
   type NativeSessionAttentionState,
 } from './workspaceNativeAttention';
 import { normalizeEffortForProvider } from './workspaceSessionPreferences';
@@ -108,6 +109,12 @@ type InteractivePromptReplyPayload =
       text: string;
       answers: Record<string, string>;
       annotations?: Record<string, InteractivePromptAnnotation>;
+    }
+  | {
+      kind: 'plan_exit';
+      toolUseId: string;
+      text: string;
+      approved: boolean;
     };
 
 interface WorkspaceNativeSessionViewProps {
@@ -284,13 +291,50 @@ function promptQuickReplies(prompt: InteractiveToolPrompt): string[] {
         .map((option) => option.preview?.trim() || option.label.trim())
         .filter(Boolean);
     }
-    case 'plan_exit':
-      return (prompt.allowed_prompts ?? [])
-        .map((value) => value.trim())
-        .filter(Boolean);
+    case 'plan_exit': {
+      const reply = getPlanExitPrimaryReply(prompt);
+      return reply ? [reply] : [];
+    }
     default:
       return [];
   }
+}
+
+function isSyntheticPlanExitPrompt(prompt: InteractiveToolPrompt) {
+  return prompt.prompt_type === 'plan_exit'
+    && /^Claude is ready to run\b/.test((prompt.plan_summary ?? '').trim());
+}
+
+function isPlanExitApprovalText(text: string, quickReplies: string[]) {
+  const normalizedText = text.trim().toLocaleLowerCase();
+  if (!normalizedText) {
+    return false;
+  }
+
+  if (quickReplies.some((reply) => reply.trim().toLocaleLowerCase() === normalizedText)) {
+    return true;
+  }
+
+  return new Set([
+    'ok',
+    'okay',
+    'yes',
+    'y',
+    'approve',
+    'approved',
+    'continue',
+    'execute',
+    'go',
+    'proceed',
+    '同意',
+    '通过',
+    '批准',
+    '确认',
+    '继续',
+    '继续执行',
+    '执行',
+    '开始执行',
+  ]).has(normalizedText);
 }
 
 function questionDisplayLabel(question: {
@@ -498,6 +542,8 @@ function WorkspaceAttentionPanel({
         const questionPrompt = entry.prompt.prompt_type === 'ask_user_question'
           ? entry.prompt
           : null;
+        const isPlanExitPrompt = entry.prompt.prompt_type === 'plan_exit';
+        const primaryPlanExitReply = getPlanExitPrimaryReply(entry.prompt);
 
         if (questionPrompt?.questions.length) {
           const providerName = providerDisplayName(provider);
@@ -774,7 +820,6 @@ function WorkspaceAttentionPanel({
           );
         }
 
-        const isPlanExitPrompt = entry.prompt.prompt_type === 'plan_exit';
         const Icon = isPlanExitPrompt ? ClipboardList : MessageSquareQuote;
 
         return (
@@ -786,10 +831,29 @@ function WorkspaceAttentionPanel({
               <div className="rounded-md bg-muted/60 p-1">
                 <Icon className="h-3 w-3 text-muted-foreground" />
               </div>
-              <p className="text-[12px] font-semibold text-foreground">
+              <p className="min-w-0 flex-1 truncate text-[12px] font-semibold text-foreground">
                 {promptPanelTitle(entry.prompt, t)}
               </p>
-              <span className="ml-auto rounded-md bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/80">
+              {primaryPlanExitReply ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-7 shrink-0 rounded-lg px-3 text-[12px] font-medium shadow-sm"
+                  disabled={isSubmittingPrompt}
+                  onClick={() => {
+                    void onSubmitPromptReply({
+                      kind: 'plan_exit',
+                      toolUseId: entry.toolUseId,
+                      text: primaryPlanExitReply,
+                      approved: true,
+                    });
+                  }}
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  <span>{primaryPlanExitReply}</span>
+                </Button>
+              ) : null}
+              <span className="shrink-0 rounded-md bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/80">
                 {entry.rawName}
               </span>
             </div>
@@ -804,7 +868,7 @@ function WorkspaceAttentionPanel({
                 {t('workspace.nativeReplyHint')}
               </p>
             )}
-            {quickReplies.length > 0 ? (
+            {quickReplies.length > 0 && !primaryPlanExitReply ? (
               <div className={cn(
                 'mt-2 flex flex-wrap gap-1.5',
                 isPlanExitPrompt && 'justify-end'
@@ -823,6 +887,16 @@ function WorkspaceAttentionPanel({
                     )}
                     disabled={isSubmittingPrompt}
                     onClick={() => {
+                      if (isPlanExitPrompt && !isSyntheticPlanExitPrompt(entry.prompt)) {
+                        void onSubmitPromptReply({
+                          kind: 'plan_exit',
+                          toolUseId: entry.toolUseId,
+                          text: reply,
+                          approved: true,
+                        });
+                        return;
+                      }
+
                       void onSubmitPromptReply({
                         kind: 'text',
                         text: reply,
@@ -1284,6 +1358,12 @@ export function WorkspaceNativeSessionView({
       .map((entry) => entry.toolUseId),
     [attentionState.prompts],
   );
+  const planExitApprovalPrompt = useMemo(
+    () => attentionState.prompts.find((entry) =>
+      entry.prompt.prompt_type === 'plan_exit' && !isSyntheticPlanExitPrompt(entry.prompt)
+    ) ?? null,
+    [attentionState.prompts],
+  );
   const hasPlanExitPrompt = planExitPromptIds.length > 0;
   const hasHardBlockingAttention = attentionState.permissions.length > 0
     || Boolean(attentionState.terminalPrompt)
@@ -1455,7 +1535,9 @@ export function WorkspaceNativeSessionView({
       id: `user-${Date.now()}`,
       text: payload.kind === 'ask_user_question'
         ? payload.text
-        : buildComposerPromptPreview(payload.text, payload.attachments ?? []),
+        : payload.kind === 'plan_exit'
+          ? payload.text
+          : buildComposerPromptPreview(payload.text, payload.attachments ?? []),
       timestamp: Date.now(),
       afterEventSeq: latestEventSeq(latestEventsRef.current) ?? undefined,
     };
@@ -1473,8 +1555,12 @@ export function WorkspaceNativeSessionView({
 
     let exitedPlanModeForPrompt = false;
     let dismissedPlanExitPromptIds: string[] = [];
+    if (payload.kind === 'plan_exit' && hasPlanExitPrompt) {
+      dismissedPlanExitPromptIds = planExitPromptIds;
+    }
     if (
-      payload.kind === 'text'
+      payload.kind === 'plan_exit'
+      && payload.approved
       && hasPlanExitPrompt
       && session.provider === 'claude'
       && sessionRuntimePermMode === 'plan'
@@ -1486,12 +1572,14 @@ export function WorkspaceNativeSessionView({
         return false;
       }
       exitedPlanModeForPrompt = true;
-      dismissedPlanExitPromptIds = planExitPromptIds;
     }
 
     setIsSending(true);
     setLocalUserPrompts((previous) => [...previous, promptEntry]);
     if (payload.kind === 'text') {
+      setComposerText('');
+      setComposerPlanModeEnabled(sessionRuntimePermMode === 'plan');
+    } else if (payload.kind === 'plan_exit') {
       setComposerText('');
       setComposerPlanModeEnabled(exitedPlanModeForPrompt ? false : sessionRuntimePermMode === 'plan');
       if (dismissedPlanExitPromptIds.length > 0) {
@@ -1501,7 +1589,7 @@ export function WorkspaceNativeSessionView({
           return next;
         });
       }
-    } else {
+    } else if (payload.kind === 'ask_user_question') {
       setLocallyDismissedPromptIds((previous) => {
         if (previous.has(payload.toolUseId)) {
           return previous;
@@ -1520,6 +1608,21 @@ export function WorkspaceNativeSessionView({
           displayText: payload.text,
           answers: payload.answers,
           annotations: payload.annotations,
+        });
+      } else if (payload.kind === 'plan_exit') {
+        await respondNativeSessionPrompt(session.runtime_id, {
+          toolUseId: payload.toolUseId,
+          promptType: 'plan_exit',
+          displayText: payload.text,
+          answers: payload.approved
+            ? {
+                decision: 'approve',
+                approval: payload.text,
+              }
+            : {
+                decision: 'revise',
+                feedback: payload.text,
+              },
         });
       } else {
         await sendNativeSessionInput(session.runtime_id, requestText, requestImages, requestText);
@@ -1540,6 +1643,16 @@ export function WorkspaceNativeSessionView({
         });
       }
       if (payload.kind === 'ask_user_question') {
+        setLocallyDismissedPromptIds((previous) => {
+          if (!previous.has(payload.toolUseId)) {
+            return previous;
+          }
+          const next = new Set(previous);
+          next.delete(payload.toolUseId);
+          return next;
+        });
+      }
+      if (payload.kind === 'plan_exit') {
         setLocallyDismissedPromptIds((previous) => {
           if (!previous.has(payload.toolUseId)) {
             return previous;
@@ -1638,6 +1751,30 @@ export function WorkspaceNativeSessionView({
     setComposerPlanModeEnabled(sessionRuntimePermMode === 'plan');
 
     if (hasQuickReplyPrompt && !isProcessingTurn && !hasHardBlockingAttention) {
+      const planExitReplies = planExitApprovalPrompt?.prompt.prompt_type === 'plan_exit'
+        ? promptQuickReplies(planExitApprovalPrompt.prompt)
+        : [];
+      if (
+        planExitApprovalPrompt
+        && attachments.length === 0
+        && isPlanExitApprovalText(text, planExitReplies)
+      ) {
+        return sendInteractivePromptReply({
+          kind: 'plan_exit',
+          toolUseId: planExitApprovalPrompt.toolUseId,
+          text,
+          approved: true,
+        });
+      }
+      if (planExitApprovalPrompt && attachments.length === 0) {
+        return sendInteractivePromptReply({
+          kind: 'plan_exit',
+          toolUseId: planExitApprovalPrompt.toolUseId,
+          text,
+          approved: false,
+        });
+      }
+
       return sendInteractivePromptReply({
         kind: 'text',
         text,
@@ -1663,6 +1800,7 @@ export function WorkspaceNativeSessionView({
     hasHardBlockingAttention,
     hasQuickReplyPrompt,
     isProcessingTurn,
+    planExitApprovalPrompt,
     sendPromptBatch,
     sendInteractivePromptReply,
     sessionRuntimePermMode,

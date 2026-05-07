@@ -55,3 +55,17 @@ test('passes persisted Claude plan sessions through as plan mode', async () => {
     allowDangerouslySkipPermissions: false,
   });
 });
+
+test('can start Claude in plan mode while enabling later bypass restore', async () => {
+  const { normalizeClaudePermissionMode } = await importPermissionModesModule();
+
+  assert.deepEqual(
+    normalizeClaudePermissionMode('plan', {
+      allowDangerouslySkipPermissions: true,
+    }),
+    {
+      permissionMode: 'plan',
+      allowDangerouslySkipPermissions: true,
+    },
+  );
+});
