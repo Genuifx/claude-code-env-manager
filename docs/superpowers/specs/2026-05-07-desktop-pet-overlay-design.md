@@ -1,80 +1,80 @@
-# Desktop Pet Overlay Design
+# 桌面宠物悬浮窗设计
 
-Date: 2026-05-07
+日期：2026-05-07
 
-## Summary
+## 概要
 
-Add an optional desktop pet for CCEM Desktop. The pet is a small golden cat that lives in a separate transparent always-on-top Tauri window. It shows a stacked notification flow beside the cat for active sessions, sessions that finished but have not been read, failed or interrupted sessions, and sessions waiting for user input or approval.
+给 CCEM Desktop 增加一个可选的桌面宠物。宠物是一只金渐层小猫，放在独立的透明 Tauri 置顶窗口里。猫旁边显示会话通知流：正在运行的会话、已经结束但用户还没看过的会话、失败或中断的会话，以及需要用户审批或回答的会话。
 
-The first version is intentionally small:
+第一版控制范围，不做太满：
 
-- Settings toggle controls whether the pet window is shown.
-- Pet window is independent from the main CCEM window.
-- Notifications show at most five sessions.
-- Sessions with the newest update move to the front immediately.
-- Completed, failed, and interrupted notifications disappear after the user opens them.
-- Running and attention-needed notifications remain while their state is still active.
+- 通过设置里的开关显示或隐藏宠物窗口。
+- 宠物窗口独立于 CCEM 主窗口。
+- 通知最多显示 5 条。
+- 有新更新的会话实时排到最前面。
+- 完成、失败、中断类通知在用户打开后标记为已读并消失。
+- 运行中和待处理通知只要状态还在，就继续显示。
 
-## User Decisions
+## 已确认的用户决策
 
-- Use an independent Tauri `pet` webview window.
-- Default setting is off.
-- Use the selected flat golden cat asset, not the blue robot reference.
-- Use stacked notification flow, not a single primary bubble or dashboard layout.
-- Show at most five bubbles.
-- Sort by most recent session update first.
-- Include running sessions, unread completed sessions, failed/interrupted sessions, and attention-needed sessions.
-- Completed, failed, and interrupted bubbles are marked read and disappear after the user opens the session.
+- 使用独立的 Tauri `pet` webview window。
+- 默认关闭，不在升级后突然弹出。
+- 使用已确认的扁平金渐层猫图，不使用之前的蓝色机器人参考图。
+- 使用堆叠通知流，不做单条主气泡，也不做小仪表盘。
+- 最多显示 5 条气泡。
+- 按最近更新时间排序，最新更新排在最前。
+- 显示运行中、未读完成、失败/中断、需要处理这几类会话。
+- 完成、失败、中断气泡打开对应会话后自动消失。
 
-## Non-Goals
+## 不做的事
 
-- No dragging or position memory in the first version.
-- No pet animations beyond a small hover/idle treatment if cheap in CSS.
-- No custom pet selection or naming UI.
-- No cross-device sync of read state.
-- No replacement for system notifications.
+- 第一版不做拖拽和位置记忆。
+- 不做复杂宠物动画。最多保留很轻的 CSS hover 或 idle 效果。
+- 不做宠物选择、命名或换装。
+- 不同步已读状态到其他设备。
+- 不替代系统通知。系统通知还是原来的系统通知。
 
-## Visual Design
+## 视觉设计
 
-The pet window renders a compact scene:
+宠物窗口是一个很紧凑的小场景：
 
-- Golden cat sits at the lower-right of the pet window.
-- Session bubbles stack to the cat's left.
-- Bubbles use dark translucent surfaces so they remain legible over arbitrary desktops.
-- Status colors:
-  - Attention needed: orange `!`
-  - Failed/interrupted: red `x`
-  - Completed unread: green check
-  - Running: small golden live dot
-- If more than five eligible sessions exist, only the five most recently updated are shown in v1.
+- 金渐层猫固定在窗口右下角。
+- 会话气泡堆叠在猫左侧。
+- 气泡使用深色半透明底，保证在不同桌面背景上都能读清。
+- 状态颜色：
+  - 需要处理：橙色 `!`
+  - 失败/中断：红色 `x`
+  - 未读完成：绿色对勾
+  - 运行中：金色 live dot
+- 如果可显示的会话超过 5 条，第一版只取最近更新的 5 条。
 
-The selected cat source currently exists as a design artifact:
+当前确认的猫图是设计阶段产物：
 
 `/Users/zkyo/Desktop/projects/claude-code-env-manager/.artifacts/ccem-pet-cat-selected-transparent.png`
 
-During implementation, copy the final asset into a tracked desktop asset path such as:
+实现时要把最终 PNG 复制到可提交的桌面端资源目录，例如：
 
 `apps/desktop/src/assets/pet/golden-cat.png`
 
-## Window Behavior
+## 窗口行为
 
-Add a second Tauri webview window with label `pet`.
+新增一个 label 为 `pet` 的 Tauri webview window。
 
-Desired window properties:
+目标窗口属性：
 
-- Transparent
-- Decorations disabled
-- Always on top
-- Hidden from taskbar/dock where Tauri supports it
-- Non-resizable
-- Starts hidden unless `desktopPetEnabled` is true
-- Default screen placement: bottom-right with a small margin from screen edges
+- 透明背景
+- 无系统窗口装饰
+- always-on-top
+- 在 Tauri 支持的情况下不出现在任务栏或 Dock
+- 不可调整大小
+- `desktopPetEnabled` 为 `true` 时才显示
+- 默认位置在屏幕右下角，离屏幕边缘留一点距离
 
-The first version may use a fixed bounding rectangle large enough for five bubbles and the cat. Transparent pixels inside the window can still capture clicks on some platforms; keep the rectangle as compact as practical to reduce desktop occlusion.
+第一版可以使用固定大小的窗口，只要能容纳猫和 5 条气泡即可。需要注意：有些平台上透明区域也会拦截点击，所以窗口矩形要尽量紧凑，减少对桌面的遮挡。
 
-## Settings
+## 设置
 
-Extend desktop settings stored in `~/.ccem/settings.json`:
+扩展 `~/.ccem/settings.json` 里的桌面设置：
 
 ```json
 {
@@ -82,38 +82,38 @@ Extend desktop settings stored in `~/.ccem/settings.json`:
 }
 ```
 
-Rust:
+Rust 侧：
 
-- Add `desktop_pet_enabled: bool` to `DesktopSettings`.
-- Default to `false`.
-- Update `save_settings` to merge and persist the field.
-- After settings save, synchronize the pet window visibility.
+- 给 `DesktopSettings` 增加 `desktop_pet_enabled: bool`。
+- 默认值为 `false`。
+- 更新 `save_settings`，合并并持久化这个字段。
+- 保存设置后同步宠物窗口的显示状态。
 
-Frontend:
+前端侧：
 
-- Extend `DesktopSettings` type.
-- Add a "Desktop Pet" toggle in Settings, likely in the Application card.
-- The toggle autosaves using the existing Settings page autosave flow.
+- 扩展 `DesktopSettings` 类型。
+- 在 Settings 页增加“桌面宠物”开关，建议放在 Application 卡片里。
+- 继续使用 Settings 页现有的自动保存流程。
 
-## Frontend Architecture
+## 前端架构
 
-Use the same React bundle for both windows. At startup, inspect the current Tauri window label:
+主窗口和宠物窗口可以复用同一个 React bundle。启动时读取当前 Tauri window label：
 
-- `main` renders the existing app.
-- `pet` renders a lightweight `PetOverlayApp`.
+- `main` 渲染现有 App。
+- `pet` 渲染轻量的 `PetOverlayApp`。
 
-`PetOverlayApp` responsibilities:
+`PetOverlayApp` 负责：
 
-- Load pet notifications.
-- Subscribe to notification update events.
-- Render the selected golden cat asset and stacked bubbles.
-- Handle bubble clicks by invoking the open/read command.
+- 加载宠物通知。
+- 监听通知更新事件。
+- 渲染金渐层猫图和堆叠气泡。
+- 处理气泡点击，调用打开会话的命令。
 
-Keep the pet overlay component separate from the existing sidebar `components/pet/*` RPG companion prototype. The existing prototype reads Claude's companion data from `~/.claude.json`; this new feature is a desktop session companion and should not depend on that data.
+这个新功能要和现有的 `components/pet/*` 侧边栏 RPG 宠物原型分开。旧原型从 `~/.claude.json` 读取 Claude companion 数据；这次做的是桌面会话宠物，不依赖那份数据。
 
-## Notification Model
+## 通知模型
 
-Add a shared TypeScript/Rust-facing shape:
+新增一组 Rust/TypeScript 共用的通知结构：
 
 ```ts
 type PetNotificationKind = 'attention' | 'failed' | 'completed' | 'running';
@@ -136,40 +136,40 @@ interface PetNotification {
 }
 ```
 
-`id` should be stable for a specific session notification state. For terminal completion/failure events, include the session id and terminal state. For running and attention notifications, use the runtime/session id.
+`id` 要能稳定指向某个会话的某个通知状态。终端会话的完成/失败事件可以把 session id 和状态一起放进去；运行中和需要处理的通知可以直接使用 runtime/session id。
 
-`updatedAt` is the time of the latest user-visible change for that session notification. It should update when status changes, output arrives, a permission or question prompt appears, a task finishes, or a failure/interruption is observed. It should not be limited to session creation time.
+`updatedAt` 表示这个会话通知最近一次“用户可见变化”的时间。状态变化、新输出、出现权限审批、出现问题提问、任务完成、失败或中断，都应该刷新它。不要只用会话创建时间。
 
-## Sorting And Eligibility
+## 排序和显示条件
 
-Eligibility:
+显示条件：
 
-- Include running sessions.
-- Include attention-needed sessions while approval, plan review, question, or prompt is pending.
-- Include completed sessions only if unread.
-- Include failed or interrupted sessions only if unread.
+- 显示运行中的会话。
+- 显示还有审批、计划确认、问题回答或 prompt 等待处理的会话。
+- 完成会话只在未读时显示。
+- 失败或中断会话只在未读时显示。
 
-Ordering:
+排序规则：
 
-1. Sort by `updatedAt` descending.
-2. If timestamps are tied or within a short debounce window such as one second, use state priority:
+1. 先按 `updatedAt` 倒序排列。
+2. 如果时间相同，或落在一个很短的防抖窗口里，比如 1 秒内，再按状态优先级排序：
    - attention
    - failed
    - completed
    - running
-3. Limit to five notifications.
+3. 最后只取前 5 条。
 
-"Newest update first" is the main rule. Priority only breaks ties or near-ties, so any session with fresh activity can move to the front.
+核心规则是“最新更新排最前”。状态优先级只用于时间接近时打破并列，所以任何会话只要有新动态，都可以顶到最前面。
 
-## Read State
+## 已读状态
 
-Read state is UI state, not a user preference. Store it outside `settings.json`.
+已读状态属于 UI 状态，不是用户偏好，不放进 `settings.json`。
 
-Recommended file:
+推荐保存到：
 
 `~/.ccem/pet-notifications.json`
 
-Shape:
+结构示例：
 
 ```json
 {
@@ -179,98 +179,98 @@ Shape:
 }
 ```
 
-Rules:
+规则：
 
-- Mark completed, failed, and interrupted notifications read when the user opens their bubble.
-- Also mark them read when the same session is opened from the main window.
-- Do not mark running notifications read.
-- Attention-needed notifications should remain visible until the attention condition is resolved.
+- 用户点击完成、失败、中断气泡并打开会话后，标记为已读。
+- 如果用户从主窗口手动打开同一个会话，也标记为已读。
+- 运行中的通知不因为点击而标记已读。
+- 需要处理的通知只有在待处理状态消失后才移除。
 
 ## IPC
 
-IPC means "inter-process communication": the React frontend calls Rust commands and Rust emits events back to frontend windows. In this feature it is the bridge between the main app window, the pet window, and the Rust session state.
+IPC 是 “inter-process communication”，也就是进程间通信。这个项目里可以理解为：React 前端通过命令调用 Rust 后端，Rust 后端也可以发事件给前端窗口。桌面宠物会用这条通道连接主窗口、宠物窗口和 Rust 里的会话状态。
 
-New or extended commands:
+新增或扩展命令：
 
 - `get_pet_notifications() -> Vec<PetNotification>`
 - `open_pet_notification(notification_id: String) -> Result<(), String>`
 - `mark_pet_notification_read(notification_id: String) -> Result<(), String>`
-- `sync_pet_window_visibility(enabled: bool) -> Result<(), String>` if settings save does not call the helper directly.
+- `sync_pet_window_visibility(enabled: bool) -> Result<(), String>`，如果保存设置时不直接调用内部 helper，可以加这个命令。
 
-Events:
+事件：
 
 - `pet-notifications-updated`
 - `pet-open-session`
 
-Expected flow:
+预期流程：
 
-1. Session state changes in Rust or a frontend session view observes a meaningful update.
-2. Backend emits `pet-notifications-updated`.
-3. `PetOverlayApp` reloads notifications.
-4. User clicks a bubble.
-5. Pet window calls `open_pet_notification`.
-6. Backend shows/focuses the main window and emits `pet-open-session` to it.
-7. Main app navigates to the target session.
-8. Backend marks terminal completed/failed/interrupted notifications read where appropriate and emits another update.
+1. Rust 里的会话状态变化，或前端会话视图观察到有意义的新动态。
+2. 后端发出 `pet-notifications-updated`。
+3. `PetOverlayApp` 重新加载通知。
+4. 用户点击某个气泡。
+5. 宠物窗口调用 `open_pet_notification`。
+6. 后端显示并聚焦主窗口，然后向主窗口发 `pet-open-session`。
+7. 主窗口跳到对应会话。
+8. 如果是完成、失败、中断类通知，后端标记为已读，并再次发通知更新事件。
 
-## Opening A Session
+## 打开会话
 
-Main window behavior after `pet-open-session`:
+主窗口收到 `pet-open-session` 后：
 
-- Bring the main window to the front.
-- Navigate to Workspace for native/headless workspace sessions when possible.
-- Navigate to Sessions for legacy terminal/tmux sessions if Workspace cannot directly show them.
-- Select or focus the target session.
+- 把主窗口拉到前台。
+- native/headless/workspace 会话优先跳到 Workspace。
+- legacy terminal/tmux 会话如果 Workspace 不能直接展示，就跳到 Sessions。
+- 选中或聚焦目标会话。
 
-If the target session no longer exists, show the main window and navigate to History or Sessions with a non-blocking toast.
+如果目标会话已经不存在，仍然拉起主窗口，跳到 History 或 Sessions，并用非阻塞 toast 提示。
 
-## Data Sources
+## 数据来源
 
-Use existing session state first:
+优先使用现有会话状态：
 
 - `list_native_sessions`
 - `list_unified_sessions`
-- legacy terminal session events: `task-completed`, `task-error`, `session-interrupted`
-- interactive/headless/native event replay for attention state
+- legacy terminal session events：`task-completed`、`task-error`、`session-interrupted`
+- interactive/headless/native event replay，用来判断是否有待处理状态
 
-For v1, prefer a backend-owned notification aggregator so both windows see the same state and read markers are centralized. The pet frontend should avoid duplicating Workspace's transcript reconstruction logic.
+第一版建议做一个后端统一的通知聚合器。这样主窗口和宠物窗口看到的是同一份状态，已读标记也集中管理。宠物前端不应该复制 Workspace 里复杂的 transcript 重建逻辑。
 
-## Error Handling
+## 错误处理
 
-- If the pet asset fails to load, render no broken image icon; hide the pet image area and keep bubbles usable.
-- If notification load fails, show only the cat and retry on the next event or poll interval.
-- If opening a session fails, keep the bubble visible and show a compact error toast in the main window when possible.
-- If the `pet` window cannot be created, keep the setting enabled but report the window creation error through Settings toast; do not crash the app.
+- 猫图加载失败时不要显示破图图标；隐藏宠物图片区域，气泡仍可用。
+- 通知加载失败时，只显示猫，并在下一次事件或轮询时重试。
+- 打开会话失败时，保留气泡；如果能显示主窗口，就用紧凑 toast 报错。
+- `pet` 窗口创建失败时，不要让应用崩溃。设置可以保持开启，但 Settings 里要提示窗口创建失败。
 
-## Testing
+## 测试
 
-Unit tests:
+单元测试：
 
-- Settings serialization defaults `desktopPetEnabled` to false.
-- Notification ordering sorts most recent updates first.
-- Tied notification ordering uses attention > failed > completed > running.
-- Completed/failed/interrupted notifications disappear after being marked read.
-- Running notifications remain eligible even if opened.
+- `desktopPetEnabled` 默认序列化为 `false`。
+- 通知按最近更新时间排在前面。
+- 时间相同或接近时，排序优先级为 attention > failed > completed > running。
+- 完成/失败/中断通知标记已读后不再显示。
+- 运行中通知即使被点击，也仍然保持可显示。
 
-Frontend tests:
+前端测试：
 
-- Pet notification list renders at most five bubbles.
-- Bubble click calls the open command with the notification id.
-- Status kinds map to the correct visual class.
+- 宠物通知列表最多渲染 5 条气泡。
+- 点击气泡会用 notification id 调用打开命令。
+- 不同状态映射到正确的样式 class。
 
-Manual desktop self-test:
+桌面手动自测：
 
-1. Start `apps/desktop` with `pnpm tauri dev`.
-2. Open Settings and enable Desktop Pet.
-3. Confirm a transparent always-on-top pet window appears near the bottom-right.
-4. Launch at least two sessions and confirm running bubbles show.
-5. Complete one session and confirm it appears as unread completed.
-6. Click the completed bubble and confirm the main window opens the session and the bubble disappears.
-7. Trigger or simulate failed/interrupted/attention-needed states and confirm they show and sort to the front when updated.
-8. Disable Desktop Pet and confirm the pet window hides.
+1. 在 `apps/desktop` 运行 `pnpm tauri dev`。
+2. 打开 Settings，启用桌面宠物。
+3. 确认右下角出现透明、置顶的宠物窗口。
+4. 启动至少两个会话，确认运行中气泡出现。
+5. 让一个会话完成，确认它作为未读完成气泡出现。
+6. 点击完成气泡，确认主窗口打开对应会话，并且气泡消失。
+7. 触发或模拟失败、中断、需要处理状态，确认它们显示出来，并在更新时排到最前。
+8. 关闭桌面宠物开关，确认宠物窗口隐藏。
 
-## Open Implementation Notes
+## 实现备注
 
-- The chosen cat asset currently lives under `.artifacts/`, which is ignored. Implementation must copy it to a tracked asset path.
-- The old sidebar `PetEntry` remains out of scope unless the implementation naturally removes dead code. Do not conflate it with the desktop overlay feature.
-- `.superpowers/brainstorm/` is a temporary visual companion directory and should not be committed.
+- 选中的猫图目前在 `.artifacts/` 下，该目录被忽略。实现时必须复制到可提交的资源目录。
+- 旧的侧边栏 `PetEntry` 不在本次范围内，除非实现时自然清理死代码。不要把旧 companion 原型和桌面宠物混成一个功能。
+- `.superpowers/brainstorm/` 是视觉 companion 的临时目录，不要提交。
