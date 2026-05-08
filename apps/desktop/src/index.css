@@ -295,6 +295,12 @@
     font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     -webkit-font-smoothing: antialiased;
   }
+
+  html[data-window='desktop-pet'],
+  html[data-window='desktop-pet'] body,
+  html[data-window='desktop-pet'] #root {
+    background: transparent;
+  }
 }
 
 /* === Motion Tokens === */
