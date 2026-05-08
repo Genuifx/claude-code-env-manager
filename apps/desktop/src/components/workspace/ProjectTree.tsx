@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, useDeferredValue, useCallback } from 'react';
+import { memo, useMemo, useState, useDeferredValue, useCallback, useRef, useEffect } from 'react';
 import { ChevronRight, FolderOpen, FolderClosed, MessageSquare, RefreshCw, Search, SquarePen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -99,6 +99,39 @@ export const ProjectTree = memo(function ProjectTree({
   const [search, setSearch] = useState('');
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
+
+  const processingKeysRef = useRef<Set<string>>(new Set());
+  const [freshDotKeys, setFreshDotKeys] = useState<Set<string>>(new Set());
+
+  // Track which sessions just finished processing
+  useEffect(() => {
+    setFreshDotKeys((prev) => {
+      const next = new Set(prev);
+      for (const session of sessions) {
+        const key = toKey(session);
+        const decoration = decorationsBySessionKey[key];
+        if (decoration?.visualState === 'processing') {
+          processingKeysRef.current.add(key);
+        } else if (processingKeysRef.current.has(key)) {
+          processingKeysRef.current.delete(key);
+          next.add(key);
+        }
+      }
+      return next;
+    });
+  }, [sessions, decorationsBySessionKey]);
+
+  // Dismiss fresh dot when user selects (reads) the session
+  useEffect(() => {
+    if (selectedKey) {
+      setFreshDotKeys((prev) => {
+        if (!prev.has(selectedKey)) return prev;
+        const next = new Set(prev);
+        next.delete(selectedKey);
+        return next;
+      });
+    }
+  }, [selectedKey]);
 
   const saveEdit = useCallback(async (session: HistorySessionItem, newTitle: string) => {
     try {
@@ -403,9 +436,16 @@ export const ProjectTree = memo(function ProjectTree({
                             />
                           </span>
                           <span className="text-[12px] truncate flex-1">{getHistorySessionDisplay(session, t('history.untitledSession'))}</span>
-                          <span className="text-[10px] text-muted-foreground shrink-0">
-                            {formatRelativeTime(session.timestamp)}
-                          </span>
+                          {freshDotKeys.has(key) ? (
+                            <span className="relative inline-flex items-center justify-center shrink-0 w-5 h-3.5">
+                              <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-amber-500/25 opacity-75" />
+                              <span className="relative w-1.5 h-1.5 rounded-full bg-amber-500" />
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-muted-foreground shrink-0">
+                              {formatRelativeTime(session.timestamp)}
+                            </span>
+                          )}
                         </button>
                       );
                     })}

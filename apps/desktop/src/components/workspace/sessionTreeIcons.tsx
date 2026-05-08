@@ -15,6 +15,7 @@ interface SessionTreeItemIconProps {
   className?: string;
 }
 
+
 function normalizeClient(value: string | undefined): LaunchClient {
   if (value === 'codex') {
     return 'codex';
