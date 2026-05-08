@@ -1,5 +1,11 @@
 # ccem
 
+## 2.3.0
+
+### Minor Changes
+
+- Add fresh session notification dot and fix IME composing check
+
 ## 2.2.0
 
 ### Minor Changes
