@@ -83,7 +83,7 @@ export function buildPetNotifications(
         id,
         runtimeId: session.runtime_id,
         provider: session.provider,
-        providerSessionId: session.provider_session_id,
+        providerSessionId: session.provider_session_id ?? null,
         title: basename(session.project_dir),
         message: defaultMessage(session, tone),
         status: session.status,

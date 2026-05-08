@@ -4,7 +4,7 @@ export interface PetNotificationItem {
   id: string;
   runtimeId: string;
   provider: 'claude' | 'codex';
-  providerSessionId?: string | null;
+  providerSessionId: string | null;
   title: string;
   message: string;
   status: string;
