@@ -71,6 +71,7 @@ import {
 } from '@/components/workspace/workspaceSessionPreferences';
 import { resolveComposerDispatch } from '@/components/workspace/workspaceComposerDispatch';
 import { trimSeedMessagesBeforeFirstUserPrompt } from '@/components/workspace/workspaceEventTranscript';
+import type { PetOpenSessionRequest } from '@/types/pet';
 
 const LazyHistoryDetail = lazy(async () =>
   import('@/components/workspace/WorkspaceConversationDetail').then((m) => ({
@@ -136,9 +137,16 @@ interface WorkspaceProps {
   isActive?: boolean;
   onNavigate: (tab: string) => void;
   onLaunchWithDir: (dir: string, client?: LaunchClient) => void;
+  petOpenRequest?: PetOpenSessionRequest | null;
+  onPetOpenHandled?: () => void;
 }
 
-export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
+export function Workspace({
+  isActive = true,
+  onNavigate,
+  petOpenRequest = null,
+  onPetOpenHandled,
+}: WorkspaceProps) {
   const { t } = useLocale();
   const {
     isLoadingEnvs,
@@ -902,6 +910,58 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     },
     [ensureLiveEntryForSession, loadConversation, setSelectedWorkingDir]
   );
+
+  useEffect(() => {
+    if (!isActive || !petOpenRequest) {
+      return;
+    }
+
+    const openFromRequest = async () => {
+      const liveEntry = liveSessionsByRuntimeId[petOpenRequest.runtimeId];
+      if (liveEntry && canRestoreWorkspaceLiveSession(liveEntry.session)) {
+        setActiveLiveRuntimeId(liveEntry.session.runtime_id);
+        setComposeDir(liveEntry.session.project_dir);
+        setSelectedWorkingDir(liveEntry.session.project_dir);
+        setWorkspaceMode('live');
+        onPetOpenHandled?.();
+        return;
+      }
+
+      const matchingSession = sidebarSessions.find((session) => {
+        if (session.id === petOpenRequest.runtimeId) {
+          return true;
+        }
+        if (petOpenRequest.providerSessionId && session.id === petOpenRequest.providerSessionId) {
+          return true;
+        }
+        return false;
+      });
+
+      if (matchingSession) {
+        await handleSelect(matchingSession);
+        onPetOpenHandled?.();
+        return;
+      }
+
+      await refreshWorkspaceData({
+        force: true,
+        silent: true,
+        includeSelectedConversation: false,
+      });
+      onPetOpenHandled?.();
+    };
+
+    void openFromRequest();
+  }, [
+    handleSelect,
+    isActive,
+    liveSessionsByRuntimeId,
+    onPetOpenHandled,
+    petOpenRequest,
+    refreshWorkspaceData,
+    setSelectedWorkingDir,
+    sidebarSessions,
+  ]);
 
   const openComposer = useCallback((client: 'claude' | 'codex', dir?: string | null) => {
     setComposeProvider(client);
