@@ -206,6 +206,11 @@
     "composerImageUnsupported": "不支持的图片格式",
     "composerImageReadFailed": "读取图片失败",
     "composerPathLabel": "路径",
+    "composerSkillSource": "来源",
+    "composerSkillPath": "路径",
+    "composerSkillImplicit": "隐式策略",
+    "composerSkillExplicitOnly": "仅显式选择",
+    "composerSkillProviderNative": "Provider 原生",
     "composerAcceptKey": "Tab"
   },
   "sessions": {

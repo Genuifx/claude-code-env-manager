@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
-import { Home, Terminal, Globe, BarChart3, Sparkles, Settings, MessageSquare, MessageCircleMore, Clock, Bug } from 'lucide-react';
+import { Home, Terminal, Globe, BarChart3, Box, Settings, MessageSquare, MessageCircleMore, Clock, Bug } from 'lucide-react';
 // import { PetEntry } from '@/components/pet/PetEntry';
 
 interface SideRailProps {
@@ -34,7 +34,7 @@ const navGroupDefs: NavGroupDef[] = [
     items: [
       { id: 'sessions', labelKey: 'sideRail.sessions', icon: Terminal, shortcut: '2' },
       { id: 'environments', labelKey: 'sideRail.environments', icon: Globe, shortcut: '3' },
-      { id: 'skills', labelKey: 'sideRail.skills', icon: Sparkles, shortcut: '4' },
+      { id: 'skills', labelKey: 'sideRail.skills', icon: Box, shortcut: '4' },
       { id: 'history', labelKey: 'sideRail.history', icon: MessageSquare, shortcut: '5' },
       { id: 'cron', labelKey: 'sideRail.cron', icon: Clock, shortcut: '6' },
       { id: 'chat-app', labelKey: 'sideRail.chatApp', icon: MessageCircleMore, shortcut: '7' },

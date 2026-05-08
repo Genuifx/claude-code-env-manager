@@ -954,6 +954,21 @@ export function useTauriCommands() {
     }
   }, [setInstalledSkills]);
 
+  const loadWorkspaceSkills = useCallback(async (options: {
+    workingDir?: string | null;
+    provider?: string | null;
+  } = {}): Promise<InstalledSkill[]> => {
+    try {
+      return await invoke<InstalledSkill[]>('list_workspace_skills', {
+        workingDir: options.workingDir ?? null,
+        provider: options.provider ?? null,
+      });
+    } catch (err) {
+      console.error('Failed to load workspace skills:', err);
+      return [];
+    }
+  }, []);
+
   // Cron commands
   const loadCronTasks = useCallback(async () => {
     setLoadingCron(true);
@@ -1245,6 +1260,7 @@ export function useTauriCommands() {
     checkOpenCodeInstalled,
     checkTmuxInstalled,
     loadInstalledSkills,
+    loadWorkspaceSkills,
     loadCronTasks,
     addCronTask,
     updateCronTask,

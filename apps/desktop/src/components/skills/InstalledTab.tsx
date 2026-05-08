@@ -6,7 +6,7 @@ import { useTauriEvent } from '@/hooks/useTauriEvents';
 import { useLocale } from '@/locales';
 import { useAppStore } from '@/store';
 import { toast } from 'sonner';
-import { Sparkles, Plug, Globe, FolderOpen } from 'lucide-react';
+import { Box, Plug, Globe, FolderOpen } from 'lucide-react';
 import { shallow } from 'zustand/shallow';
 
 export function InstalledTab() {
@@ -70,7 +70,7 @@ export function InstalledTab() {
   if (installedSkills.length === 0) {
     return (
       <EmptyState
-        icon={Sparkles}
+        icon={Box}
         message={t('skills.noSkills')}
         action={t('skills.addFirstSkill')}
       />

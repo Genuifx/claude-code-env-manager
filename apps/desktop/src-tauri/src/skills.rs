@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::io::BufRead;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter};
@@ -15,7 +16,19 @@ static USER_PATH: OnceLock<String> = OnceLock::new();
 // Types
 // ============================================
 
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillUiMetadata {
+    pub display_name: Option<String>,
+    pub short_description: Option<String>,
+    pub brand_color: Option<String>,
+    pub composer_icon: Option<String>,
+    pub logo: Option<String>,
+    pub default_prompt: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct InstalledSkill {
     pub name: String,
     pub description: String,
@@ -24,6 +37,18 @@ pub struct InstalledSkill {
     pub agents: Vec<String>,    // ["Claude Code", "Codex"]
     pub source: Option<String>, // plugin: marketplace name, skills: "skills.sh"
     pub version: Option<String>,
+    pub id: String,
+    pub provider: Option<String>,
+    pub skill_file: Option<String>,
+    pub display_name: Option<String>,
+    pub invocation_label: Option<String>,
+    pub plugin_name: Option<String>,
+    pub plugin_marketplace: Option<String>,
+    pub disabled: bool,
+    pub visibility: Option<String>,
+    pub implicit_allowed: bool,
+    pub ui_metadata: Option<SkillUiMetadata>,
+    pub diagnostics: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -34,6 +59,47 @@ pub struct CuratedSkill {
     pub description: String,
     pub category: String,     // "official" | "popular" | "community"
     pub install_type: String, // "skills" | "plugin"
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectedSkillContent {
+    pub skill_file: String,
+    pub directory: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub content: String,
+    pub resource_hints: Vec<String>,
+    pub diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct SkillMetadata {
+    name: Option<String>,
+    description: Option<String>,
+    ui_metadata: Option<SkillUiMetadata>,
+    diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct SkillScanOptions {
+    scope: String,
+    agents: Vec<String>,
+    source: Option<String>,
+    version: Option<String>,
+    provider: Option<String>,
+    plugin_name: Option<String>,
+    plugin_marketplace: Option<String>,
+    disabled: bool,
+    visibility: Option<String>,
+    implicit_allowed: bool,
+    diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct CodexConfig {
+    disabled_skill_paths: HashSet<PathBuf>,
+    disabled_plugins: HashSet<String>,
 }
 
 // ============================================
@@ -60,35 +126,295 @@ fn get_user_path() -> &'static str {
     })
 }
 
-/// Parse YAML frontmatter from SKILL.md content.
-/// Returns (name, description) if frontmatter exists.
-fn parse_skill_frontmatter(content: &str) -> (Option<String>, Option<String>) {
-    let trimmed = content.trim_start();
-    if !trimmed.starts_with("---") {
-        return (None, None);
-    }
+fn yaml_mapping_value<'a>(
+    mapping: &'a serde_yaml::Mapping,
+    key: &str,
+) -> Option<&'a serde_yaml::Value> {
+    mapping.get(&serde_yaml::Value::String(key.to_string()))
+}
 
-    // Find the closing ---
-    let after_first = &trimmed[3..];
-    let end = match after_first.find("---") {
-        Some(pos) => pos,
-        None => return (None, None),
+fn yaml_value_to_string(value: &serde_yaml::Value) -> Option<String> {
+    match value {
+        serde_yaml::Value::String(value) => Some(value.trim().to_string()),
+        serde_yaml::Value::Number(value) => Some(value.to_string()),
+        serde_yaml::Value::Bool(value) => Some(value.to_string()),
+        _ => None,
+    }
+    .filter(|value| !value.is_empty())
+}
+
+fn parse_ui_metadata(value: &serde_yaml::Value) -> Option<SkillUiMetadata> {
+    let mapping = value.as_mapping()?;
+    let metadata = SkillUiMetadata {
+        display_name: yaml_mapping_value(mapping, "displayName")
+            .or_else(|| yaml_mapping_value(mapping, "display_name"))
+            .and_then(yaml_value_to_string),
+        short_description: yaml_mapping_value(mapping, "shortDescription")
+            .or_else(|| yaml_mapping_value(mapping, "short_description"))
+            .and_then(yaml_value_to_string),
+        brand_color: yaml_mapping_value(mapping, "brandColor")
+            .or_else(|| yaml_mapping_value(mapping, "brand_color"))
+            .and_then(yaml_value_to_string),
+        composer_icon: yaml_mapping_value(mapping, "composerIcon")
+            .or_else(|| yaml_mapping_value(mapping, "composer_icon"))
+            .and_then(yaml_value_to_string),
+        logo: yaml_mapping_value(mapping, "logo").and_then(yaml_value_to_string),
+        default_prompt: yaml_mapping_value(mapping, "defaultPrompt")
+            .or_else(|| yaml_mapping_value(mapping, "default_prompt"))
+            .and_then(yaml_value_to_string),
     };
 
-    let frontmatter = &after_first[..end];
+    if metadata.display_name.is_none()
+        && metadata.short_description.is_none()
+        && metadata.brand_color.is_none()
+        && metadata.composer_icon.is_none()
+        && metadata.logo.is_none()
+        && metadata.default_prompt.is_none()
+    {
+        None
+    } else {
+        Some(metadata)
+    }
+}
+
+fn extract_frontmatter(content: &str) -> Option<String> {
+    let trimmed = content.trim_start_matches('\u{feff}').trim_start();
+    let mut lines = trimmed.lines();
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+
+    let mut frontmatter = Vec::new();
+    for line in lines {
+        let marker = line.trim();
+        if marker == "---" || marker == "..." {
+            return Some(frontmatter.join("\n"));
+        }
+        frontmatter.push(line);
+    }
+
+    None
+}
+
+fn parse_lenient_frontmatter(frontmatter: &str) -> (Option<String>, Option<String>) {
     let mut name = None;
     let mut description = None;
 
     for line in frontmatter.lines() {
         let line = line.trim();
-        if let Some(val) = line.strip_prefix("name:") {
-            name = Some(val.trim().trim_matches('"').trim_matches('\'').to_string());
-        } else if let Some(val) = line.strip_prefix("description:") {
-            description = Some(val.trim().trim_matches('"').trim_matches('\'').to_string());
+        let Some((raw_key, raw_value)) = line.split_once(':') else {
+            continue;
+        };
+        let key = raw_key.trim().to_ascii_lowercase();
+        let value = raw_value
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .trim()
+            .to_string();
+        if value.is_empty() || value == "|" || value == ">" {
+            continue;
+        }
+        match key.as_str() {
+            "name" => name = Some(value),
+            "description" => description = Some(value),
+            _ => {}
         }
     }
 
     (name, description)
+}
+
+fn parse_skill_metadata(content: &str) -> SkillMetadata {
+    let Some(frontmatter) = extract_frontmatter(content) else {
+        return SkillMetadata {
+            name: None,
+            description: None,
+            ui_metadata: None,
+            diagnostics: Vec::new(),
+        };
+    };
+
+    match serde_yaml::from_str::<serde_yaml::Value>(&frontmatter) {
+        Ok(serde_yaml::Value::Mapping(mapping)) => {
+            let name = yaml_mapping_value(&mapping, "name").and_then(yaml_value_to_string);
+            let description =
+                yaml_mapping_value(&mapping, "description").and_then(yaml_value_to_string);
+            let ui_metadata = yaml_mapping_value(&mapping, "ui")
+                .or_else(|| yaml_mapping_value(&mapping, "uiMetadata"))
+                .or_else(|| yaml_mapping_value(&mapping, "ui_metadata"))
+                .and_then(parse_ui_metadata);
+
+            SkillMetadata {
+                name,
+                description,
+                ui_metadata,
+                diagnostics: Vec::new(),
+            }
+        }
+        Ok(_) => {
+            let (name, description) = parse_lenient_frontmatter(&frontmatter);
+            SkillMetadata {
+                name,
+                description,
+                ui_metadata: None,
+                diagnostics: vec![
+                    "Frontmatter is not a YAML mapping; used lenient parser".to_string()
+                ],
+            }
+        }
+        Err(error) => {
+            let (name, description) = parse_lenient_frontmatter(&frontmatter);
+            SkillMetadata {
+                name,
+                description,
+                ui_metadata: None,
+                diagnostics: vec![format!("YAML frontmatter parse failed: {}", error)],
+            }
+        }
+    }
+}
+
+/// Parse YAML frontmatter from SKILL.md content.
+/// Returns (name, description) if frontmatter exists.
+fn parse_skill_frontmatter(content: &str) -> (Option<String>, Option<String>) {
+    let metadata = parse_skill_metadata(content);
+    (metadata.name, metadata.description)
+}
+
+fn default_skill_scan_options(
+    scope: &str,
+    agents: &[String],
+    source: Option<&str>,
+) -> SkillScanOptions {
+    SkillScanOptions {
+        scope: scope.to_string(),
+        agents: agents.to_vec(),
+        source: source.map(|s| s.to_string()),
+        version: None,
+        provider: None,
+        plugin_name: None,
+        plugin_marketplace: None,
+        disabled: false,
+        visibility: Some("native".to_string()),
+        implicit_allowed: true,
+        diagnostics: Vec::new(),
+    }
+}
+
+fn is_hidden_dir(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with('.'))
+}
+
+fn build_installed_skill_from_dir(
+    path: &Path,
+    options: &SkillScanOptions,
+) -> Option<InstalledSkill> {
+    if is_hidden_dir(path) {
+        return None;
+    }
+
+    let skill_md = path.join("SKILL.md");
+    if !skill_md.exists() {
+        return None;
+    }
+
+    let dir_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let (base_name, description, mut diagnostics, ui_metadata) =
+        match std::fs::read_to_string(&skill_md) {
+            Ok(content) => {
+                let metadata = parse_skill_metadata(&content);
+                (
+                    metadata.name.unwrap_or_else(|| dir_name.clone()),
+                    metadata.description.unwrap_or_default(),
+                    metadata.diagnostics,
+                    metadata.ui_metadata,
+                )
+            }
+            Err(error) => (
+                dir_name.clone(),
+                String::new(),
+                vec![format!("Failed to read SKILL.md: {}", error)],
+                None,
+            ),
+        };
+
+    diagnostics.extend(options.diagnostics.clone());
+
+    let should_namespace_claude_plugin = options.provider.as_deref() == Some("claude")
+        && options.scope == "plugin"
+        && options.plugin_name.is_some();
+    let invocation_label = if should_namespace_claude_plugin {
+        format!(
+            "{}:{}",
+            options.plugin_name.as_deref().unwrap_or("plugin"),
+            base_name
+        )
+    } else {
+        base_name.clone()
+    };
+    let name = if should_namespace_claude_plugin {
+        invocation_label.clone()
+    } else {
+        base_name.clone()
+    };
+    let skill_file = skill_md.to_string_lossy().to_string();
+    let provider_key = options.provider.as_deref().unwrap_or("skill");
+    let id = format!("{}:{}", provider_key, skill_file);
+
+    Some(InstalledSkill {
+        name,
+        description,
+        path: path.to_string_lossy().to_string(),
+        scope: options.scope.clone(),
+        agents: options.agents.clone(),
+        source: options.source.clone(),
+        version: options.version.clone(),
+        id,
+        provider: options.provider.clone(),
+        skill_file: Some(skill_file),
+        display_name: Some(base_name),
+        invocation_label: Some(invocation_label),
+        plugin_name: options.plugin_name.clone(),
+        plugin_marketplace: options.plugin_marketplace.clone(),
+        disabled: options.disabled,
+        visibility: options.visibility.clone(),
+        implicit_allowed: options.implicit_allowed,
+        ui_metadata,
+        diagnostics,
+    })
+}
+
+fn scan_skills_dir_with_options(dir: &Path, options: &SkillScanOptions) -> Vec<InstalledSkill> {
+    let mut skills = Vec::new();
+
+    if let Some(skill) = build_installed_skill_from_dir(dir, options) {
+        skills.push(skill);
+        return skills;
+    }
+
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(_) => return skills,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() || is_hidden_dir(&path) {
+            continue;
+        }
+
+        skills.extend(scan_skills_dir_with_options(&path, options));
+    }
+
+    skills
 }
 
 /// Scan a directory for skills (each subdirectory with SKILL.md).
@@ -98,70 +424,751 @@ fn scan_skills_dir(
     agents: &[String],
     source: Option<&str>,
 ) -> Vec<InstalledSkill> {
-    let mut skills = Vec::new();
+    scan_skills_dir_with_options(dir, &default_skill_scan_options(scope, agents, source))
+}
 
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return skills,
+fn home_relative(path: &str, home: &Path) -> PathBuf {
+    if path == "~" {
+        return home.to_path_buf();
+    }
+    if let Some(rest) = path.strip_prefix("~/") {
+        return home.join(rest);
+    }
+    PathBuf::from(path)
+}
+
+fn normalized_existing_or_raw(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn is_path_disabled(path: &Path, disabled_paths: &HashSet<PathBuf>) -> bool {
+    let normalized = normalized_existing_or_raw(path);
+    disabled_paths.iter().any(|disabled_path| {
+        normalized.starts_with(disabled_path) || path.starts_with(disabled_path)
+    })
+}
+
+fn read_codex_config(home: &Path) -> CodexConfig {
+    let config_path = home.join(".codex").join("config.toml");
+    let content = match std::fs::read_to_string(config_path) {
+        Ok(content) => content,
+        Err(_) => {
+            return CodexConfig {
+                disabled_skill_paths: HashSet::new(),
+                disabled_plugins: HashSet::new(),
+            };
+        }
+    };
+    let parsed = match content.parse::<toml::Value>() {
+        Ok(parsed) => parsed,
+        Err(_) => {
+            let mut disabled_skill_paths = HashSet::new();
+            let mut disabled_plugins = HashSet::new();
+            extend_codex_disabled_skill_paths_lenient(&content, home, &mut disabled_skill_paths);
+            extend_codex_disabled_plugins_lenient(&content, &mut disabled_plugins);
+            return CodexConfig {
+                disabled_skill_paths,
+                disabled_plugins,
+            };
+        }
     };
 
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-
-        // Skip hidden directories
-        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            if name.starts_with('.') {
+    let mut disabled_skill_paths = HashSet::new();
+    if let Some(configs) = parsed
+        .get("skills")
+        .and_then(|skills| skills.get("config"))
+        .and_then(|config| config.as_array())
+    {
+        for item in configs {
+            let enabled = item
+                .get("enabled")
+                .and_then(|enabled| enabled.as_bool())
+                .unwrap_or(true);
+            if enabled {
                 continue;
             }
+            let raw_path = item
+                .get("path")
+                .or_else(|| item.get("skill"))
+                .or_else(|| item.get("directory"))
+                .or_else(|| item.get("file"))
+                .and_then(|path| path.as_str());
+            if let Some(raw_path) = raw_path {
+                let expanded = home_relative(raw_path, home);
+                disabled_skill_paths.insert(expanded.clone());
+                disabled_skill_paths.insert(normalized_existing_or_raw(&expanded));
+            }
         }
+    }
+    extend_codex_disabled_skill_paths_lenient(&content, home, &mut disabled_skill_paths);
 
-        let skill_md = path.join("SKILL.md");
-        if !skill_md.exists() {
-            // Check for nested skills (multi-skill pack)
-            let nested = scan_skills_dir(&path, scope, agents, source);
-            skills.extend(nested);
+    let mut disabled_plugins = HashSet::new();
+    if let Some(plugins) = parsed.get("plugins").and_then(|plugins| plugins.as_table()) {
+        for (plugin_key, value) in plugins {
+            let enabled = value
+                .get("enabled")
+                .and_then(|enabled| enabled.as_bool())
+                .unwrap_or(true);
+            if !enabled {
+                disabled_plugins.insert(plugin_key.clone());
+            }
+        }
+    }
+    extend_codex_disabled_plugins_lenient(&content, &mut disabled_plugins);
+
+    CodexConfig {
+        disabled_skill_paths,
+        disabled_plugins,
+    }
+}
+
+fn extend_codex_disabled_skill_paths_lenient(
+    content: &str,
+    home: &Path,
+    disabled_skill_paths: &mut HashSet<PathBuf>,
+) {
+    let mut in_skill_config = false;
+    let mut pending_path: Option<String> = None;
+    let mut pending_enabled = true;
+
+    let flush = |pending_path: &mut Option<String>,
+                 pending_enabled: &mut bool,
+                 disabled_skill_paths: &mut HashSet<PathBuf>| {
+        if !*pending_enabled {
+            if let Some(raw_path) = pending_path.take() {
+                let expanded = home_relative(&raw_path, home);
+                disabled_skill_paths.insert(expanded.clone());
+                disabled_skill_paths.insert(normalized_existing_or_raw(&expanded));
+            }
+        } else {
+            *pending_path = None;
+        }
+        *pending_enabled = true;
+    };
+
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.starts_with("[[") {
+            if in_skill_config {
+                flush(
+                    &mut pending_path,
+                    &mut pending_enabled,
+                    disabled_skill_paths,
+                );
+            }
+            in_skill_config = line == "[[skills.config]]";
+            pending_path = None;
+            pending_enabled = true;
             continue;
         }
-
-        let dir_name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown")
-            .to_string();
-
-        let (name, description) = match std::fs::read_to_string(&skill_md) {
-            Ok(content) => {
-                let (n, d) = parse_skill_frontmatter(&content);
-                (n.unwrap_or_else(|| dir_name.clone()), d.unwrap_or_default())
+        if line.starts_with('[') {
+            if in_skill_config {
+                flush(
+                    &mut pending_path,
+                    &mut pending_enabled,
+                    disabled_skill_paths,
+                );
             }
-            Err(_) => (dir_name.clone(), String::new()),
+            in_skill_config = false;
+            continue;
+        }
+        if !in_skill_config {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
         };
-
-        skills.push(InstalledSkill {
-            name,
-            description,
-            path: path.to_string_lossy().to_string(),
-            scope: scope.to_string(),
-            agents: agents.to_vec(),
-            source: source.map(|s| s.to_string()),
-            version: None,
-        });
+        let key = key.trim();
+        let value = value.trim().trim_matches('"').trim_matches('\'');
+        match key {
+            "path" | "skill" | "directory" | "file" => pending_path = Some(value.to_string()),
+            "enabled" => pending_enabled = value != "false",
+            _ => {}
+        }
     }
+
+    if in_skill_config {
+        flush(
+            &mut pending_path,
+            &mut pending_enabled,
+            disabled_skill_paths,
+        );
+    }
+}
+
+fn extend_codex_disabled_plugins_lenient(content: &str, disabled_plugins: &mut HashSet<String>) {
+    let mut pending_plugin: Option<String> = None;
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.starts_with('[') {
+            pending_plugin = line
+                .strip_prefix("[plugins.")
+                .and_then(|value| value.strip_suffix(']'))
+                .map(|value| value.trim_matches('"').trim_matches('\'').to_string());
+            continue;
+        }
+        let Some(plugin_key) = pending_plugin.as_deref() else {
+            continue;
+        };
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim() == "enabled" && value.trim() == "false" {
+            disabled_plugins.insert(plugin_key.to_string());
+        }
+    }
+}
+
+fn add_skills_unique_by_file(
+    all_skills: &mut Vec<InstalledSkill>,
+    seen_files: &mut HashSet<String>,
+    skills: Vec<InstalledSkill>,
+) {
+    for skill in skills {
+        let key = skill
+            .skill_file
+            .clone()
+            .unwrap_or_else(|| format!("{}/SKILL.md", skill.path));
+        if seen_files.insert(key) {
+            all_skills.push(skill);
+        }
+    }
+}
+
+fn collect_workspace_skill_dirs(working_dir: Option<&Path>, folder_name: &str) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let Some(working_dir) = working_dir else {
+        return dirs;
+    };
+    let mut current = if working_dir.is_file() {
+        working_dir.parent().map(Path::to_path_buf)
+    } else {
+        Some(working_dir.to_path_buf())
+    };
+
+    while let Some(dir) = current {
+        let skills_dir = dir.join(folder_name).join("skills");
+        if skills_dir.exists() {
+            dirs.push(skills_dir);
+        }
+        if dir.join(".git").exists() {
+            break;
+        }
+        current = dir.parent().map(Path::to_path_buf);
+    }
+
+    dirs
+}
+
+fn scan_codex_skills_for_context(
+    home: Option<&Path>,
+    working_dir: Option<&Path>,
+) -> Vec<InstalledSkill> {
+    let mut skills = Vec::new();
+    let mut seen_files = HashSet::new();
+
+    let codex_agents = vec!["Codex".to_string()];
+    let Some(home) = home else {
+        return skills;
+    };
+    let codex_config = read_codex_config(home);
+
+    for dir in collect_workspace_skill_dirs(working_dir, ".agents") {
+        let mut options = SkillScanOptions {
+            scope: "project".to_string(),
+            agents: codex_agents.clone(),
+            source: Some(".agents/skills".to_string()),
+            version: None,
+            provider: Some("codex".to_string()),
+            plugin_name: None,
+            plugin_marketplace: None,
+            disabled: is_path_disabled(&dir, &codex_config.disabled_skill_paths),
+            visibility: Some("native".to_string()),
+            implicit_allowed: true,
+            diagnostics: Vec::new(),
+        };
+        if options.disabled {
+            options
+                .diagnostics
+                .push("Disabled by Codex skills.config".to_string());
+        }
+        add_skills_unique_by_file(
+            &mut skills,
+            &mut seen_files,
+            scan_skills_dir_with_options(&dir, &options),
+        );
+    }
+
+    let global_agents_dir = home.join(".agents").join("skills");
+    if global_agents_dir.exists() {
+        let mut options = SkillScanOptions {
+            scope: "global".to_string(),
+            agents: codex_agents.clone(),
+            source: Some("~/.agents/skills".to_string()),
+            version: None,
+            provider: Some("codex".to_string()),
+            plugin_name: None,
+            plugin_marketplace: None,
+            disabled: is_path_disabled(&global_agents_dir, &codex_config.disabled_skill_paths),
+            visibility: Some("native".to_string()),
+            implicit_allowed: true,
+            diagnostics: Vec::new(),
+        };
+        if options.disabled {
+            options
+                .diagnostics
+                .push("Disabled by Codex skills.config".to_string());
+        }
+        add_skills_unique_by_file(
+            &mut skills,
+            &mut seen_files,
+            scan_skills_dir_with_options(&global_agents_dir, &options),
+        );
+    }
+
+    let codex_skills_dir = home.join(".codex").join("skills");
+    if codex_skills_dir.exists() {
+        let mut options = SkillScanOptions {
+            scope: "global".to_string(),
+            agents: codex_agents.clone(),
+            source: Some("~/.codex/skills".to_string()),
+            version: None,
+            provider: Some("codex".to_string()),
+            plugin_name: None,
+            plugin_marketplace: None,
+            disabled: is_path_disabled(&codex_skills_dir, &codex_config.disabled_skill_paths),
+            visibility: Some("native".to_string()),
+            implicit_allowed: true,
+            diagnostics: Vec::new(),
+        };
+        if options.disabled {
+            options
+                .diagnostics
+                .push("Disabled by Codex skills.config".to_string());
+        }
+        add_skills_unique_by_file(
+            &mut skills,
+            &mut seen_files,
+            scan_skills_dir_with_options(&codex_skills_dir, &options),
+        );
+
+        let codex_system_skills_dir = codex_skills_dir.join(".system");
+        if codex_system_skills_dir.exists() {
+            let system_options = SkillScanOptions {
+                scope: "system".to_string(),
+                agents: codex_agents.clone(),
+                source: Some("~/.codex/skills/.system".to_string()),
+                version: None,
+                provider: Some("codex".to_string()),
+                plugin_name: None,
+                plugin_marketplace: None,
+                disabled: is_path_disabled(
+                    &codex_system_skills_dir,
+                    &codex_config.disabled_skill_paths,
+                ),
+                visibility: Some("native".to_string()),
+                implicit_allowed: true,
+                diagnostics: Vec::new(),
+            };
+            add_skills_unique_by_file(
+                &mut skills,
+                &mut seen_files,
+                scan_skills_dir_with_options(&codex_system_skills_dir, &system_options),
+            );
+        }
+    }
+
+    let admin_skills_dir = PathBuf::from("/etc/codex/skills");
+    if admin_skills_dir.exists() {
+        let mut options = SkillScanOptions {
+            scope: "system".to_string(),
+            agents: codex_agents.clone(),
+            source: Some("/etc/codex/skills".to_string()),
+            version: None,
+            provider: Some("codex".to_string()),
+            plugin_name: None,
+            plugin_marketplace: None,
+            disabled: is_path_disabled(&admin_skills_dir, &codex_config.disabled_skill_paths),
+            visibility: Some("native".to_string()),
+            implicit_allowed: true,
+            diagnostics: Vec::new(),
+        };
+        if options.disabled {
+            options
+                .diagnostics
+                .push("Disabled by Codex skills.config".to_string());
+        }
+        add_skills_unique_by_file(
+            &mut skills,
+            &mut seen_files,
+            scan_skills_dir_with_options(&admin_skills_dir, &options),
+        );
+    }
+
+    scan_codex_plugin_cache_skills(home, &codex_config, &mut skills, &mut seen_files);
 
     skills
 }
 
-/// Scan plugin skills from ~/.claude/plugins/
-fn scan_plugin_skills() -> Vec<InstalledSkill> {
-    let mut skills = Vec::new();
-    let home = match dirs::home_dir() {
-        Some(h) => h,
-        None => return skills,
+fn scan_codex_plugin_cache_skills(
+    home: &Path,
+    codex_config: &CodexConfig,
+    all_skills: &mut Vec<InstalledSkill>,
+    seen_files: &mut HashSet<String>,
+) {
+    let cache_dir = home.join(".codex").join("plugins").join("cache");
+    let marketplace_entries = match std::fs::read_dir(cache_dir) {
+        Ok(entries) => entries,
+        Err(_) => return,
     };
 
+    for marketplace_entry in marketplace_entries.flatten() {
+        let marketplace_path = marketplace_entry.path();
+        if !marketplace_path.is_dir() || is_hidden_dir(&marketplace_path) {
+            continue;
+        }
+        let marketplace = marketplace_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        let plugin_entries = match std::fs::read_dir(&marketplace_path) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+
+        for plugin_entry in plugin_entries.flatten() {
+            let plugin_path = plugin_entry.path();
+            if !plugin_path.is_dir() || is_hidden_dir(&plugin_path) {
+                continue;
+            }
+            let plugin_name = plugin_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let plugin_key = format!("{}@{}", plugin_name, marketplace);
+            let disabled = codex_config.disabled_plugins.contains(&plugin_key)
+                || codex_config.disabled_plugins.contains(&plugin_name)
+                || is_path_disabled(&plugin_path, &codex_config.disabled_skill_paths);
+            let mut options = SkillScanOptions {
+                scope: if marketplace.starts_with("openai-") {
+                    "system".to_string()
+                } else {
+                    "plugin".to_string()
+                },
+                agents: vec!["Codex".to_string()],
+                source: Some(marketplace.clone()),
+                version: None,
+                provider: Some("codex".to_string()),
+                plugin_name: Some(plugin_name.clone()),
+                plugin_marketplace: Some(marketplace.clone()),
+                disabled,
+                visibility: Some("native".to_string()),
+                implicit_allowed: !disabled,
+                diagnostics: Vec::new(),
+            };
+            if disabled {
+                options
+                    .diagnostics
+                    .push("Disabled by Codex plugin or skills.config".to_string());
+            }
+
+            let scan_root = plugin_path.join("skills");
+            let scan_root = if scan_root.exists() {
+                scan_root
+            } else {
+                plugin_path
+            };
+            add_skills_unique_by_file(
+                all_skills,
+                seen_files,
+                scan_skills_dir_with_options(&scan_root, &options),
+            );
+        }
+    }
+}
+
+fn parse_claude_skill_overrides_from_value(
+    value: &serde_json::Value,
+    overrides: &mut HashMap<String, String>,
+) {
+    let candidates = [
+        value.get("skillOverrides"),
+        value
+            .get("skills")
+            .and_then(|skills| skills.get("overrides")),
+        value
+            .get("skills")
+            .and_then(|skills| skills.get("skillOverrides")),
+    ];
+
+    for candidate in candidates.into_iter().flatten() {
+        let Some(object) = candidate.as_object() else {
+            continue;
+        };
+        for (key, value) in object {
+            let mode = value.as_str().or_else(|| {
+                value
+                    .as_object()
+                    .and_then(|object| object.get("mode"))
+                    .and_then(|mode| mode.as_str())
+            });
+            if let Some(mode) = mode {
+                overrides.insert(key.to_ascii_lowercase(), mode.to_ascii_lowercase());
+            }
+        }
+    }
+}
+
+fn collect_claude_settings_paths(home: Option<&Path>, working_dir: Option<&Path>) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(home) = home {
+        paths.push(home.join(".claude").join("settings.json"));
+    }
+    if let Some(working_dir) = working_dir {
+        let mut current = if working_dir.is_file() {
+            working_dir.parent().map(Path::to_path_buf)
+        } else {
+            Some(working_dir.to_path_buf())
+        };
+        while let Some(dir) = current {
+            paths.push(dir.join(".claude").join("settings.json"));
+            if dir.join(".git").exists() {
+                break;
+            }
+            current = dir.parent().map(Path::to_path_buf);
+        }
+    }
+    paths
+}
+
+fn read_claude_skill_overrides(
+    home: Option<&Path>,
+    working_dir: Option<&Path>,
+) -> HashMap<String, String> {
+    let mut overrides = HashMap::new();
+    for settings_path in collect_claude_settings_paths(home, working_dir) {
+        let Ok(content) = std::fs::read_to_string(settings_path) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else {
+            continue;
+        };
+        parse_claude_skill_overrides_from_value(&value, &mut overrides);
+    }
+    overrides
+}
+
+fn apply_claude_overrides(skill: &mut InstalledSkill, overrides: &HashMap<String, String>) {
+    let mut keys = vec![
+        skill.name.to_ascii_lowercase(),
+        skill
+            .display_name
+            .as_deref()
+            .unwrap_or(&skill.name)
+            .to_ascii_lowercase(),
+        skill
+            .invocation_label
+            .as_deref()
+            .unwrap_or(&skill.name)
+            .to_ascii_lowercase(),
+        skill.path.to_ascii_lowercase(),
+    ];
+    if let Some(skill_file) = &skill.skill_file {
+        keys.push(skill_file.to_ascii_lowercase());
+    }
+
+    let Some(mode) = keys.iter().find_map(|key| overrides.get(key)) else {
+        return;
+    };
+
+    skill.visibility = Some(mode.clone());
+    match mode.as_str() {
+        "on" => {
+            skill.disabled = false;
+            skill.implicit_allowed = true;
+        }
+        "name-only" | "user-invocable-only" => {
+            skill.implicit_allowed = false;
+            skill
+                .diagnostics
+                .push(format!("Claude skillOverrides set {}", mode));
+        }
+        "off" => {
+            skill.disabled = true;
+            skill.implicit_allowed = false;
+            skill
+                .diagnostics
+                .push("Disabled by Claude skillOverrides".to_string());
+        }
+        _ => {
+            skill
+                .diagnostics
+                .push(format!("Unknown Claude skillOverrides mode: {}", mode));
+        }
+    }
+}
+
+fn claude_scope_priority(scope: &str) -> i32 {
+    match scope {
+        "enterprise" => 3,
+        "global" | "personal" => 2,
+        "project" => 1,
+        _ => 0,
+    }
+}
+
+fn apply_claude_native_priority(skills: Vec<InstalledSkill>) -> Vec<InstalledSkill> {
+    let mut kept: Vec<InstalledSkill> = Vec::new();
+    let mut native_by_name: HashMap<String, usize> = HashMap::new();
+
+    for skill in skills {
+        let is_plugin = skill.scope == "plugin";
+        let is_explicit_only = skill.visibility.as_deref() == Some("explicit-only");
+        if is_plugin || is_explicit_only {
+            kept.push(skill);
+            continue;
+        }
+
+        let key = skill
+            .display_name
+            .as_deref()
+            .unwrap_or(&skill.name)
+            .to_ascii_lowercase();
+        if let Some(existing_index) = native_by_name.get(&key).copied() {
+            let existing_priority = claude_scope_priority(&kept[existing_index].scope);
+            let next_priority = claude_scope_priority(&skill.scope);
+            if next_priority > existing_priority {
+                kept[existing_index] = skill;
+            }
+        } else {
+            native_by_name.insert(key, kept.len());
+            kept.push(skill);
+        }
+    }
+
+    kept
+}
+
+fn scan_claude_skills_for_context(
+    home: Option<&Path>,
+    working_dir: Option<&Path>,
+) -> Vec<InstalledSkill> {
+    let claude_agents = vec!["Claude Code".to_string()];
+    let mut skills = Vec::new();
+
+    let enterprise_dir = PathBuf::from("/etc/claude-code/skills");
+    if enterprise_dir.exists() {
+        let options = SkillScanOptions {
+            scope: "enterprise".to_string(),
+            agents: claude_agents.clone(),
+            source: Some("/etc/claude-code/skills".to_string()),
+            version: None,
+            provider: Some("claude".to_string()),
+            plugin_name: None,
+            plugin_marketplace: None,
+            disabled: false,
+            visibility: Some("native".to_string()),
+            implicit_allowed: true,
+            diagnostics: Vec::new(),
+        };
+        skills.extend(scan_skills_dir_with_options(&enterprise_dir, &options));
+    }
+
+    if let Some(home) = home {
+        let personal_dir = home.join(".claude").join("skills");
+        if personal_dir.exists() {
+            let options = SkillScanOptions {
+                scope: "global".to_string(),
+                agents: claude_agents.clone(),
+                source: Some("~/.claude/skills".to_string()),
+                version: None,
+                provider: Some("claude".to_string()),
+                plugin_name: None,
+                plugin_marketplace: None,
+                disabled: false,
+                visibility: Some("native".to_string()),
+                implicit_allowed: true,
+                diagnostics: Vec::new(),
+            };
+            skills.extend(scan_skills_dir_with_options(&personal_dir, &options));
+        }
+    }
+
+    for project_dir in collect_workspace_skill_dirs(working_dir, ".claude") {
+        let options = SkillScanOptions {
+            scope: "project".to_string(),
+            agents: claude_agents.clone(),
+            source: Some(".claude/skills".to_string()),
+            version: None,
+            provider: Some("claude".to_string()),
+            plugin_name: None,
+            plugin_marketplace: None,
+            disabled: false,
+            visibility: Some("native".to_string()),
+            implicit_allowed: true,
+            diagnostics: Vec::new(),
+        };
+        skills.extend(scan_skills_dir_with_options(&project_dir, &options));
+    }
+
+    if let Some(home) = home {
+        skills.extend(scan_claude_plugin_skills(home));
+
+        let shared_agents_dir = home.join(".agents").join("skills");
+        if shared_agents_dir.exists() {
+            let options = SkillScanOptions {
+                scope: "global".to_string(),
+                agents: claude_agents.clone(),
+                source: Some("~/.agents/skills".to_string()),
+                version: None,
+                provider: Some("claude".to_string()),
+                plugin_name: None,
+                plugin_marketplace: None,
+                disabled: false,
+                visibility: Some("explicit-only".to_string()),
+                implicit_allowed: false,
+                diagnostics: vec![
+                    ".agents/skills is injected exactly by CCEM when selected; Claude native implicit discovery is not assumed".to_string(),
+                ],
+            };
+            skills.extend(scan_skills_dir_with_options(&shared_agents_dir, &options));
+        }
+    }
+
+    for project_agents_dir in collect_workspace_skill_dirs(working_dir, ".agents") {
+        let options = SkillScanOptions {
+            scope: "project".to_string(),
+            agents: claude_agents.clone(),
+            source: Some(".agents/skills".to_string()),
+            version: None,
+            provider: Some("claude".to_string()),
+            plugin_name: None,
+            plugin_marketplace: None,
+            disabled: false,
+            visibility: Some("explicit-only".to_string()),
+            implicit_allowed: false,
+            diagnostics: vec![
+                ".agents/skills is available through CCEM exact-path injection only for Claude"
+                    .to_string(),
+            ],
+        };
+        skills.extend(scan_skills_dir_with_options(&project_agents_dir, &options));
+    }
+
+    let overrides = read_claude_skill_overrides(home, working_dir);
+    for skill in &mut skills {
+        apply_claude_overrides(skill, &overrides);
+    }
+
+    apply_claude_native_priority(skills)
+}
+
+/// Scan plugin skills from ~/.claude/plugins/
+fn scan_claude_plugin_skills(home: &Path) -> Vec<InstalledSkill> {
+    let mut skills = Vec::new();
     // Read installed_plugins.json
     let plugins_json = home
         .join(".claude")
@@ -184,12 +1191,10 @@ fn scan_plugin_skills() -> Vec<InstalledSkill> {
     };
 
     for (plugin_key, installs) in plugins {
-        // Extract marketplace from "name@marketplace"
-        let marketplace = plugin_key
-            .split('@')
-            .nth(1)
-            .unwrap_or("unknown")
-            .to_string();
+        // Extract name and marketplace from "name@marketplace"
+        let mut parts = plugin_key.split('@');
+        let plugin_name = parts.next().unwrap_or("unknown").to_string();
+        let marketplace = parts.next().unwrap_or("unknown").to_string();
 
         let installs_arr = match installs.as_array() {
             Some(a) => a,
@@ -209,22 +1214,33 @@ fn scan_plugin_skills() -> Vec<InstalledSkill> {
             // Scan installPath/skills/ for SKILL.md subdirectories
             let skills_dir = install_path.join("skills");
             if skills_dir.exists() {
-                let mut plugin_skills = scan_skills_dir(
-                    &skills_dir,
-                    "plugin",
-                    &["Claude Code".to_string()],
-                    Some(&marketplace),
-                );
-                // Set version on each skill
-                for skill in &mut plugin_skills {
-                    skill.version = version.clone();
-                }
+                let options = SkillScanOptions {
+                    scope: "plugin".to_string(),
+                    agents: vec!["Claude Code".to_string()],
+                    source: Some(marketplace.clone()),
+                    version: version.clone(),
+                    provider: Some("claude".to_string()),
+                    plugin_name: Some(plugin_name.clone()),
+                    plugin_marketplace: Some(marketplace.clone()),
+                    disabled: false,
+                    visibility: Some("native".to_string()),
+                    implicit_allowed: true,
+                    diagnostics: Vec::new(),
+                };
+                let plugin_skills = scan_skills_dir_with_options(&skills_dir, &options);
                 skills.extend(plugin_skills);
             }
         }
     }
 
     skills
+}
+
+/// Backward-compatible wrapper for the installed skills settings view.
+fn scan_plugin_skills() -> Vec<InstalledSkill> {
+    dirs::home_dir()
+        .map(|home| scan_claude_plugin_skills(&home))
+        .unwrap_or_default()
 }
 
 // ============================================
@@ -305,6 +1321,149 @@ pub fn search_skills_stream(app: AppHandle, query: String) {
 /// 1. Filesystem skills: ~/.claude/skills/, ~/.agents/skills/, ~/.codex/skills/
 /// 2. Plugin skills: ~/.claude/plugins/installed_plugins.json
 /// 3. Project skills: <defaultWorkingDir>/.claude/skills/ (optional)
+#[tauri::command]
+pub fn list_workspace_skills(
+    working_dir: Option<String>,
+    provider: Option<String>,
+) -> Result<Vec<InstalledSkill>, String> {
+    let home = dirs::home_dir();
+    let working_dir = working_dir
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from);
+    let normalized_provider = provider
+        .as_deref()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty());
+
+    let mut skills = Vec::new();
+    match normalized_provider.as_deref() {
+        Some("codex") => {
+            skills.extend(scan_codex_skills_for_context(
+                home.as_deref(),
+                working_dir.as_deref(),
+            ));
+        }
+        Some("claude") | Some("claude-code") => {
+            skills.extend(scan_claude_skills_for_context(
+                home.as_deref(),
+                working_dir.as_deref(),
+            ));
+        }
+        _ => {
+            skills.extend(scan_claude_skills_for_context(
+                home.as_deref(),
+                working_dir.as_deref(),
+            ));
+            skills.extend(scan_codex_skills_for_context(
+                home.as_deref(),
+                working_dir.as_deref(),
+            ));
+        }
+    }
+
+    skills.sort_by(|left, right| {
+        let left_disabled = left.disabled;
+        let right_disabled = right.disabled;
+        left_disabled
+            .cmp(&right_disabled)
+            .then_with(|| left.provider.cmp(&right.provider))
+            .then_with(|| left.scope.cmp(&right.scope))
+            .then_with(|| {
+                left.display_name
+                    .as_deref()
+                    .unwrap_or(&left.name)
+                    .to_ascii_lowercase()
+                    .cmp(
+                        &right
+                            .display_name
+                            .as_deref()
+                            .unwrap_or(&right.name)
+                            .to_ascii_lowercase(),
+                    )
+            })
+            .then_with(|| left.path.cmp(&right.path))
+    });
+
+    Ok(skills)
+}
+
+#[tauri::command]
+pub fn read_skill_files(skill_files: Vec<String>) -> Result<Vec<SelectedSkillContent>, String> {
+    let mut seen = HashSet::new();
+    let mut selected = Vec::new();
+
+    for raw_path in skill_files {
+        if !seen.insert(raw_path.clone()) {
+            continue;
+        }
+        let path = PathBuf::from(&raw_path);
+        let directory = path
+            .parent()
+            .map(|parent| parent.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let mut diagnostics = Vec::new();
+
+        if path.file_name().and_then(|name| name.to_str()) != Some("SKILL.md") {
+            diagnostics.push("Selected path is not a SKILL.md file".to_string());
+            selected.push(SelectedSkillContent {
+                skill_file: raw_path,
+                directory,
+                name: None,
+                description: None,
+                content: String::new(),
+                resource_hints: Vec::new(),
+                diagnostics,
+            });
+            continue;
+        }
+
+        match std::fs::read_to_string(&path) {
+            Ok(content) => {
+                let metadata = parse_skill_metadata(&content);
+                diagnostics.extend(metadata.diagnostics.clone());
+                selected.push(SelectedSkillContent {
+                    skill_file: path.to_string_lossy().to_string(),
+                    directory,
+                    name: metadata.name,
+                    description: metadata.description,
+                    content,
+                    resource_hints: collect_skill_resource_hints(path.parent()),
+                    diagnostics,
+                });
+            }
+            Err(error) => {
+                diagnostics.push(format!("Failed to read selected skill: {}", error));
+                selected.push(SelectedSkillContent {
+                    skill_file: raw_path,
+                    directory,
+                    name: None,
+                    description: None,
+                    content: String::new(),
+                    resource_hints: Vec::new(),
+                    diagnostics,
+                });
+            }
+        }
+    }
+
+    Ok(selected)
+}
+
+fn collect_skill_resource_hints(directory: Option<&Path>) -> Vec<String> {
+    let Some(directory) = directory else {
+        return Vec::new();
+    };
+    let mut hints = Vec::new();
+    for resource_dir in ["scripts", "examples", "templates", "assets", "references"] {
+        let path = directory.join(resource_dir);
+        if path.exists() {
+            hints.push(path.to_string_lossy().to_string());
+        }
+    }
+    hints
+}
+
 #[tauri::command]
 pub fn list_installed_skills() -> Result<Vec<InstalledSkill>, String> {
     let mut all_skills = Vec::new();
@@ -807,6 +1966,185 @@ Some content here.
         let skills = scan_skills_dir(&dir, "global", &["Claude Code".to_string()], None);
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "Nested Skill");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn skill_for_test(name: &str, scope: &str, path: &str) -> InstalledSkill {
+        InstalledSkill {
+            name: name.to_string(),
+            description: String::new(),
+            path: path.to_string(),
+            scope: scope.to_string(),
+            agents: vec!["Claude Code".to_string()],
+            source: None,
+            version: None,
+            id: format!("test:{}", path),
+            provider: Some("claude".to_string()),
+            skill_file: Some(format!("{}/SKILL.md", path)),
+            display_name: Some(name.to_string()),
+            invocation_label: Some(name.to_string()),
+            plugin_name: None,
+            plugin_marketplace: None,
+            disabled: false,
+            visibility: Some("native".to_string()),
+            implicit_allowed: true,
+            ui_metadata: None,
+            diagnostics: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_yaml_frontmatter_multiline_description() {
+        let content = "---\nname: deep-research\ndescription: >\n  Search docs deeply,\n  then implement.\n---\n";
+        let (name, desc) = parse_skill_frontmatter(content);
+        assert_eq!(name, Some("deep-research".to_string()));
+        assert_eq!(
+            desc,
+            Some("Search docs deeply, then implement.".to_string())
+        );
+    }
+
+    #[test]
+    fn test_codex_duplicate_names_are_preserved() {
+        let dir = std::env::temp_dir().join("ccem-test-skills-duplicates");
+        let _ = fs::remove_dir_all(&dir);
+        for child in ["project-one", "project-two"] {
+            let skill_dir = dir.join(child);
+            fs::create_dir_all(&skill_dir).unwrap();
+            fs::write(
+                skill_dir.join("SKILL.md"),
+                "---\nname: duplicate\ndescription: same name\n---\n",
+            )
+            .unwrap();
+        }
+
+        let options = SkillScanOptions {
+            scope: "project".to_string(),
+            agents: vec!["Codex".to_string()],
+            source: Some(".agents/skills".to_string()),
+            version: None,
+            provider: Some("codex".to_string()),
+            plugin_name: None,
+            plugin_marketplace: None,
+            disabled: false,
+            visibility: Some("native".to_string()),
+            implicit_allowed: true,
+            diagnostics: Vec::new(),
+        };
+        let skills = scan_skills_dir_with_options(&dir, &options);
+        assert_eq!(skills.len(), 2);
+        assert!(skills.iter().all(|skill| skill.name == "duplicate"));
+        assert_ne!(skills[0].skill_file, skills[1].skill_file);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_claude_native_priority_prefers_personal_over_project() {
+        let skills = apply_claude_native_priority(vec![
+            skill_for_test("same", "project", "/tmp/project/same"),
+            skill_for_test("same", "global", "/tmp/global/same"),
+        ]);
+
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].scope, "global");
+        assert_eq!(skills[0].path, "/tmp/global/same");
+    }
+
+    #[test]
+    fn test_claude_plugin_skills_are_namespaced() {
+        let dir = std::env::temp_dir().join("ccem-test-skills-plugin-namespace");
+        let _ = fs::remove_dir_all(&dir);
+        let skill_dir = dir.join("lint");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(skill_dir.join("SKILL.md"), "---\nname: lint\n---\n").unwrap();
+
+        let options = SkillScanOptions {
+            scope: "plugin".to_string(),
+            agents: vec!["Claude Code".to_string()],
+            source: Some("market".to_string()),
+            version: Some("1.0.0".to_string()),
+            provider: Some("claude".to_string()),
+            plugin_name: Some("acme".to_string()),
+            plugin_marketplace: Some("market".to_string()),
+            disabled: false,
+            visibility: Some("native".to_string()),
+            implicit_allowed: true,
+            diagnostics: Vec::new(),
+        };
+        let skills = scan_skills_dir_with_options(&dir, &options);
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "acme:lint");
+        assert_eq!(skills[0].display_name, Some("lint".to_string()));
+        assert_eq!(skills[0].invocation_label, Some("acme:lint".to_string()));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_codex_config_disabled_skill_paths() {
+        let home = std::env::temp_dir().join("ccem-test-codex-config");
+        let _ = fs::remove_dir_all(&home);
+        fs::create_dir_all(home.join(".codex")).unwrap();
+        fs::write(
+            home.join(".codex").join("config.toml"),
+            "[[skills.config]]\npath = \"~/blocked\"\nenabled = false\n\n[plugins.\"demo@market\"]\nenabled = false\n",
+        )
+        .unwrap();
+
+        let config = read_codex_config(&home);
+        assert!(is_path_disabled(
+            &home.join("blocked").join("SKILL.md"),
+            &config.disabled_skill_paths
+        ));
+        assert!(config.disabled_plugins.contains("demo@market"));
+
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn test_workspace_agents_scan_stops_at_repo_root() {
+        let root = std::env::temp_dir().join("ccem-test-workspace-root");
+        let _ = fs::remove_dir_all(&root);
+        let repo = root.join("repo");
+        let nested = repo.join("packages").join("app");
+        fs::create_dir_all(repo.join(".agents").join("skills")).unwrap();
+        fs::create_dir_all(root.join(".agents").join("skills")).unwrap();
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(repo.join(".git"), "gitdir: somewhere").unwrap();
+
+        let dirs = collect_workspace_skill_dirs(Some(&nested), ".agents");
+        assert_eq!(dirs, vec![repo.join(".agents").join("skills")]);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_hidden_system_container_can_be_scanned_directly() {
+        let dir = std::env::temp_dir().join("ccem-test-codex-system-skills");
+        let _ = fs::remove_dir_all(&dir);
+        let system_skill = dir.join(".system").join("imagegen");
+        fs::create_dir_all(&system_skill).unwrap();
+        fs::write(system_skill.join("SKILL.md"), "---\nname: imagegen\n---\n").unwrap();
+
+        let options = SkillScanOptions {
+            scope: "system".to_string(),
+            agents: vec!["Codex".to_string()],
+            source: Some("~/.codex/skills/.system".to_string()),
+            version: None,
+            provider: Some("codex".to_string()),
+            plugin_name: None,
+            plugin_marketplace: None,
+            disabled: false,
+            visibility: Some("native".to_string()),
+            implicit_allowed: true,
+            diagnostics: Vec::new(),
+        };
+        let skills = scan_skills_dir_with_options(&dir.join(".system"), &options);
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "imagegen");
+        assert_eq!(skills[0].scope, "system");
 
         let _ = fs::remove_dir_all(&dir);
     }

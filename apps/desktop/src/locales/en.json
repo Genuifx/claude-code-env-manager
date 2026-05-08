@@ -206,6 +206,11 @@
     "composerImageUnsupported": "Unsupported image format",
     "composerImageReadFailed": "Failed to read pasted image",
     "composerPathLabel": "Path",
+    "composerSkillSource": "Source",
+    "composerSkillPath": "Path",
+    "composerSkillImplicit": "Implicit",
+    "composerSkillExplicitOnly": "explicit only",
+    "composerSkillProviderNative": "provider native",
     "composerAcceptKey": "Tab"
   },
   "sessions": {

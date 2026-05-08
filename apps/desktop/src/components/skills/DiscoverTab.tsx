@@ -9,7 +9,7 @@ import { useTauriEvent } from '@/hooks/useTauriEvents';
 import { useLocale } from '@/locales';
 import { useAppStore } from '@/store';
 import { toast } from 'sonner';
-import { Search, Sparkles, Loader2, Bot, Wrench, AlertTriangle, Settings, Shield, TrendingUp, Users } from 'lucide-react';
+import { Search, Box, Loader2, Bot, Wrench, AlertTriangle, Settings, Shield, TrendingUp, Users } from 'lucide-react';
 import { LaunchButton } from '@/components/ui/LaunchButton';
 import { shallow } from 'zustand/shallow';
 
@@ -313,7 +313,7 @@ export function DiscoverTab() {
                 )}
                 {msg.type === 'result' && (
                   <>
-                    <Sparkles className="w-3.5 h-3.5 mt-0.5 text-emerald-500 shrink-0" />
+                    <Box className="w-3.5 h-3.5 mt-0.5 text-emerald-500 shrink-0" />
                     <span className="text-emerald-500">{msg.content}</span>
                   </>
                 )}
@@ -386,7 +386,7 @@ export function DiscoverTab() {
       {/* Empty state — only when not searching, no results, and no curated */}
       {!hasSearchContent && groupedCurated.length === 0 && (
         <EmptyState
-          icon={Sparkles}
+          icon={Box}
           message={t('skills.noResults')}
           action={t('skills.tryDifferent')}
           onAction={() => document.querySelector<HTMLInputElement>('input[type="text"]')?.focus()}
