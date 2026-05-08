@@ -1,5 +1,11 @@
 # ccem
 
+## 2.2.0
+
+### Minor Changes
+
+- Add workspace skills support and Escape key to abort running sessions
+
 ## 2.1.2
 
 ### Patch Changes
