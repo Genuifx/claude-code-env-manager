@@ -86,6 +86,7 @@ export function Settings() {
   const [autoStart, setAutoStart] = useState(false);
   const [startMinimized, setStartMinimized] = useState(false);
   const [closeToTray, setCloseToTray] = useState(true);
+  const [desktopPetEnabled, setDesktopPetEnabled] = useState(false);
   const [desktopNotificationsEnabled, setDesktopNotificationsEnabled] = useState(true);
   const [notifyOnTaskCompleted, setNotifyOnTaskCompleted] = useState(true);
   const [notifyOnTaskFailed, setNotifyOnTaskFailed] = useState(true);
@@ -180,6 +181,7 @@ export function Settings() {
           autoStart: boolean;
           startMinimized: boolean;
           closeToTray: boolean;
+          desktopPetEnabled?: boolean;
           desktopNotificationsEnabled?: boolean;
           notifyOnTaskCompleted?: boolean;
           notifyOnTaskFailed?: boolean;
@@ -195,6 +197,7 @@ export function Settings() {
         setAutoStart(settings.autoStart);
         setStartMinimized(settings.startMinimized);
         setCloseToTray(settings.closeToTray);
+        setDesktopPetEnabled(settings.desktopPetEnabled ?? false);
         setDesktopNotificationsEnabled(settings.desktopNotificationsEnabled ?? true);
         setNotifyOnTaskCompleted(settings.notifyOnTaskCompleted ?? true);
         setNotifyOnTaskFailed(settings.notifyOnTaskFailed ?? true);
@@ -222,6 +225,7 @@ export function Settings() {
             setAutoStart(settings.autoStart ?? false);
             setStartMinimized(settings.startMinimized ?? false);
             setCloseToTray(settings.closeToTray ?? true);
+            setDesktopPetEnabled(Boolean(settings.desktopPetEnabled));
             setDesktopNotificationsEnabled(settings.desktopNotificationsEnabled ?? true);
             setNotifyOnTaskCompleted(settings.notifyOnTaskCompleted ?? true);
             setNotifyOnTaskFailed(settings.notifyOnTaskFailed ?? true);
@@ -315,6 +319,7 @@ export function Settings() {
       autoStart,
       startMinimized,
       closeToTray,
+      desktopPetEnabled,
       desktopNotificationsEnabled,
       notifyOnTaskCompleted,
       notifyOnTaskFailed,
@@ -337,6 +342,7 @@ export function Settings() {
     autoStart,
     startMinimized,
     closeToTray,
+    desktopPetEnabled,
     desktopNotificationsEnabled,
     notifyOnTaskCompleted,
     notifyOnTaskFailed,
@@ -467,6 +473,12 @@ export function Settings() {
               onChange={setCloseToTray}
               title={t('settings.closeToTray')}
               description={t('settings.closeToTrayDesc')}
+            />
+            <ToggleSetting
+              checked={desktopPetEnabled}
+              onChange={setDesktopPetEnabled}
+              title={t('settings.desktopPetEnabled')}
+              description={t('settings.desktopPetEnabledDesc')}
             />
           </div>
         </Card>
