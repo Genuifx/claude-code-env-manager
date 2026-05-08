@@ -186,6 +186,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     launchOpenCodeWeb,
     launchClaudeCode,
     searchWorkspaceFiles,
+    stopNativeSession,
   } = useTauriCommands();
 
   const [sessions, setSessions] = useState<HistorySessionItem[]>([]);
@@ -1233,6 +1234,30 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     ]
   );
   useKeyboardShortcuts(isActive ? shortcuts : {});
+
+  // Escape key: abort running session, prevent fullscreen exit
+  const activeLiveStatus = activeLiveEntry?.session.status;
+  const activeLiveStoppingId = activeLiveEntry?.session.runtime_id;
+
+  useEffect(() => {
+    if (!isActive) return;
+
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+
+      e.preventDefault();
+
+      if (
+        activeLiveStatus === 'initializing' ||
+        activeLiveStatus === 'processing'
+      ) {
+        void stopNativeSession(activeLiveStoppingId!);
+      }
+    };
+
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isActive, activeLiveStatus, activeLiveStoppingId, stopNativeSession]);
 
   const renderComposeView = () => (
     <div className="flex h-full min-h-0 flex-col items-center px-8">
