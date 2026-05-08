@@ -20,6 +20,7 @@ mod native_helper_resource;
 mod native_runtime;
 mod notifications;
 mod opencode;
+mod pet_notifications;
 mod pet_window;
 mod permission;
 mod proxy_debug;
@@ -3017,6 +3018,9 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             companion::get_companion,
+            pet_notifications::get_pet_notification_read_state,
+            pet_notifications::mark_pet_notification_read,
+            pet_notifications::open_pet_notification,
             app_updates::get_app_version,
             app_updates::check_app_update,
             app_updates::install_app_update,

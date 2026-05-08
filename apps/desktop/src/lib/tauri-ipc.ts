@@ -57,6 +57,9 @@ export interface TauriCommands {
   remove_favorite: [{ path: string }, void];
   add_recent: [{ path: string }, void];
   save_settings: [{ settings: DesktopSettings }, void];
+  get_pet_notification_read_state: [void, PetNotificationReadState];
+  mark_pet_notification_read: [{ notificationId: string }, PetNotificationReadState];
+  open_pet_notification: [{ request: PetOpenSessionRequest }, void];
   get_telegram_settings: [void, TelegramSettings];
   save_telegram_settings: [{ settings: TelegramSettings }, void];
   get_telegram_bridge_status: [void, TelegramBridgeStatus];
@@ -493,6 +496,19 @@ export interface DesktopSettings {
   proxyDebugCodexUpstreamBaseUrl?: string;
   proxyDebugLogMaxBytes?: number;
   proxyDebugRecordMode?: string;
+}
+
+export interface PetNotificationReadState {
+  readNotificationIds: string[];
+}
+
+export interface PetOpenSessionRequest {
+  notificationId: string;
+  runtimeId: string;
+  providerSessionId?: string | null;
+  provider?: string | null;
+  status: string;
+  markRead: boolean;
 }
 
 export interface TelegramSettings {
