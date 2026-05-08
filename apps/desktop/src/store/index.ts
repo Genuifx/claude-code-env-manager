@@ -65,13 +65,32 @@ export interface JetBrainsProject {
 }
 
 export interface InstalledSkill {
+  id?: string;
   name: string;
   description: string;
   path: string;
-  scope: 'project' | 'global' | 'plugin';
+  scope: 'enterprise' | 'project' | 'global' | 'plugin' | 'system' | string;
   agents: string[];
   source?: string;
   version?: string;
+  provider?: 'claude' | 'codex' | string;
+  skillFile?: string;
+  displayName?: string;
+  invocationLabel?: string;
+  pluginName?: string;
+  pluginMarketplace?: string;
+  disabled?: boolean;
+  visibility?: string;
+  implicitAllowed?: boolean;
+  uiMetadata?: {
+    displayName?: string;
+    shortDescription?: string;
+    brandColor?: string;
+    composerIcon?: string;
+    logo?: string;
+    defaultPrompt?: string;
+  } | null;
+  diagnostics?: string[];
 }
 
 export interface CronTask {

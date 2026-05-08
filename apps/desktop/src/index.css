@@ -871,6 +871,104 @@
   transform-origin: center bottom;
 }
 
+/* === Workspace Composer Prompt Area === */
+.ccem-prompt-area {
+  --prompt-area-surface: hsl(var(--surface-raised));
+}
+
+.ccem-prompt-area .prompt-area-editor {
+  min-height: 72px;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  line-height: 26px;
+  caret-color: hsl(var(--foreground));
+}
+
+.ccem-prompt-area .prompt-area-editor::selection {
+  background: hsl(var(--primary) / 0.25);
+}
+
+.ccem-prompt-area .prompt-area-placeholder {
+  color: hsl(var(--muted-foreground) / 0.75);
+  font-size: 14px;
+  line-height: 26px;
+}
+
+.ccem-prompt-area .prompt-area-chip {
+  --prompt-chip-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.05' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z'/%3E%3Cpath d='m3.3 7 8.7 5 8.7-5'/%3E%3Cpath d='M12 22V12'/%3E%3C/svg%3E");
+  --prompt-chip-icon-size: 14px;
+  display: inline-flex;
+  height: 26px;
+  align-items: center;
+  gap: 7px;
+  max-width: min(100%, 280px);
+  margin: 0 2px;
+  padding: 0 8px;
+  border: 1px solid hsl(var(--primary) / 0.22);
+  border-radius: 7px;
+  background: hsl(var(--primary) / 0.075);
+  color: hsl(var(--primary));
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  overflow: hidden;
+  position: relative;
+  vertical-align: baseline;
+  white-space: nowrap;
+  box-shadow:
+    inset 0 1px 0 hsl(var(--glass-border-light) / 0.18),
+    inset 0 0 0 1px hsl(var(--primary) / 0.11);
+}
+
+.ccem-prompt-area .prompt-area-chip-ripple {
+  pointer-events: none;
+  position: absolute;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.14;
+  transform: scale(0);
+  animation: prompt-area-chip-ripple 360ms ease-out forwards;
+}
+
+@keyframes prompt-area-chip-ripple {
+  to {
+    opacity: 0;
+    transform: scale(1.8);
+  }
+}
+
+.ccem-prompt-area .prompt-area-chip::before {
+  content: "";
+  width: var(--prompt-chip-icon-size);
+  height: var(--prompt-chip-icon-size);
+  flex: 0 0 auto;
+  background: currentColor;
+  opacity: 0.95;
+  transform: translateY(-0.5px);
+  -webkit-mask: var(--prompt-chip-icon) center / contain no-repeat;
+  mask: var(--prompt-chip-icon) center / contain no-repeat;
+}
+
+.ccem-prompt-area .prompt-area-chip[data-chip-kind='command'] {
+  --prompt-chip-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 3a3 3 0 0 0-3 3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0 0-6'/%3E%3C/svg%3E");
+  color: hsl(var(--foreground) / 0.86);
+  border-color: hsl(var(--border) / 0.85);
+  background: hsl(var(--muted) / 0.48);
+  box-shadow: inset 0 0 0 1px hsl(var(--glass-border-light) / 0.04);
+}
+
+.ccem-prompt-area .prompt-area-chip[data-chip-kind='file'] {
+  --prompt-chip-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z'/%3E%3C/svg%3E");
+}
+
+.ccem-prompt-area .prompt-area-chip[data-chip-kind='image'] {
+  --prompt-chip-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='18' height='18' x='3' y='3' rx='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21'/%3E%3C/svg%3E");
+  color: hsl(var(--info));
+  border-color: hsl(var(--info) / 0.24);
+  background: hsl(var(--info) / 0.08);
+  box-shadow: inset 0 0 0 1px hsl(var(--info) / 0.14);
+}
+
 /* === Status Indicators === */
 @keyframes status-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }

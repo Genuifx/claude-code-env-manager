@@ -3105,6 +3105,8 @@ fn main() {
             title_overrides::set_session_title,
             skills::search_skills_stream,
             skills::list_installed_skills,
+            skills::list_workspace_skills,
+            skills::read_skill_files,
             skills::get_curated_skills,
             skills::install_skill,
             skills::uninstall_skill,

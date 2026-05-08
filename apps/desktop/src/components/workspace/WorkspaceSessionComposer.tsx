@@ -1,18 +1,19 @@
 import {
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   type TextareaHTMLAttributes,
-  type MutableRefObject,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   ArrowUp,
+  Box,
   Check,
-  Clock3,
   Command,
   FileText,
   FolderTree,
@@ -21,19 +22,31 @@ import {
   LoaderCircle,
   Paperclip,
   Plus,
-  Sparkles,
   X,
 } from 'lucide-react';
 import { Claude, Codex, OpenCode } from '@lobehub/icons';
+import { PromptArea } from '@/components/prompt-area';
+import { plainTextToSegments, segmentsToPlainText } from '@/components/segment-helpers';
+import { TriggerPopover } from '@/components/trigger-popover';
+import type {
+  ChipClickContext,
+  ChipSegment,
+  PromptAreaHandle,
+  PromptAreaTriggerPanelState,
+  Segment,
+  TriggerConfig,
+  TriggerSuggestion,
+} from '@/components/types';
 import { Button, type ButtonProps } from '@/components/ui/button';
 import {
   Popover,
+  PopoverAnchor,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import type { WorkspaceFileSuggestion } from '@/lib/tauri-ipc';
+import type { SelectedSkillContent, WorkspaceFileSuggestion } from '@/lib/tauri-ipc';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import type { InstalledSkill, LaunchClient } from '@/store';
@@ -47,13 +60,11 @@ import {
   createComposerImagePlaceholder,
   createComposerTextAttachment,
   getNextComposerImagePlaceholderIndex,
-  getSupportedImageMediaType,
   isLargeComposerPaste,
   loadComposerRecentFiles,
   mergeComposerAttachments,
   revokeComposerImageUrls,
   saveComposerRecentFile,
-  splitComposerImagePlaceholders,
   validateComposerImageFile,
   type ComposerAttachment,
   type ComposerImageAttachment,
@@ -61,12 +72,15 @@ import {
   type ComposerSubmitPayload,
 } from './composerAttachments';
 import {
-  applySuggestionToComposerText,
+  buildComposerPromptWithSelectedSkills,
   buildComposerSuggestions,
-  findActiveComposerQuery,
+  parseComposerTokens,
+  selectedSkillFilesFromComposerText,
   type ComposerSuggestion,
+  type ComposerToken,
   type ComposerTokenKind,
 } from './composerModel';
+import { composerSegmentsReferenceImageAttachment } from './composerImageReferences';
 
 export interface ComposerQueuedMessage {
   id: string;
@@ -132,7 +146,7 @@ function attachmentIcon(attachment: ComposerAttachment) {
 function suggestionIcon(kind: ComposerSuggestion['kind']) {
   switch (kind) {
     case 'skill':
-      return <Sparkles className="h-3.5 w-3.5" />;
+      return <Box className="h-3.5 w-3.5" strokeWidth={2.05} />;
     case 'command':
       return <Command className="h-3.5 w-3.5" />;
     case 'file':
@@ -142,74 +156,138 @@ function suggestionIcon(kind: ComposerSuggestion['kind']) {
   }
 }
 
+function SkillGlyphBadge({
+  disabled = false,
+  className,
+}: {
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <span className={cn(
+      'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] border shadow-[inset_0_1px_0_hsl(var(--glass-border-light)/0.14)]',
+      disabled
+        ? 'border-destructive/15 bg-destructive/[0.055] text-destructive'
+        : 'border-primary/15 bg-primary/[0.065] text-primary',
+      className,
+    )}>
+      <Box className="h-4 w-4" strokeWidth={2.1} />
+    </span>
+  );
+}
+
 function formatImageSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function insertComposerTextAtRange(
-  text: string,
-  insertion: string,
-  start: number,
-  end: number,
-): { nextText: string; nextCaretPosition: number } {
-  const safeStart = Math.max(0, Math.min(start, text.length));
-  const safeEnd = Math.max(safeStart, Math.min(end, text.length));
-  const before = text.slice(0, safeStart);
-  const after = text.slice(safeEnd);
-  const leadingSpace = before && !/\s$/.test(before) ? ' ' : '';
-  const trailingSpace = !after || !/^\s/.test(after) ? ' ' : '';
-  const inserted = `${leadingSpace}${insertion}${trailingSpace}`;
+type ComposerPromptChipKind = ComposerTokenKind | 'image';
 
-  return {
-    nextText: `${before}${inserted}${after}`,
-    nextCaretPosition: before.length + inserted.length,
+interface ComposerPromptChipData {
+  kind: ComposerPromptChipKind;
+  suggestion?: ComposerSuggestion;
+  path?: string;
+  attachmentId?: string;
+  placeholder?: string;
+  name?: string;
+}
+
+interface InlineSkillPopoverState {
+  token: ComposerToken;
+  anchor: {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
   };
 }
 
-function removeComposerImagePlaceholder(text: string, placeholder: string): string {
-  const index = text.indexOf(placeholder);
-  if (index < 0) {
-    return text;
-  }
-
-  const before = text.slice(0, index);
-  const after = text.slice(index + placeholder.length);
-  if (/\s$/.test(before) && /^\s/.test(after)) {
-    return `${before}${after.replace(/^\s+/, ' ')}`;
-  }
-
-  return `${before}${after}`;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function ComposerTextareaHighlight({
-  value,
-  scrollRef,
-}: {
-  value: string;
-  scrollRef: MutableRefObject<HTMLDivElement | null>;
-}) {
-  const parts = useMemo(() => splitComposerImagePlaceholders(value), [value]);
+function readComposerPromptChipData(value: unknown): ComposerPromptChipData | null {
+  if (!isRecord(value) || typeof value.kind !== 'string') {
+    return null;
+  }
+  if (value.kind !== 'skill' && value.kind !== 'command' && value.kind !== 'file' && value.kind !== 'image') {
+    return null;
+  }
 
-  return (
-    <div
-      ref={scrollRef}
-      aria-hidden="true"
-      className="pointer-events-none absolute inset-0 z-0 min-h-[72px] overflow-hidden whitespace-pre-wrap break-words text-[14px] leading-6.5 text-foreground"
-    >
-      {parts.map((part, index) => part.kind === 'image' ? (
-        <span
-          key={`${part.text}-${index}`}
-          className="rounded-[5px] bg-primary/[0.12] font-medium text-primary ring-1 ring-inset ring-primary/[0.35] shadow-[inset_0_0_0_1px_hsl(30_8%_82%/0.04)]"
-        >
-          {part.text}
-        </span>
-      ) : (
-        <span key={`text-${index}`}>{part.text}</span>
-      ))}
-    </div>
-  );
+  return {
+    kind: value.kind,
+    suggestion: isRecord(value.suggestion) ? value.suggestion as unknown as ComposerSuggestion : undefined,
+    path: typeof value.path === 'string' ? value.path : undefined,
+    attachmentId: typeof value.attachmentId === 'string' ? value.attachmentId : undefined,
+    placeholder: typeof value.placeholder === 'string' ? value.placeholder : undefined,
+    name: typeof value.name === 'string' ? value.name : undefined,
+  };
+}
+
+function displayTextForComposerSuggestion(suggestion: ComposerSuggestion): string {
+  const trigger = suggestion.label[0];
+  if ((trigger === '/' || trigger === '$' || trigger === '@') && suggestion.label.length > 1) {
+    return suggestion.label.slice(1);
+  }
+  return suggestion.label;
+}
+
+function composerSuggestionToTriggerSuggestion(suggestion: ComposerSuggestion): TriggerSuggestion {
+  const displayText = displayTextForComposerSuggestion(suggestion);
+  return {
+    value: suggestion.path ?? suggestion.id,
+    label: suggestion.label,
+    description: suggestion.subtitle,
+    icon: suggestionIcon(suggestion.kind),
+    badges: suggestion.badges,
+    disabled: suggestion.disabled,
+    data: {
+      kind: suggestion.kind,
+      suggestion,
+      path: suggestion.path,
+      displayText,
+    },
+  };
+}
+
+function selectedTokenFromPromptChip(chip: ChipSegment): ComposerToken | null {
+  const data = readComposerPromptChipData(chip.data);
+  if (data?.kind !== 'skill' || !data.suggestion?.path) {
+    return null;
+  }
+
+  return {
+    id: `skill-chip-${data.suggestion.path}`,
+    kind: 'skill',
+    raw: `${chip.trigger}${chip.displayText}`,
+    display: `${chip.trigger}${chip.displayText}`,
+    subtitle: data.suggestion.subtitle,
+    path: data.suggestion.path,
+    skill: data.suggestion.skill,
+  };
+}
+
+function removeImageAttachmentFromSegments(
+  segments: Segment[],
+  attachment: ComposerImageAttachment,
+): Segment[] {
+  return segments
+    .map((segment): Segment | null => {
+      if (segment.type === 'chip') {
+        const data = readComposerPromptChipData(segment.data);
+        const isTargetImage = data?.kind === 'image'
+          && (data.attachmentId === attachment.id || data.placeholder === attachment.placeholder);
+        return isTargetImage ? null : segment;
+      }
+      return {
+        type: 'text',
+        text: segment.text
+          .replace(attachment.placeholder, '')
+          .replace(/[ \t]{2,}/g, ' '),
+      };
+    })
+    .filter((segment): segment is Segment => Boolean(segment));
 }
 
 function ComposerAttachmentChip({
@@ -269,6 +347,89 @@ function ComposerAttachmentChip({
         <X className="h-3 w-3" />
       </button>
     </span>
+  );
+}
+
+function ComposerSkillInfoPanel({
+  token,
+  onClose,
+}: {
+  token: ComposerToken;
+  onClose: () => void;
+}) {
+  const { t } = useLocale();
+  const skill = token.skill;
+  const badges = [
+    skill?.provider,
+    skill?.scope,
+    skill?.visibility && skill.visibility !== 'native' ? skill.visibility : undefined,
+  ].filter(Boolean) as string[];
+  const diagnostics = skill?.diagnostics ?? [];
+
+  return (
+    <div
+      data-composer-skill-info-panel
+      className="rounded-[16px] bg-surface px-3 py-3"
+    >
+      <div className="space-y-2.5">
+        <div className="flex items-start gap-2">
+          <SkillGlyphBadge disabled={skill?.disabled} className="mt-0.5 h-7 w-7 rounded-[8px]" />
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-2">
+              <p className="truncate text-sm font-semibold text-foreground">
+                {skill?.displayName ?? skill?.name ?? token.display}
+              </p>
+              {badges.slice(0, 3).map((badge) => (
+                <span
+                  key={badge}
+                  className="rounded-[5px] bg-muted/70 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground"
+                >
+                  {badge}
+                </span>
+              ))}
+            </div>
+            {skill?.description ? (
+              <p className="mt-1 line-clamp-3 text-[11px] leading-4 text-muted-foreground">
+                {skill.description}
+              </p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            className="rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+            onClick={onClose}
+            aria-label={t('common.close')}
+            title={t('common.close')}
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+
+        <div className="space-y-1 text-[10px] leading-4 text-muted-foreground">
+          {skill?.source || skill?.pluginName || skill?.pluginMarketplace ? (
+            <p>
+              <span className="text-foreground/75">{t('workspace.composerSkillSource')}:</span>{' '}
+              {[skill.source, skill.pluginName, skill.pluginMarketplace].filter(Boolean).join(' / ')}
+            </p>
+          ) : null}
+          <p className="break-all">
+            <span className="text-foreground/75">{t('workspace.composerSkillPath')}:</span>{' '}
+            {token.path ?? skill?.skillFile ?? skill?.path}
+          </p>
+          <p>
+            <span className="text-foreground/75">{t('workspace.composerSkillImplicit')}:</span>{' '}
+            {skill?.implicitAllowed === false
+              ? t('workspace.composerSkillExplicitOnly')
+              : t('workspace.composerSkillProviderNative')}
+          </p>
+          {diagnostics.length > 0 ? (
+            <p className="rounded-lg bg-muted/45 px-2 py-1.5 text-[10px] leading-4">
+              {diagnostics.join(' / ')}
+            </p>
+          ) : null}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -478,143 +639,54 @@ function ComposerQueueDock({
   );
 }
 
-function ComposerSuggestionPanel({
-  suggestions,
-  activeSuggestionIndex,
-  isSearchingFiles,
-  activeQueryKind,
-  onHoverSuggestion,
-  onSelectSuggestion,
-}: {
-  suggestions: ComposerSuggestion[];
-  activeSuggestionIndex: number;
-  isSearchingFiles: boolean;
-  activeQueryKind: ComposerTokenKind | null;
-  onHoverSuggestion: (index: number) => void;
-  onSelectSuggestion: (suggestion: ComposerSuggestion) => void;
-}) {
-  const { t } = useLocale();
-
-  if (suggestions.length === 0 && !(activeQueryKind === 'file' && isSearchingFiles)) {
-    return null;
-  }
-
-  return (
-    <div className="max-h-[236px] overflow-y-auto px-0.5 py-0.5">
-      {suggestions.map((suggestion, index) => (
-        <button
-          key={suggestion.id}
-          type="button"
-          className={cn(
-            'flex w-full items-start gap-1.5 rounded-[16px] px-1.5 py-1 text-left transition-colors',
-            index === activeSuggestionIndex
-              ? 'bg-surface'
-              : 'hover:bg-surface/65',
-          )}
-          onMouseEnter={() => onHoverSuggestion(index)}
-          onMouseDown={(event) => {
-            event.preventDefault();
-            onSelectSuggestion(suggestion);
-          }}
-        >
-          <div className="mt-0.5 rounded-md bg-muted/35 p-1 text-muted-foreground">
-            <div className="scale-[0.85]">
-              {suggestionIcon(suggestion.kind)}
-            </div>
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className={cn(
-              'truncate font-medium text-foreground',
-              suggestion.kind === 'file' ? 'text-[11px] leading-4' : 'text-[11px] leading-4',
-            )}>
-              {suggestion.label}
-            </p>
-            {suggestion.subtitle ? (
-              <p className={cn(
-                'mt-0.5 truncate text-muted-foreground',
-                suggestion.kind === 'file' ? 'text-[9px] leading-3.5 opacity-80' : 'text-[9px] leading-3.5 opacity-80',
-              )}>
-                {suggestion.subtitle}
-              </p>
-            ) : null}
-          </div>
-          {index === activeSuggestionIndex ? (
-            <span className="mt-0.5 rounded-full bg-muted/75 px-1.5 py-0.5 text-[8px] font-medium text-muted-foreground">
-              {t('workspace.composerAcceptKey')}
-            </span>
-          ) : null}
-        </button>
-      ))}
-      {suggestions.length === 0 && activeQueryKind === 'file' && isSearchingFiles ? (
-        <div className="px-1.5 py-1.5 text-[10px] text-muted-foreground">
-          {t('workspace.composerSearchingFiles')}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function ComposerAttentionPanel({
-  suggestions,
-  activeSuggestionIndex,
-  isSearchingFiles,
-  activeQueryKind,
-  suggestionSectionTitle,
-  onHoverSuggestion,
-  onSelectSuggestion,
   queuedMessages,
   queueCanFlush,
   onFlushQueuedMessages,
   onRemoveQueuedMessage,
 }: {
-  suggestions: ComposerSuggestion[];
-  activeSuggestionIndex: number;
-  isSearchingFiles: boolean;
-  activeQueryKind: ComposerTokenKind | null;
-  suggestionSectionTitle?: string | null;
-  onHoverSuggestion: (index: number) => void;
-  onSelectSuggestion: (suggestion: ComposerSuggestion) => void;
   queuedMessages: ComposerQueuedMessage[];
   queueCanFlush: boolean;
   onFlushQueuedMessages?: () => void | Promise<void>;
   onRemoveQueuedMessage?: (id: string) => void;
 }) {
-  const showSuggestions = suggestions.length > 0 || (activeQueryKind === 'file' && isSearchingFiles);
   const showQueue = queuedMessages.length > 0;
 
-  if (!showSuggestions && !showQueue) {
+  if (!showQueue) {
     return null;
   }
 
   return (
     <div className="space-y-1.5">
-      {showQueue ? (
-        <ComposerQueueDock
-          messages={queuedMessages}
-          canFlush={queueCanFlush}
-          onFlush={onFlushQueuedMessages}
-          onRemove={onRemoveQueuedMessage}
-        />
-      ) : null}
+      <ComposerQueueDock
+        messages={queuedMessages}
+        canFlush={queueCanFlush}
+        onFlush={onFlushQueuedMessages}
+        onRemove={onRemoveQueuedMessage}
+      />
+    </div>
+  );
+}
 
-      {showSuggestions ? (
-        <div className="space-y-1 px-0.5">
-          {suggestionSectionTitle ? (
-            <div className="flex items-center gap-1.5 px-1 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-muted-foreground/70">
-              <Clock3 className="h-3 w-3" />
-              <span>{suggestionSectionTitle}</span>
-            </div>
-          ) : null}
-          <ComposerSuggestionPanel
-            suggestions={suggestions}
-            activeSuggestionIndex={activeSuggestionIndex}
-            isSearchingFiles={isSearchingFiles}
-            activeQueryKind={activeQueryKind}
-            onHoverSuggestion={onHoverSuggestion}
-            onSelectSuggestion={onSelectSuggestion}
-          />
-        </div>
-      ) : null}
+function ComposerTriggerSuggestionPanel({
+  state,
+}: {
+  state: PromptAreaTriggerPanelState;
+}) {
+  return (
+    <div className="max-h-[min(42vh,320px)] overflow-y-auto pr-0.5">
+      <TriggerPopover
+        suggestions={state.suggestions}
+        loading={state.loading}
+        error={state.error}
+        emptyMessage={state.emptyMessage}
+        selectedIndex={state.selectedIndex}
+        onSelect={state.onSelect}
+        onDismiss={state.onDismiss}
+        triggerChar={state.triggerChar}
+        placement="static"
+        className="max-h-none"
+      />
     </div>
   );
 }
@@ -658,19 +730,17 @@ export function WorkspaceSessionComposer({
 }: WorkspaceSessionComposerProps) {
   const { t } = useLocale();
   const composerShellRef = useRef<HTMLDivElement | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const textareaHighlightRef = useRef<HTMLDivElement | null>(null);
-  const pendingCaretRef = useRef<number | null>(null);
-  const fileSearchSeqRef = useRef(0);
-  const [caretPosition, setCaretPosition] = useState(value.length);
-  const [matchedFiles, setMatchedFiles] = useState<WorkspaceFileSuggestion[]>([]);
-  const [isSearchingFiles, setIsSearchingFiles] = useState(false);
-  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
+  const promptAreaRef = useRef<PromptAreaHandle | null>(null);
+  const syncedPlainTextRef = useRef(value);
+  const [composerSegments, setComposerSegments] = useState<Segment[]>(() => plainTextToSegments(value));
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [recentFiles, setRecentFiles] = useState<ComposerRecentFile[]>([]);
   const [isDragTarget, setIsDragTarget] = useState(false);
   const [draggedFileCount, setDraggedFileCount] = useState(0);
-  const canSubmitWithAttachments = canSubmit || value.trim().length > 0 || attachments.length > 0;
+  const [inlineSkillPopover, setInlineSkillPopover] = useState<InlineSkillPopoverState | null>(null);
+  const [triggerPanelState, setTriggerPanelState] = useState<PromptAreaTriggerPanelState | null>(null);
+  const composerPlainText = useMemo(() => segmentsToPlainText(composerSegments), [composerSegments]);
+  const canSubmitWithAttachments = canSubmit || composerPlainText.trim().length > 0 || attachments.length > 0;
   const resolvedActionLabel = isSubmitting ? loadingLabel : (primaryActionLabel ?? submitLabel);
   const resolvedPrimaryDisabled = primaryActionDisabled ?? (!canSubmitWithAttachments || disabled);
   const resolvedPrimaryIcon = isSubmitting
@@ -678,20 +748,7 @@ export function WorkspaceSessionComposer({
     : (primaryActionIcon ?? <ArrowUp className="h-4 w-4" />);
   const capabilities = getComposerCapabilities(provider);
   const planButtonVisible = planModeAvailable ?? Boolean(onPlanModeEnabledChange);
-  const activeQuery = useMemo(
-    () => findActiveComposerQuery(value, caretPosition, provider),
-    [caretPosition, provider, value],
-  );
-  const suggestions = useMemo(
-    () => buildComposerSuggestions({
-      activeQuery,
-      provider,
-      installedSkills,
-      fileSuggestions: matchedFiles,
-    }),
-    [activeQuery, installedSkills, matchedFiles, provider],
-  );
-  const recentFileSuggestions = useMemo(
+  const recentFileSuggestions = useMemo<ComposerSuggestion[]>(
     () => recentFiles.map((entry) => ({
       id: `recent-file-${entry.path}`,
       kind: 'file' as const,
@@ -702,19 +759,46 @@ export function WorkspaceSessionComposer({
     })),
     [recentFiles],
   );
-  const showRecentFiles = activeQuery?.kind === 'file'
-    && activeQuery.query.length === 0
-    && attachments.length === 0
-    && recentFileSuggestions.length > 0;
-  const visibleSuggestions = showRecentFiles ? recentFileSuggestions : suggestions;
-  const hasImagePlaceholders = useMemo(
-    () => splitComposerImagePlaceholders(value).some((part) => part.kind === 'image'),
-    [value],
+  const selectedSkillTokens = useMemo(
+    () => {
+      const chipTokens = composerSegments
+        .filter((segment): segment is ChipSegment => segment.type === 'chip')
+        .map(selectedTokenFromPromptChip)
+        .filter((token): token is ComposerToken => Boolean(token));
+      const parsedTokens = parseComposerTokens(composerPlainText, provider, installedSkills)
+        .filter((token) => token.kind === 'skill' && token.path);
+      const seen = new Set<string>();
+      return [...chipTokens, ...parsedTokens].filter((token) => {
+        const key = token.path ?? token.raw;
+        if (seen.has(key)) {
+          return false;
+        }
+        seen.add(key);
+        return true;
+      });
+    },
+    [composerPlainText, composerSegments, installedSkills, provider],
   );
 
   useEffect(() => {
-    setActiveSuggestionIndex(0);
-  }, [activeQuery?.kind, activeQuery?.query, showRecentFiles, visibleSuggestions.length]);
+    if (!inlineSkillPopover) {
+      return;
+    }
+
+    const selectedKey = inlineSkillPopover.token.path ?? inlineSkillPopover.token.raw;
+    const stillSelected = selectedSkillTokens.some((token) => (token.path ?? token.raw) === selectedKey);
+    if (!stillSelected) {
+      setInlineSkillPopover(null);
+    }
+  }, [inlineSkillPopover, selectedSkillTokens]);
+
+  useEffect(() => {
+    if (value === syncedPlainTextRef.current) {
+      return;
+    }
+    syncedPlainTextRef.current = value;
+    setComposerSegments(plainTextToSegments(value));
+  }, [value]);
 
   useEffect(() => {
     setRecentFiles(loadComposerRecentFiles(workingDir));
@@ -734,52 +818,6 @@ export function WorkspaceSessionComposer({
     };
   }, []);
 
-  useEffect(() => {
-    if (pendingCaretRef.current == null || !textareaRef.current) {
-      return;
-    }
-
-    textareaRef.current.focus();
-    textareaRef.current.setSelectionRange(pendingCaretRef.current, pendingCaretRef.current);
-    setCaretPosition(pendingCaretRef.current);
-    pendingCaretRef.current = null;
-  }, [value]);
-
-  useEffect(() => {
-    if (activeQuery?.kind !== 'file' || !workingDir || !searchWorkspaceFiles) {
-      setMatchedFiles([]);
-      setIsSearchingFiles(false);
-      return;
-    }
-
-    const requestId = ++fileSearchSeqRef.current;
-    setIsSearchingFiles(true);
-    const timeout = window.setTimeout(() => {
-      void searchWorkspaceFiles(workingDir, activeQuery.query, 8)
-        .then((results) => {
-          if (requestId !== fileSearchSeqRef.current) {
-            return;
-          }
-          setMatchedFiles(results);
-        })
-        .catch((error) => {
-          console.error('Failed to search workspace files for composer:', error);
-          if (requestId === fileSearchSeqRef.current) {
-            setMatchedFiles([]);
-          }
-        })
-        .finally(() => {
-          if (requestId === fileSearchSeqRef.current) {
-            setIsSearchingFiles(false);
-          }
-        });
-    }, 90);
-
-    return () => {
-      window.clearTimeout(timeout);
-    };
-  }, [activeQuery?.kind, activeQuery?.query, searchWorkspaceFiles, workingDir]);
-
   const addAttachments = useCallback((nextAttachments: ComposerAttachment[]) => {
     if (nextAttachments.length === 0) {
       return;
@@ -795,20 +833,46 @@ export function WorkspaceSessionComposer({
     setRecentFiles(loadComposerRecentFiles(workingDir));
   }, [workingDir]);
 
-  const handleImagePaste = useCallback(async (
-    items: DataTransferItem[],
-    insertion?: { text: string; start: number; end: number },
-  ) => {
+  const syncComposerSegments = useCallback((segments: Segment[]) => {
+    setComposerSegments(segments);
+    const plainText = segmentsToPlainText(segments);
+    syncedPlainTextRef.current = plainText;
+    onValueChange(plainText);
+  }, [onValueChange]);
+
+  const pruneUnreferencedImageAttachments = useCallback((segments: Segment[]) => {
+    setAttachments((previous) => {
+      let changed = false;
+      const next = previous.filter((attachment) => {
+        if (attachment.kind !== 'image') {
+          return true;
+        }
+        if (composerSegmentsReferenceImageAttachment(segments, attachment)) {
+          return true;
+        }
+        changed = true;
+        if (attachment.objectUrl) {
+          URL.revokeObjectURL(attachment.objectUrl);
+        }
+        return false;
+      });
+      return changed ? next : previous;
+    });
+  }, []);
+
+  const handlePromptSegmentsChange = useCallback((segments: Segment[]) => {
+    syncComposerSegments(segments);
+    pruneUnreferencedImageAttachments(segments);
+  }, [pruneUnreferencedImageAttachments, syncComposerSegments]);
+
+  const handleImagePaste = useCallback(async (files: File[]) => {
     if (!capabilities.supportsImages) {
       return;
     }
 
     const imageAttachments: ComposerImageAttachment[] = [];
     const firstImageIndex = getNextComposerImagePlaceholderIndex(attachmentsRef.current);
-    for (const item of items) {
-      const file = item.getAsFile();
-      if (!file) continue;
-
+    for (const file of files) {
       const validation = validateComposerImageFile(file);
       if (!validation.valid) {
         const errorMessage = t(validation.errorKey);
@@ -832,19 +896,156 @@ export function WorkspaceSessionComposer({
     }
 
     if (imageAttachments.length > 0) {
-      if (insertion) {
-        const { nextText, nextCaretPosition } = insertComposerTextAtRange(
-          insertion.text,
-          imageAttachments.map((attachment) => attachment.placeholder).join(' '),
-          insertion.start,
-          insertion.end,
-        );
-        pendingCaretRef.current = nextCaretPosition;
-        onValueChange(nextText);
-      }
       addAttachments(imageAttachments);
+      for (const attachment of imageAttachments) {
+        promptAreaRef.current?.insertChip({
+          trigger: '',
+          value: attachment.placeholder,
+          displayText: attachment.placeholder,
+          data: {
+            kind: 'image',
+            attachmentId: attachment.id,
+            placeholder: attachment.placeholder,
+            name: attachment.name,
+          } satisfies ComposerPromptChipData,
+        });
+      }
     }
-  }, [addAttachments, capabilities.supportsImages, onValueChange, t]);
+  }, [addAttachments, capabilities.supportsImages, t]);
+
+  const handleBeforeTextPaste = useCallback((text: string) => {
+    if (!isLargeComposerPaste(text)) {
+      return false;
+    }
+    addAttachments([createComposerTextAttachment(
+      text,
+      t('workspace.composerPastedTextName'),
+      'paste',
+    )]);
+    return true;
+  }, [addAttachments, t]);
+
+  const promptAreaTriggers = useMemo<TriggerConfig[]>(() => {
+    const suggestionQuery = (kind: ComposerTokenKind, trigger: '$' | '/' | '@', query: string, files: WorkspaceFileSuggestion[] = []) => (
+      buildComposerSuggestions({
+        activeQuery: {
+          kind,
+          trigger,
+          query,
+          range: { start: 0, end: query.length + 1 },
+        },
+        provider,
+        installedSkills,
+        fileSuggestions: files,
+      }).map(composerSuggestionToTriggerSuggestion)
+    );
+
+    return [
+      {
+        char: '/',
+        position: 'any',
+        mode: 'dropdown',
+        chipStyle: 'pill',
+        chipClassName: 'ccem-prompt-chip',
+        accessibilityLabel: 'command or skill',
+        onSearch: (query) => suggestionQuery('command', '/', query),
+        onSelect: (suggestion) => {
+          const data = readComposerPromptChipData(suggestion.data);
+          return data?.suggestion ? displayTextForComposerSuggestion(data.suggestion) : suggestion.label.replace(/^\//, '');
+        },
+      },
+      {
+        char: '$',
+        position: 'any',
+        mode: 'dropdown',
+        chipStyle: 'pill',
+        chipClassName: 'ccem-prompt-chip',
+        accessibilityLabel: 'skill',
+        onSearch: (query) => suggestionQuery('skill', '$', query),
+        onSelect: (suggestion) => {
+          const data = readComposerPromptChipData(suggestion.data);
+          return data?.suggestion ? displayTextForComposerSuggestion(data.suggestion) : suggestion.label.replace(/^\$/, '');
+        },
+      },
+      {
+        char: '@',
+        position: 'any',
+        mode: 'dropdown',
+        chipStyle: 'pill',
+        chipClassName: 'ccem-prompt-chip',
+        accessibilityLabel: 'workspace file',
+        onSearch: async (query, { signal }) => {
+          if (!workingDir || !searchWorkspaceFiles) {
+            return [];
+          }
+          if (!query && attachments.length === 0 && recentFileSuggestions.length > 0) {
+            return recentFileSuggestions.map(composerSuggestionToTriggerSuggestion);
+          }
+          const files = await searchWorkspaceFiles(workingDir, query, 8);
+          if (signal.aborted) {
+            return [];
+          }
+          return suggestionQuery('file', '@', query, files);
+        },
+        onSelect: (suggestion) => {
+          const data = readComposerPromptChipData(suggestion.data);
+          return data?.suggestion ? displayTextForComposerSuggestion(data.suggestion) : suggestion.label.replace(/^@/, '');
+        },
+      },
+    ];
+  }, [attachments.length, installedSkills, provider, recentFileSuggestions, searchWorkspaceFiles, workingDir]);
+
+  const handlePromptChipAdd = useCallback((chip: ChipSegment) => {
+    const data = readComposerPromptChipData(chip.data);
+    if (data?.kind === 'file' && data.path) {
+      saveComposerRecentFile(workingDir, createComposerFileAttachment(data.path, workingDir, 'search'));
+      setRecentFiles(loadComposerRecentFiles(workingDir));
+    }
+  }, [workingDir]);
+
+  const handlePromptChipClick = useCallback((chip: ChipSegment, context: ChipClickContext) => {
+    const token = selectedTokenFromPromptChip(chip);
+    if (!token) {
+      setInlineSkillPopover(null);
+      return;
+    }
+
+    const shell = composerShellRef.current;
+    const shellRect = shell?.getBoundingClientRect();
+    const rect = context.element.getBoundingClientRect();
+    if (!shellRect) {
+      return;
+    }
+
+    setInlineSkillPopover({
+      token,
+      anchor: {
+        left: rect.left - shellRect.left,
+        top: rect.top - shellRect.top,
+        width: rect.width,
+        height: rect.height,
+      },
+    });
+  }, []);
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((previous) => {
+      const removed = previous.find((attachment) => attachment.id === id);
+      if (removed?.kind === 'image' && removed.objectUrl) {
+        URL.revokeObjectURL(removed.objectUrl);
+      }
+      if (removed?.kind === 'image') {
+        setComposerSegments((segments) => {
+          const nextSegments = removeImageAttachmentFromSegments(segments, removed);
+          const plainText = segmentsToPlainText(nextSegments);
+          syncedPlainTextRef.current = plainText;
+          onValueChange(plainText);
+          return nextSegments;
+        });
+      }
+      return previous.filter((attachment) => attachment.id !== id);
+    });
+  }, [onValueChange]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -911,43 +1112,28 @@ export function WorkspaceSessionComposer({
     };
   }, [addAttachments, workingDir]);
 
-  const syncCaretFromDom = () => {
-    if (!textareaRef.current) {
-      return;
-    }
-    setCaretPosition(textareaRef.current.selectionStart ?? value.length);
-  };
-
-  const syncTextareaHighlightScroll = useCallback(() => {
-    if (!textareaRef.current || !textareaHighlightRef.current) {
-      return;
-    }
-
-    textareaHighlightRef.current.scrollTop = textareaRef.current.scrollTop;
-    textareaHighlightRef.current.scrollLeft = textareaRef.current.scrollLeft;
-  }, []);
-
-  const applySuggestion = useCallback((suggestion: ComposerSuggestion) => {
-    if (!activeQuery) {
-      if (showRecentFiles && suggestion.path) {
-        addAttachments([createComposerFileAttachment(suggestion.path, workingDir, 'recent')]);
-      }
-      return;
-    }
-
-    const { nextValue, nextCaretPosition } = applySuggestionToComposerText(value, activeQuery, suggestion);
-    pendingCaretRef.current = nextCaretPosition;
-    onValueChange(nextValue);
-
-    if (suggestion.kind === 'file' && suggestion.path) {
-      saveComposerRecentFile(workingDir, createComposerFileAttachment(suggestion.path, workingDir, 'search'));
-      setRecentFiles(loadComposerRecentFiles(workingDir));
-    }
-  }, [activeQuery, addAttachments, onValueChange, showRecentFiles, value, workingDir]);
-
   const handleComposerSubmit = useCallback(async () => {
+    const promptValue = segmentsToPlainText(composerSegments);
+    let text = promptValue.trim();
+    const selectedSkillFiles = Array.from(new Set([
+      ...selectedSkillTokens
+        .filter((token) => token.path)
+        .map((token) => token.path as string),
+      ...selectedSkillFilesFromComposerText(promptValue, provider, installedSkills),
+    ]));
+    if (selectedSkillFiles.length > 0) {
+      try {
+        const selectedSkills = await invoke<SelectedSkillContent[]>('read_skill_files', {
+          skillFiles: selectedSkillFiles,
+        });
+        text = buildComposerPromptWithSelectedSkills(promptValue, selectedSkills);
+      } catch (error) {
+        console.error('Failed to read selected skill files for composer prompt:', error);
+      }
+    }
+
     const payload: ComposerSubmitPayload = {
-      text: value.trim(),
+      text,
       attachments,
     };
 
@@ -961,13 +1147,17 @@ export function WorkspaceSessionComposer({
       setAttachments([]);
       setIsDragTarget(false);
       setDraggedFileCount(0);
+      setInlineSkillPopover(null);
+      setTriggerPanelState(null);
     }
     return result;
-  }, [attachments, onSubmit, value]);
+  }, [attachments, composerSegments, installedSkills, onSubmit, provider, selectedSkillTokens]);
 
-  const hasComposerAttentionPanel = queuedMessages.length > 0
-    || visibleSuggestions.length > 0
-    || (activeQuery?.kind === 'file' && isSearchingFiles);
+  const hasComposerAttentionPanel = queuedMessages.length > 0;
+
+  const triggerAttentionPanel = useMemo(() => (
+    triggerPanelState ? <ComposerTriggerSuggestionPanel state={triggerPanelState} /> : null
+  ), [triggerPanelState]);
 
   const composerAttentionPanel = useMemo(() => {
     if (!hasComposerAttentionPanel) {
@@ -976,13 +1166,6 @@ export function WorkspaceSessionComposer({
 
     return (
       <ComposerAttentionPanel
-        suggestions={visibleSuggestions}
-        activeSuggestionIndex={activeSuggestionIndex}
-        isSearchingFiles={isSearchingFiles}
-        activeQueryKind={activeQuery?.kind ?? null}
-        suggestionSectionTitle={showRecentFiles ? t('workspace.composerRecentFiles') : null}
-        onHoverSuggestion={setActiveSuggestionIndex}
-        onSelectSuggestion={applySuggestion}
         queuedMessages={queuedMessages}
         queueCanFlush={queueCanFlush}
         onFlushQueuedMessages={onFlushQueuedMessages}
@@ -990,22 +1173,15 @@ export function WorkspaceSessionComposer({
       />
     );
   }, [
-    activeQuery?.kind,
-    activeSuggestionIndex,
-    applySuggestion,
     hasComposerAttentionPanel,
-    isSearchingFiles,
     onFlushQueuedMessages,
     onRemoveQueuedMessage,
     queueCanFlush,
     queuedMessages,
-    showRecentFiles,
-    t,
-    visibleSuggestions,
   ]);
 
   const combinedAboveComposer = useMemo(() => {
-    if (!aboveComposer && !composerAttentionPanel) {
+    if (!aboveComposer && !triggerAttentionPanel && !composerAttentionPanel) {
       return null;
     }
 
@@ -1029,7 +1205,11 @@ export function WorkspaceSessionComposer({
               {aboveComposer}
             </div>
           ) : null}
-          {aboveComposer && composerAttentionPanel ? (
+          {aboveComposer && (triggerAttentionPanel || composerAttentionPanel) ? (
+            <div className="h-px bg-border/35" aria-hidden="true" />
+          ) : null}
+          {triggerAttentionPanel}
+          {triggerAttentionPanel && composerAttentionPanel ? (
             <div className="h-px bg-border/35" aria-hidden="true" />
           ) : null}
           {composerAttentionPanel ? (
@@ -1047,6 +1227,7 @@ export function WorkspaceSessionComposer({
   }, [
     aboveComposer,
     composerAttentionPanel,
+    triggerAttentionPanel,
   ]);
 
   return (
@@ -1058,6 +1239,39 @@ export function WorkspaceSessionComposer({
               {combinedAboveComposer}
             </div>
           </div>
+        ) : null}
+
+        {inlineSkillPopover ? (
+          <Popover open onOpenChange={(open) => {
+            if (!open) {
+              setInlineSkillPopover(null);
+            }
+          }}>
+            <PopoverAnchor asChild>
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute"
+                style={{
+                  left: inlineSkillPopover.anchor.left,
+                  top: inlineSkillPopover.anchor.top,
+                  width: inlineSkillPopover.anchor.width,
+                  height: inlineSkillPopover.anchor.height,
+                }}
+              />
+            </PopoverAnchor>
+            <PopoverContent
+              align="start"
+              side="bottom"
+              sideOffset={8}
+              collisionPadding={12}
+              className="z-[70] w-[360px] max-w-[calc(100vw-24px)] rounded-xl border-border/45 bg-popover p-0 shadow-md"
+            >
+              <ComposerSkillInfoPanel
+                token={inlineSkillPopover.token}
+                onClose={() => setInlineSkillPopover(null)}
+              />
+            </PopoverContent>
+          </Popover>
         ) : null}
 
         <div className={cn(
@@ -1100,18 +1314,7 @@ export function WorkspaceSessionComposer({
                     <ComposerAttachmentChip
                       key={attachment.id}
                       attachment={attachment}
-                      onRemove={(id) => {
-                        setAttachments((previous) => {
-                          const removed = previous.find((c) => c.id === id);
-                          if (removed?.kind === 'image' && removed.objectUrl) {
-                            URL.revokeObjectURL(removed.objectUrl);
-                          }
-                          if (removed?.kind === 'image') {
-                            onValueChange(removeComposerImagePlaceholder(value, removed.placeholder));
-                          }
-                          return previous.filter((c) => c.id !== id);
-                        });
-                      }}
+                      onRemove={removeAttachment}
                     />
                   ))}
                 </div>
@@ -1120,82 +1323,25 @@ export function WorkspaceSessionComposer({
           ) : null}
 
           <div className="relative min-h-[72px]">
-            {hasImagePlaceholders ? (
-              <ComposerTextareaHighlight
-                value={value}
-                scrollRef={textareaHighlightRef}
-              />
-            ) : null}
-            <textarea
-              ref={textareaRef}
-              {...textareaProps}
-              value={value}
-              onChange={(event) => {
-                onValueChange(event.target.value);
-                setCaretPosition(event.target.selectionStart ?? event.target.value.length);
-                syncTextareaHighlightScroll();
-              }}
-              onFocus={(event) => {
-                textareaProps?.onFocus?.(event);
-              }}
-              onBlur={(event) => {
-                textareaProps?.onBlur?.(event);
-              }}
-              onScroll={(event) => {
-                syncTextareaHighlightScroll();
-                textareaProps?.onScroll?.(event);
-              }}
-              onPaste={(event) => {
-                textareaProps?.onPaste?.(event);
-                if (event.defaultPrevented) {
-                  return;
-                }
-
-                const items = event.clipboardData?.items;
-                if (items) {
-                  const imageItems: DataTransferItem[] = [];
-                  for (let i = 0; i < items.length; i++) {
-                    if (items[i].kind === 'file' && getSupportedImageMediaType(items[i].type)) {
-                      imageItems.push(items[i]);
-                    }
-                  }
-                  if (imageItems.length > 0) {
-                    event.preventDefault();
-                    void handleImagePaste(imageItems, {
-                      text: value,
-                      start: textareaRef.current?.selectionStart ?? value.length,
-                      end: textareaRef.current?.selectionEnd ?? value.length,
-                    });
-                    return;
-                  }
-                }
-
-                const pastedText = event.clipboardData?.getData('text/plain') ?? '';
-                if (!isLargeComposerPaste(pastedText)) {
-                  return;
-                }
-
-                event.preventDefault();
-                addAttachments([createComposerTextAttachment(
-                  pastedText,
-                  t('workspace.composerPastedTextName'),
-                  'paste',
-                )]);
-              }}
-              onSelect={(event) => {
-                syncCaretFromDom();
-                textareaProps?.onSelect?.(event);
-              }}
-              onClick={(event) => {
-                syncCaretFromDom();
-                textareaProps?.onClick?.(event);
-              }}
-              onKeyUp={(event) => {
-                syncCaretFromDom();
-                textareaProps?.onKeyUp?.(event);
-              }}
+            <PromptArea
+              ref={promptAreaRef}
+              value={composerSegments}
+              onChange={handlePromptSegmentsChange}
+              triggers={promptAreaTriggers}
+              placeholder={placeholder}
+              disabled={disabled}
+              minHeight={72}
+              maxHeight={260}
+              markdown={false}
+              onSubmit={() => void handleComposerSubmit()}
+              onChipClick={handlePromptChipClick}
+              onChipAdd={handlePromptChipAdd}
+              onImagePaste={(file) => void handleImagePaste([file])}
+              onBeforeTextPaste={handleBeforeTextPaste}
+              onTriggerPanelChange={setTriggerPanelState}
+              triggerPanelPlacement="external"
               onKeyDown={(event) => {
-                textareaProps?.onKeyDown?.(event);
+                textareaProps?.onKeyDown?.(event as unknown as ReactKeyboardEvent<HTMLTextAreaElement>);
                 if (event.defaultPrevented) {
                   return;
                 }
@@ -1203,45 +1349,10 @@ export function WorkspaceSessionComposer({
                 if (event.key === 'Tab' && event.shiftKey && planButtonVisible && onPlanModeEnabledChange) {
                   event.preventDefault();
                   onPlanModeEnabledChange(!planModeEnabled);
-                  return;
-                }
-
-                if (visibleSuggestions.length > 0) {
-                  if (event.key === 'ArrowDown') {
-                    event.preventDefault();
-                    setActiveSuggestionIndex((current) => (current + 1) % visibleSuggestions.length);
-                    return;
-                  }
-
-                  if (event.key === 'ArrowUp') {
-                    event.preventDefault();
-                    setActiveSuggestionIndex((current) => (current - 1 + visibleSuggestions.length) % visibleSuggestions.length);
-                    return;
-                  }
-
-                  if (event.key === 'Tab' && !event.shiftKey) {
-                    event.preventDefault();
-                    const suggestion = visibleSuggestions[activeSuggestionIndex] ?? visibleSuggestions[0];
-                    if (suggestion) {
-                      applySuggestion(suggestion);
-                    }
-                    return;
-                  }
-                }
-
-                if (event.key === 'Enter' && !event.altKey && !event.shiftKey) {
-                  event.preventDefault();
-                  void handleComposerSubmit();
                 }
               }}
-              placeholder={placeholder}
-              disabled={disabled}
-              className={cn(
-                'relative z-10 min-h-[72px] w-full resize-none bg-transparent text-[14px] leading-6.5 outline-none placeholder:text-muted-foreground/75 disabled:cursor-not-allowed disabled:text-muted-foreground',
-                hasImagePlaceholders
-                  ? 'text-transparent caret-foreground selection:bg-primary/25 placeholder:text-transparent'
-                  : 'text-foreground',
-              )}
+              className="ccem-prompt-area"
+              aria-label={placeholder}
             />
           </div>
 

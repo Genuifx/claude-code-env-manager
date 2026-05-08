@@ -16268,6 +16268,18 @@ function buildClaudePlanModeHooks(isPlanMode, onBlockedTool) {
   };
 }
 
+// src/claudeSkills.ts
+var CLAUDE_SKILL_SETTING_SOURCES = ["user", "project"];
+function ensureClaudeSkillToolAllowed(allowedTools) {
+  if (!allowedTools || allowedTools.length === 0) {
+    return void 0;
+  }
+  if (allowedTools.some((tool) => tool === "Skill")) {
+    return allowedTools;
+  }
+  return [...allowedTools, "Skill"];
+}
+
 // src/promptContent.ts
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -16968,6 +16980,9 @@ async function consumeClaudeMessages() {
       includePartialMessages: true,
       includeHookEvents: true,
       persistSession: true,
+      settingSources: [...CLAUDE_SKILL_SETTING_SOURCES],
+      allowedTools: ensureClaudeSkillToolAllowed(initCommand.allowed_tools),
+      disallowedTools: initCommand.disallowed_tools ?? void 0,
       hooks: buildClaudePlanModeHooks(
         () => initCommand?.provider === "claude" && initCommand.perm_mode === "plan",
         emitClaudePlanExitPromptForBlockedTool

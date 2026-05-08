@@ -11,6 +11,10 @@ import {
   buildClaudePlanModeHooks,
   type ClaudePlanModeBlockedTool,
 } from './claudePlanGuard';
+import {
+  CLAUDE_SKILL_SETTING_SOURCES,
+  ensureClaudeSkillToolAllowed,
+} from './claudeSkills';
 import { buildPromptContentParts, type PromptImage } from './promptContent';
 import { normalizeClaudePermissionMode, normalizeCodexSandboxMode } from './permissionModes';
 
@@ -32,6 +36,8 @@ type InitCommand = {
   codex_base_url?: string | null;
   codex_api_key?: string | null;
   effort?: string | null;
+  allowed_tools?: string[] | null;
+  disallowed_tools?: string[] | null;
 };
 
 type PromptCommand = {
@@ -1010,6 +1016,9 @@ async function consumeClaudeMessages() {
       includePartialMessages: true,
       includeHookEvents: true,
       persistSession: true,
+      settingSources: [...CLAUDE_SKILL_SETTING_SOURCES],
+      allowedTools: ensureClaudeSkillToolAllowed(initCommand.allowed_tools),
+      disallowedTools: initCommand.disallowed_tools ?? undefined,
       hooks: buildClaudePlanModeHooks(
         () => initCommand?.provider === 'claude' && initCommand.perm_mode === 'plan',
         emitClaudePlanExitPromptForBlockedTool,

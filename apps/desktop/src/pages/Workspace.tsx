@@ -176,6 +176,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     openDirectoryPicker,
     loadCronTasks,
     loadInstalledSkills,
+    loadWorkspaceSkills,
     checkCodexInstalled,
     checkOpenCodeInstalled,
     setSessionTitle,
@@ -338,11 +339,11 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
   }, [listNativeSessions, replaceLiveSessionsByRuntimeId, setSelectedWorkingDir]);
 
   useEffect(() => {
-    if (installedSkills.length === 0) {
+    if (installedSkills.length === 0 || workspaceInstalledSkills.length > 0) {
       return;
     }
     setWorkspaceInstalledSkills(installedSkills);
-  }, [installedSkills]);
+  }, [installedSkills, workspaceInstalledSkills.length]);
 
   useEffect(() => {
     const cancelDeferred = scheduleAfterFirstPaint(() => {
@@ -825,6 +826,57 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
 
   const effectiveComposeDir = composeDir || selectedWorkingDir || defaultWorkingDir || null;
   const effectiveComposeDirLabel = effectiveComposeDir ? getProjectName(effectiveComposeDir) : null;
+  const skillsContext = useMemo(() => {
+    if (workspaceMode === 'history' && selectedSession) {
+      return {
+        workingDir: selectedSession.project || null,
+        provider: selectedSession.source === 'codex' ? 'codex' : 'claude',
+      };
+    }
+    if (workspaceMode === 'live' && activeLiveEntry) {
+      return {
+        workingDir: activeLiveEntry.session.project_dir || null,
+        provider: activeLiveEntry.session.provider,
+      };
+    }
+    return {
+      workingDir: effectiveComposeDir,
+      provider: composeProvider,
+    };
+  }, [
+    activeLiveEntry,
+    composeProvider,
+    effectiveComposeDir,
+    selectedSession,
+    workspaceMode,
+  ]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadWorkspaceSkills({
+      workingDir: skillsContext.workingDir,
+      provider: skillsContext.provider,
+    })
+      .then((skills) => {
+        if (cancelled) {
+          return;
+        }
+        if (skills.length > 0) {
+          setWorkspaceInstalledSkills(skills);
+          return;
+        }
+        setWorkspaceInstalledSkills(installedSkills);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setWorkspaceInstalledSkills(installedSkills);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [installedSkills, loadWorkspaceSkills, skillsContext]);
 
   const handleSelect = useCallback(
     async (session: HistorySessionItem) => {

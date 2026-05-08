@@ -360,6 +360,11 @@ export interface TauriCommands {
   // Skills
   search_skills_stream: [{ query: string }, void];
   list_installed_skills: [void, InstalledSkill[]];
+  list_workspace_skills: [
+    { workingDir?: string | null; provider?: string | null },
+    InstalledSkill[]
+  ];
+  read_skill_files: [{ skillFiles: string[] }, SelectedSkillContent[]];
   install_skill: [{ packageId: string; global: boolean }, void];  // 修正：后端参数是 package_id + global
   uninstall_skill: [{ name: string }, void];
 
@@ -872,9 +877,42 @@ export interface ConversationSegment {
 }
 
 export interface InstalledSkill {
+  id?: string;
   name: string;
-  description?: string;
+  description: string;
+  path: string;
+  scope: string;
+  agents: string[];
+  source?: string;
   version?: string;
+  provider?: string;
+  skillFile?: string;
+  displayName?: string;
+  invocationLabel?: string;
+  pluginName?: string;
+  pluginMarketplace?: string;
+  disabled?: boolean;
+  visibility?: string;
+  implicitAllowed?: boolean;
+  uiMetadata?: {
+    displayName?: string;
+    shortDescription?: string;
+    brandColor?: string;
+    composerIcon?: string;
+    logo?: string;
+    defaultPrompt?: string;
+  } | null;
+  diagnostics?: string[];
+}
+
+export interface SelectedSkillContent {
+  skillFile: string;
+  directory: string;
+  name?: string | null;
+  description?: string | null;
+  content: string;
+  resourceHints: string[];
+  diagnostics: string[];
 }
 
 export interface CronTask {
