@@ -987,7 +987,7 @@ export function usePromptArea({
 
       // 2.8 Shift+Enter: insert newline at model level (avoids browser's broken
       // contentEditable behavior near <a> elements)
-      if (e.key === 'Enter' && e.shiftKey && !e.nativeEvent.isComposing) {
+      if (e.key === 'Enter' && e.shiftKey && !e.nativeEvent.isComposing && !events.isComposing.current) {
         e.preventDefault()
         const editor = editorRef.current
         if (editor) {
@@ -1006,7 +1006,7 @@ export function usePromptArea({
       }
 
       // 3. Submit on Enter (without Shift), skip during IME
-      if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+      if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && !events.isComposing.current) {
         // 3a. Check for list continuation first (only when markdown is enabled)
         const editor = editorRef.current
         if (editor && tryListContinuation(editor)) {
@@ -1029,7 +1029,7 @@ export function usePromptArea({
       }
 
       // 4.5 Non-collapsed selection delete (Backspace/Delete across <a> boundaries)
-      if ((e.key === 'Backspace' || e.key === 'Delete') && !e.nativeEvent.isComposing) {
+      if ((e.key === 'Backspace' || e.key === 'Delete') && !e.nativeEvent.isComposing && !events.isComposing.current) {
         const editor = editorRef.current
         if (editor) {
           const offsets = getSelectionOffsets(editor)
