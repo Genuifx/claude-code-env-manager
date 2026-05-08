@@ -480,11 +480,15 @@ export interface DesktopSettings {
   autoStart: boolean;
   startMinimized: boolean;
   closeToTray: boolean;
+  desktopPetEnabled?: boolean;
   desktopNotificationsEnabled?: boolean;
   notifyOnTaskCompleted?: boolean;
   notifyOnTaskFailed?: boolean;
   notifyOnActionRequired?: boolean;
   defaultMode?: string;
+  performanceMode?: 'auto' | 'reduced' | 'default';
+  aiEnhanced?: boolean;
+  aiEnvName?: string | null;
   proxyDebugEnabled?: boolean;
   proxyDebugCodexUpstreamBaseUrl?: string;
   proxyDebugLogMaxBytes?: number;
