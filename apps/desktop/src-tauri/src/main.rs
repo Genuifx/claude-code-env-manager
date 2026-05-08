@@ -20,6 +20,7 @@ mod native_helper_resource;
 mod native_runtime;
 mod notifications;
 mod opencode;
+mod pet_window;
 mod permission;
 mod proxy_debug;
 mod remote;
@@ -2487,6 +2488,7 @@ fn save_settings(app: tauri::AppHandle, settings: DesktopSettings) -> Result<(),
     merged_settings.auto_start = settings.auto_start;
     merged_settings.start_minimized = settings.start_minimized;
     merged_settings.close_to_tray = settings.close_to_tray;
+    merged_settings.desktop_pet_enabled = settings.desktop_pet_enabled;
     merged_settings.default_mode = settings.default_mode;
     merged_settings.performance_mode = settings.performance_mode;
     merged_settings.desktop_notifications_enabled = settings.desktop_notifications_enabled;
@@ -2496,6 +2498,11 @@ fn save_settings(app: tauri::AppHandle, settings: DesktopSettings) -> Result<(),
     merged_settings.ai_enhanced = settings.ai_enhanced;
     merged_settings.ai_env_name = settings.ai_env_name;
     config::write_settings(&merged_settings)?;
+    if let Err(e) =
+        pet_window::sync_pet_window_visibility(&app, merged_settings.desktop_pet_enabled)
+    {
+        errors.push(format!("desktop pet: {}", e));
+    }
     if let Some(notification_prefs_state) = app.try_state::<notifications::NotificationPrefsState>()
     {
         notification_prefs_state.replace_from_settings(&merged_settings);
@@ -3266,6 +3273,16 @@ fn main() {
             if startup_settings.start_minimized {
                 if let Some(w) = app.get_webview_window("main") {
                     let _ = w.hide();
+                }
+            }
+
+            if startup_settings.desktop_pet_enabled {
+                let app_handle = app.handle().clone();
+                if let Err(error) = pet_window::sync_pet_window_visibility(
+                    &app_handle,
+                    startup_settings.desktop_pet_enabled,
+                ) {
+                    eprintln!("Desktop pet startup warning: {}", error);
                 }
             }
 
