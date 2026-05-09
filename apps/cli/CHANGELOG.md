@@ -1,5 +1,11 @@
 # ccem
 
+## 2.3.1
+
+### Patch Changes
+
+- fix(desktop): soften workspace code theme
+
 ## 2.3.0
 
 ### Minor Changes
