@@ -11,10 +11,13 @@ interface MarkdownRendererProps {
   className?: string;
   /** "user" adapts colors for the blue user bubble background */
   variant?: 'default' | 'user';
+  /** "reading" is tuned for workspace long-form reading surfaces */
+  codeTone?: 'default' | 'reading';
 }
 interface CodeHighlighterProps {
   code: string;
   language: string;
+  codeTone: NonNullable<MarkdownRendererProps['codeTone']>;
 }
 
 let syntaxLanguagesRegistered = false;
@@ -23,6 +26,7 @@ const LazyCodeHighlighter = lazy(async () => {
   const [
     { default: SyntaxHighlighter },
     { default: oneDark },
+    { default: coldarkCold },
     { default: bash },
     { default: diff },
     { default: go },
@@ -38,6 +42,7 @@ const LazyCodeHighlighter = lazy(async () => {
   ] = await Promise.all([
     import('react-syntax-highlighter/dist/esm/prism-light'),
     import('react-syntax-highlighter/dist/esm/styles/prism/one-dark'),
+    import('react-syntax-highlighter/dist/esm/styles/prism/coldark-cold'),
     import('react-syntax-highlighter/dist/esm/languages/prism/bash'),
     import('react-syntax-highlighter/dist/esm/languages/prism/diff'),
     import('react-syntax-highlighter/dist/esm/languages/prism/go'),
@@ -83,7 +88,7 @@ const LazyCodeHighlighter = lazy(async () => {
     syntaxLanguagesRegistered = true;
   }
 
-  const codeTheme = {
+  const defaultCodeTheme = {
     ...oneDark,
     'pre[class*="language-"]': {
       ...oneDark['pre[class*="language-"]'],
@@ -100,10 +105,93 @@ const LazyCodeHighlighter = lazy(async () => {
     },
   };
 
-  function CodeHighlighter({ code, language }: CodeHighlighterProps) {
+  const readingCodeTheme = {
+    ...coldarkCold,
+    'pre[class*="language-"]': {
+      ...coldarkCold['pre[class*="language-"]'],
+      background: 'transparent',
+      color: 'var(--workspace-reading-code-text)',
+      margin: 0,
+      padding: '0.875rem 1rem',
+      fontSize: '12.5px',
+      lineHeight: '1.65',
+    },
+    'code[class*="language-"]': {
+      ...coldarkCold['code[class*="language-"]'],
+      background: 'transparent',
+      color: 'var(--workspace-reading-code-text)',
+      fontSize: '12.5px',
+    },
+    comment: {
+      ...coldarkCold.comment,
+      color: 'var(--workspace-reading-code-comment)',
+    },
+    prolog: {
+      ...coldarkCold.prolog,
+      color: 'var(--workspace-reading-code-comment)',
+    },
+    doctype: {
+      ...coldarkCold.doctype,
+      color: 'var(--workspace-reading-code-comment)',
+    },
+    cdata: {
+      ...coldarkCold.cdata,
+      color: 'var(--workspace-reading-code-comment)',
+    },
+    keyword: {
+      ...coldarkCold.keyword,
+      color: 'var(--workspace-reading-code-keyword)',
+    },
+    operator: {
+      ...coldarkCold.operator,
+      color: 'var(--workspace-reading-code-keyword)',
+    },
+    string: {
+      ...coldarkCold.string,
+      color: 'var(--workspace-reading-code-string)',
+    },
+    char: {
+      ...coldarkCold.char,
+      color: 'var(--workspace-reading-code-string)',
+    },
+    'attr-value': {
+      ...coldarkCold['attr-value'],
+      color: 'var(--workspace-reading-code-string)',
+    },
+    function: {
+      ...coldarkCold.function,
+      color: 'var(--workspace-reading-code-function)',
+    },
+    number: {
+      ...coldarkCold.number,
+      color: 'var(--workspace-reading-code-number)',
+    },
+    boolean: {
+      ...coldarkCold.boolean,
+      color: 'var(--workspace-reading-code-number)',
+    },
+    constant: {
+      ...coldarkCold.constant,
+      color: 'var(--workspace-reading-code-number)',
+    },
+    property: {
+      ...coldarkCold.property,
+      color: 'var(--workspace-reading-code-property)',
+    },
+    variable: {
+      ...coldarkCold.variable,
+      color: 'var(--workspace-reading-code-property)',
+    },
+    punctuation: {
+      ...coldarkCold.punctuation,
+      color: 'var(--workspace-reading-code-punctuation)',
+    },
+  };
+
+  function CodeHighlighter({ code, language, codeTone }: CodeHighlighterProps) {
     return (
       <SyntaxHighlighter
-        style={codeTheme}
+        style={codeTone === 'reading' ? readingCodeTheme : defaultCodeTheme}
         language={language}
         PreTag="div"
       >
@@ -151,9 +239,22 @@ function CopyButton({ text, dark = false }: { text: string; dark?: boolean }) {
   );
 }
 
-function PlainCodeBlock({ code }: { code: string }) {
+function PlainCodeBlock({
+  code,
+  codeTone,
+}: {
+  code: string;
+  codeTone: NonNullable<MarkdownRendererProps['codeTone']>;
+}) {
   return (
-    <pre className="overflow-x-auto px-4 py-3 text-[12px] leading-[1.6] text-white/85">
+    <pre
+      className={cn(
+        'overflow-x-auto px-4 py-3 font-mono',
+        codeTone === 'reading'
+          ? 'text-[12.5px] leading-[1.65] text-[color:var(--workspace-reading-code-text)]'
+          : 'text-[12px] leading-[1.6] text-white/85'
+      )}
+    >
       <code>{code}</code>
     </pre>
   );
@@ -163,26 +264,60 @@ function CodeBlockFrame({
   language,
   code,
   children,
+  codeTone,
 }: {
   language: string;
   code: string;
   children: React.ReactNode;
+  codeTone: NonNullable<MarkdownRendererProps['codeTone']>;
 }) {
+  const isReading = codeTone === 'reading';
+
   return (
-    <div className="my-2 overflow-hidden rounded-lg border border-[#1e1e2e]/50 bg-[#1e1e2e]">
-      <div className="flex items-center justify-between border-b border-white/[0.06] px-3 py-1.5">
-        <span className="text-[10px] font-mono uppercase tracking-wider text-white/30">
+    <div
+      className={cn(
+        'my-2 overflow-hidden rounded-lg border',
+        isReading ? 'shadow-[0_1px_2px_rgb(15_23_42/0.04)]' : 'border-[#1e1e2e]/50 bg-[#1e1e2e]'
+      )}
+      style={isReading ? {
+        background: 'var(--workspace-reading-code-bg)',
+        borderColor: 'var(--workspace-reading-code-border)',
+      } : undefined}
+    >
+      <div
+        className={cn(
+          'flex items-center justify-between border-b px-3 py-1.5',
+          !isReading && 'border-white/[0.06]'
+        )}
+        style={isReading ? {
+          background: 'var(--workspace-reading-code-header-bg)',
+          borderColor: 'var(--workspace-reading-code-header-border)',
+        } : undefined}
+      >
+        <span
+          className={cn(
+            'text-[10px] font-mono uppercase tracking-wider',
+            !isReading && 'text-white/30'
+          )}
+          style={isReading ? { color: 'var(--workspace-reading-code-label)' } : undefined}
+        >
           {language}
         </span>
-        <CopyButton text={code} dark />
+        <CopyButton text={code} dark={!isReading} />
       </div>
       {children}
     </div>
   );
 }
 
-export function MarkdownRenderer({ content, className, variant = 'default' }: MarkdownRendererProps) {
+export function MarkdownRenderer({
+  content,
+  className,
+  variant = 'default',
+  codeTone = 'default',
+}: MarkdownRendererProps) {
   const isUser = variant === 'user';
+  const isReadingCode = codeTone === 'reading';
   const shouldReduceCodeRendering = getPerformanceMode() === 'reduced';
   return (
     <div className={cn('markdown-content', className)}>
@@ -264,12 +399,12 @@ export function MarkdownRenderer({ content, className, variant = 'default' }: Ma
             if (isBlock) {
               const language = match?.[1] || 'text';
               return (
-                <CodeBlockFrame language={language} code={codeString}>
+                <CodeBlockFrame language={language} code={codeString} codeTone={codeTone}>
                   {shouldReduceCodeRendering ? (
-                    <PlainCodeBlock code={codeString} />
+                    <PlainCodeBlock code={codeString} codeTone={codeTone} />
                   ) : (
-                    <Suspense fallback={<PlainCodeBlock code={codeString} />}>
-                      <LazyCodeHighlighter code={codeString} language={language} />
+                    <Suspense fallback={<PlainCodeBlock code={codeString} codeTone={codeTone} />}>
+                      <LazyCodeHighlighter code={codeString} language={language} codeTone={codeTone} />
                     </Suspense>
                   )}
                 </CodeBlockFrame>
@@ -280,7 +415,11 @@ export function MarkdownRenderer({ content, className, variant = 'default' }: Ma
             return (
               <code className={cn(
                 'rounded px-1.5 py-0.5 text-[12px] font-mono',
-                isUser ? 'bg-white/20 text-inherit' : 'bg-muted text-primary'
+                isUser
+                  ? 'bg-white/20 text-inherit'
+                  : isReadingCode
+                    ? 'border border-[color:var(--workspace-reading-inline-border)] bg-[var(--workspace-reading-inline-bg)] text-[color:var(--workspace-reading-inline-text)]'
+                    : 'bg-muted text-primary'
               )}>
                 {children}
               </code>

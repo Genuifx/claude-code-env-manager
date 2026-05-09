@@ -957,7 +957,7 @@ function AgentNoteBlock({ msg, label }: { msg: TeammateMessage; label: string })
           {notification.failureReason || notification.idleReason || msg.content}
         </p>
       ) : (
-        <MarkdownRenderer content={msg.content} className="text-[14px] leading-7" />
+        <MarkdownRenderer content={msg.content} className="text-[14px] leading-7" codeTone="reading" />
       )}
     </DisclosureCard>
   );
@@ -973,7 +973,7 @@ function PlanBlock({ content, label }: { content: string; label: string }) {
       label={label}
       summary={title}
     >
-      <MarkdownRenderer content={content} className="text-[14px] leading-7" />
+      <MarkdownRenderer content={content} className="text-[14px] leading-7" codeTone="reading" />
     </DisclosureCard>
   );
 }
@@ -983,6 +983,7 @@ function renderAssistantMarkdown(text: string) {
     <MarkdownRenderer
       content={text}
       className="text-[14px] leading-7 text-foreground/88 [&_p]:my-0 [&_p+*]:mt-3"
+      codeTone="reading"
     />
   );
 }
@@ -992,6 +993,7 @@ function renderUserMarkdown(text: string) {
     <MarkdownRenderer
       content={text}
       className="text-[14px] leading-7 text-foreground/94 [&_p]:my-0 [&_p+*]:mt-3"
+      codeTone="reading"
     />
   );
 }

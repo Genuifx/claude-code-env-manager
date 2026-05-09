@@ -126,6 +126,22 @@
     --chat-user-opacity: 0.88;
     --chat-user-blur: 8px;
     --tool-input-bg: 0 0% 100% / 0.06;
+    --workspace-reading-code-bg: #1e1e2e;
+    --workspace-reading-code-border: rgb(30 30 46 / 0.5);
+    --workspace-reading-code-header-bg: transparent;
+    --workspace-reading-code-header-border: rgb(255 255 255 / 0.06);
+    --workspace-reading-code-label: rgb(255 255 255 / 0.3);
+    --workspace-reading-code-text: #abb2bf;
+    --workspace-reading-code-comment: #7f848e;
+    --workspace-reading-code-keyword: #c678dd;
+    --workspace-reading-code-string: #98c379;
+    --workspace-reading-code-function: #61afef;
+    --workspace-reading-code-number: #d19a66;
+    --workspace-reading-code-property: #e06c75;
+    --workspace-reading-code-punctuation: #abb2bf;
+    --workspace-reading-inline-bg: hsl(var(--muted) / 0.72);
+    --workspace-reading-inline-border: hsl(var(--border) / 0.85);
+    --workspace-reading-inline-text: hsl(var(--foreground) / 0.86);
 
     /* Segmented control — selected pill */
     --seg-active-bg: 0 0% 100% / 0.18;
@@ -240,6 +256,22 @@
     --chat-user-opacity: 0.88;
     --chat-user-blur: 8px;
     --tool-input-bg: 40 10% 45% / 0.08;
+    --workspace-reading-code-bg: #eef0ee;
+    --workspace-reading-code-border: #d9ddd8;
+    --workspace-reading-code-header-bg: #e7ebe7;
+    --workspace-reading-code-header-border: #d9ddd8;
+    --workspace-reading-code-label: #64748b;
+    --workspace-reading-code-text: #111b27;
+    --workspace-reading-code-comment: #3c526d;
+    --workspace-reading-code-keyword: #a04900;
+    --workspace-reading-code-string: #116b00;
+    --workspace-reading-code-function: #7c00aa;
+    --workspace-reading-code-number: #755f00;
+    --workspace-reading-code-property: #005a8e;
+    --workspace-reading-code-punctuation: #111b27;
+    --workspace-reading-inline-bg: #eef0ee;
+    --workspace-reading-inline-border: #d9ddd8;
+    --workspace-reading-inline-text: #334155;
 
     /* Segmented control — selected pill */
     --seg-active-bg: 0 0% 100% / 0.60;
