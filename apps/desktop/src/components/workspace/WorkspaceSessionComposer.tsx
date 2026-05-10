@@ -735,6 +735,7 @@ export function WorkspaceSessionComposer({
   const syncedPlainTextRef = useRef(value);
   const [composerSegments, setComposerSegments] = useState<Segment[]>(() => plainTextToSegments(value));
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const attachmentsRef = useRef(attachments);
   const [recentFiles, setRecentFiles] = useState<ComposerRecentFile[]>([]);
   const [isDragTarget, setIsDragTarget] = useState(false);
   const [draggedFileCount, setDraggedFileCount] = useState(0);
@@ -805,14 +806,13 @@ export function WorkspaceSessionComposer({
     setRecentFiles(loadComposerRecentFiles(workingDir));
     setAttachments((previous) => {
       revokeComposerImageUrls(previous);
+      attachmentsRef.current = [];
       return [];
     });
     setIsDragTarget(false);
     setDraggedFileCount(0);
   }, [workingDir]);
 
-  const attachmentsRef = useRef(attachments);
-  attachmentsRef.current = attachments;
   useEffect(() => {
     return () => {
       revokeComposerImageUrls(attachmentsRef.current);
@@ -824,7 +824,9 @@ export function WorkspaceSessionComposer({
       return;
     }
 
-    setAttachments((previous) => mergeComposerAttachments(previous, nextAttachments));
+    const next = mergeComposerAttachments(attachmentsRef.current, nextAttachments);
+    attachmentsRef.current = next;
+    setAttachments(next);
     for (const attachment of nextAttachments) {
       if (attachment.kind !== 'file') {
         continue;
@@ -842,23 +844,24 @@ export function WorkspaceSessionComposer({
   }, [onValueChange]);
 
   const pruneUnreferencedImageAttachments = useCallback((segments: Segment[]) => {
-    setAttachments((previous) => {
-      let changed = false;
-      const next = previous.filter((attachment) => {
-        if (attachment.kind !== 'image') {
-          return true;
-        }
-        if (composerSegmentsReferenceImageAttachment(segments, attachment)) {
-          return true;
-        }
-        changed = true;
-        if (attachment.objectUrl) {
-          URL.revokeObjectURL(attachment.objectUrl);
-        }
-        return false;
-      });
-      return changed ? next : previous;
+    let changed = false;
+    const next = attachmentsRef.current.filter((attachment) => {
+      if (attachment.kind !== 'image') {
+        return true;
+      }
+      if (composerSegmentsReferenceImageAttachment(segments, attachment)) {
+        return true;
+      }
+      changed = true;
+      if (attachment.objectUrl) {
+        URL.revokeObjectURL(attachment.objectUrl);
+      }
+      return false;
     });
+    if (changed) {
+      attachmentsRef.current = next;
+      setAttachments(next);
+    }
   }, []);
 
   const handlePromptSegmentsChange = useCallback((segments: Segment[]) => {
@@ -1031,22 +1034,23 @@ export function WorkspaceSessionComposer({
   }, []);
 
   const removeAttachment = useCallback((id: string) => {
-    setAttachments((previous) => {
-      const removed = previous.find((attachment) => attachment.id === id);
-      if (removed?.kind === 'image' && removed.objectUrl) {
-        URL.revokeObjectURL(removed.objectUrl);
-      }
-      if (removed?.kind === 'image') {
-        setComposerSegments((segments) => {
-          const nextSegments = removeImageAttachmentFromSegments(segments, removed);
-          const plainText = segmentsToPlainText(nextSegments);
-          syncedPlainTextRef.current = plainText;
-          onValueChange(plainText);
-          return nextSegments;
-        });
-      }
-      return previous.filter((attachment) => attachment.id !== id);
-    });
+    const previous = attachmentsRef.current;
+    const removed = previous.find((attachment) => attachment.id === id);
+    if (removed?.kind === 'image' && removed.objectUrl) {
+      URL.revokeObjectURL(removed.objectUrl);
+    }
+    if (removed?.kind === 'image') {
+      setComposerSegments((segments) => {
+        const nextSegments = removeImageAttachmentFromSegments(segments, removed);
+        const plainText = segmentsToPlainText(nextSegments);
+        syncedPlainTextRef.current = plainText;
+        onValueChange(plainText);
+        return nextSegments;
+      });
+    }
+    const next = previous.filter((attachment) => attachment.id !== id);
+    attachmentsRef.current = next;
+    setAttachments(next);
   }, [onValueChange]);
 
   useEffect(() => {
@@ -1115,7 +1119,8 @@ export function WorkspaceSessionComposer({
   }, [addAttachments, workingDir]);
 
   const handleComposerSubmit = useCallback(async () => {
-    const promptValue = segmentsToPlainText(composerSegments);
+    const promptValue = promptAreaRef.current?.getPlainText() ?? segmentsToPlainText(composerSegments);
+    const currentAttachments = attachmentsRef.current;
     let text = promptValue.trim();
     const selectedSkillFiles = Array.from(new Set([
       ...selectedSkillTokens
@@ -1136,7 +1141,7 @@ export function WorkspaceSessionComposer({
 
     const payload: ComposerSubmitPayload = {
       text,
-      attachments,
+      attachments: currentAttachments,
     };
 
     if (!payload.text && payload.attachments.length === 0) {
@@ -1145,7 +1150,8 @@ export function WorkspaceSessionComposer({
 
     const result = await onSubmit(payload);
     if (result !== false) {
-      revokeComposerImageUrls(attachments);
+      revokeComposerImageUrls(currentAttachments);
+      attachmentsRef.current = [];
       setAttachments([]);
       setIsDragTarget(false);
       setDraggedFileCount(0);
@@ -1153,7 +1159,7 @@ export function WorkspaceSessionComposer({
       setTriggerPanelState(null);
     }
     return result;
-  }, [attachments, composerSegments, installedSkills, onSubmit, provider, selectedSkillTokens]);
+  }, [composerSegments, installedSkills, onSubmit, provider, selectedSkillTokens]);
 
   const hasComposerAttentionPanel = queuedMessages.length > 0;
 
