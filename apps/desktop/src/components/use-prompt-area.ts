@@ -63,7 +63,7 @@ type UsePromptAreaOptions = {
   onUndo?: (segments: Segment[]) => void
   onRedo?: (segments: Segment[]) => void
   onBeforeTextPaste?: (text: string) => boolean
-  onImagePaste?: (file: File) => void
+  onImagePaste?: (files: File[]) => void
   markdown?: boolean
 }
 

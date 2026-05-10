@@ -265,8 +265,8 @@ export type PromptAreaProps = {
   images?: PromptAreaImage[]
   /** Where to render the image strip relative to the text area. Defaults to 'above'. */
   imagePosition?: 'above' | 'below'
-  /** Called when the user pastes an image from clipboard. Receives the File object. */
-  onImagePaste?: (file: File) => void
+  /** Called when the user pastes one or more images from clipboard. Receives the File objects. */
+  onImagePaste?: (files: File[]) => void
   /** Called when the user clicks the remove button on an image */
   onImageRemove?: (image: PromptAreaImage) => void
   /** Called when the user clicks an image thumbnail */

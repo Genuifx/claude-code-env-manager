@@ -38,7 +38,7 @@ type EventHandlerDeps = {
   onRedo?: (segments: Segment[]) => void
   onBeforeTextPaste?: (text: string) => boolean
   onChipAdd?: (chip: ChipSegment) => void
-  onImagePaste?: (file: File) => void
+  onImagePaste?: (files: File[]) => void
 }
 
 type PromptAreaEventHandlers = {
@@ -64,6 +64,23 @@ const MAX_UNDO_HISTORY = 100
 
 /** Delay before dismissing trigger on blur, so popover clicks register first */
 export const BLUR_DELAY_MS = 150
+
+type ClipboardImageItem = Pick<DataTransferItem, 'type' | 'getAsFile'>
+
+export function collectClipboardImageFiles(
+  clipboardFiles: Iterable<File>,
+  clipboardItems: Iterable<ClipboardImageItem>,
+): File[] {
+  const files = Array.from(clipboardFiles).filter((file) => file.type.startsWith('image/'))
+  if (files.length > 0) {
+    return files
+  }
+
+  return Array.from(clipboardItems)
+    .filter((item) => item.type.startsWith('image/'))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => Boolean(file?.type.startsWith('image/')))
+}
 
 type UndoState = {
   undoStack: Segment[][]
@@ -131,16 +148,11 @@ export function usePromptAreaEvents(deps: EventHandlerDeps): PromptAreaEventHand
       const editor = editorRef.current
       if (!editor) return
 
-      // Check for image files in clipboard before processing text
-      // Some browsers/OSes provide pasted images via `items` instead of `files` (e.g. screenshots)
-      const imageFile =
-        Array.from(e.clipboardData.files).find((f) => f.type.startsWith('image/')) ??
-        (() => {
-          const item = Array.from(e.clipboardData.items).find((i) => i.type.startsWith('image/'))
-          return item?.getAsFile() ?? null
-        })()
-      if (imageFile) {
-        onImagePaste?.(imageFile)
+      // Check for image files in clipboard before processing text. Some browsers/OSes
+      // provide pasted images via `items` instead of `files` (e.g. screenshots).
+      const imageFiles = collectClipboardImageFiles(e.clipboardData.files, e.clipboardData.items)
+      if (imageFiles.length > 0) {
+        onImagePaste?.(imageFiles)
         return
       }
 

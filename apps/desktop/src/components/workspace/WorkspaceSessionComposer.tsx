@@ -1344,7 +1344,7 @@ export function WorkspaceSessionComposer({
               onSubmit={() => void handleComposerSubmit()}
               onChipClick={handlePromptChipClick}
               onChipAdd={handlePromptChipAdd}
-              onImagePaste={(file) => void handleImagePaste([file])}
+              onImagePaste={(files) => void handleImagePaste(files)}
               onBeforeTextPaste={handleBeforeTextPaste}
               onTriggerPanelChange={setTriggerPanelState}
               triggerPanelPlacement="external"

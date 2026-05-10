@@ -41,3 +41,10 @@ test('composer attachment ref updates synchronously when pasted attachments are 
   assert.match(addBlock, /attachmentsRef\.current = next;/);
   assert.match(addBlock, /setAttachments\(next\);/);
 });
+
+test('composer forwards all pasted images from PromptArea', async () => {
+  const source = await readComposerSource();
+
+  assert.match(source, /onImagePaste=\{\(files\) => void handleImagePaste\(files\)\}/);
+  assert.doesNotMatch(source, /handleImagePaste\(\[file\]\)/);
+});
