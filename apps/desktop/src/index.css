@@ -240,6 +240,7 @@
     --glass-rim-opacity: 0.5;
     --glass-sheen-opacity: 0.22;
     --glass-caustic-opacity: 0.18;
+    --glass-caustic-color: 30 15% 80%;
     --ambient-1: 211 100% 68%;
     --ambient-2: 270 80% 72%;
     --ambient-3: 170 75% 58%;
@@ -327,12 +328,12 @@
 }
 
 /* ========================================================= */
-/* === AMBIENT BACKGROUND — the secret to real glass      === */
-/* === Glass needs color behind it to blur. Without this, === */
-/* === backdrop-filter has nothing to work with.          === */
+/* === AMBIENT BACKGROUND — subtle atmospheric depth       === */
+/* === Apple style: no decorative gradients, depth comes   === */
+/* === from backdrop-blur and surface-color change only.   === */
 /* ========================================================= */
 
-/* Ambient orb container — provides colorful blobs behind glass panels */
+/* Ambient layer — single-hue tint behind glass panels for backdrop-filter to work with */
 .ambient-bg {
   position: fixed;
   inset: 0;
@@ -345,72 +346,39 @@
   content: "";
   position: absolute;
   border-radius: 50%;
-  filter: blur(100px);
-  will-change: transform;
+  filter: blur(120px);
 }
-/* Top-left blue orb */
+/* Top-left — warm neutral glow */
 .ambient-bg::before {
   width: 700px;
   height: 700px;
-  top: -15%;
+  top: -12%;
   left: -10%;
-  background: radial-gradient(circle, hsl(var(--ambient-1) / var(--ambient-opacity)) 0%, transparent 70%);
-  animation: ambient-drift-1 25s var(--ease-default) infinite alternate;
+  background: radial-gradient(circle, hsl(30 30% 92% / 0.5) 0%, transparent 70%);
 }
-/* Bottom-right purple orb */
+/* Bottom-right — cool neutral for contrast */
 .ambient-bg::after {
   width: 600px;
   height: 600px;
   bottom: -10%;
-  right: -5%;
-  background: radial-gradient(circle, hsl(var(--ambient-2) / var(--ambient-opacity)) 0%, transparent 70%);
-  animation: ambient-drift-2 30s var(--ease-default) infinite alternate;
-  will-change: transform;
+  right: -8%;
+  background: radial-gradient(circle, hsl(220 15% 90% / 0.4) 0%, transparent 70%);
 }
-/* Third orb via a child element */
+/* Center orb — soft warm white */
 .ambient-orb-3 {
   position: absolute;
-  width: 500px;
-  height: 500px;
-  top: 40%;
-  left: 30%;
+  width: 650px;
+  height: 650px;
+  top: 25%;
+  left: 20%;
   border-radius: 50%;
-  background: radial-gradient(circle, hsl(var(--ambient-3) / calc(var(--ambient-opacity) * 0.7)) 0%, transparent 70%);
+  background: radial-gradient(circle, hsl(35 25% 95% / 0.6) 0%, transparent 70%);
   filter: blur(100px);
-  animation: ambient-drift-3 22s var(--ease-default) infinite alternate;
   pointer-events: none;
-  will-change: transform;
 }
-/* Fourth orb — warm accent for more color coverage */
+/* Fourth orb — removed, Apple uses minimal color */
 .ambient-orb-4 {
-  position: absolute;
-  width: 450px;
-  height: 450px;
-  bottom: 15%;
-  left: 55%;
-  border-radius: 50%;
-  background: radial-gradient(circle, hsl(var(--ambient-1) / calc(var(--ambient-opacity) * 0.6)) 0%, transparent 70%);
-  filter: blur(100px);
-  animation: ambient-drift-4 28s var(--ease-default) infinite alternate;
-  pointer-events: none;
-  will-change: transform;
-}
-
-@keyframes ambient-drift-1 {
-  0% { transform: translate(0, 0) scale(1); }
-  100% { transform: translate(60px, 40px) scale(1.15); }
-}
-@keyframes ambient-drift-2 {
-  0% { transform: translate(0, 0) scale(1); }
-  100% { transform: translate(-50px, -30px) scale(1.1); }
-}
-@keyframes ambient-drift-3 {
-  0% { transform: translate(0, 0) scale(1); }
-  100% { transform: translate(30px, -50px) scale(1.2); }
-}
-@keyframes ambient-drift-4 {
-  0% { transform: translate(0, 0) scale(1); }
-  100% { transform: translate(-40px, 30px) scale(1.1); }
+  display: none;
 }
 
 /* ========================================================= */
@@ -1183,12 +1151,12 @@
     ),
     radial-gradient(
       120% 110% at 0% 0%,
-      hsl(var(--primary) / var(--glass-caustic-opacity)) 0%,
+      hsl(var(--glass-caustic-color) / var(--glass-caustic-opacity)) 0%,
       transparent 46%
     ),
     radial-gradient(
       110% 90% at 100% 0%,
-      hsl(var(--ambient-2) / calc(var(--glass-caustic-opacity) * 0.78)) 0%,
+      hsl(var(--glass-caustic-color) / calc(var(--glass-caustic-opacity) * 0.78)) 0%,
       transparent 40%
     ),
     linear-gradient(
@@ -1227,7 +1195,7 @@
     ),
     radial-gradient(
       120% 120% at 0% 0%,
-      hsl(var(--primary) / calc(var(--glass-caustic-opacity) * 0.85)) 0%,
+      hsl(var(--glass-caustic-color) / calc(var(--glass-caustic-opacity) * 0.85)) 0%,
       transparent 42%
     ),
     linear-gradient(
@@ -1259,7 +1227,7 @@
     ),
     radial-gradient(
       140% 120% at 0% 0%,
-      hsl(var(--primary) / calc(var(--glass-caustic-opacity) * 0.72)) 0%,
+      hsl(var(--glass-caustic-color) / calc(var(--glass-caustic-opacity) * 0.72)) 0%,
       transparent 42%
     ),
     linear-gradient(
@@ -1297,6 +1265,79 @@
     ),
     hsl(var(--glass-sidebar-bg) / 0.22);
   border-color: hsl(var(--glass-border-light) / calc(var(--glass-border-opacity) + 0.1));
+}
+
+/* --- Sidebar frosted depth (Apple style) --- */
+.glass-sidebar-panel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+}
+
+.sidebar-aurora {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 1;
+  transition: opacity var(--duration-slow) var(--ease-decelerate);
+  overflow: hidden;
+  border-radius: inherit;
+  background:
+    linear-gradient(
+      180deg,
+      transparent 50%,
+      hsl(0 0% 100% / 0.6) 100%
+    );
+  backdrop-filter: blur(80px) saturate(220%);
+  -webkit-backdrop-filter: blur(80px) saturate(220%);
+}
+
+.dark .sidebar-aurora {
+  opacity: 0;
+}
+
+.glass-sidebar-muted .sidebar-aurora {
+  opacity: 0 !important;
+}
+
+.sidebar-aurora-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+  opacity: 0.18;
+}
+
+.sidebar-aurora-blob-1 {
+  width: 200px;
+  height: 200px;
+  bottom: -20px;
+  left: -40px;
+  background: hsl(211 100% 52%);
+}
+
+.sidebar-aurora-blob-2 {
+  width: 180px;
+  height: 180px;
+  bottom: 20px;
+  right: -40px;
+  background: hsl(211 100% 52%);
+}
+
+.sidebar-aurora-blob-3 {
+  width: 160px;
+  height: 160px;
+  bottom: 80px;
+  left: 30px;
+  background: hsl(211 80% 68%);
+}
+
+.glass-sidebar-muted::after {
+  opacity: 0 !important;
 }
 
 /* --- Sidebar glass muted state (workspace mode) --- */
@@ -1406,7 +1447,7 @@
     ),
     radial-gradient(
       120% 110% at 0% 0%,
-      hsl(var(--primary) / calc(var(--glass-caustic-opacity) * 0.9)) 0%,
+      hsl(var(--glass-caustic-color) / calc(var(--glass-caustic-opacity) * 0.9)) 0%,
       transparent 44%
     ),
     linear-gradient(
@@ -1429,7 +1470,24 @@
     transform var(--duration-base) var(--ease-default);
 }
 .glass-card:hover {
-  background: hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) + 0.03));
+  background:
+    linear-gradient(
+      180deg,
+      hsl(var(--glass-border-light) / var(--glass-rim-opacity)) 0%,
+      transparent 18%,
+      transparent 100%
+    ),
+    radial-gradient(
+      120% 110% at 0% 0%,
+      hsl(var(--glass-caustic-color) / calc(var(--glass-caustic-opacity) * 0.9)) 0%,
+      transparent 44%
+    ),
+    linear-gradient(
+      160deg,
+      hsl(var(--glass-border-light) / var(--glass-sheen-opacity)) 0%,
+      transparent 34%
+    ),
+    hsl(var(--glass-bg) / calc(var(--glass-bg-opacity) + 0.03));
   border-color: hsl(var(--glass-border-light) / var(--glass-border-hover-opacity));
 }
 .light .glass-card {
@@ -1479,7 +1537,7 @@
     ),
     radial-gradient(
       120% 110% at 0% 0%,
-      hsl(var(--primary) / calc(var(--glass-caustic-opacity) + 0.04)) 0%,
+      hsl(var(--glass-caustic-color) / calc(var(--glass-caustic-opacity) + 0.04)) 0%,
       transparent 42%
     ),
     linear-gradient(
@@ -1509,7 +1567,7 @@
     ),
     radial-gradient(
       110% 100% at 0% 0%,
-      hsl(var(--primary) / calc(var(--glass-caustic-opacity) * 0.72)) 0%,
+      hsl(var(--glass-caustic-color) / calc(var(--glass-caustic-opacity) * 0.72)) 0%,
       transparent 36%
     ),
     linear-gradient(
@@ -1698,7 +1756,7 @@
     ),
     radial-gradient(
       120% 110% at 0% 0%,
-      hsl(var(--primary) / calc(var(--glass-caustic-opacity) * 0.75)) 0%,
+      hsl(var(--glass-caustic-color) / calc(var(--glass-caustic-opacity) * 0.75)) 0%,
       transparent 42%
     ),
     linear-gradient(
@@ -1773,7 +1831,7 @@
     ),
     radial-gradient(
       120% 110% at 0% 0%,
-      hsl(var(--primary) / calc(var(--glass-caustic-opacity) * 0.6)) 0%,
+      hsl(var(--glass-caustic-color) / calc(var(--glass-caustic-opacity) * 0.6)) 0%,
       transparent 44%
     ),
     linear-gradient(
@@ -1922,7 +1980,7 @@
     ),
     radial-gradient(
       120% 110% at 0% 0%,
-      hsl(var(--primary) / calc(var(--glass-caustic-opacity) * 0.76)) 0%,
+      hsl(var(--glass-caustic-color) / calc(var(--glass-caustic-opacity) * 0.76)) 0%,
       transparent 44%
     ),
     linear-gradient(
@@ -2448,11 +2506,8 @@
 
 :root[data-performance-mode='reduced'] .ambient-bg::before,
 :root[data-performance-mode='reduced'] .ambient-bg::after,
-:root[data-performance-mode='reduced'] .ambient-orb-3,
-:root[data-performance-mode='reduced'] .ambient-orb-4 {
-  animation: none !important;
-  filter: blur(84px);
-  will-change: auto;
+:root[data-performance-mode='reduced'] .ambient-orb-3 {
+  filter: blur(100px);
 }
 
 :root[data-performance-mode='reduced'] .glass-noise::before {
