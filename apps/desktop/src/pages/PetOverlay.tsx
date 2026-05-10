@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import catImage from '@/assets/pet/golden-cat.png';
 import { PetBubble } from '@/components/pet-overlay/PetBubble';
-import { buildPetNotifications } from '@/lib/petNotifications';
+import { buildPetNotifications, type PetNotificationSourceSession } from '@/lib/petNotifications';
 import type { NativeSessionSummary, PetNotificationReadState } from '@/lib/tauri-ipc';
 import type { PetNotificationItem, PetOpenSessionRequest } from '@/types/pet';
 
@@ -14,17 +14,18 @@ function readIdsFromState(state: PetNotificationReadState): Set<string> {
 }
 
 export function PetOverlay() {
-  const [sessions, setSessions] = useState<NativeSessionSummary[]>([]);
+  const [sessions, setSessions] = useState<PetNotificationSourceSession[]>([]);
   const [readIds, setReadIds] = useState<Set<string>>(() => new Set());
   const refreshTimerRef = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const [nextSessions, readState] = await Promise.all([
+      const [nativeSessions, interactiveSessions, readState] = await Promise.all([
         invoke<NativeSessionSummary[]>('list_native_sessions'),
+        invoke<PetNotificationSourceSession[]>('list_interactive_sessions'),
         invoke<PetNotificationReadState>('get_pet_notification_read_state'),
       ]);
-      setSessions(nextSessions);
+      setSessions([...nativeSessions, ...interactiveSessions]);
       setReadIds(readIdsFromState(readState));
     } catch (error) {
       console.debug('Desktop pet refresh skipped:', error);

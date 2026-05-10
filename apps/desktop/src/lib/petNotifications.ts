@@ -1,4 +1,5 @@
 import type { NativeSessionSummary } from '@/lib/tauri-ipc';
+import type { Session as InteractiveSession } from '@/store';
 import type { PetNotificationItem, PetNotificationTone } from '@/types/pet';
 
 export const PET_NOTIFICATION_LIMIT = 5;
@@ -22,8 +23,67 @@ function timestamp(value: string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function notificationId(session: NativeSessionSummary): string {
-  return `pet:${session.provider}:${session.runtime_id}:${session.status}`;
+interface TauriInteractiveSession {
+  id: string;
+  client?: string;
+  working_dir: string;
+  start_time: string;
+  status: string;
+}
+
+export type PetNotificationSourceSession =
+  | NativeSessionSummary
+  | InteractiveSession
+  | TauriInteractiveSession;
+
+function isNativeSession(session: PetNotificationSourceSession): session is NativeSessionSummary {
+  return 'runtime_id' in session;
+}
+
+function sessionRuntimeId(session: PetNotificationSourceSession): string {
+  return isNativeSession(session) ? session.runtime_id : session.id;
+}
+
+function sessionProvider(session: PetNotificationSourceSession): 'claude' | 'codex' {
+  const provider = isNativeSession(session) ? session.provider : session.client;
+  return provider === 'codex' ? 'codex' : 'claude';
+}
+
+function sessionProviderLabel(session: PetNotificationSourceSession): string {
+  return sessionProvider(session) === 'codex' ? 'Codex' : 'Claude';
+}
+
+function sessionProviderSessionId(session: PetNotificationSourceSession): string | null {
+  return isNativeSession(session) ? session.provider_session_id ?? null : null;
+}
+
+function sessionProjectDir(session: PetNotificationSourceSession): string {
+  if (isNativeSession(session)) {
+    return session.project_dir;
+  }
+  return 'workingDir' in session ? session.workingDir : session.working_dir;
+}
+
+function sessionCreatedAt(session: PetNotificationSourceSession): string {
+  if (isNativeSession(session)) {
+    return session.created_at;
+  }
+  if ('startedAt' in session) {
+    return session.startedAt instanceof Date ? session.startedAt.toISOString() : String(session.startedAt);
+  }
+  return session.start_time;
+}
+
+function sessionUpdatedAt(session: PetNotificationSourceSession): string {
+  return isNativeSession(session) ? session.updated_at || session.created_at : sessionCreatedAt(session);
+}
+
+function sessionLastError(session: PetNotificationSourceSession): string | null {
+  return isNativeSession(session) ? session.last_error ?? null : null;
+}
+
+function notificationId(session: PetNotificationSourceSession): string {
+  return `pet:${sessionProvider(session)}:${sessionRuntimeId(session)}:${session.status}`;
 }
 
 function toneForStatus(status: string): PetNotificationTone {
@@ -50,21 +110,22 @@ function labelForTone(tone: PetNotificationTone): string {
   }
 }
 
-function defaultMessage(session: NativeSessionSummary, tone: PetNotificationTone): string {
-  if (session.last_error?.trim()) {
-    return session.last_error.trim();
+function defaultMessage(session: PetNotificationSourceSession, tone: PetNotificationTone): string {
+  const lastError = sessionLastError(session);
+  if (lastError?.trim()) {
+    return lastError.trim();
   }
   if (tone === 'attention') {
     return '这条会话需要你处理';
   }
   if (tone === 'running') {
-    return `${session.provider === 'codex' ? 'Codex' : 'Claude'} 正在运行`;
+    return `${sessionProviderLabel(session)} 正在运行`;
   }
   return '点开查看结果';
 }
 
 export function buildPetNotifications(
-  sessions: NativeSessionSummary[],
+  sessions: PetNotificationSourceSession[],
   readNotificationIds: ReadonlySet<string>,
 ): PetNotificationItem[] {
   return sessions
@@ -81,16 +142,16 @@ export function buildPetNotifications(
 
       return {
         id,
-        runtimeId: session.runtime_id,
-        provider: session.provider,
-        providerSessionId: session.provider_session_id ?? null,
-        title: basename(session.project_dir),
+        runtimeId: sessionRuntimeId(session),
+        provider: sessionProvider(session),
+        providerSessionId: sessionProviderSessionId(session),
+        title: basename(sessionProjectDir(session)),
         message: defaultMessage(session, tone),
         status: session.status,
         statusLabel: labelForTone(tone),
         tone,
-        updatedAt: session.updated_at || session.created_at,
-        projectDir: session.project_dir,
+        updatedAt: sessionUpdatedAt(session),
+        projectDir: sessionProjectDir(session),
         markReadOnOpen: isTerminal && !isAttention,
       } satisfies PetNotificationItem;
     })

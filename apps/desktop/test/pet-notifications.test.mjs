@@ -47,6 +47,38 @@ function session(overrides = {}) {
   };
 }
 
+function interactiveSession(overrides = {}) {
+  return {
+    id: 'session-1',
+    client: 'claude',
+    envName: 'official',
+    workingDir: '/tmp/legacy-project',
+    startedAt: new Date('2026-05-01T08:04:00.000Z'),
+    status: 'running',
+    permMode: 'dev',
+    terminalType: 'iterm2',
+    windowId: '123',
+    itermSessionId: 'iterm-session-1',
+    ...overrides,
+  };
+}
+
+function tauriInteractiveSession(overrides = {}) {
+  return {
+    id: 'session-raw-1',
+    client: 'claude',
+    env_name: 'official',
+    working_dir: '/tmp/raw-project',
+    start_time: '2026-05-01T08:05:00.000Z',
+    status: 'running',
+    perm_mode: 'dev',
+    terminal_type: 'iterm2',
+    window_id: '456',
+    iterm_session_id: 'iterm-session-raw-1',
+    ...overrides,
+  };
+}
+
 test('shows running sessions and unread terminal sessions, but hides read terminal sessions', async () => {
   const { buildPetNotifications } = await importPetNotifications();
   const notifications = buildPetNotifications(
@@ -64,6 +96,48 @@ test('shows running sessions and unread terminal sessions, but hides read termin
   );
   assert.equal(notifications[0].markReadOnOpen, false);
   assert.equal(notifications[1].markReadOnOpen, true);
+});
+
+test('includes legacy interactive sessions launched from the desktop app', async () => {
+  const { buildPetNotifications } = await importPetNotifications();
+  const notifications = buildPetNotifications(
+    [
+      interactiveSession({
+        id: 'legacy-running-1',
+        client: 'claude',
+        workingDir: '/tmp/legacy-project',
+        startedAt: new Date('2026-05-01T08:04:00.000Z'),
+        status: 'running',
+      }),
+    ],
+    new Set(),
+  );
+
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].runtimeId, 'legacy-running-1');
+  assert.equal(notifications[0].title, 'legacy-project');
+  assert.equal(notifications[0].message, 'Claude 正在运行');
+  assert.equal(notifications[0].statusLabel, '运行中');
+});
+
+test('includes raw interactive sessions returned directly from Tauri IPC', async () => {
+  const { buildPetNotifications } = await importPetNotifications();
+  const notifications = buildPetNotifications(
+    [
+      tauriInteractiveSession({
+        id: 'raw-running-1',
+        working_dir: '/tmp/raw-project',
+        start_time: '2026-05-01T08:05:00.000Z',
+        status: 'running',
+      }),
+    ],
+    new Set(),
+  );
+
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].runtimeId, 'raw-running-1');
+  assert.equal(notifications[0].title, 'raw-project');
+  assert.equal(notifications[0].updatedAt, '2026-05-01T08:05:00.000Z');
 });
 
 test('sorts newest updates first and limits the stack to five bubbles', async () => {
