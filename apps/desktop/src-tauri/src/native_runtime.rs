@@ -472,14 +472,14 @@ impl NativeRuntimeManager {
         let images_ref = images
             .filter(|imgs| !imgs.is_empty())
             .map(|imgs| imgs.as_slice());
-        self.append_user_prompt_event(runtime_id, display_text.unwrap_or(text), images)?;
         self.write_to_child(
             &handle,
             &HelperInputCommand::Prompt {
                 text,
                 images: images_ref,
             },
-        )
+        )?;
+        self.append_user_prompt_event(runtime_id, display_text.unwrap_or(text), images)
     }
 
     pub fn respond_to_permission(

@@ -1005,9 +1005,10 @@ async function consumeClaudeMessages() {
     effort: initCommand.effort,
   });
 
-  claudeInputQueue = new AsyncMessageQueue<SDKUserMessage>();
-  currentClaudeQuery = query({
-    prompt: claudeInputQueue,
+  const inputQueue = new AsyncMessageQueue<SDKUserMessage>();
+  claudeInputQueue = inputQueue;
+  const claudeQuery = query({
+    prompt: inputQueue,
     options: {
       cwd: initCommand.working_dir,
       env,
@@ -1038,180 +1039,190 @@ async function consumeClaudeMessages() {
       ...permission,
     },
   });
+  currentClaudeQuery = claudeQuery;
 
-  for await (const message of currentClaudeQuery) {
-    const sessionId = (message as { session_id?: string } | undefined)?.session_id;
-    if (sessionId) {
-      emitSessionMeta(sessionId);
-    }
-
-    if (message.type === 'stream_event') {
-      const event = (message as { event?: Record<string, unknown> }).event;
-      if (event) {
-        handleClaudePartialEvent(event);
+  try {
+    for await (const message of claudeQuery) {
+      const sessionId = (message as { session_id?: string } | undefined)?.session_id;
+      if (sessionId) {
+        emitSessionMeta(sessionId);
       }
-      continue;
-    }
 
-    if (message.type === 'assistant') {
-      const contentBlocks = getClaudeContentBlocks(message.message);
-      const emittedThinking = new Set<string>();
-      contentBlocks.forEach((block) => {
-        if (block.type === 'thinking' && typeof block.thinking === 'string' && block.thinking) {
-          const thinking = block.thinking.trim();
-          if (!thinking || claudeSawPartialThinking || emittedThinking.has(thinking)) {
-            return;
-          }
-          emittedThinking.add(thinking);
-          emitEvent({
-            type: 'system_message',
-            message: thinking,
-          });
-          return;
+      if (message.type === 'stream_event') {
+        const event = (message as { event?: Record<string, unknown> }).event;
+        if (event) {
+          handleClaudePartialEvent(event);
         }
-
-        if (block.type === 'text' && typeof block.text === 'string' && block.text && !claudeSawPartialText) {
-          emitEvent({
-            type: 'assistant_chunk',
-            text: block.text,
-          });
-          return;
-        }
-
-        if (
-          block.type === 'tool_use'
-          && typeof block.id === 'string'
-          && typeof block.name === 'string'
-          && block.name
-        ) {
-          const input = block.input && typeof block.input === 'object'
-            ? block.input as Record<string, unknown>
-            : {};
-          const prompt = parseClaudeInteractiveToolPrompt(block.name, input);
-          const category = categorizeClaudeTool(block.name);
-          const needsResponse = category.category === 'user_input'
-            && (category.kind === 'question' || category.kind === 'plan_exit');
-          emitClaudeToolUseStarted({
-            toolUseId: block.id,
-            rawName: block.name,
-            inputSummary: summarizeClaudeToolInput(block.name, input),
-            needsResponse,
-            prompt,
-          });
-        }
-      });
-      continue;
-    }
-
-    if (message.type === 'user') {
-      const contentBlocks = getClaudeContentBlocks(message.message);
-      contentBlocks.forEach((block) => {
-        if (block.type !== 'tool_result' || typeof block.tool_use_id !== 'string') {
-          return;
-        }
-        emitClaudeToolUseCompleted(
-          block.tool_use_id,
-          summarizeClaudeToolResult(block),
-          block.is_error !== true,
-        );
-      });
-      continue;
-    }
-
-    if (message.type === 'tool_progress') {
-      emitClaudeToolUseStarted({
-        toolUseId: message.tool_use_id,
-        rawName: message.tool_name,
-        inputSummary: `Running ${message.tool_name}`,
-        needsResponse: false,
-      });
-      continue;
-    }
-
-    if (message.type === 'tool_use_summary') {
-      for (const toolUseId of message.preceding_tool_use_ids) {
-        emitClaudeToolUseCompleted(toolUseId, message.summary, true);
-      }
-      continue;
-    }
-
-    if (message.type === 'system' && message.subtype === 'compact_boundary') {
-      handleClaudeCompactBoundary(message as Record<string, unknown>);
-      continue;
-    }
-
-    if (message.type === 'system' && message.subtype === 'status') {
-      if (handleClaudeStatusMessage(message as Record<string, unknown>)) {
         continue;
       }
-      const statusLabel = message.status || 'idle';
-      emitEvent({
-        type: 'lifecycle',
-        stage: 'status',
-        detail: `Claude status: ${statusLabel}`,
-      });
-      continue;
-    }
 
-    if (message.type === 'system' && message.subtype === 'session_state_changed') {
-      if (message.state !== claudeLastSessionState) {
-        if (message.state === 'running') {
-          claudeTurnCompletionEmitted = false;
-          emitEvent({
-            type: 'lifecycle',
-            stage: 'turn_started',
-            detail: 'Claude is processing a turn.',
-          });
-          emitStatus('processing', 'Claude is processing a turn.');
-        }
+      if (message.type === 'assistant') {
+        const contentBlocks = getClaudeContentBlocks(message.message);
+        const emittedThinking = new Set<string>();
+        contentBlocks.forEach((block) => {
+          if (block.type === 'thinking' && typeof block.thinking === 'string' && block.thinking) {
+            const thinking = block.thinking.trim();
+            if (!thinking || claudeSawPartialThinking || emittedThinking.has(thinking)) {
+              return;
+            }
+            emittedThinking.add(thinking);
+            emitEvent({
+              type: 'system_message',
+              message: thinking,
+            });
+            return;
+          }
 
-        if (message.state === 'idle' && !claudeTurnCompletionEmitted) {
-          claudeTurnCompletionEmitted = true;
-          emitEvent({
-            type: 'lifecycle',
-            stage: 'turn_completed',
-            detail: 'Claude turn completed.',
-          });
-          emitStatus('ready', 'Ready for the next prompt.');
-        }
+          if (block.type === 'text' && typeof block.text === 'string' && block.text && !claudeSawPartialText) {
+            emitEvent({
+              type: 'assistant_chunk',
+              text: block.text,
+            });
+            return;
+          }
+
+          if (
+            block.type === 'tool_use'
+            && typeof block.id === 'string'
+            && typeof block.name === 'string'
+            && block.name
+          ) {
+            const input = block.input && typeof block.input === 'object'
+              ? block.input as Record<string, unknown>
+              : {};
+            const prompt = parseClaudeInteractiveToolPrompt(block.name, input);
+            const category = categorizeClaudeTool(block.name);
+            const needsResponse = category.category === 'user_input'
+              && (category.kind === 'question' || category.kind === 'plan_exit');
+            emitClaudeToolUseStarted({
+              toolUseId: block.id,
+              rawName: block.name,
+              inputSummary: summarizeClaudeToolInput(block.name, input),
+              needsResponse,
+              prompt,
+            });
+          }
+        });
+        continue;
       }
 
-      claudeLastSessionState = message.state;
-
-      if (message.state === 'idle' && pendingSettings) {
-        applyPendingSettingsToInitCommand();
-        teardownClaudeSession();
-        emitStatus('ready', 'Settings applied.');
-        return;
+      if (message.type === 'user') {
+        const contentBlocks = getClaudeContentBlocks(message.message);
+        contentBlocks.forEach((block) => {
+          if (block.type !== 'tool_result' || typeof block.tool_use_id !== 'string') {
+            return;
+          }
+          emitClaudeToolUseCompleted(
+            block.tool_use_id,
+            summarizeClaudeToolResult(block),
+            block.is_error !== true,
+          );
+        });
+        continue;
       }
-      continue;
-    }
 
-    if (message.type === 'result') {
-      if (message.subtype === 'success') {
-        if (!claudeTurnCompletionEmitted) {
-          claudeTurnCompletionEmitted = true;
-          emitEvent({
-            type: 'lifecycle',
-            stage: 'turn_completed',
-            detail: message.result || 'Claude turn completed.',
-          });
-          emitStatus('ready', 'Ready for the next prompt.');
+      if (message.type === 'tool_progress') {
+        emitClaudeToolUseStarted({
+          toolUseId: message.tool_use_id,
+          rawName: message.tool_name,
+          inputSummary: `Running ${message.tool_name}`,
+          needsResponse: false,
+        });
+        continue;
+      }
+
+      if (message.type === 'tool_use_summary') {
+        for (const toolUseId of message.preceding_tool_use_ids) {
+          emitClaudeToolUseCompleted(toolUseId, message.summary, true);
         }
-      } else {
+        continue;
+      }
+
+      if (message.type === 'system' && message.subtype === 'compact_boundary') {
+        handleClaudeCompactBoundary(message as Record<string, unknown>);
+        continue;
+      }
+
+      if (message.type === 'system' && message.subtype === 'status') {
+        if (handleClaudeStatusMessage(message as Record<string, unknown>)) {
+          continue;
+        }
+        const statusLabel = message.status || 'idle';
         emitEvent({
-          type: 'session_completed',
-          reason: message.errors?.join('\n') || message.subtype,
+          type: 'lifecycle',
+          stage: 'status',
+          detail: `Claude status: ${statusLabel}`,
+        });
+        continue;
+      }
+
+      if (message.type === 'system' && message.subtype === 'session_state_changed') {
+        if (message.state !== claudeLastSessionState) {
+          if (message.state === 'running') {
+            claudeTurnCompletionEmitted = false;
+            emitEvent({
+              type: 'lifecycle',
+              stage: 'turn_started',
+              detail: 'Claude is processing a turn.',
+            });
+            emitStatus('processing', 'Claude is processing a turn.');
+          }
+
+          if (message.state === 'idle' && !claudeTurnCompletionEmitted) {
+            claudeTurnCompletionEmitted = true;
+            emitEvent({
+              type: 'lifecycle',
+              stage: 'turn_completed',
+              detail: 'Claude turn completed.',
+            });
+            emitStatus('ready', 'Ready for the next prompt.');
+          }
+        }
+
+        claudeLastSessionState = message.state;
+
+        if (message.state === 'idle' && pendingSettings) {
+          applyPendingSettingsToInitCommand();
+          teardownClaudeSession();
+          emitStatus('ready', 'Settings applied.');
+          return;
+        }
+        continue;
+      }
+
+      if (message.type === 'result') {
+        if (message.subtype === 'success') {
+          if (!claudeTurnCompletionEmitted) {
+            claudeTurnCompletionEmitted = true;
+            emitEvent({
+              type: 'lifecycle',
+              stage: 'turn_completed',
+              detail: message.result || 'Claude turn completed.',
+            });
+            emitStatus('ready', 'Ready for the next prompt.');
+          }
+        } else {
+          emitEvent({
+            type: 'session_completed',
+            reason: message.errors?.join('\n') || message.subtype,
+          });
+        }
+        continue;
+      }
+
+      if (message.type === 'auth_status' && message.error) {
+        emitEvent({
+          type: 'stderr_line',
+          line: message.error,
         });
       }
-      continue;
     }
-
-    if (message.type === 'auth_status' && message.error) {
-      emitEvent({
-        type: 'stderr_line',
-        line: message.error,
-      });
+  } finally {
+    if (claudeInputQueue === inputQueue) {
+      claudeInputQueue = null;
+    }
+    if (currentClaudeQuery === claudeQuery) {
+      currentClaudeQuery = null;
     }
   }
 }
@@ -1226,7 +1237,8 @@ async function ensureClaudeSession() {
   }
 
   if (!claudeConsumeLoop) {
-    claudeConsumeLoop = consumeClaudeMessages().catch((error) => {
+    let loop: Promise<void>;
+    loop = consumeClaudeMessages().catch((error) => {
       const isAbort = error instanceof Error && error.name === 'AbortError';
       if (stopped || isAbort) {
         return;
@@ -1242,7 +1254,12 @@ async function ensureClaudeSession() {
         reason: message,
       });
       emitStatus('error', message);
+    }).finally(() => {
+      if (claudeConsumeLoop === loop) {
+        claudeConsumeLoop = null;
+      }
     });
+    claudeConsumeLoop = loop;
   }
 }
 
