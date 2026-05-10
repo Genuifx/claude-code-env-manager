@@ -34,22 +34,37 @@ pub fn hide_pet_window(app: &AppHandle) -> Result<(), String> {
 }
 
 fn build_pet_window(app: &AppHandle) -> Result<WebviewWindow, String> {
-    WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         app,
         PET_WINDOW_LABEL,
         WebviewUrl::App("index.html?window=pet".into()),
     )
     .title("CCEM Desktop Pet")
     .decorations(false)
-    .transparent(true)
     .resizable(false)
     .shadow(false)
     .always_on_top(true)
     .skip_taskbar(true)
     .inner_size(PET_WINDOW_WIDTH, PET_WINDOW_HEIGHT)
-    .visible(false)
-    .build()
-    .map_err(|e| format!("build pet window: {e}"))
+    .visible(false);
+
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.transparent(true);
+
+    let window = builder
+        .build()
+        .map_err(|e| format!("build pet window: {e}"))?;
+
+    #[cfg(target_os = "macos")]
+    {
+        use tauri_plugin_decorum::WebviewWindowExt;
+
+        window
+            .make_transparent()
+            .map_err(|e| format!("make pet window transparent: {e}"))?;
+    }
+
+    Ok(window)
 }
 
 fn configure_pet_window(window: &WebviewWindow) -> Result<(), String> {

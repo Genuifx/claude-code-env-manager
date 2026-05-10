@@ -58,10 +58,7 @@ pub fn mark_pet_notification_read(
 }
 
 #[tauri::command]
-pub fn open_pet_notification(
-    app: AppHandle,
-    request: PetOpenSessionRequest,
-) -> Result<(), String> {
+pub fn open_pet_notification(app: AppHandle, request: PetOpenSessionRequest) -> Result<(), String> {
     if request.mark_read {
         mark_pet_notification_read(request.notification_id.clone())?;
         app.emit("pet-notification-read-state-updated", ())
