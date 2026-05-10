@@ -1,3 +1,5 @@
+import type { ChipSegment } from './types'
+
 export function isHTMLElement(node: Node): node is HTMLElement {
   return node instanceof HTMLElement
 }
@@ -107,6 +109,37 @@ export function getChipData(node: Node): unknown {
   const raw = node.dataset.chipData
   if (!raw) return undefined
   return safeJsonParse(raw)
+}
+
+export function createChipSegmentFromParts(
+  trigger: string | undefined,
+  value: string | undefined,
+  displayText: string | undefined,
+  data?: unknown,
+  autoResolved = false,
+): ChipSegment | null {
+  if (trigger === undefined || value === undefined || !displayText) {
+    return null
+  }
+
+  return {
+    type: 'chip',
+    trigger,
+    value,
+    displayText,
+    ...(data !== undefined ? { data } : {}),
+    ...(autoResolved ? { autoResolved: true } : {}),
+  }
+}
+
+export function readChipSegment(node: Node): ChipSegment | null {
+  return createChipSegmentFromParts(
+    getChipTrigger(node),
+    getChipValue(node),
+    getChipDisplay(node),
+    getChipData(node),
+    getChipAutoResolved(node),
+  )
 }
 
 // ---------------------------------------------------------------------------

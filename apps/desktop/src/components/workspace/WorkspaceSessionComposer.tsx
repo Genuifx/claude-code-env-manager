@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { toast } from 'sonner';
 import {
   ArrowUp,
   Box,
@@ -876,7 +877,7 @@ export function WorkspaceSessionComposer({
       const validation = validateComposerImageFile(file);
       if (!validation.valid) {
         const errorMessage = t(validation.errorKey);
-        setAttachments((prev) => prev);
+        toast.error(errorMessage);
         console.warn(`Image paste rejected: ${errorMessage}`);
         continue;
       }
@@ -892,6 +893,7 @@ export function WorkspaceSessionComposer({
         imageAttachments.push(attachment);
       } catch (error) {
         console.error('Failed to read pasted image:', error);
+        toast.error(t('workspace.composerImageReadFailed'));
       }
     }
 

@@ -32,11 +32,8 @@ import {
   isChipElement,
   isLinkElement,
   isBRElement,
-  getChipTrigger,
-  getChipValue,
-  getChipDisplay,
-  getChipData,
   getChipAutoResolved,
+  readChipSegment,
   getDirectChildContaining,
   indexOfChildNode,
   normalizeEditorDOM,
@@ -168,22 +165,9 @@ export function usePromptArea({
           segments.push({ type: 'text', text })
         }
       } else if (isChipElement(node)) {
-        // Type-safe chip reading via type guards
-        const trigger = getChipTrigger(node)
-        const chipValue = getChipValue(node)
-        const display = getChipDisplay(node)
-        const data = getChipData(node)
-
-        if (trigger && chipValue !== undefined && display) {
-          const autoResolved = getChipAutoResolved(node)
-          segments.push({
-            type: 'chip',
-            trigger,
-            value: chipValue,
-            displayText: display,
-            ...(data !== undefined ? { data } : {}),
-            ...(autoResolved ? { autoResolved: true } : {}),
-          })
+        const chip = readChipSegment(node)
+        if (chip) {
+          segments.push(chip)
         }
       } else if (isBRElement(node)) {
         if (node.dataset.sentinel) continue // skip sentinel <br>
@@ -559,21 +543,8 @@ export function usePromptArea({
           ripple.addEventListener('animationend', () => ripple.remove())
 
           if (!onChipClick) return
-          const trigger = getChipTrigger(node)
-          const chipValue = getChipValue(node)
-          const display = getChipDisplay(node)
-          const data = getChipData(node)
-
-          if (trigger && chipValue !== undefined && display) {
-            const autoResolved = getChipAutoResolved(node)
-            const chip: ChipSegment = {
-              type: 'chip',
-              trigger,
-              value: chipValue,
-              displayText: display,
-              ...(data !== undefined ? { data } : {}),
-              ...(autoResolved ? { autoResolved: true } : {}),
-            }
+          const chip = readChipSegment(node)
+          if (chip) {
             onChipClick(chip, {
               element: chipEl,
               clientX: e.clientX,
