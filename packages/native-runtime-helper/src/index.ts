@@ -17,6 +17,11 @@ import {
 } from './claudeSkills';
 import { buildPromptContentParts, type PromptImage } from './promptContent';
 import { normalizeClaudePermissionMode, normalizeCodexSandboxMode } from './permissionModes';
+import {
+  buildCodexContextUsageFromTokenCount,
+  findCodexSessionFile,
+  readLatestCodexContextUsageFromSessionFile,
+} from './codexContextUsage';
 
 type NativeProvider = 'claude' | 'codex';
 
@@ -134,9 +139,11 @@ let claudeLastSessionState: 'idle' | 'running' | 'requires_action' | null = null
 let claudeSawPartialText = false;
 let claudeSawPartialThinking = false;
 let claudeTurnCompletionEmitted = false;
+const claudeSeenMessageIds = new Set<string>();
 let claudePlanExitPromptPending = false;
 let codexClient: Codex | null = null;
 let codexThread: any = null;
+let codexLastContextUsageKey: string | null = null;
 let pendingSettings: RuntimeSettingsPatch | null = null;
 const promptQueue: Array<{ text: string; images?: PromptImage[] | null }> = [];
 const pendingPermissions = new Map<string, PermissionResolver>();
@@ -326,6 +333,7 @@ function resetClaudeTurnTracking() {
   claudeSawPartialText = false;
   claudeSawPartialThinking = false;
   claudeTurnCompletionEmitted = false;
+  claudeSeenMessageIds.clear();
 }
 
 function categorizeClaudeTool(name: string) {
@@ -876,6 +884,107 @@ function handleClaudeCompactBoundary(message: Record<string, unknown>) {
     stage: 'compact_completed',
     detail: parts.join(' '),
   });
+
+  // Emit fresh context snapshot after compaction
+  void emitClaudeContextUsage();
+}
+
+async function emitClaudeContextUsage() {
+  if (!currentClaudeQuery) return;
+  try {
+    const ctx = await currentClaudeQuery.getContextUsage();
+    emitEvent({
+      type: 'context_usage',
+      provider: 'claude',
+      used_tokens: ctx.totalTokens,
+      max_tokens: ctx.rawMaxTokens || ctx.maxTokens,
+      raw_max_tokens: ctx.rawMaxTokens,
+      percentage: ctx.rawMaxTokens
+        ? (ctx.totalTokens / ctx.rawMaxTokens) * 100
+        : ctx.percentage,
+      auto_compact_threshold: ctx.autoCompactThreshold ?? null,
+      is_auto_compact_enabled: ctx.isAutoCompactEnabled,
+      model: ctx.model,
+      categories: ctx.categories.map((c: { name: string; tokens: number }) => ({
+        name: c.name,
+        tokens: c.tokens,
+      })),
+    });
+  } catch (err) {
+    const stack = err instanceof Error ? err.stack : String(err);
+    emitEvent({
+      type: 'stderr_line',
+      line: `[context_usage] getContextUsage failed: ${stack}`,
+    });
+  }
+}
+
+function emitCodexContextUsageSnapshot(snapshot: {
+  usedTokens: number;
+  maxTokens: number;
+  percentage: number;
+  model: string;
+  categories: Array<{ name: string; tokens: number }>;
+}) {
+  const key = [
+    snapshot.usedTokens,
+    snapshot.maxTokens,
+    Math.round(snapshot.percentage * 10) / 10,
+    snapshot.model,
+  ].join(':');
+  if (key === codexLastContextUsageKey) {
+    return false;
+  }
+  codexLastContextUsageKey = key;
+
+  emitEvent({
+    type: 'context_usage',
+    provider: 'codex',
+    used_tokens: snapshot.usedTokens,
+    max_tokens: snapshot.maxTokens,
+    raw_max_tokens: snapshot.maxTokens,
+    percentage: snapshot.percentage,
+    auto_compact_threshold: null,
+    is_auto_compact_enabled: true,
+    model: snapshot.model,
+    categories: snapshot.categories,
+  });
+  return true;
+}
+
+function emitCodexContextUsageFromTokenCount(payload: Record<string, unknown>) {
+  const snapshot = buildCodexContextUsageFromTokenCount(payload);
+  if (!snapshot) return false;
+  return emitCodexContextUsageSnapshot(snapshot);
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function emitCodexContextUsageFromSessionFile(
+  providerSessionId: string | null,
+  retries = 0,
+  delayMs = 80,
+) {
+  const sessionId = providerSessionId?.trim();
+  if (!sessionId) return false;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const filePath = findCodexSessionFile(sessionId);
+    if (filePath) {
+      const snapshot = readLatestCodexContextUsageFromSessionFile(filePath);
+      if (snapshot && emitCodexContextUsageSnapshot(snapshot)) {
+        return true;
+      }
+    }
+
+    if (attempt < retries) {
+      await sleep(delayMs);
+    }
+  }
+
+  return false;
 }
 
 function handleClaudeStatusMessage(message: Record<string, unknown>) {
@@ -988,6 +1097,7 @@ function teardownClaudeSession() {
 
 function teardownCodexSession(envChanged: boolean) {
   codexThread = null;
+  codexLastContextUsageKey = null;
   if (envChanged) codexClient = null;
 }
 
@@ -1041,6 +1151,13 @@ async function consumeClaudeMessages() {
   });
   currentClaudeQuery = claudeQuery;
 
+  // Ensure the CLI's internal mainLoopModel state is initialized.
+  // Without this, getContextUsage() fails with "q.match is not a function"
+  // because the CLI's model getter returns null when set_model was never called.
+  try {
+    await claudeQuery.setModel();
+  } catch { /* non-fatal — context usage will degrade gracefully */ }
+
   try {
     for await (const message of claudeQuery) {
       const sessionId = (message as { session_id?: string } | undefined)?.session_id;
@@ -1057,6 +1174,21 @@ async function consumeClaudeMessages() {
       }
 
       if (message.type === 'assistant') {
+        // Emit token_usage per unique message (parallel tool calls share the same id)
+        const msgId = (message as { message?: { id?: string; usage?: Record<string, unknown> } }).message?.id;
+        const msgUsage = (message as { message?: { id?: string; usage?: Record<string, unknown> } }).message?.usage;
+        if (msgId && !claudeSeenMessageIds.has(msgId) && msgUsage) {
+          claudeSeenMessageIds.add(msgId);
+          emitEvent({
+            type: 'token_usage',
+            provider: 'claude',
+            input_tokens: typeof msgUsage.input_tokens === 'number' ? msgUsage.input_tokens : 0,
+            output_tokens: typeof msgUsage.output_tokens === 'number' ? msgUsage.output_tokens : 0,
+            cache_read_tokens: typeof msgUsage.cache_read_input_tokens === 'number' ? msgUsage.cache_read_input_tokens : 0,
+            cache_creation_tokens: typeof msgUsage.cache_creation_input_tokens === 'number' ? msgUsage.cache_creation_input_tokens : 0,
+          });
+        }
+
         const contentBlocks = getClaudeContentBlocks(message.message);
         const emittedThinking = new Set<string>();
         contentBlocks.forEach((block) => {
@@ -1191,6 +1323,22 @@ async function consumeClaudeMessages() {
       }
 
       if (message.type === 'result') {
+        // Emit turn-total token_usage with cost estimate
+        const resultUsage = (message as { usage?: Record<string, unknown> }).usage;
+        const totalCostUsd = (message as { total_cost_usd?: number }).total_cost_usd;
+        if (resultUsage) {
+          emitEvent({
+            type: 'token_usage',
+            provider: 'claude',
+            input_tokens: typeof resultUsage.input_tokens === 'number' ? resultUsage.input_tokens : 0,
+            output_tokens: typeof resultUsage.output_tokens === 'number' ? resultUsage.output_tokens : 0,
+            cache_read_tokens: typeof resultUsage.cache_read_input_tokens === 'number' ? resultUsage.cache_read_input_tokens : 0,
+            cache_creation_tokens: typeof resultUsage.cache_creation_input_tokens === 'number' ? resultUsage.cache_creation_input_tokens : 0,
+            total_cost_usd: typeof totalCostUsd === 'number' ? totalCostUsd : null,
+            scope: 'turn_total',
+          });
+        }
+
         if (message.subtype === 'success') {
           if (!claudeTurnCompletionEmitted) {
             claudeTurnCompletionEmitted = true;
@@ -1201,6 +1349,10 @@ async function consumeClaudeMessages() {
             });
             emitStatus('ready', 'Ready for the next prompt.');
           }
+          // Defer context usage fetch to next tick — SDK internal state may not
+          // be fully updated until after the result message is consumed.
+          await new Promise(resolve => setImmediate(resolve));
+          await emitClaudeContextUsage();
         } else {
           emitEvent({
             type: 'session_completed',
@@ -1361,6 +1513,7 @@ async function ensureCodexThread() {
 
     if (currentProviderSessionId) {
       emitSessionMeta(currentProviderSessionId);
+      await emitCodexContextUsageFromSessionFile(currentProviderSessionId);
     }
   }
 
@@ -1405,8 +1558,18 @@ async function runCodexTurn(text: string, images?: PromptImage[] | null) {
   const seenReasoningByItem = new Map<string, string>();
 
   for await (const event of streamed.events) {
+    const rawEvent = event as { type: string; payload?: Record<string, unknown> };
+    if (rawEvent.type === 'event_msg') {
+      const payload = rawEvent.payload;
+      if (payload?.type === 'token_count') {
+        emitCodexContextUsageFromTokenCount(payload);
+      }
+      continue;
+    }
+
     if (event.type === 'thread.started') {
       emitSessionMeta(event.thread_id);
+      await emitCodexContextUsageFromSessionFile(event.thread_id);
       continue;
     }
 
@@ -1425,6 +1588,15 @@ async function runCodexTurn(text: string, images?: PromptImage[] | null) {
         stage: 'turn_completed',
         detail: `Turn completed · output ${event.usage.output_tokens} tokens`,
       });
+      emitEvent({
+        type: 'token_usage',
+        provider: 'codex',
+        input_tokens: event.usage.input_tokens ?? 0,
+        output_tokens: event.usage.output_tokens ?? 0,
+        cache_read_tokens: event.usage.cached_input_tokens ?? 0,
+        cache_creation_tokens: 0,
+      });
+      await emitCodexContextUsageFromSessionFile(currentProviderSessionId, 10);
       continue;
     }
 
@@ -1568,6 +1740,9 @@ async function handleCommand(command: InputCommand) {
     currentProviderSessionId = command.provider_session_id ?? null;
     if (currentProviderSessionId) {
       emitSessionMeta(currentProviderSessionId);
+      if (command.provider === 'codex') {
+        await emitCodexContextUsageFromSessionFile(currentProviderSessionId);
+      }
     }
     emitStatus('ready', 'Native runtime helper initialized.');
     const initialText = command.initial_prompt?.trim() ?? '';

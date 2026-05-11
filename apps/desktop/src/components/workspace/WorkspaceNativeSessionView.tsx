@@ -71,6 +71,8 @@ import {
   stabilizeMessageRefs,
   type LocalUserPrompt,
 } from './workspaceEventTranscript';
+import { ContextWindowIndicator } from './ContextWindowIndicator';
+import { computeSessionUsage } from './workspaceUsage';
 
 function ProcessingActionIcon({ stopping = false }: { stopping?: boolean }) {
   return (
@@ -1013,6 +1015,8 @@ export function WorkspaceNativeSessionView({
   const scrollSettleTimeoutRef = useRef<number | null>(null);
   const prevEventCountRef = useRef(0);
   const tickInFlightRef = useRef(false);
+
+  const sessionUsage = useMemo(() => computeSessionUsage(events), [events]);
 
   useEffect(() => {
     const cachedEvents = readCachedNativeEvents(session.runtime_id);
@@ -2018,31 +2022,34 @@ export function WorkspaceNativeSessionView({
           />
         )}
         secondaryActions={(
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="h-9 w-9 rounded-full"
-                    aria-label={t('workspace.nativeOpenTerminal')}
-                    title={t('workspace.nativeOpenTerminal')}
-                    disabled={isHandingOff}
-                    onClick={() => void handleHandoff()}
-                  >
-                    {isHandingOff ? (
-                      <LoaderCircle className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <TerminalSquare className="h-4 w-4" />
-                    )}
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="top">{t('workspace.nativeOpenTerminal')}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <>
+            <ContextWindowIndicator usage={sessionUsage} />
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex">
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-9 w-9 rounded-full"
+                      aria-label={t('workspace.nativeOpenTerminal')}
+                      title={t('workspace.nativeOpenTerminal')}
+                      disabled={isHandingOff}
+                      onClick={() => void handleHandoff()}
+                    >
+                      {isHandingOff ? (
+                        <LoaderCircle className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <TerminalSquare className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top">{t('workspace.nativeOpenTerminal')}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </>
         )}
       />
     </div>

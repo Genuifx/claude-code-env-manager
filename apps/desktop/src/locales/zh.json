@@ -211,7 +211,19 @@
     "composerSkillImplicit": "隐式策略",
     "composerSkillExplicitOnly": "仅显式选择",
     "composerSkillProviderNative": "Provider 原生",
-    "composerAcceptKey": "Tab"
+    "composerAcceptKey": "Tab",
+    "contextWindowTitle": "背景信息窗口:",
+    "contextPercentUsed": "{percent} 已用",
+    "contextUsageLine": "已用 {used} token，共 {total}",
+    "contextAutoCompactEnabled": "自动压缩其背景信息",
+    "contextAutoCompactDisabled": "未自动压缩其背景信息",
+    "contextTokenFallback": "已用 {tokens} token",
+    "contextWindowUnavailable": "窗口上限暂不可用",
+    "contextUsed": "上下文占用",
+    "contextInputTokens": "输入 tokens",
+    "contextOutputTokens": "输出 tokens",
+    "contextCacheRead": "缓存读取",
+    "contextCost": "预估费用"
   },
   "sessions": {
     "subtitle": "管理运行中的 Claude Code 会话",

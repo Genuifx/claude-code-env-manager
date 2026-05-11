@@ -765,10 +765,17 @@ impl NativeRuntimeManager {
 
         let options = build_runtime_bootstrap_options(&record)?;
 
+        let start_seq = self
+            .event_log
+            .newest_seq(runtime_id)
+            .unwrap_or(None)
+            .map(|seq| seq + 1)
+            .unwrap_or(1);
+
         let handle = Arc::new(NativeSessionHandle {
             record: Mutex::new(record.clone()),
             child: Mutex::new(None),
-            events: Mutex::new(SessionStore::new(runtime_id.to_string())),
+            events: Mutex::new(SessionStore::with_start_seq(runtime_id.to_string(), start_seq)),
             helper_env_vars: options.helper_env_vars.clone(),
             terminal_env_vars: options.terminal_env_vars.clone(),
             claude_path: options.claude_path.clone(),

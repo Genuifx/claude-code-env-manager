@@ -16072,9 +16072,9 @@ var Codex = class {
 
 // src/index.ts
 import { createInterface } from "node:readline";
-import fs2 from "node:fs";
-import os3 from "node:os";
-import path4 from "node:path";
+import fs3 from "node:fs";
+import os4 from "node:os";
+import path5 from "node:path";
 import process3 from "node:process";
 
 // src/claudeEnv.ts
@@ -16348,6 +16348,166 @@ function buildPromptContentParts(text, images) {
   return parts;
 }
 
+// src/codexContextUsage.ts
+import fs2 from "node:fs";
+import os3 from "node:os";
+import path4 from "node:path";
+var TAIL_BYTES = 512 * 1024;
+function asRecord2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
+}
+function finiteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+function usageTotalTokens(value) {
+  const usage = asRecord2(value);
+  if (!usage) return null;
+  const total = finiteNumber(usage.total_tokens);
+  if (total !== null && total >= 0) {
+    return total;
+  }
+  const input = finiteNumber(usage.input_tokens) ?? 0;
+  const output = finiteNumber(usage.output_tokens) ?? 0;
+  const totalFromParts = input + output;
+  return totalFromParts > 0 ? totalFromParts : null;
+}
+function usageCategoryTokens(value, key) {
+  const usage = asRecord2(value);
+  return Math.max(0, finiteNumber(usage?.[key]) ?? 0);
+}
+function buildCodexContextUsageFromTokenCount(payload, fallbackModel = "codex") {
+  if (payload.type !== "token_count") {
+    return null;
+  }
+  const info = asRecord2(payload.info);
+  const lastUsage = info ? asRecord2(info.last_token_usage) : null;
+  if (!info || !lastUsage) {
+    return null;
+  }
+  const maxTokens = finiteNumber(info.model_context_window) ?? finiteNumber(payload.model_context_window);
+  const usedTokens = usageTotalTokens(lastUsage);
+  if (maxTokens === null || maxTokens <= 0 || usedTokens === null) {
+    return null;
+  }
+  const inputTokens = usageCategoryTokens(lastUsage, "input_tokens");
+  const outputTokens = usageCategoryTokens(lastUsage, "output_tokens");
+  const categories = [
+    inputTokens > 0 ? { name: "input", tokens: inputTokens } : null,
+    outputTokens > 0 ? { name: "output", tokens: outputTokens } : null
+  ].filter((category) => Boolean(category));
+  return {
+    usedTokens,
+    maxTokens,
+    percentage: usedTokens / maxTokens * 100,
+    model: typeof info.model === "string" && info.model.trim() ? info.model.trim() : fallbackModel,
+    categories
+  };
+}
+function resolveCodexSessionsRoot(env = process.env) {
+  const codexHome = env.CODEX_HOME?.trim() || path4.join(os3.homedir(), ".codex");
+  return path4.join(codexHome, "sessions");
+}
+function looksLikeUuid(value) {
+  return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(value);
+}
+function scanDirectoryForSessionFile(dir, sessionId, recursive) {
+  let entries;
+  try {
+    entries = fs2.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  for (const entry of entries) {
+    const entryPath = path4.join(dir, entry.name);
+    if (entry.isFile() && entry.name.endsWith(".jsonl") && entry.name.includes(sessionId)) {
+      return entryPath;
+    }
+  }
+  if (!recursive) {
+    return null;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const match = scanDirectoryForSessionFile(path4.join(dir, entry.name), sessionId, true);
+    if (match) {
+      return match;
+    }
+  }
+  return null;
+}
+function recentSessionDirs(root, days = 7) {
+  const dirs = [];
+  for (let offset = 0; offset < days; offset++) {
+    const date = new Date(Date.now() - offset * 24 * 60 * 60 * 1e3);
+    const yyyy = String(date.getFullYear());
+    const mm = String(date.getMonth() + 1).padStart(2, "0");
+    const dd = String(date.getDate()).padStart(2, "0");
+    dirs.push(path4.join(root, yyyy, mm, dd));
+  }
+  return dirs;
+}
+function findCodexSessionFile(sessionId, sessionsRoot = resolveCodexSessionsRoot()) {
+  const trimmed = sessionId.trim();
+  if (!trimmed || !looksLikeUuid(trimmed)) {
+    return null;
+  }
+  for (const dir of recentSessionDirs(sessionsRoot)) {
+    const match = scanDirectoryForSessionFile(dir, trimmed, false);
+    if (match) {
+      return match;
+    }
+  }
+  return scanDirectoryForSessionFile(sessionsRoot, trimmed, true);
+}
+function readTailLines(filePath) {
+  const stat = fs2.statSync(filePath);
+  const length = Math.min(stat.size, TAIL_BYTES);
+  const start = Math.max(0, stat.size - length);
+  const fd2 = fs2.openSync(filePath, "r");
+  try {
+    const buffer = Buffer.alloc(length);
+    fs2.readSync(fd2, buffer, 0, length, start);
+    const text = buffer.toString("utf8");
+    const lines = text.split(/\r?\n/).filter((line) => line.trim());
+    return start > 0 ? lines.slice(1) : lines;
+  } finally {
+    fs2.closeSync(fd2);
+  }
+}
+function readLatestCodexContextUsageFromSessionFile(filePath) {
+  let currentModel = "codex";
+  let latest = null;
+  for (const line of readTailLines(filePath)) {
+    let parsed;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const payload = asRecord2(parsed.payload);
+    if (!payload) {
+      continue;
+    }
+    if (parsed.type === "session_meta" || parsed.type === "turn_context") {
+      const model = typeof payload.model === "string" ? payload.model.trim() : "";
+      if (model) {
+        currentModel = model;
+      }
+      continue;
+    }
+    if (parsed.type !== "event_msg") {
+      continue;
+    }
+    const snapshot = buildCodexContextUsageFromTokenCount(payload, currentModel);
+    if (snapshot) {
+      latest = snapshot;
+    }
+  }
+  return latest;
+}
+
 // src/index.ts
 var initCommand = null;
 var stopped = false;
@@ -16361,9 +16521,11 @@ var claudeLastSessionState = null;
 var claudeSawPartialText = false;
 var claudeSawPartialThinking = false;
 var claudeTurnCompletionEmitted = false;
+var claudeSeenMessageIds = /* @__PURE__ */ new Set();
 var claudePlanExitPromptPending = false;
 var codexClient = null;
 var codexThread = null;
+var codexLastContextUsageKey = null;
 var pendingSettings = null;
 var promptQueue = [];
 var pendingPermissions = /* @__PURE__ */ new Map();
@@ -16485,6 +16647,7 @@ function resetClaudeTurnTracking() {
   claudeSawPartialText = false;
   claudeSawPartialThinking = false;
   claudeTurnCompletionEmitted = false;
+  claudeSeenMessageIds.clear();
 }
 function categorizeClaudeTool(name) {
   if (name.includes("AskUser") || name.includes("Question")) {
@@ -16862,6 +17025,84 @@ function handleClaudeCompactBoundary(message) {
     stage: "compact_completed",
     detail: parts.join(" ")
   });
+  void emitClaudeContextUsage();
+}
+async function emitClaudeContextUsage() {
+  if (!currentClaudeQuery) return;
+  try {
+    const ctx = await currentClaudeQuery.getContextUsage();
+    emitEvent({
+      type: "context_usage",
+      provider: "claude",
+      used_tokens: ctx.totalTokens,
+      max_tokens: ctx.rawMaxTokens || ctx.maxTokens,
+      raw_max_tokens: ctx.rawMaxTokens,
+      percentage: ctx.rawMaxTokens ? ctx.totalTokens / ctx.rawMaxTokens * 100 : ctx.percentage,
+      auto_compact_threshold: ctx.autoCompactThreshold ?? null,
+      is_auto_compact_enabled: ctx.isAutoCompactEnabled,
+      model: ctx.model,
+      categories: ctx.categories.map((c) => ({
+        name: c.name,
+        tokens: c.tokens
+      }))
+    });
+  } catch (err) {
+    const stack = err instanceof Error ? err.stack : String(err);
+    emitEvent({
+      type: "stderr_line",
+      line: `[context_usage] getContextUsage failed: ${stack}`
+    });
+  }
+}
+function emitCodexContextUsageSnapshot(snapshot) {
+  const key = [
+    snapshot.usedTokens,
+    snapshot.maxTokens,
+    Math.round(snapshot.percentage * 10) / 10,
+    snapshot.model
+  ].join(":");
+  if (key === codexLastContextUsageKey) {
+    return false;
+  }
+  codexLastContextUsageKey = key;
+  emitEvent({
+    type: "context_usage",
+    provider: "codex",
+    used_tokens: snapshot.usedTokens,
+    max_tokens: snapshot.maxTokens,
+    raw_max_tokens: snapshot.maxTokens,
+    percentage: snapshot.percentage,
+    auto_compact_threshold: null,
+    is_auto_compact_enabled: true,
+    model: snapshot.model,
+    categories: snapshot.categories
+  });
+  return true;
+}
+function emitCodexContextUsageFromTokenCount(payload) {
+  const snapshot = buildCodexContextUsageFromTokenCount(payload);
+  if (!snapshot) return false;
+  return emitCodexContextUsageSnapshot(snapshot);
+}
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+async function emitCodexContextUsageFromSessionFile(providerSessionId, retries = 0, delayMs = 80) {
+  const sessionId = providerSessionId?.trim();
+  if (!sessionId) return false;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const filePath = findCodexSessionFile(sessionId);
+    if (filePath) {
+      const snapshot = readLatestCodexContextUsageFromSessionFile(filePath);
+      if (snapshot && emitCodexContextUsageSnapshot(snapshot)) {
+        return true;
+      }
+    }
+    if (attempt < retries) {
+      await sleep(delayMs);
+    }
+  }
+  return false;
 }
 function handleClaudeStatusMessage(message) {
   const compactResult = message.compact_result;
@@ -16955,6 +17196,7 @@ function teardownClaudeSession() {
 }
 function teardownCodexSession(envChanged) {
   codexThread = null;
+  codexLastContextUsageKey = null;
   if (envChanged) codexClient = null;
 }
 async function consumeClaudeMessages() {
@@ -17005,6 +17247,10 @@ async function consumeClaudeMessages() {
   });
   currentClaudeQuery = claudeQuery;
   try {
+    await claudeQuery.setModel();
+  } catch {
+  }
+  try {
     for await (const message of claudeQuery) {
       const sessionId = message?.session_id;
       if (sessionId) {
@@ -17018,6 +17264,19 @@ async function consumeClaudeMessages() {
         continue;
       }
       if (message.type === "assistant") {
+        const msgId = message.message?.id;
+        const msgUsage = message.message?.usage;
+        if (msgId && !claudeSeenMessageIds.has(msgId) && msgUsage) {
+          claudeSeenMessageIds.add(msgId);
+          emitEvent({
+            type: "token_usage",
+            provider: "claude",
+            input_tokens: typeof msgUsage.input_tokens === "number" ? msgUsage.input_tokens : 0,
+            output_tokens: typeof msgUsage.output_tokens === "number" ? msgUsage.output_tokens : 0,
+            cache_read_tokens: typeof msgUsage.cache_read_input_tokens === "number" ? msgUsage.cache_read_input_tokens : 0,
+            cache_creation_tokens: typeof msgUsage.cache_creation_input_tokens === "number" ? msgUsage.cache_creation_input_tokens : 0
+          });
+        }
         const contentBlocks = getClaudeContentBlocks(message.message);
         const emittedThinking = /* @__PURE__ */ new Set();
         contentBlocks.forEach((block) => {
@@ -17132,6 +17391,20 @@ async function consumeClaudeMessages() {
         continue;
       }
       if (message.type === "result") {
+        const resultUsage = message.usage;
+        const totalCostUsd = message.total_cost_usd;
+        if (resultUsage) {
+          emitEvent({
+            type: "token_usage",
+            provider: "claude",
+            input_tokens: typeof resultUsage.input_tokens === "number" ? resultUsage.input_tokens : 0,
+            output_tokens: typeof resultUsage.output_tokens === "number" ? resultUsage.output_tokens : 0,
+            cache_read_tokens: typeof resultUsage.cache_read_input_tokens === "number" ? resultUsage.cache_read_input_tokens : 0,
+            cache_creation_tokens: typeof resultUsage.cache_creation_input_tokens === "number" ? resultUsage.cache_creation_input_tokens : 0,
+            total_cost_usd: typeof totalCostUsd === "number" ? totalCostUsd : null,
+            scope: "turn_total"
+          });
+        }
         if (message.subtype === "success") {
           if (!claudeTurnCompletionEmitted) {
             claudeTurnCompletionEmitted = true;
@@ -17142,6 +17415,8 @@ async function consumeClaudeMessages() {
             });
             emitStatus("ready", "Ready for the next prompt.");
           }
+          await new Promise((resolve) => setImmediate(resolve));
+          await emitClaudeContextUsage();
         } else {
           emitEvent({
             type: "session_completed",
@@ -17284,6 +17559,7 @@ async function ensureCodexThread() {
     codexThread = currentProviderSessionId ? codexClient.resumeThread(currentProviderSessionId, threadOptions) : codexClient.startThread(threadOptions);
     if (currentProviderSessionId) {
       emitSessionMeta(currentProviderSessionId);
+      await emitCodexContextUsageFromSessionFile(currentProviderSessionId);
     }
   }
   return codexThread;
@@ -17295,8 +17571,8 @@ async function runCodexTurn(text, images) {
   const parts = buildPromptContentParts(text, images);
   const hasImages = parts.some((part) => part.type === "image");
   if (hasImages) {
-    const tempDir = path4.join(os3.tmpdir(), "ccem-images");
-    fs2.mkdirSync(tempDir, { recursive: true });
+    const tempDir = path5.join(os4.tmpdir(), "ccem-images");
+    fs3.mkdirSync(tempDir, { recursive: true });
     const inputParts = [];
     for (const part of parts) {
       if (part.type === "text") {
@@ -17305,8 +17581,8 @@ async function runCodexTurn(text, images) {
       }
       const ext = part.image.mediaType.split("/")[1] || "png";
       const filename = `paste-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
-      const filePath = path4.join(tempDir, filename);
-      fs2.writeFileSync(filePath, Buffer.from(part.image.base64Data, "base64"));
+      const filePath = path5.join(tempDir, filename);
+      fs3.writeFileSync(filePath, Buffer.from(part.image.base64Data, "base64"));
       inputParts.push({ type: "local_image", path: filePath });
     }
     input = inputParts;
@@ -17319,8 +17595,17 @@ async function runCodexTurn(text, images) {
   const seenTextByItem = /* @__PURE__ */ new Map();
   const seenReasoningByItem = /* @__PURE__ */ new Map();
   for await (const event of streamed.events) {
+    const rawEvent = event;
+    if (rawEvent.type === "event_msg") {
+      const payload = rawEvent.payload;
+      if (payload?.type === "token_count") {
+        emitCodexContextUsageFromTokenCount(payload);
+      }
+      continue;
+    }
     if (event.type === "thread.started") {
       emitSessionMeta(event.thread_id);
+      await emitCodexContextUsageFromSessionFile(event.thread_id);
       continue;
     }
     if (event.type === "turn.started") {
@@ -17337,6 +17622,15 @@ async function runCodexTurn(text, images) {
         stage: "turn_completed",
         detail: `Turn completed \xB7 output ${event.usage.output_tokens} tokens`
       });
+      emitEvent({
+        type: "token_usage",
+        provider: "codex",
+        input_tokens: event.usage.input_tokens ?? 0,
+        output_tokens: event.usage.output_tokens ?? 0,
+        cache_read_tokens: event.usage.cached_input_tokens ?? 0,
+        cache_creation_tokens: 0
+      });
+      await emitCodexContextUsageFromSessionFile(currentProviderSessionId, 10);
       continue;
     }
     if (event.type === "turn.failed") {
@@ -17467,6 +17761,9 @@ async function handleCommand(command) {
     currentProviderSessionId = command.provider_session_id ?? null;
     if (currentProviderSessionId) {
       emitSessionMeta(currentProviderSessionId);
+      if (command.provider === "codex") {
+        await emitCodexContextUsageFromSessionFile(currentProviderSessionId);
+      }
     }
     emitStatus("ready", "Native runtime helper initialized.");
     const initialText = command.initial_prompt?.trim() ?? "";
