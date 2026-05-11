@@ -48,6 +48,14 @@ const SettingsPage = lazy(async () =>
   import('@/pages/Settings').then((m) => ({ default: m.Settings }))
 );
 
+const PERMISSION_MODE_NAMES: PermissionModeName[] = ['yolo', 'dev', 'readonly', 'safe', 'ci', 'audit'];
+
+function normalizeAppPermissionMode(value: unknown): PermissionModeName | null {
+  return typeof value === 'string' && (PERMISSION_MODE_NAMES as string[]).includes(value)
+    ? value as PermissionModeName
+    : null;
+}
+
 function calculateContinuousUsageDays(dailyHistory: UsageStats['dailyHistory']): number {
   const date = new Date();
   date.setHours(0, 0, 0, 0);
@@ -76,11 +84,12 @@ function App() {
   const lastFocusSyncAtRef = useRef(0);
   const [, startTransition] = useTransition();
 
-  const { setEnvironments, setCurrentEnv, setPermissionMode, setUsageStats, setContinuousUsageDays, setCompanion, environments, launchClient, error, setError } = useAppStore(
+  const { setEnvironments, setCurrentEnv, setPermissionMode, setDefaultMode, setUsageStats, setContinuousUsageDays, setCompanion, environments, launchClient, error, setError } = useAppStore(
     (state) => ({
       setEnvironments: state.setEnvironments,
       setCurrentEnv: state.setCurrentEnv,
       setPermissionMode: state.setPermissionMode,
+      setDefaultMode: state.setDefaultMode,
       setUsageStats: state.setUsageStats,
       setContinuousUsageDays: state.setContinuousUsageDays,
       setCompanion: state.setCompanion,
@@ -252,6 +261,30 @@ function App() {
   }, [navigateToTab, setCurrentEnv, setPermissionMode]);
 
   const refreshCriticalData = useCallback(async () => {
+    const settingsPromise = invoke<{ defaultMode: string | null }>('get_settings')
+      .then((settings) => {
+        const defaultMode = normalizeAppPermissionMode(settings.defaultMode);
+        if (defaultMode) {
+          setDefaultMode(defaultMode);
+          setPermissionMode(defaultMode);
+        }
+      })
+      .catch(() => {
+        const saved = localStorage.getItem('ccem-settings');
+        if (!saved) {
+          return;
+        }
+        try {
+          const settings = JSON.parse(saved) as { defaultMode?: unknown };
+          const defaultMode = normalizeAppPermissionMode(settings.defaultMode);
+          if (defaultMode) {
+            setDefaultMode(defaultMode);
+            setPermissionMode(defaultMode);
+          }
+        } catch {
+          // Ignore corrupt local fallback settings.
+        }
+      });
     const envPromise = loadEnvironments().catch(() => {
       // Fallback to presets if Tauri is not available (dev mode)
       const envList: Environment[] = Object.entries(ENV_PRESETS).map(([name, config]) => ({
@@ -277,6 +310,7 @@ function App() {
     });
 
     await Promise.allSettled([
+      settingsPromise,
       envPromise,
       currentEnvPromise,
     ]);
@@ -285,6 +319,8 @@ function App() {
     loadCurrentEnv,
     setEnvironments,
     setCurrentEnv,
+    setDefaultMode,
+    setPermissionMode,
   ]);
 
   const refreshDeferredData = useCallback(async () => {
