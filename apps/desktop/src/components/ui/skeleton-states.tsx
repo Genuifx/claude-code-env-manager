@@ -61,45 +61,44 @@ export function WorkspaceSkeleton() {
 
 export function SessionsSkeleton() {
   return (
-    <div className="animate-pulse space-y-6">
-      {/* Hero Card */}
-      <div className="stat-card glass-noise p-5">
-        <div className="flex items-center justify-between">
-          <div>
-            <Bone className="h-8 w-32 mb-1.5" />
-            <Bone className="h-4 w-24" />
-          </div>
-          <div className="flex items-center gap-2">
-            <Bone className="h-8 w-20 rounded-lg" />
-            <Bone className="h-9 w-28 rounded-lg" />
-            <Bone className="h-8 w-24 rounded-lg" />
-          </div>
+    <div className="flex flex-col h-full animate-pulse">
+      {/* Frosted toolbar skeleton */}
+      <div className="h-[52px] flex items-center justify-between px-5 border-b border-[hsl(var(--border-subtle))]">
+        <div className="flex items-center gap-2.5">
+          <Bone className="h-5 w-16" />
+          <Bone className="h-5 w-5 rounded-full" />
+        </div>
+        <div className="flex items-center gap-2">
+          <Bone className="h-7 w-16 rounded-full" />
+          <Bone className="h-7 w-20 rounded-full" />
+          <Bone className="h-8 w-24 rounded-full" />
         </div>
       </div>
 
-      {/* Sessions Card */}
-      <Card className="p-4">
-        <Bone className="h-4 w-36 mb-4" />
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* Content skeleton */}
+      <div className="flex-1 px-5 py-5">
+        <Bone className="h-4 w-28 mb-4" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {[1, 2, 3].map((i) => (
-            <Card key={i} className="p-4">
-              <div className="flex items-center gap-3 mb-3">
+            <div key={i} className="rounded-[18px] border border-[hsl(var(--border-subtle))] p-5">
+              <div className="flex items-center gap-2.5 mb-3">
+                <Bone className="h-[7px] w-[7px] rounded-full" />
+                <Bone className="h-4 w-28" />
+              </div>
+              <div className="flex items-center gap-2 mb-2.5">
                 <Bone className="h-3 w-3 rounded-full" />
-                <Bone className="h-5 w-32" />
+                <Bone className="h-3 w-20" />
+                <Bone className="h-3 w-12" />
               </div>
-              <div className="flex gap-2 mb-3">
-                <Bone className="h-5 w-16 rounded-full" />
-                <Bone className="h-5 w-20 rounded-full" />
+              <Bone className="h-3 w-full mb-4" />
+              <div className="pt-3 border-t border-[hsl(var(--border-subtle))] flex items-center gap-2">
+                <Bone className="h-[30px] w-16 rounded-full" />
+                <Bone className="h-[34px] w-[34px] rounded-full" />
               </div>
-              <Bone className="h-4 w-full mb-3" />
-              <div className="flex gap-2">
-                <Bone className="h-8 w-20" />
-                <Bone className="h-8 w-20" />
-              </div>
-            </Card>
+            </div>
           ))}
         </div>
-      </Card>
+      </div>
     </div>
   );
 }

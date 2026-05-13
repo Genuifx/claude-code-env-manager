@@ -1,8 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { LayoutGrid, List, Minimize2, Plus, Terminal, X, FolderOpen, Globe, Shield } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { LaunchButton } from '@/components/ui/LaunchButton';
-import { Card } from '@/components/ui/card';
 import { ProjectPickerModal } from '@/components/workspace/ProjectPickerModal';
 import {
   Select,
@@ -11,7 +8,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { EmptyState } from '@/components/ui/EmptyState';
 import {
   SessionCard,
   SessionList,
@@ -647,229 +643,239 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   // Total count for display (merged)
   const totalDisplayCount = totalCount;
 
+
   // Show skeleton when sessions are loading
   if (isLoadingSessions && !sessions.length && !unifiedSessions.length) {
     return <SessionsSkeleton />;
   }
 
   return (
-    <div className="page-transition-enter space-y-6">
-      {/* Hero Card */}
-      <div className="stat-card glass-noise p-4 sm:p-5">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:justify-between">
-          {/* View Mode Toggle - Left side */}
-          <div className="flex items-center gap-0.5 p-0.5 rounded-lg glass-subtle w-fit">
+    <div className="flex flex-col h-full">
+      {/* Frosted toolbar */}
+      <header className="sticky top-0 z-10 h-[52px] flex items-center justify-between px-5 backdrop-blur-xl bg-[hsl(var(--surface-base))]/80 border-b border-[hsl(var(--border-subtle))]">
+        {/* Left: title + count */}
+        <div className="flex items-center gap-2.5">
+          <h1 className="text-[17px] font-semibold tracking-[-0.02em] text-foreground">
+            {t('sessions.title')}
+          </h1>
+          {totalDisplayCount > 0 && (
+            <span className="inline-flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-primary/10 text-primary text-[12px] font-medium">
+              {totalDisplayCount}
+            </span>
+          )}
+        </div>
+
+        {/* Right: controls */}
+        <div className="flex items-center gap-2">
+          {/* View toggle */}
+          <div className="flex items-center gap-0.5 p-0.5 rounded-full bg-[hsl(var(--surface-raised))] border border-[hsl(var(--border-subtle))]">
+            <button
+              type="button"
+              onClick={() => setViewMode('card')}
+              className={`h-7 w-7 rounded-full flex items-center justify-center transition-all duration-150 ${
+                effectiveViewMode === 'card'
+                  ? 'bg-primary/10 text-primary'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('list')}
+              disabled={hasUnifiedOnlyInView}
+              className={`h-7 w-7 rounded-full flex items-center justify-center transition-all duration-150 ${
+                effectiveViewMode === 'list'
+                  ? 'bg-primary/10 text-primary'
+                  : hasUnifiedOnlyInView
+                    ? 'text-muted-foreground/30 cursor-not-allowed'
+                    : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <List className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Env selector */}
+          <Select value={currentEnv} onValueChange={switchEnvironment}>
+            <SelectTrigger variant="badge" badgeColor={getEnvColorVar(currentEnv)} className="hover:bg-[hsl(var(--surface-raised))]">
+              <Globe className="w-3.5 h-3.5" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {environments.map(env => (
+                <SelectItem key={env.name} value={env.name}>{env.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Permission selector */}
+          <Select value={permissionMode} onValueChange={(v) => setPermissionMode(v as PermissionModeName)}>
+            <SelectTrigger variant="badge" badgeColor="var(--chart-4)" className="hover:bg-[hsl(var(--surface-raised))]">
+              <Shield className="w-3.5 h-3.5" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.keys(PERMISSION_PRESETS).map((mode) => (
+                <SelectItem key={mode} value={mode}>{mode}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Directory button */}
+          <button
+            type="button"
+            onClick={() => setShowProjectPicker(true)}
+            className="rounded-full border border-[hsl(var(--border-subtle))] px-3 py-2 text-[13px] hover:bg-[hsl(var(--surface-raised))] active:scale-95 transition-all flex items-center gap-1.5"
+          >
+            <FolderOpen className="w-3.5 h-3.5 text-muted-foreground" />
+            <span className="hidden sm:inline font-mono text-xs max-w-[100px] truncate text-muted-foreground">
+              {launchDirDisplay || t('workspace.selectDir')}
+            </span>
+          </button>
+
+          {/* New Session pill */}
+          <button
+            type="button"
+            onClick={handleLaunchClick}
+            className={`bg-primary text-white rounded-full px-4 py-2 text-[14px] font-medium hover:bg-primary/90 active:scale-95 transition-all flex items-center gap-1.5${launched ? ' opacity-90' : ''}`}
+          >
+            <Plus className="w-4 h-4" />
+            {t('sessions.newSession')}
+          </button>
+
+          {/* Multi-Launch */}
+          <SessionLauncherPopover
+            open={launcherOpen}
+            onOpenChange={setLauncherOpen}
+            onLaunchMulti={handleMultiLaunch}
+            onBrowseAndLaunch={handleBrowseAndLaunch}
+            isLaunching={isMultiLaunching}
+            trigger={
               <button
                 type="button"
-                onClick={() => setViewMode('card')}
-                className={`h-7 w-7 rounded-md flex items-center justify-center transition-all duration-150 ${
-                  effectiveViewMode === 'card'
-                    ? 'seg-active text-foreground'
-                    : 'text-muted-foreground seg-hover hover:text-foreground'
-                }`}
+                className="rounded-full border border-[hsl(var(--border-subtle))] px-3 py-2 text-[13px] hover:bg-[hsl(var(--surface-raised))] active:scale-95 transition-all flex items-center gap-1.5"
               >
                 <LayoutGrid className="w-3.5 h-3.5" />
+                {t('sessions.multiLaunch')}
               </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('list')}
-                disabled={hasUnifiedOnlyInView}
-                className={`h-7 w-7 rounded-md flex items-center justify-center transition-all duration-150 ${
-                  effectiveViewMode === 'list'
-                    ? 'seg-active text-foreground'
-                    : hasUnifiedOnlyInView
-                      ? 'text-muted-foreground/30 cursor-not-allowed'
-                      : 'text-muted-foreground seg-hover hover:text-foreground'
-                }`}
-              >
-                <List className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-          {/* Right side toolbar */}
-          <div className="flex items-center flex-wrap gap-2">
-            {/* Directory selector */}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowProjectPicker(true)}
-              className="glass-btn-outline"
-            >
-              <FolderOpen className="w-4 h-4" />
-              <span className="hidden sm:inline font-mono text-xs max-w-[140px] truncate">
-                {launchDirDisplay || t('workspace.selectDir')}
-              </span>
-            </Button>
-
-            {/* Env + Perm selectors */}
-            <span className="hidden sm:inline text-muted-foreground/20 text-xs select-none">·</span>
-
-            <Select value={currentEnv} onValueChange={switchEnvironment}>
-              <SelectTrigger variant="badge" badgeColor={getEnvColorVar(currentEnv)} className="hover:bg-white/[0.08]">
-                <Globe className="w-3.5 h-3.5" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {environments.map(env => (
-                  <SelectItem key={env.name} value={env.name}>{env.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <span className="hidden sm:inline text-muted-foreground/20 text-xs select-none">·</span>
-
-            <Select value={permissionMode} onValueChange={(v) => setPermissionMode(v as PermissionModeName)}>
-              <SelectTrigger variant="badge" badgeColor="var(--chart-4)" className="hover:bg-white/[0.08]">
-                <Shield className="w-3.5 h-3.5" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.keys(PERMISSION_PRESETS).map((mode) => (
-                  <SelectItem key={mode} value={mode}>{mode}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            {/* New Session — 3D launch button */}
-            <LaunchButton
-              onClick={handleLaunchClick}
-              launched={launched}
-              size="md"
-              icon={<Plus className="w-4 h-4" />}
-            >
-              {t('sessions.newSession')}
-            </LaunchButton>
-
-            {/* Multi-Launch — opens popover */}
-            <SessionLauncherPopover
-              open={launcherOpen}
-              onOpenChange={setLauncherOpen}
-              onLaunchMulti={handleMultiLaunch}
-              onBrowseAndLaunch={handleBrowseAndLaunch}
-              isLaunching={isMultiLaunching}
-              trigger={
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="glass-btn-outline"
-                >
-                  <LayoutGrid className="w-4 h-4" />
-                  {t('sessions.multiLaunch')}
-                </Button>
-              }
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Arrange Banner — shown when running >= 2 */}
-      {externalRunningCount >= 2 && (
-        <div>
-          <ArrangeBanner
-            runningCount={externalRunningCount}
-            onArrange={handleArrange}
-            isArranging={isArranging}
-            arrangeStatus={arrangeStatus}
-            selectedLayout={selectedLayout}
-            onSelectLayout={(layout) => setArrangeLayout(layout)}
-            onMinimizeAll={handleMinimizeAll}
-            onCloseAll={() => setShowCloseAllDialog(true)}
+            }
           />
         </div>
-      )}
+      </header>
 
-      {/* Sessions Display */}
-      <div className="space-y-4">
-        {totalDisplayCount === 0 ? (
-          <Card className="p-4">
-            <div className="py-8">
-              <EmptyState
-                icon={Terminal}
-                message={t('sessions.noActiveSessions')}
-                action={t('sessions.launchClaudeCode')}
-                onAction={onLaunch}
-              />
-              <p className="text-xs text-muted-foreground text-center -mt-8">
-                {t('sessions.detectionNote')}
-              </p>
-            </div>
-          </Card>
-        ) : (
-          <>
-            <Card className="p-4">
-              <h3 className="text-sm font-medium text-muted-foreground mb-4">
-                {t('sessions.activeSessions')} ({totalDisplayCount})
-              </h3>
-
-              {effectiveViewMode === 'card' ? (
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-                  {filteredSessions.map((item) => (
-                    <SessionCard
-                      key={item.session.id}
-                      session={item.session}
-                      unifiedSession={item.unifiedSession}
-                      terminalOptions={tmuxAttachTerminals}
-                      onMenuIntent={ensureTmuxAttachTerminalsLoaded}
-                      onFocus={handleFocus}
-                      onOpenInTerminal={handleOpenInTerminal}
-                      onMinimize={handleMinimize}
-                      onClose={handleRequestClose}
-                      onStop={handleStopUnified}
-                      onRemove={handleRemoveHeadless}
-                      onDisconnectChannel={handleDisconnectChannel}
-                      confirmingClose={confirmingId === item.session.id}
-                      onCancelClose={handleCancelClose}
-                      onConfirmClose={handleConfirmClose}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <SessionList
-                  sessions={filteredSessions.map(item => item.session)}
-                  terminalOptions={tmuxAttachTerminals}
-                  onMenuIntent={ensureTmuxAttachTerminalsLoaded}
-                  onFocus={handleFocus}
-                  onOpenInTerminal={handleOpenInTerminal}
-                  onMinimize={handleMinimize}
-                  onClose={handleRequestClose}
-                  confirmingId={confirmingId}
-                  onCancelClose={handleCancelClose}
-                  onConfirmClose={handleConfirmClose}
-                />
-              )}
-
-              {/* Card footer: Minimize All / Close All */}
-              {(() => {
-                // ArrangeBanner already provides Close All when externalRunningCount >= 2
-                const arrangeBannerVisible = externalRunningCount >= 2;
-                // Show footer when there are sessions but ArrangeBanner is not handling it
-                const hasAnySessions = mergedSessions.length > 0;
-                if (arrangeBannerVisible || !hasAnySessions) return null;
-
-                return (
-                  <div className="mt-4 pt-3 flex items-center gap-2 glass-divider-top">
-                    {externalRunningCount > 0 && (
-                      <Button size="sm" variant="ghost" onClick={handleMinimizeAll} className="glass-ghost-hover">
-                        <Minimize2 className="mr-1 h-3.5 w-3.5" />
-                        {t('sessions.minimizeAll')}
-                      </Button>
-                    )}
-                    <Button size="sm" variant="ghost" onClick={() => setShowCloseAllDialog(true)} className="glass-ghost-hover">
-                      <X className="mr-1 h-3.5 w-3.5" />
-                      {t('sessions.closeAll')}
-                    </Button>
-                  </div>
-                );
-              })()}
-            </Card>
-          </>
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto px-5 py-5">
+        {/* Arrange Banner */}
+        {externalRunningCount >= 2 && (
+          <div className="mb-5">
+            <ArrangeBanner
+              runningCount={externalRunningCount}
+              onArrange={handleArrange}
+              isArranging={isArranging}
+              arrangeStatus={arrangeStatus}
+              selectedLayout={selectedLayout}
+              onSelectLayout={(layout) => setArrangeLayout(layout)}
+              onMinimizeAll={handleMinimizeAll}
+              onCloseAll={() => setShowCloseAllDialog(true)}
+            />
+          </div>
         )}
+
+        {/* Recovery candidates */}
         {showRecoveryCandidates ? (
-          <Suspense fallback={null}>
-            <LazyRecoveryCandidatesPanel />
-          </Suspense>
+          <div className="mb-5">
+            <Suspense fallback={null}>
+              <LazyRecoveryCandidatesPanel />
+            </Suspense>
+          </div>
         ) : null}
-        {/* HeadlessSessionsPanel removed - unified view */}
+
+        {/* Empty state OR session grid */}
+        {totalDisplayCount === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20">
+            <Terminal className="w-12 h-12 text-muted-foreground/40 mb-4" />
+            <p className="text-[17px] font-medium text-foreground mb-2">
+              {t('sessions.noActiveSessions')}
+            </p>
+            <p className="text-[13px] text-muted-foreground">
+              {t('sessions.detectionNote')}
+            </p>
+          </div>
+        ) : (
+          <div>
+            <h3 className="text-[13px] font-medium text-muted-foreground tracking-[-0.01em] uppercase mb-4">
+              {t('sessions.activeSessions')}
+            </h3>
+
+            {effectiveViewMode === 'card' ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {filteredSessions.map((item) => (
+                  <SessionCard
+                    key={item.session.id}
+                    session={item.session}
+                    unifiedSession={item.unifiedSession}
+                    terminalOptions={tmuxAttachTerminals}
+                    onMenuIntent={ensureTmuxAttachTerminalsLoaded}
+                    onFocus={handleFocus}
+                    onOpenInTerminal={handleOpenInTerminal}
+                    onMinimize={handleMinimize}
+                    onClose={handleRequestClose}
+                    onStop={handleStopUnified}
+                    onRemove={handleRemoveHeadless}
+                    onDisconnectChannel={handleDisconnectChannel}
+                    confirmingClose={confirmingId === item.session.id}
+                    onCancelClose={handleCancelClose}
+                    onConfirmClose={handleConfirmClose}
+                  />
+                ))}
+              </div>
+            ) : (
+              <SessionList
+                sessions={filteredSessions.map(item => item.session)}
+                terminalOptions={tmuxAttachTerminals}
+                onMenuIntent={ensureTmuxAttachTerminalsLoaded}
+                onFocus={handleFocus}
+                onOpenInTerminal={handleOpenInTerminal}
+                onMinimize={handleMinimize}
+                onClose={handleRequestClose}
+                confirmingId={confirmingId}
+                onCancelClose={handleCancelClose}
+                onConfirmClose={handleConfirmClose}
+              />
+            )}
+
+            {/* Footer actions when no arrange banner */}
+            {(() => {
+              const arrangeBannerVisible = externalRunningCount >= 2;
+              const hasAnySessions = mergedSessions.length > 0;
+              if (arrangeBannerVisible || !hasAnySessions) return null;
+
+              return (
+                <div className="mt-5 pt-4 flex items-center gap-2 border-t border-[hsl(var(--border-subtle))]">
+                  {externalRunningCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleMinimizeAll}
+                      className="rounded-full border border-[hsl(var(--border-subtle))] px-3 py-1.5 text-[13px] text-muted-foreground hover:bg-[hsl(var(--surface-raised))] active:scale-95 transition-all flex items-center gap-1.5"
+                    >
+                      <Minimize2 className="h-3.5 w-3.5" />
+                      {t('sessions.minimizeAll')}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowCloseAllDialog(true)}
+                    className="rounded-full border border-[hsl(var(--border-subtle))] px-3 py-1.5 text-[13px] text-muted-foreground hover:bg-[hsl(var(--surface-raised))] active:scale-95 transition-all flex items-center gap-1.5"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    {t('sessions.closeAll')}
+                  </button>
+                </div>
+              );
+            })()}
+          </div>
+        )}
       </div>
 
       {/* Close All Dialog */}
@@ -879,7 +885,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
             className="absolute inset-0 bg-black/40 backdrop-blur-md"
             onClick={() => setShowCloseAllDialog(false)}
           />
-          <div className="relative frosted-panel glass-noise rounded-xl p-6 max-w-md w-full mx-4 shadow-dialog">
+          <div className="relative bg-card rounded-[18px] border border-[hsl(var(--border-subtle))] p-6 max-w-md w-full mx-4 shadow-lg">
             <h3 className="text-lg font-semibold text-foreground mb-2">
               {t('sessions.closeAllTitle')}
             </h3>
@@ -887,17 +893,26 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
               {t('sessions.closeAllDescription').replace('{count}', String(mergedSessions.length))}
             </p>
             <div className="flex justify-end gap-3">
-              <Button variant="ghost" onClick={() => setShowCloseAllDialog(false)} className="glass-ghost-hover">
+              <button
+                type="button"
+                onClick={() => setShowCloseAllDialog(false)}
+                className="rounded-full border border-[hsl(var(--border-subtle))] px-4 py-2 text-[14px] font-medium hover:bg-[hsl(var(--surface-raised))] transition-all"
+              >
                 {t('common.cancel')}
-              </Button>
-              <Button onClick={handleCloseAll} className="glass-btn-destructive">
+              </button>
+              <button
+                type="button"
+                onClick={handleCloseAll}
+                className="bg-destructive text-destructive-foreground rounded-full px-4 py-2 text-[14px] font-medium hover:bg-destructive/90 active:scale-95 transition-all"
+              >
                 {t('sessions.closeAll')}
-              </Button>
+              </button>
             </div>
           </div>
         </div>
       )}
 
+      {/* Project Picker Modal */}
       <ProjectPickerModal
         open={showProjectPicker}
         onOpenChange={setShowProjectPicker}
