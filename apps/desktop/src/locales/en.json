@@ -345,7 +345,8 @@
     "switchTo": "Switch to this environment",
     "notSet": "Not set",
     "failedToLoad": "Failed to load environments",
-    "configCorrupt": "Environment configuration may be corrupt. Re-add environments to repair."
+    "configCorrupt": "Environment configuration may be corrupt. Re-add environments to repair.",
+    "searchPlaceholder": "Search environments..."
   },
   "environmentDialog": {
     "addTitle": "Add Environment",
@@ -486,7 +487,10 @@
     "posterRankSilver": "Silver Coder",
     "posterRankGold": "Gold Coder",
     "posterRankDiamond": "Diamond Coder",
-    "posterRankLegendary": "Legendary Coder"
+    "posterRankLegendary": "Legendary Coder",
+    "posterStyleClassic": "Classic",
+    "posterStyleTerminal": "Terminal",
+    "posterStyleDataink": "Data Ink"
   },
   "skills": {
     "subtitle": "Discover, install and manage Claude Code skill extensions",
@@ -535,7 +539,10 @@
     "agentCodex": "Codex",
     "scopePlugin": "Plugin",
     "installGlobally": "Install globally",
-    "curatedLoadError": "Failed to load curated skills"
+    "curatedLoadError": "Failed to load curated skills",
+    "filterAll": "All",
+    "filterInstalled": "Installed",
+    "usageHint": "Use this skill in Claude Code:"
   },
   "settings": {
     "subtitle": "App configuration and preferences",
@@ -926,6 +933,11 @@
     "exitCode": "Exit Code",
     "stdout": "Stdout",
     "stderr": "Stderr",
+    "runDetail": "Run Detail",
+    "viewOutput": "View Output",
+    "noOutput": "No output",
+    "copyOutput": "Copy",
+    "copied": "Copied",
     "statusRunning": "Running",
     "statusSuccess": "Success",
     "statusFailed": "Failed",
@@ -933,6 +945,14 @@
     "taskAdded": "Task added",
     "taskUpdated": "Task updated",
     "taskDeleted": "Task deleted",
+    "taskRetried": "Task triggered",
+    "retryFailed": "Failed to trigger task",
+    "upcoming": "Upcoming",
+    "completedToday": "Completed today",
+    "relativeUnder1Min": "Less than 1 min",
+    "relativeMinutes": "In {n} min",
+    "relativeHours": "In {n} hr",
+    "relativeDays": "In {n} days",
     "confirmDelete": "Are you sure you want to delete task \"{name}\"?",
     "templates": "Quick Templates",
     "newTask": "New Task",

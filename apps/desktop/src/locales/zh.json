@@ -345,7 +345,8 @@
     "switchTo": "切换到此环境",
     "notSet": "未设置",
     "failedToLoad": "加载环境配置失败",
-    "configCorrupt": "环境配置可能已损坏。重新添加环境以修复。"
+    "configCorrupt": "环境配置可能已损坏。重新添加环境以修复。",
+    "searchPlaceholder": "搜索环境..."
   },
   "environmentDialog": {
     "addTitle": "添加环境",
@@ -486,7 +487,10 @@
     "posterRankSilver": "Silver Coder",
     "posterRankGold": "Gold Coder",
     "posterRankDiamond": "Diamond Coder",
-    "posterRankLegendary": "Legendary Coder"
+    "posterRankLegendary": "Legendary Coder",
+    "posterStyleClassic": "经典",
+    "posterStyleTerminal": "终端",
+    "posterStyleDataink": "数据"
   },
   "skills": {
     "subtitle": "发现、安装和管理 Claude Code 技能扩展",
@@ -535,7 +539,10 @@
     "agentCodex": "Codex",
     "scopePlugin": "插件",
     "installGlobally": "全局安装",
-    "curatedLoadError": "加载精选技能失败"
+    "curatedLoadError": "加载精选技能失败",
+    "filterAll": "全部",
+    "filterInstalled": "已安装",
+    "usageHint": "在 Claude Code 中使用此技能："
   },
   "settings": {
     "subtitle": "应用配置和偏好设置",
@@ -926,6 +933,11 @@
     "exitCode": "退出码",
     "stdout": "标准输出",
     "stderr": "标准错误",
+    "runDetail": "执行详情",
+    "viewOutput": "查看输出",
+    "noOutput": "无输出内容",
+    "copyOutput": "复制",
+    "copied": "已复制",
     "statusRunning": "运行中",
     "statusSuccess": "成功",
     "statusFailed": "失败",
@@ -933,6 +945,14 @@
     "taskAdded": "任务已添加",
     "taskUpdated": "任务已更新",
     "taskDeleted": "任务已删除",
+    "taskRetried": "任务已触发执行",
+    "retryFailed": "触发执行失败",
+    "upcoming": "即将执行",
+    "completedToday": "今日已完成",
+    "relativeUnder1Min": "不到1分钟",
+    "relativeMinutes": "{n}分钟后",
+    "relativeHours": "{n}小时后",
+    "relativeDays": "{n}天后",
     "confirmDelete": "确定要删除任务 \"{name}\" 吗？",
     "templates": "快速模板",
     "newTask": "新建任务",
