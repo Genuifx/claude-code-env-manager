@@ -935,7 +935,7 @@ function DiagnosticsPanel({ active }: { active: boolean }) {
     setSummary(getPerfSummary());
     const id = window.setInterval(() => {
       setSummary(getPerfSummary());
-    }, 2000);
+    }, 3000);
     return () => {
       window.clearInterval(id);
     };
@@ -957,12 +957,7 @@ function DiagnosticsPanel({ active }: { active: boolean }) {
       recordPerfMark('diagnostics:exported');
       toast.success(t('settings.diagnosticsExported'));
     } catch (error) {
-      toast.error(
-        (t('settings.diagnosticsExportFailed') || 'Export failed: {error}').replace(
-          '{error}',
-          String(error)
-        )
-      );
+      toast.error(t('settings.diagnosticsExportFailed').replace('{error}', String(error)));
     }
   };
 

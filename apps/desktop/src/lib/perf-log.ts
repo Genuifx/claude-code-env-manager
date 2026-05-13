@@ -357,7 +357,7 @@ export function initPerfLog(
   if (patchTauri) {
     ipcPatched = patchTauriInvoke(targetWindow);
     if (!ipcPatched) {
-      // Tauri may inject __TAURI_INTERN__ slightly after page load. Retry briefly.
+      // Tauri may inject __TAURI_INTERNALS__ slightly after page load. Retry briefly.
       let attempts = 0;
       const retry = () => {
         if (ipcPatched || attempts >= 20) return;
