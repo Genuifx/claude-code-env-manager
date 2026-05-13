@@ -149,10 +149,10 @@
 
     /* Heatmap level colors (dark mode) */
     --heatmap-0: 30 6% 17%;
-    --heatmap-1: 211 85% 52% / 0.22;
-    --heatmap-2: 211 85% 52% / 0.48;
-    --heatmap-3: 211 85% 52% / 0.72;
-    --heatmap-4: 211 85% 52%;
+    --heatmap-1: 250 48% 62% / 0.22;
+    --heatmap-2: 250 48% 62% / 0.48;
+    --heatmap-3: 250 48% 62% / 0.72;
+    --heatmap-4: 250 48% 62%;
   }
 
   /* === Light Mode — Medium-style Reading Experience === */
@@ -280,10 +280,10 @@
 
     /* Heatmap level colors (light mode) */
     --heatmap-0: 220 10% 87%;
-    --heatmap-1: 211 100% 45% / 0.22;
-    --heatmap-2: 211 100% 45% / 0.48;
-    --heatmap-3: 211 100% 45% / 0.72;
-    --heatmap-4: 211 100% 45%;
+    --heatmap-1: 250 40% 52% / 0.22;
+    --heatmap-2: 250 40% 52% / 0.48;
+    --heatmap-3: 250 40% 52% / 0.72;
+    --heatmap-4: 250 40% 52%;
   }
 }
 
@@ -1218,6 +1218,7 @@
    subtle tinted background, white border edges, inset highlight, and soft shadow. */
 .glass-sidebar-panel {
   position: relative;
+  clip-path: inset(0 round var(--radius-xl));
   background:
     linear-gradient(
       180deg,
@@ -1241,9 +1242,7 @@
   border: 1px solid hsl(var(--glass-border-light) / calc(var(--glass-border-opacity) + 0.04));
   box-shadow:
     inset 0 1px 0 0 hsl(var(--glass-inset-highlight) / var(--glass-inset-opacity)),
-    inset 0 0 0 0.5px hsl(var(--glass-border-light) / calc(var(--glass-border-opacity) * 0.5)),
-    0 2px 8px hsl(var(--glass-shadow-base) / 0.12),
-    0 8px 32px hsl(var(--glass-shadow-base) / 0.08);
+    inset 0 0 0 0.5px hsl(var(--glass-border-light) / calc(var(--glass-border-opacity) * 0.5));
 }
 .light .glass-sidebar-panel {
   background:

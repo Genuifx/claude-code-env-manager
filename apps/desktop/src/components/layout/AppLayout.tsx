@@ -82,7 +82,7 @@ function AppLayoutBody({
 
       <Sidebar>
         {open && (
-          <SideRail activeTab={activeTab} onTabChange={onTabChange} onTabPrefetch={onTabPrefetch} glassMuted={isWorkspace} />
+          <SideRail activeTab={activeTab} onTabChange={onTabChange} onTabPrefetch={onTabPrefetch} glassMuted={false} />
         )}
       </Sidebar>
 
@@ -110,6 +110,7 @@ function AppLayoutBody({
                 {pageActions}
               </div>
             )}
+            <div id="page-actions-slot" className="flex items-center gap-2.5 ml-auto relative z-[110] empty:hidden" />
           </div>
         )}
         <main
