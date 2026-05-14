@@ -378,7 +378,7 @@ export function Analytics() {
   }
 
   return (
-    <div className="page-transition-enter mx-auto max-w-[980px] pb-8">
+    <div className="page-transition-enter mx-auto w-full max-w-[1480px] pb-8">
       {loadError && !isUsingMockData && (
         <ErrorBanner
           message={t('analytics.failedToLoad')}
@@ -399,10 +399,10 @@ export function Analytics() {
       )}
 
       {/* Summary Section */}
-      <section className="rounded-2xl border border-border-subtle bg-[hsl(var(--surface-sunken))] px-5 py-8 sm:px-8 sm:py-10">
+      <section className="rounded-2xl border border-border-subtle bg-[hsl(var(--surface-sunken))] px-5 py-5 sm:px-8 sm:py-6">
         {/* Source filter + actions row */}
-        <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2" role="radiogroup" aria-label="Source filter">
+        <div className="mb-5 flex items-start justify-between gap-3">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 sm:flex-nowrap sm:overflow-x-auto sm:[scrollbar-width:none] sm:[&::-webkit-scrollbar]:hidden" role="radiogroup" aria-label="Source filter">
             {(['all', 'claude', 'codex', 'opencode'] as UsageSourceFilter[]).map((source) => (
               <button
                 key={source}
@@ -412,7 +412,7 @@ export function Analytics() {
                 aria-checked={usageSource === source}
                 onClick={() => startTransition(() => setUsageSource(source))}
                 className={cn(
-                  'rounded-full px-4 py-1.5 text-sm transition-all duration-200',
+                  'shrink-0 rounded-full px-4 py-1.5 text-sm transition-all duration-200',
                   'tracking-[-0.01em]',
                   usageSource === source
                     ? 'border-2 border-primary bg-[hsl(var(--surface))] font-medium text-foreground shadow-sm'
@@ -449,42 +449,44 @@ export function Analytics() {
           </div>
         </div>
 
-        {/* Metrics row — peers, not hero */}
-        <div className="mb-10 flex flex-wrap items-start gap-x-6 gap-y-5 sm:gap-x-10 sm:gap-y-6">
-          <MetricCell
-            value={animatedTotalTokens.toLocaleString()}
-            label={t('analytics.totalTokens')}
-            trend={tokenChange}
-          />
-          <MetricCell
-            value={`$${(animatedTotalCostCents / 100).toFixed(2)}`}
-            label={t('analytics.costTotal')}
-          />
-          <MetricCell
-            value={`$${(animatedWeeklyCostCents / 100).toFixed(2)}`}
-            label={t('analytics.costThisWeek')}
-          />
-          <MetricCell
-            value={animatedWeeklyTokens.toLocaleString()}
-            label={t('analytics.tokenThisWeek')}
-          />
-          <MetricCell
-            value={String(animatedStreakDays)}
-            label={t('analytics.streak')}
-            suffix={
-              <Flame
-                className={cn(
-                  'h-4 w-4 transition-colors duration-300',
-                  streakDays >= 7 ? 'text-[hsl(25_90%_50%)] drop-shadow-[0_0_4px_hsl(25_90%_50%/0.4)]' : 'text-muted-foreground'
-                )}
-              />
-            }
-          />
-        </div>
+        <div className="grid gap-5 border-t border-[hsl(var(--border-subtle)/0.5)] pt-5 xl:grid-cols-[minmax(320px,0.4fr)_minmax(620px,1fr)] xl:gap-7">
+          <div className="grid min-w-0 grid-cols-2 gap-x-5 gap-y-4 xl:border-r xl:border-[hsl(var(--border-subtle)/0.5)] xl:pr-7">
+            <MetricCell
+              value={animatedTotalTokens.toLocaleString()}
+              label={t('analytics.totalTokens')}
+              trend={tokenChange}
+              featured
+              className="col-span-2"
+            />
+            <MetricCell
+              value={`$${(animatedTotalCostCents / 100).toFixed(2)}`}
+              label={t('analytics.costTotal')}
+            />
+            <MetricCell
+              value={`$${(animatedWeeklyCostCents / 100).toFixed(2)}`}
+              label={t('analytics.costThisWeek')}
+            />
+            <MetricCell
+              value={animatedWeeklyTokens.toLocaleString()}
+              label={t('analytics.tokenThisWeek')}
+            />
+            <MetricCell
+              value={String(animatedStreakDays)}
+              label={t('analytics.streak')}
+              suffix={
+                <Flame
+                  className={cn(
+                    'h-4 w-4 transition-colors duration-300',
+                    streakDays >= 7 ? 'text-[hsl(25_90%_50%)] drop-shadow-[0_0_4px_hsl(25_90%_50%/0.4)]' : 'text-muted-foreground'
+                  )}
+                />
+              }
+            />
+          </div>
 
-        {/* Heatmap */}
-        <div className="flex-shrink-0 border-t border-[hsl(var(--border-subtle)/0.5)] pt-8">
-          <HeatmapCalendar activities={dailyActivities} compact={false} />
+          <div className="min-w-0">
+            <HeatmapCalendar activities={dailyActivities} compact={false} />
+          </div>
         </div>
       </section>
 
@@ -523,17 +525,24 @@ function MetricCell({
   label,
   trend,
   suffix,
+  featured = false,
+  className,
 }: {
   value: string;
   label: string;
   trend?: number | null;
   suffix?: React.ReactNode;
+  featured?: boolean;
+  className?: string;
 }) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-center gap-2">
+    <div className={cn('min-w-0 border-t border-[hsl(var(--border-subtle)/0.42)] pt-2.5 first:border-t-0 first:pt-0', className)}>
+      <div className="flex min-w-0 items-center gap-2">
         <span
-          className="text-2xl font-semibold tabular-nums text-foreground"
+          className={cn(
+            'min-w-0 truncate font-semibold tabular-nums text-foreground',
+            featured ? 'text-[1.65rem] leading-none sm:text-[2rem]' : 'text-[1.22rem] leading-tight sm:text-[1.45rem]'
+          )}
           style={{
             fontFamily: 'system-ui, -apple-system, sans-serif',
             letterSpacing: '-0.02em',
@@ -561,7 +570,7 @@ function MetricCell({
         )}
       </div>
       <span
-        className="text-sm text-muted-foreground"
+        className="mt-1.5 block text-sm text-muted-foreground"
         style={{
           fontFamily: 'system-ui, -apple-system, sans-serif',
           letterSpacing: '-0.01em',

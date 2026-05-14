@@ -22,6 +22,7 @@ import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useLocale } from '../locales';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { SessionsSkeleton } from '@/components/ui/skeleton-states';
+import { PageActionsSlot } from '@/components/layout';
 import { toast } from 'sonner';
 import { shallow } from 'zustand/shallow';
 import { getRemotePlatformFromSource } from '@/lib/remote-platforms';
@@ -651,21 +652,8 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Frosted toolbar */}
-      <header className="sticky top-0 z-10 h-[52px] flex items-center justify-between px-5 backdrop-blur-xl bg-[hsl(var(--surface-base))]/80 border-b border-[hsl(var(--border-subtle))]">
-        {/* Left: title + count */}
-        <div className="flex items-center gap-2.5">
-          <h1 className="text-[17px] font-semibold tracking-[-0.02em] text-foreground">
-            {t('sessions.title')}
-          </h1>
-          {totalDisplayCount > 0 && (
-            <span className="inline-flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-primary/10 text-primary text-[12px] font-medium">
-              {totalDisplayCount}
-            </span>
-          )}
-        </div>
-
-        {/* Right: controls */}
+      {/* Page action buttons — portaled to titlebar */}
+      <PageActionsSlot>
         <div className="flex items-center gap-2">
           {/* View toggle */}
           <div className="flex items-center gap-0.5 p-0.5 rounded-full bg-[hsl(var(--surface-raised))] border border-[hsl(var(--border-subtle))]">
@@ -762,7 +750,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
             }
           />
         </div>
-      </header>
+      </PageActionsSlot>
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto px-5 py-5">

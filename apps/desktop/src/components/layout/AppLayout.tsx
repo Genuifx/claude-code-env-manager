@@ -64,7 +64,6 @@ function AppLayoutBody({
 
   const subtitleKeyMap: Record<string, string> = {
     workspace: 'workspace.subtitle',
-    sessions: 'sessions.subtitle',
     environments: 'environments.description',
     skills: 'skills.subtitle',
     history: 'history.subtitle',
@@ -118,7 +117,7 @@ function AppLayoutBody({
             ? 'scroll-glass-root flex-1 overflow-hidden relative z-10'
             : 'scroll-glass-root flex-1 overflow-y-auto px-8 py-4 relative z-10'}
         >
-          <div className={fullBleed ? 'w-full h-full' : 'max-w-6xl'}>
+          <div className={fullBleed ? 'w-full h-full' : 'w-full min-w-0'}>
             {children}
           </div>
         </main>

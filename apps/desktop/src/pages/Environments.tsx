@@ -64,7 +64,7 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
   }
 
   return (
-    <div className="page-transition-enter max-w-[1200px]">
+    <div className="page-transition-enter w-full">
       {/* Error banner */}
       {error && error.includes('environment') && (
         <ErrorBanner
