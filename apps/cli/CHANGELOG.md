@@ -1,5 +1,11 @@
 # ccem
 
+## 2.5.0
+
+### Minor Changes
+
+- Refine the desktop glass redesign with responsive analytics summary, compact usage heatmap, and titlebar-aligned session controls.
+
 ## 2.4.0
 
 ### Minor Changes
