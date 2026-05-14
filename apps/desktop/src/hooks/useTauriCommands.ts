@@ -1047,6 +1047,10 @@ export function useTauriCommands() {
     setCronRuns(taskId, runs);
   }, [setCronRuns]);
 
+  const getCronRunDetail = useCallback(async (taskId: string, runId: string) => {
+    return invoke<CronTaskRun>('get_cron_run_detail', { taskId, runId });
+  }, []);
+
   const retryCronTask = useCallback(async (id: string) => {
     await invoke('retry_cron_task', { id });
   }, []);
@@ -1267,6 +1271,7 @@ export function useTauriCommands() {
     deleteCronTask,
     toggleCronTask,
     loadCronTaskRuns,
+    getCronRunDetail,
     retryCronTask,
     getCronNextRuns,
     listCronTemplates,

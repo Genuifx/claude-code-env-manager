@@ -11,7 +11,7 @@ The file-size CI gate blocks new source files over 1000 lines unless they are do
 - `apps/desktop/src-tauri/src/native_runtime.rs`: Native SDK runtime lifecycle, event replay, and helper orchestration are still centralized.
 - `apps/desktop/src-tauri/src/proxy_debug.rs`: Proxy debug parsing and reduction logic still lives in one module.
 - `apps/desktop/src-tauri/src/runtime.rs`: Runtime management remains a large central orchestrator.
-- `apps/desktop/src-tauri/src/skills.rs`: Skill discovery, metadata parsing, and provider-specific skill projection are still coupled in one backend module.
+- `apps/desktop/src-tauri/src/skills.rs`: Skill discovery, metadata parsing, provider-specific projection, install, uninstall, and curated metadata handling remain bundled in one backend module.
 - `apps/desktop/src-tauri/src/telegram/mod.rs`: Telegram bot integration is currently a large monolith and needs phased extraction.
 - `apps/desktop/src-tauri/src/terminal.rs`: Terminal management and adapter logic is still bundled together.
 - `apps/desktop/src-tauri/src/tmux.rs`: tmux launch, status parsing, and recovery helpers are still bundled together.
@@ -21,6 +21,7 @@ The file-size CI gate blocks new source files over 1000 lines unless they are do
 - `apps/desktop/src/components/workspace/WorkspaceMessageBubble.tsx`: Workspace transcript rendering is still bundled with attachment, diff, and tool-call presentation during the workspace redesign.
 - `apps/desktop/src/components/workspace/WorkspaceSessionComposer.tsx`: Workspace composer state, image attachment handling, and model/provider controls remain concentrated during the workspace redesign.
 - `apps/desktop/src/components/workspace/WorkspaceNativeSessionView.tsx`: Native workspace transcript, attention handling, and composer orchestration remain concentrated during the workspace redesign.
+- `apps/desktop/src/pages/CronTasks.tsx`: Cron task list, run timeline, and editor orchestration are still centralized during the scheduler surface redesign.
 - `apps/desktop/src/pages/Workspace.tsx`: Workspace navigation, history, compose, and live-session coordination remain centralized during the workspace redesign.
 - `apps/desktop/src/hooks/useTauriCommands.ts`: Tauri IPC wrappers are still exposed from one large hook.
 - `apps/desktop/src/lib/tauri-ipc.ts`: Frontend IPC payload types are still centralized while native session events and workspace commands continue to evolve together.

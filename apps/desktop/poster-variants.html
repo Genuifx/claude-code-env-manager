@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>分享图风格对比</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #1a1a1a;
+      color: #fff;
+      font-family: 'Inter', sans-serif;
+      padding: 60px 40px;
+    }
+
+    .page-title {
+      text-align: center;
+      font-size: 28px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: #e0e0e0;
+    }
+
+    .page-subtitle {
+      text-align: center;
+      font-size: 14px;
+      color: #666;
+      margin-bottom: 60px;
+    }
+
+    .variants-container {
+      display: flex;
+      gap: 48px;
+      justify-content: center;
+      flex-wrap: wrap;
+      align-items: flex-start;
+    }
+
+    .variant-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .variant-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+    }
+
+    /* ========================================
+       VARIANT A: Terminal Receipt
+       ======================================== */
+    .card-a {
+      width: 440px;
+      height: 720px;
+      background: #0a0a0a;
+      border: 1px solid #1a1a1a;
+      padding: 40px 36px;
+      font-family: 'JetBrains Mono', monospace;
+      color: #33ff33;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card-a::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: repeating-linear-gradient(
+    0deg,
+        transparent,
+        transparent 2px,
+        rgba(0, 255, 0, 0.008) 2px,
+        rgba(0, 255, 0, 0.008) 4px
+      );
+      pointer-events: none;
+    }
+
+    .card-a .header {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+
+    .card-a .brand {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 6px;
+      color: #33ff33;
+    }
+
+    .card-a .divider {
+      color: #1a5c1a;
+      font-size: 12px;
+      text-align: center;
+      margin: 12px 0;
+      letter-spacing: -0.5px;
+    }
+
+    .card-a .divider-double {
+      color: #2a7a2a;
+    }
+
+    .card-a .meta-line {
+      font-size: 11px;
+      color: #1a8c1a;
+      display: flex;
+      justify-content: space-between;
+      margin: 4px 0;
+    }
+
+    .card-a .hero-section {
+      text-align: center;
+      margin: 20px 0;
+    }
+
+    .card-a .hero-label {
+      font-size: 10px;
+      color: #1a8c1a;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .card-a .hero-number {
+      font-size: 36px;
+      font-weight: 700;
+      color: #33ff33;
+      text-shadow: 0 0 10px rgba(51, 255, 51, 0.3);
+      letter-spacing: -1px;
+    }
+
+    .card-a .hero-unit {
+      font-size: 12px;
+      color: #1a8c1a;
+      margin-top: 4px;
+    }
+
+    .card-a .stats-block {
+      margin: 16px 0;
+    }
+
+    .card-a .stat-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      margin: 6px 0;
+      color: #2aaa2a;
+    }
+
+    .card-a .stat-row .value {
+      color: #33ff33;
+    }
+
+    .card-a .models-section {
+      margin: 12px 0;
+    }
+
+    .card-a .model-row {
+      font-size: 11px;
+      margin: 5px 0;
+      color: #2aaa2a;
+    }
+
+    .card-a .model-bar {
+      display: inline-block;
+      color: #33ff33;
+    }
+
+    .card-a .activity-section {
+      margin: 20px 0;
+      text-align: center;
+    }
+
+    .card-a .activity-label {
+      font-size: 10px;
+      color: #1a8c1a;
+      letter-spacing: 2px;
+      margin-bottom: 10px;
+    }
+
+    .card-a .activity-bars {
+      font-size: 24px;
+      letter-spacing: 8px;
+      color: #33ff33;
+      text-shadow: 0 0 6px rgba(51, 255, 51, 0.2);
+    }
+
+    .card-a .footer {
+      margin-top: auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+
+    .card-a .qr-placeholder {
+      width: 56px;
+      height: 56px;
+      border: 1px solid #1a5c1a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 8px;
+      color: #1a5c1a;
+    }
+
+    .card-a .footer-text {
+      font-size: 9px;
+      color: #1a5c1a;
+      text-align: right;
+      line-height: 1.6;
+    }
+
+    /* ========================================
+       VARIANT B: Data Ink
+       ======================================== */
+    .card-b {
+      width: 440px;
+      height: 720px;
+      background: #faf9f7;
+      padding: 48px 40px 40px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    .card-b .top-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 40px;
+    }
+
+    .card-b .brand {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      color: #3730a3;
+    }
+
+    .card-b .date-range {
+      font-size: 12px;
+      color: #9ca3af;
+      font-weight: 400;
+    }
+
+    .card-b .hero-section {
+      margin-bottom: 36px;
+    }
+
+    .card-b .hero-label {
+      font-size: 11px;
+      font-weight: 500;
+      color: #9ca3af;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 8px;
+    }
+
+    .card-b .hero-number {
+      font-size: 64px;
+      font-weight: 900;
+      color: #1a1a2e;
+      letter-spacing: -3px;
+      line-height: 1;
+    }
+
+    .card-b .hero-unit {
+      font-size: 14px;
+      font-weight: 400;
+      color: #6b7280;
+      margin-top: 6px;
+    }
+
+    .card-b .divider {
+      height: 1px;
+      background: #e5e5e5;
+      margin: 24px 0;
+    }
+
+    .card-b .stats-row {
+      display: flex;
+      gap: 40px;
+      margin-bottom: 32px;
+    }
+
+    .card-b .stat-item {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .card-b .stat-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .card-b .stat-label {
+      font-size: 11px;
+      color: #9ca3af;
+      margin-top: 2px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .card-b .models-section {
+      margin-bottom: 32px;
+    }
+
+    .card-b .models-title {
+      font-size: 10px;
+      font-weight: 500;
+      color: #9ca3af;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 14px;
+    }
+
+    .card-b .model-row {
+      display: flex;
+      align-items: center;
+      margin: 10px 0;
+    }
+
+    .card-b .model-name {
+      font-size: 12px;
+      color: #4b5563;
+      width: 140px;
+    }
+
+    .card-b .model-bar-track {
+      flex: 1;
+      height: 3px;
+      background: #f0eeeb;
+      border-radius: 2px;
+      margin: 0 12px;
+    }
+
+    .card-b .model-bar-fill {
+      height: 100%;
+      background: #3730a3;
+      border-radius: 2px;
+    }
+
+    .card-b .model-pct {
+      font-size: 12px;
+      font-weight: 600;
+      color: #1a1a2e;
+      width: 36px;
+      text-align: right;
+    }
+
+    .card-b .activity-section {
+      margin-bottom: 24px;
+    }
+
+    .card-b .activity-title {
+      font-size: 10px;
+      font-weight: 500;
+      color: #9ca3af;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 16px;
+    }
+
+    .card-b .activity-chart {
+      display: flex;
+      align-items: flex-end;
+      gap: 6px;
+      height: 60px;
+    }
+
+    .card-b .activity-day {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .card-b .activity-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #3730a3;
+    }
+
+    .card-b .activity-line {
+      width: 2px;
+      background: #3730a3;
+      border-radius: 1px;
+    }
+
+    .card-b .activity-day-label {
+      font-size: 9px;
+      color: #9ca3af;
+    }
+
+    .card-b .footer {
+      margin-top: auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+
+    .card-b .footer-left {
+      font-size: 11px;
+      color: #9ca3af;
+    }
+
+    .card-b .footer-left .username {
+      color: #3730a3;
+      font-weight: 600;
+    }
+
+    .card-b .qr-placeholder {
+      width: 52px;
+      height: 52px;
+      border: 1.5px solid #e5e5e5;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 8px;
+      color: #9ca3af;
+    }
+
+    /* ========================================
+       VARIANT C: Neon Badge
+       ======================================== */
+    .card-c {
+      width: 440px;
+      height: 520px;
+      background: #0f0f14;
+      border-radius: 20px;
+      padding: 44px 40px 36px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card-c::before {
+      content: '';
+      position: absolute;
+      top: -60%;
+      left: -20%;
+      width: 140%;
+      height: 100%;
+      background: radial-gradient(
+        ellipse at center,
+        rgba(139, 92, 246, 0.12) 0%,
+        transparent 60%
+      );
+      pointer-events: none;
+    }
+
+    .card-c .top-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 40px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .card-c .brand {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 4px;
+      color: rgba(255, 255, 255, 0.4);
+    }
+
+    .card-c .date-badge {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 4px 10px;
+      border-radius: 20px;
+    }
+
+    .card-c .hero-section {
+      text-align: center;
+      margin-bottom: 40px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .card-c .hero-number {
+      font-size: 72px;
+      font-weight: 900;
+      line-height: 1;
+      background: linear-gradient(135deg, #a78bfa 0%, #7c3aed 40%, #ec4899 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: -3px;
+    }
+
+    .card-c .hero-label {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.35);
+      margin-top: 8px;
+      font-weight: 400;
+    }
+
+    .card-c .stats-row {
+      display: flex;
+      justify-content: center;
+      gap: 48px;
+      margin-bottom: 40px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .card-c .stat-item {
+      text-align: center;
+    }
+
+    .card-c .stat-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .card-c .stat-label {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.35);
+      margin-top: 4px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .card-c .glow-bar {
+      margin-top: auto;
+      height: 4px;
+      border-radius: 2px;
+      background: linear-gradient(
+        90deg,
+        rgba(167, 139, 250, 0.1) 0%,
+        rgba(167, 139, 250, 0.6) 15%,
+        rgba(124, 58, 237, 0.9) 30%,
+        rgba(236, 72, 153, 0.8) 50%,
+        rgba(124, 58, 237, 0.9) 70%,
+        rgba(167, 139, 250, 0.6) 85%,
+        rgba(167, 139, 250, 0.1) 100%
+      );
+      box-shadow: 0 0 20px rgba(124, 58, 237, 0.4), 0 0 40px rgba(124, 58, 237, 0.2);
+      position: relative;
+      z-index: 1;
+    }
+
+    .card-c .footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 24px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .card-c .username {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.4);
+      font-weight: 500;
+    }
+
+    .card-c .qr-placeholder {
+      width: 44px;
+      height: 44px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 7px;
+      color: rgba(255, 255, 255, 0.2);
+    }
+  </style>
+</head>
+<body>
+  <h1 class="page-title">分享图风格对比</h1>
+  <p class="page-subtitle">440px actual size &mdash; 3 visual directions for the weekly stats poster</p>
+
+  <div class="variants-container">
+
+    <!-- ============ VARIANT A: Terminal Receipt ============ -->
+    <div class="variant-wrapper">
+      <span class="variant-label">Variant A &mdash; Terminal Receipt</span>
+      <div class="card-a">
+        <div class="header">
+          <div class="brand">C C E M</div>
+        </div>
+        <div class="divider divider-double">╔══════════════════════════════════════╗</div>
+        <div class="meta-line">
+          <span>@developer</span>
+          <span>2026.5.5 – 5.11</span>
+        </div>
+        <div class="divider">────────────────────────────────────────</div>
+
+        <div class="hero-section">
+          <div class="hero-label">TOKENS THIS WEEK</div>
+          <div class="hero-number">12,847,392</div>
+          <div class="hero-unit">tokens consumed</div>
+        </div>
+
+        <div class="divider">──────────────────────</div>
+
+        <div class="stats-block">
+          <div class="stat-row">
+            <span>STREAK</span>
+            <span class="value">14 days</span>
+          </div>
+          <div class="stat-row">
+            <span>COST</span>
+            <span class="value">$42.86</span>
+          </div>
+        </div>
+
+        <div class="divider">────────────────────────────────────────</div>
+
+        <div class="models-section">
+          <div class="model-row"><span class="model-bar">████████████░░░░</span> sonnet-4  62%</div>
+          <div class="model-row"><span class="model-bar">███████░░░░░░░░░</span> opus-4   28%</div>
+          <div class="model-row"><span class="model-bar">██░░░░░░░░░░░░░░</span> haiku    10%</div>
+        </div>
+
+        <div class="divider">────────────────────────────────────────</div>
+
+        <div class="activity-section">
+          <div class="activity-label">DAILY ACTIVITY</div>
+          <div class="activity-bars">▂▅▇▃▆█▄</div>
+        </div>
+
+        <div class="divider">╚══════════════════════════════════════╝</div>
+
+        <div class="footer">
+          <div class="qr-placeholder">QR</div>
+          <div class="footer-text">
+            GENERATED BY CCEM<br>
+            claude-code-env-manager
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ VARIANT B: Data Ink ============ -->
+    <div class="variant-wrapper">
+      <span class="variant-label">Variant B &mdash; Data Ink</span>
+      <div class="card-b">
+        <div class="top-bar">
+          <div class="brand">CCEM</div>
+          <div class="date-range">5.5 – 5.11, 2026</div>
+        </div>
+
+        <div class="hero-section">
+          <div class="hero-label">Tokens This Week</div>
+          <div class="hero-number">12,847,392</div>
+          <div class="hero-unit">tokens consumed by @developer</div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="stats-row">
+          <div class="stat-item">
+            <div class="stat-value">14</div>
+            <div class="stat-label">Day Streak</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value">$42.86</div>
+            <div class="stat-label">Total Cost</div>
+          </div>
+        </div>
+
+        <div class="models-section">
+          <div class="models-title">Model Distribution</div>
+          <div class="model-row">
+            <span class="model-name">claude-sonnet-4</span>
+            <div class="model-bar-track"><div class="model-bar-fill" style="width: 62%"></div></div>
+            <span class="model-pct">62%</span>
+          </div>
+          <div class="model-row">
+            <span class="model-name">claude-opus-4</span>
+            <div class="model-bar-track"><div class="model-bar-fill" style="width: 28%"></div></div>
+            <span class="model-pct">28%</span>
+          </div>
+          <div class="model-row">
+            <span class="model-name">claude-haiku</span>
+            <div class="model-bar-track"><div class="model-bar-fill" style="width: 10%"></div></div>
+            <span class="model-pct">10%</span>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="activity-section">
+          <div class="activity-title">Daily Activity</div>
+          <div class="activity-chart">
+            <div class="activity-day">
+              <div class="activity-dot"></div>
+              <div class="activity-line" style="height: 14px"></div>
+              <span class="activity-day-label">M</span>
+            </div>
+            <div class="activity-day">
+              <div class="activity-dot"></div>
+              <div class="activity-line" style="height: 36px"></div>
+              <span class="activity-day-label">T</span>
+            </div>
+            <div class="activity-day">
+              <div class="activity-dot"></div>
+              <div class="activity-line" style="height: 52px"></div>
+              <span class="activity-day-label">W</span>
+            </div>
+            <div class="activity-day">
+              <div class="activity-dot"></div>
+              <div class="activity-line" style="height: 22px"></div>
+              <span class="activity-day-label">T</span>
+            </div>
+            <div class="activity-day">
+              <div class="activity-dot"></div>
+              <div class="activity-line" style="height: 44px"></div>
+              <span class="activity-day-label">F</span>
+            </div>
+            <div class="activity-day">
+              <div class="activity-dot"></div>
+              <div class="activity-line" style="height: 56px"></div>
+              <span class="activity-day-label">S</span>
+            </div>
+            <div class="activity-day">
+              <div class="activity-dot"></div>
+              <div class="activity-line" style="height: 30px"></div>
+              <span class="activity-day-label">S</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="footer">
+          <div class="footer-left">
+            <span class="username">@developer</span> weekly report
+          </div>
+          <div class="qr-placeholder">QR</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ VARIANT C: Neon Badge ============ -->
+    <div class="variant-wrapper">
+      <span class="variant-label">Variant C &mdash; Neon Badge</span>
+      <div class="card-c">
+        <div class="top-row">
+          <div class="brand">CCEM</div>
+          <div class="date-badge">5.5 – 5.11</div>
+        </div>
+
+        <div class="hero-section">
+          <div class="hero-number">12.8M</div>
+          <div class="hero-label">tokens this week</div>
+        </div>
+
+        <div class="stats-row">
+          <div class="stat-item">
+            <div class="stat-value">14</div>
+            <div class="stat-label">Day Streak</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value">$42.86</div>
+            <div class="stat-label">Cost</div>
+          </div>
+        </div>
+
+        <div class="glow-bar"></div>
+
+        <div class="footer">
+          <div class="username">@developer</div>
+          <div class="qr-placeholder">QR</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>

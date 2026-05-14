@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { domToPng } from 'modern-screenshot';
 import { QRCodeSVG } from 'qrcode.react';
 import { invoke } from '@tauri-apps/api/core';
-import { Copy, Download, Loader2, Moon, Sun } from 'lucide-react';
+import { Copy, Download, Loader2, Moon, Sun, Terminal, BookOpen } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -15,6 +15,9 @@ import { Button } from '@/components/ui/button';
 import { useLocale } from '@/locales';
 import { formatTokens } from '@/lib/utils';
 import type { DailyActivity, ModelBreakdownHistory, TokenUsage, TokenUsageWithCost, UsageStats } from '@/types/analytics';
+import { PosterCardTerminal } from './PosterCardTerminal';
+import { PosterCardDataInk } from './PosterCardDataInk';
+import type { PosterStyle } from './poster-types';
 
 /* ── Types ── */
 
@@ -1057,6 +1060,7 @@ export function SharePosterDialog({
     document.documentElement.classList.contains('light') ? 'light' : 'dark',
   );
   const [timeRange, setTimeRange] = useState<TimeRange>('week');
+  const [posterStyle, setPosterStyle] = useState<PosterStyle>('classic');
   const [modelBreakdown, setModelBreakdown] = useState<ModelBreakdownHistory | null>(null);
   const previewId = useId().replace(/:/g, '');
   const exportId = useId().replace(/:/g, '');
@@ -1124,11 +1128,17 @@ export function SharePosterDialog({
     return () => observer.disconnect();
   }, [open]);
 
+  const getPosterBgColor = () => {
+    if (posterStyle === 'terminal') return '#0a0a0a';
+    if (posterStyle === 'dataink') return '#faf9f7';
+    return THEMES[posterTheme].bg;
+  };
+
   const buildPosterDataUrl = async () => {
     if (!exportPosterRef.current) throw new Error(t('analytics.shareGenerateFailed'));
     if (document.fonts?.ready) await document.fonts.ready;
     return domToPng(exportPosterRef.current, {
-      backgroundColor: THEMES[posterTheme].bg,
+      backgroundColor: getPosterBgColor(),
       scale: 3,
     });
   };
@@ -1187,7 +1197,7 @@ export function SharePosterDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[90vh] w-auto max-w-[500px] flex-col gap-0 overflow-hidden border-none bg-transparent p-0 shadow-none sm:rounded-2xl">
+      <DialogContent className="flex max-h-[90vh] w-auto max-w-[560px] flex-col gap-0 overflow-visible border-none bg-transparent p-0 shadow-none sm:rounded-2xl">
         <DialogHeader className="sr-only">
           <DialogTitle>{t('analytics.sharePoster')}</DialogTitle>
           <DialogDescription>{t('analytics.shareDialogHint')}</DialogDescription>
@@ -1196,33 +1206,70 @@ export function SharePosterDialog({
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div ref={previewShellRef} className="flex justify-center">
             <div
-              className="overflow-hidden rounded-2xl"
-              style={{ height: POSTER_H * previewScale, width: POSTER_W * previewScale }}
+              style={{
+                height: POSTER_H * previewScale,
+                width: POSTER_W * previewScale,
+                borderRadius: 16,
+                overflow: 'hidden',
+                position: 'relative',
+              }}
             >
               <div
                 style={{
                   height: POSTER_H,
+                  width: POSTER_W,
                   transform: `scale(${previewScale})`,
                   transformOrigin: 'top left',
-                  width: POSTER_W,
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
                 }}
               >
-                <PosterCard chartIdPrefix={`preview-${previewId}`} {...posterProps} />
+                {posterStyle === 'terminal' ? (
+                  <PosterCardTerminal chartIdPrefix={`preview-${previewId}`} {...posterProps} />
+                ) : posterStyle === 'dataink' ? (
+                  <PosterCardDataInk chartIdPrefix={`preview-${previewId}`} {...posterProps} />
+                ) : (
+                  <PosterCard chartIdPrefix={`preview-${previewId}`} {...posterProps} />
+                )}
               </div>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center justify-center gap-2 pt-3">
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            className="h-9 w-9 rounded-full border-white/10 bg-white/5 text-white/80 backdrop-blur-sm hover:bg-white/10"
-            onClick={() => setPosterTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))}
-          >
-            {posterTheme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          </Button>
+        <div className="flex flex-wrap items-center justify-center gap-2 pt-3">
+          {/* Theme Toggle - only for classic style */}
+          {posterStyle === 'classic' && (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="h-9 w-9 rounded-full border-white/10 bg-white/5 text-white/80 backdrop-blur-sm hover:bg-white/10"
+              onClick={() => setPosterTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))}
+            >
+              {posterTheme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
+          )}
+
+          {/* Style Toggle */}
+          <div className="flex items-center rounded-full border border-white/10 bg-white/5 p-0.5 backdrop-blur-sm">
+            {(['classic', 'terminal', 'dataink'] as PosterStyle[]).map((style) => (
+              <button
+                key={style}
+                type="button"
+                onClick={() => setPosterStyle(style)}
+                className={`flex h-7 items-center gap-1 rounded-full px-2.5 text-xs font-medium transition-all ${
+                  posterStyle === style
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-white/60 hover:text-white/80'
+                }`}
+              >
+                {style === 'terminal' && <Terminal className="h-3 w-3" />}
+                {style === 'dataink' && <BookOpen className="h-3 w-3" />}
+                {t(`analytics.posterStyle${style.charAt(0).toUpperCase() + style.slice(1)}` as any)}
+              </button>
+            ))}
+          </div>
 
           {/* Time Range Toggle */}
           <div className="flex items-center rounded-full border border-white/10 bg-white/5 p-0.5 backdrop-blur-sm">
@@ -1273,7 +1320,13 @@ export function SharePosterDialog({
 
         <div aria-hidden="true" className="pointer-events-none fixed left-[-10000px] top-0">
           <div ref={exportPosterRef}>
-            <PosterCard chartIdPrefix={`export-${exportId}`} {...posterProps} />
+            {posterStyle === 'terminal' ? (
+              <PosterCardTerminal chartIdPrefix={`export-${exportId}`} {...posterProps} />
+            ) : posterStyle === 'dataink' ? (
+              <PosterCardDataInk chartIdPrefix={`export-${exportId}`} {...posterProps} />
+            ) : (
+              <PosterCard chartIdPrefix={`export-${exportId}`} {...posterProps} />
+            )}
           </div>
         </div>
       </DialogContent>

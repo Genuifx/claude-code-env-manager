@@ -19,9 +19,6 @@ interface TokenChartProps {
   animate?: boolean;
 }
 
-const AMBER = 'hsl(38 92% 50%)';
-const AMBER_LIGHT = 'hsl(45 93% 58%)';
-
 interface TokenTooltipPayloadItem {
   color?: string;
   payload?: ChartDataPoint;
@@ -67,12 +64,18 @@ function TokenTooltipContent({ active, label, payload }: TokenTooltipContentProp
   };
 
   return (
-    <div className="min-w-[196px] rounded-[24px] border border-white/45 bg-[hsl(var(--surface-overlay)/0.96)] px-4 py-3 shadow-[0_18px_50px_rgba(15,23,42,0.16)] backdrop-blur-2xl">
+    <div
+      className="min-w-[196px] rounded-xl border border-[hsl(var(--border-subtle))] bg-[hsl(var(--surface))] px-4 py-3 shadow-sm"
+      style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}
+    >
       <div className="mb-3 flex items-start justify-between gap-4">
         <div className="text-[13px] font-medium tracking-[-0.01em] text-foreground">
           {label}
         </div>
-        <div className="text-right text-[18px] font-semibold tracking-[-0.02em] tabular-nums text-[hsl(38_92%_50%)]">
+        <div
+          className="text-right text-[18px] font-semibold tracking-[-0.02em] tabular-nums"
+          style={{ color: 'hsl(var(--chart-4))' }}
+        >
           {formatTokens(totalUsage)}
         </div>
       </div>
@@ -84,11 +87,11 @@ function TokenTooltipContent({ active, label, payload }: TokenTooltipContentProp
           {t('analytics.tooltipUsage')}
         </span>
         {(breakdownRows.length > 0
-          ? breakdownRows.map(([model, value]) => ({ label: model, value, color: AMBER }))
+          ? breakdownRows.map(([model, value]) => ({ label: model, value, color: 'hsl(var(--chart-4))' }))
           : seriesRows.map((item) => ({
               label: resolveSeriesLabel(item),
               value: item.value,
-              color: item.color ?? AMBER,
+              color: item.color ?? 'hsl(var(--chart-4))',
             }))
         ).map((item) => (
           <Fragment key={`${item.label}-${item.value}`}>
@@ -99,7 +102,7 @@ function TokenTooltipContent({ active, label, payload }: TokenTooltipContentProp
               />
               <span className="font-medium">{item.label}</span>
             </div>
-            <span className="text-right text-[15px] font-semibold tracking-[-0.01em] tabular-nums text-[hsl(38_92%_50%)]">
+            <span className="text-right text-[15px] font-semibold tracking-[-0.01em] tabular-nums" style={{ color: 'hsl(var(--chart-4))' }}>
               {formatTokens(item.value)}
             </span>
           </Fragment>
@@ -125,35 +128,45 @@ export const TokenChart = memo(function TokenChart({
 
   return (
     <ResponsiveContainer width="100%" height={300}>
-      <AreaChart data={data} margin={{ left: 8, top: 8, right: 8 }}>
+      <AreaChart data={data} margin={{ left: 4, top: 12, right: 4, bottom: 4 }}>
         <defs>
-          <linearGradient id="amber-gradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor={AMBER_LIGHT} stopOpacity={0.35} />
-            <stop offset="95%" stopColor={AMBER} stopOpacity={0.05} />
+          <linearGradient id="chart-area-gradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor="hsl(var(--chart-4))" stopOpacity={0.2} />
+            <stop offset="95%" stopColor="hsl(var(--chart-4))" stopOpacity={0.02} />
           </linearGradient>
         </defs>
-        <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+        <CartesianGrid
+          horizontal={true}
+          vertical={false}
+          strokeOpacity={0.4}
+          className="stroke-border"
+        />
         <XAxis
           dataKey="date"
-          className="text-xs text-muted-foreground"
+          axisLine={false}
+          tickLine={false}
+          tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+          dy={8}
         />
         <YAxis
-          className="text-xs text-muted-foreground"
+          axisLine={false}
+          tickLine={false}
           tickFormatter={formatTokenAxisValue}
+          tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
           domain={[0, 'auto']}
           width={yAxisWidth}
         />
         <Tooltip
-          cursor={{ stroke: 'hsl(var(--border))', strokeDasharray: '4 4', strokeOpacity: 0.9 }}
+          cursor={{ stroke: 'hsl(var(--chart-4) / 0.4)', strokeDasharray: '4 4', strokeOpacity: 0.9 }}
           content={<TokenTooltipContent />}
         />
         <Area
           type="monotone"
           dataKey={dataKey}
-          stroke={AMBER}
+          stroke="hsl(var(--chart-4))"
           strokeWidth={2}
           fillOpacity={1}
-          fill="url(#amber-gradient)"
+          fill="url(#chart-area-gradient)"
           isAnimationActive={animate}
         />
       </AreaChart>

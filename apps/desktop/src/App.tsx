@@ -624,7 +624,7 @@ function App() {
             activeTab={activeTab}
             onTabChange={navigateToTab}
             onTabPrefetch={prefetchTab}
-            fullBleed={activeTab === 'history' || activeTab === 'workspace'}
+            fullBleed={activeTab === 'history' || activeTab === 'workspace' || activeTab === 'settings'}
           >
             <>
               <div

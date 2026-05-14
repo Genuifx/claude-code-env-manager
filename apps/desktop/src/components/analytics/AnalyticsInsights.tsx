@@ -1,7 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { Suspense, lazy, memo, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { BarChart3, DollarSign, Flame, RefreshCw } from 'lucide-react';
-import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
@@ -193,8 +192,8 @@ function NextMilestone({ milestones }: { milestones: Milestone[] }) {
     next = higherTargets.find((milestone) => !milestone.achieved);
     if (!next) {
       return (
-        <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
-          <Flame className="h-4 w-4 text-orange-500" />
+        <div className="flex items-center gap-2 px-6 py-4 text-sm text-muted-foreground">
+          <Flame className="h-4 w-4 text-[hsl(25_90%_50%)]" />
           <span>{t('analytics.allMilestonesAchieved')}</span>
         </div>
       );
@@ -205,21 +204,27 @@ function NextMilestone({ milestones }: { milestones: Milestone[] }) {
   const Icon = next.type === 'cost' ? DollarSign : next.type === 'streak' ? Flame : BarChart3;
 
   return (
-    <div className="flex items-center gap-3 py-2">
-      <Icon className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-      <span className="flex-shrink-0 text-sm text-muted-foreground">
-        {t('analytics.nextMilestone')}:
+    <div className="flex items-center gap-4 rounded-2xl border border-border-subtle bg-[hsl(var(--surface-sunken))] px-6 py-4">
+      <Icon className="h-4 w-4 flex-shrink-0" style={{ color: 'hsl(var(--chart-4))' }} />
+      <span
+        className="flex-shrink-0 text-sm text-muted-foreground"
+        style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}
+      >
+        {t('analytics.nextMilestone')}
       </span>
-      <span className="flex-shrink-0 text-sm font-medium text-foreground">
+      <span
+        className="flex-shrink-0 text-sm font-semibold text-foreground"
+        style={{ fontFamily: 'system-ui, -apple-system, sans-serif', letterSpacing: '-0.01em' }}
+      >
         {next.title}
       </span>
-      <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[hsl(var(--border-subtle))]">
         <div
-          className="h-full rounded-full bg-primary transition-all duration-500"
-          style={{ width: `${progress}%` }}
+          className="h-full rounded-full transition-all duration-500"
+          style={{ width: `${progress}%`, backgroundColor: 'hsl(var(--chart-4))' }}
         />
       </div>
-      <span className="flex-shrink-0 text-xs text-muted-foreground">
+      <span className="flex-shrink-0 text-xs font-medium tabular-nums text-muted-foreground">
         {progress.toFixed(0)}%
       </span>
     </div>
@@ -227,7 +232,7 @@ function NextMilestone({ milestones }: { milestones: Milestone[] }) {
 }
 
 function ChartSkeleton({ heightClass }: { heightClass: string }) {
-  return <div className={cn('animate-pulse rounded-2xl bg-muted', heightClass)} />;
+  return <div className={cn('animate-pulse rounded-2xl bg-[hsl(var(--surface-sunken))]', heightClass)} />;
 }
 
 export const AnalyticsInsights = memo(function AnalyticsInsights({
@@ -433,18 +438,24 @@ export const AnalyticsInsights = memo(function AnalyticsInsights({
   const deferredDailyHistory = useDeferredValue(usageStats.dailyHistory);
 
   return (
-    <>
-      <Card className="p-4">
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-foreground">
+    <div className="space-y-6">
+      {/* Token Distribution Chart */}
+      <div className="rounded-2xl border border-border-subtle bg-[hsl(var(--surface))] p-6 transition-shadow duration-200 hover:shadow-md">
+        <div className="mb-5 flex items-center justify-between">
+          <h3
+            className="text-lg font-semibold text-foreground"
+            style={{ fontFamily: 'system-ui, -apple-system, sans-serif', letterSpacing: '-0.01em' }}
+          >
             {t('analytics.tokenDistribution')}
           </h3>
           <div className="flex items-center gap-2">
-            <div className="glass-subtle flex items-center gap-0.5 rounded-lg p-0.5">
+            <div className="flex items-center gap-1" role="radiogroup" aria-label="Time granularity">
               {granularityOptions.map(({ key, label }) => (
                 <button
                   key={key}
                   type="button"
+                  role="radio"
+                  aria-checked={granularity === key}
                   onClick={() => {
                     if (granularity === key) {
                       return;
@@ -453,11 +464,12 @@ export const AnalyticsInsights = memo(function AnalyticsInsights({
                     startTransition(() => setGranularity(key));
                   }}
                   className={cn(
-                    'h-7 rounded-md px-3 text-xs transition-all duration-150',
+                    'rounded-full px-3 py-1 text-xs transition-all duration-200',
                     granularity === key
-                      ? 'seg-active text-foreground'
-                      : 'seg-hover text-muted-foreground hover:text-foreground'
+                      ? 'border-2 border-primary bg-[hsl(var(--surface))] font-medium text-foreground shadow-sm'
+                      : 'border border-border-subtle text-muted-foreground hover:text-foreground'
                   )}
+                  style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}
                 >
                   {label}
                 </button>
@@ -467,9 +479,10 @@ export const AnalyticsInsights = memo(function AnalyticsInsights({
               type="button"
               disabled={isRefreshing}
               onClick={() => void onRefresh()}
-              className="seg-hover flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-[hsl(var(--surface-sunken))] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+              aria-label="Refresh"
             >
-              <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <RefreshCw className={cn('h-3.5 w-3.5', isRefreshing && 'animate-spin')} />
             </button>
           </div>
         </div>
@@ -486,11 +499,15 @@ export const AnalyticsInsights = memo(function AnalyticsInsights({
             />
           </Suspense>
         )}
-      </Card>
+      </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card className="p-4">
-          <h3 className="mb-4 text-lg font-semibold text-foreground">
+      {/* Secondary Charts Grid */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="rounded-2xl border border-border-subtle bg-[hsl(var(--surface))] p-6 transition-shadow duration-200 hover:shadow-md">
+          <h3
+            className="mb-5 text-lg font-semibold text-foreground"
+            style={{ fontFamily: 'system-ui, -apple-system, sans-serif', letterSpacing: '-0.01em' }}
+          >
             {t('analytics.modelDistribution')}
           </h3>
           {showSecondaryCharts ? (
@@ -500,10 +517,12 @@ export const AnalyticsInsights = memo(function AnalyticsInsights({
           ) : (
             <ChartSkeleton heightClass="h-[160px]" />
           )}
-        </Card>
-
-        <Card className="p-4">
-          <h3 className="mb-4 text-lg font-semibold text-foreground">
+        </div>
+        <div className="rounded-2xl border border-border-subtle bg-[hsl(var(--surface))] p-6 transition-shadow duration-200 hover:shadow-md">
+          <h3
+            className="mb-5 text-lg font-semibold text-foreground"
+            style={{ fontFamily: 'system-ui, -apple-system, sans-serif', letterSpacing: '-0.01em' }}
+          >
             {t('analytics.dailyTokens')}
           </h3>
           {showSecondaryCharts ? (
@@ -513,10 +532,11 @@ export const AnalyticsInsights = memo(function AnalyticsInsights({
           ) : (
             <ChartSkeleton heightClass="h-[200px]" />
           )}
-        </Card>
+        </div>
       </div>
 
+      {/* Milestone */}
       <NextMilestone milestones={milestones} />
-    </>
+    </div>
   );
 });

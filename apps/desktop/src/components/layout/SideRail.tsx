@@ -102,6 +102,13 @@ export function SideRail({ activeTab, onTabChange, onTabPrefetch, glassMuted }: 
       'w-[200px] transition-[opacity,transform,background,border-color,box-shadow] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]',
       glassMuted && "glass-sidebar-muted"
     )}>
+      {/* Liquid glass aurora blobs */}
+      <div className="sidebar-aurora" aria-hidden="true">
+        <div className="sidebar-aurora-blob sidebar-aurora-blob-1" />
+        <div className="sidebar-aurora-blob sidebar-aurora-blob-2" />
+        <div className="sidebar-aurora-blob sidebar-aurora-blob-3" />
+      </div>
+
       {/* Traffic light + sidebar toggle spacer; remaining area stays draggable */}
       <div className="sidebar-top-drag-region h-[52px] shrink-0 flex items-end pb-2 pr-3">
         <div data-tauri-drag-region className="h-9 flex-1 rounded-full" />

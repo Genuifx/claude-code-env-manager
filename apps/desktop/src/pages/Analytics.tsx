@@ -1,8 +1,7 @@
 // apps/desktop/src/pages/Analytics.tsx
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Flame, Share2, TrendingDown, TrendingUp } from 'lucide-react';
-import { Card } from '@/components/ui/card';
+import { Flame, RefreshCw, Share2, TrendingDown, TrendingUp } from 'lucide-react';
 import { ErrorBanner } from '@/components/ui/EmptyState';
 import { cn } from '@/lib/utils';
 import { HeatmapCalendar } from '@/components/analytics/HeatmapCalendar';
@@ -115,27 +114,20 @@ const LazySharePosterDialog = lazy(async () =>
 
 function AnalyticsInsightsFallback() {
   return (
-    <div className="space-y-4">
-      <Card className="p-4">
-        <div className="mb-4 h-5 w-40 animate-pulse rounded-xl bg-muted" />
-        <div className="h-64 w-full animate-pulse rounded-2xl bg-muted" />
-      </Card>
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card className="p-4">
-          <div className="mb-4 h-5 w-32 animate-pulse rounded-xl bg-muted" />
-          <div className="h-40 w-full animate-pulse rounded-2xl bg-muted" />
-        </Card>
-        <Card className="p-4">
-          <div className="mb-4 h-5 w-28 animate-pulse rounded-xl bg-muted" />
-          <div className="h-40 w-full animate-pulse rounded-2xl bg-muted" />
-        </Card>
+    <div className="space-y-6">
+      <div className="rounded-2xl border border-border-subtle bg-[hsl(var(--surface))] p-6">
+        <div className="mb-5 h-5 w-40 animate-pulse rounded-full bg-[hsl(var(--surface-sunken))]" />
+        <div className="h-[300px] w-full animate-pulse rounded-2xl bg-[hsl(var(--surface-sunken))]" />
       </div>
-      <div className="flex items-center gap-3 py-2">
-        <div className="h-4 w-4 animate-pulse rounded bg-muted" />
-        <div className="h-4 w-24 animate-pulse rounded bg-muted" />
-        <div className="h-4 w-20 animate-pulse rounded bg-muted" />
-        <div className="h-2 flex-1 animate-pulse rounded-full bg-muted" />
-        <div className="h-3 w-8 animate-pulse rounded bg-muted" />
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="rounded-2xl border border-border-subtle bg-[hsl(var(--surface))] p-6">
+          <div className="mb-5 h-5 w-32 animate-pulse rounded-full bg-[hsl(var(--surface-sunken))]" />
+          <div className="h-[160px] w-full animate-pulse rounded-2xl bg-[hsl(var(--surface-sunken))]" />
+        </div>
+        <div className="rounded-2xl border border-border-subtle bg-[hsl(var(--surface))] p-6">
+          <div className="mb-5 h-5 w-28 animate-pulse rounded-full bg-[hsl(var(--surface-sunken))]" />
+          <div className="h-[160px] w-full animate-pulse rounded-2xl bg-[hsl(var(--surface-sunken))]" />
+        </div>
       </div>
     </div>
   );
@@ -360,7 +352,7 @@ export function Analytics() {
     const end = new Date();
     end.setHours(0, 0, 0, 0);
     const start = new Date(end);
-    start.setDate(start.getDate() - 89);
+    start.setDate(start.getDate() - 364);
 
     for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
       const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -386,7 +378,7 @@ export function Analytics() {
   }
 
   return (
-    <div className="page-transition-enter space-y-6">
+    <div className="page-transition-enter mx-auto w-full max-w-[1480px] pb-8">
       {loadError && !isUsingMockData && (
         <ErrorBanner
           message={t('analytics.failedToLoad')}
@@ -399,28 +391,34 @@ export function Analytics() {
       )}
 
       {import.meta.env.DEV && isUsingMockData && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
+        <div className="mb-6 rounded-2xl border border-[hsl(var(--warning)/0.3)] bg-[hsl(var(--warning)/0.06)] px-5 py-3 text-sm text-[hsl(var(--warning-foreground))]">
           <span>
             <strong>{t('analytics.demoData')}</strong> — {t('analytics.demoDataHint')}
           </span>
         </div>
       )}
 
-      <div className="stat-card glass-noise px-5 py-4">
-        <div className="mb-3 flex items-center justify-between">
-          <div className="glass-subtle flex items-center gap-0.5 rounded-lg p-0.5">
+      {/* Summary Section */}
+      <section className="rounded-2xl border border-border-subtle bg-[hsl(var(--surface-sunken))] px-5 py-5 sm:px-8 sm:py-6">
+        {/* Source filter + actions row */}
+        <div className="mb-5 flex items-start justify-between gap-3">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 sm:flex-nowrap sm:overflow-x-auto sm:[scrollbar-width:none] sm:[&::-webkit-scrollbar]:hidden" role="radiogroup" aria-label="Source filter">
             {(['all', 'claude', 'codex', 'opencode'] as UsageSourceFilter[]).map((source) => (
               <button
                 key={source}
                 data-testid={`analytics-filter-${source}`}
                 type="button"
+                role="radio"
+                aria-checked={usageSource === source}
                 onClick={() => startTransition(() => setUsageSource(source))}
                 className={cn(
-                  'h-7 rounded-md px-3 text-xs transition-all duration-150',
+                  'shrink-0 rounded-full px-4 py-1.5 text-sm transition-all duration-200',
+                  'tracking-[-0.01em]',
                   usageSource === source
-                    ? 'seg-active text-foreground'
-                    : 'seg-hover text-muted-foreground hover:text-foreground'
+                    ? 'border-2 border-primary bg-[hsl(var(--surface))] font-medium text-foreground shadow-sm'
+                    : 'border border-border-subtle bg-[hsl(var(--surface))] text-muted-foreground hover:text-foreground'
                 )}
+                style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}
               >
                 {source === 'all' && t('analytics.sourceAll')}
                 {source === 'claude' && t('analytics.sourceClaude')}
@@ -429,105 +427,82 @@ export function Analytics() {
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            onClick={() => setShowSharePoster(true)}
-            className="seg-hover flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-            title={t('analytics.sharePoster')}
-          >
-            <Share2 className="h-3.5 w-3.5" />
-          </button>
-        </div>
 
-        <div className="mb-3 flex items-baseline gap-3">
-          <div
-            data-testid="analytics-total-tokens"
-            className="text-4xl font-bold tabular-nums"
-            style={{
-              background: 'linear-gradient(135deg, hsl(var(--chart-1)), hsl(var(--chart-2)))',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-            }}
-          >
-            {animatedTotalTokens.toLocaleString()}
-          </div>
-          {tokenChange !== null ? (
-            <div
-              className={`flex items-center gap-1 text-sm tabular-nums ${
-                tokenChange >= 0 ? 'text-chart-2' : 'text-destructive'
-              }`}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={isRefreshing}
+              onClick={() => void handleRefresh()}
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-[hsl(var(--surface))] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+              aria-label="Refresh"
             >
-              {tokenChange >= 0 ? (
-                <TrendingUp className="h-3.5 w-3.5" />
-              ) : (
-                <TrendingDown className="h-3.5 w-3.5" />
-              )}
-              {Math.abs(tokenChange).toFixed(1)}%
-            </div>
-          ) : null}
-        </div>
-
-        <div className="flex items-end justify-between gap-4">
-          <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
-            <div className="flex flex-col">
-              <span
-                data-testid="analytics-total-cost"
-                className="text-lg font-semibold tabular-nums text-foreground"
-              >
-                ${(animatedTotalCostCents / 100).toFixed(2)}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {t('analytics.costTotal')}
-              </span>
-            </div>
-
-            <div className="flex flex-col">
-              <span className="text-lg font-semibold tabular-nums text-foreground">
-                ${(animatedWeeklyCostCents / 100).toFixed(2)}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {t('analytics.costThisWeek')}
-              </span>
-            </div>
-
-            <div className="flex flex-col">
-              <span className="text-lg font-semibold tabular-nums text-foreground">
-                {animatedWeeklyTokens.toLocaleString()}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {t('analytics.tokenThisWeek')}
-              </span>
-            </div>
-
-            <div className="flex flex-col items-center">
-              <div className="flex items-center gap-1">
-                <span className="text-lg font-semibold tabular-nums text-foreground">
-                  {animatedStreakDays}
-                </span>
-                <Flame className={`h-4 w-4 ${streakDays >= 7 ? 'text-orange-500' : 'text-muted-foreground'}`} />
-              </div>
-              <span className="text-xs text-muted-foreground">
-                {t('analytics.streak')}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex-shrink-0">
-            <HeatmapCalendar activities={dailyActivities} compact={true} />
+              <RefreshCw className={cn('h-4 w-4', isRefreshing && 'animate-spin')} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowSharePoster(true)}
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-[hsl(var(--surface))] text-muted-foreground transition-colors hover:text-foreground"
+              aria-label={t('analytics.sharePoster')}
+            >
+              <Share2 className="h-4 w-4" />
+            </button>
           </div>
         </div>
-      </div>
 
-      <Suspense fallback={<AnalyticsInsightsFallback />}>
-        <LazyAnalyticsInsights
-          usageStats={usageStats}
-          usageSource={usageSource}
-          enableModelBreakdown={!isUsingMockData}
-          milestones={milestones}
-          isRefreshing={isRefreshing}
-          onRefresh={handleRefresh}
-        />
-      </Suspense>
+        <div className="grid gap-5 border-t border-[hsl(var(--border-subtle)/0.5)] pt-5 xl:grid-cols-[minmax(320px,0.4fr)_minmax(620px,1fr)] xl:gap-7">
+          <div className="grid min-w-0 grid-cols-2 gap-x-5 gap-y-4 xl:border-r xl:border-[hsl(var(--border-subtle)/0.5)] xl:pr-7">
+            <MetricCell
+              value={animatedTotalTokens.toLocaleString()}
+              label={t('analytics.totalTokens')}
+              trend={tokenChange}
+              featured
+              className="col-span-2"
+            />
+            <MetricCell
+              value={`$${(animatedTotalCostCents / 100).toFixed(2)}`}
+              label={t('analytics.costTotal')}
+            />
+            <MetricCell
+              value={`$${(animatedWeeklyCostCents / 100).toFixed(2)}`}
+              label={t('analytics.costThisWeek')}
+            />
+            <MetricCell
+              value={animatedWeeklyTokens.toLocaleString()}
+              label={t('analytics.tokenThisWeek')}
+            />
+            <MetricCell
+              value={String(animatedStreakDays)}
+              label={t('analytics.streak')}
+              suffix={
+                <Flame
+                  className={cn(
+                    'h-4 w-4 transition-colors duration-300',
+                    streakDays >= 7 ? 'text-[hsl(25_90%_50%)] drop-shadow-[0_0_4px_hsl(25_90%_50%/0.4)]' : 'text-muted-foreground'
+                  )}
+                />
+              }
+            />
+          </div>
+
+          <div className="min-w-0">
+            <HeatmapCalendar activities={dailyActivities} compact={false} />
+          </div>
+        </div>
+      </section>
+
+      {/* Charts Section — white surface */}
+      <section className="mt-8">
+        <Suspense fallback={<AnalyticsInsightsFallback />}>
+          <LazyAnalyticsInsights
+            usageStats={usageStats}
+            usageSource={usageSource}
+            enableModelBreakdown={!isUsingMockData}
+            milestones={milestones}
+            isRefreshing={isRefreshing}
+            onRefresh={handleRefresh}
+          />
+        </Suspense>
+      </section>
 
       {showSharePoster && (
         <Suspense fallback={null}>
@@ -540,6 +515,69 @@ export function Analytics() {
           />
         </Suspense>
       )}
+    </div>
+  );
+}
+
+/** A single metric in the horizontal row */
+function MetricCell({
+  value,
+  label,
+  trend,
+  suffix,
+  featured = false,
+  className,
+}: {
+  value: string;
+  label: string;
+  trend?: number | null;
+  suffix?: React.ReactNode;
+  featured?: boolean;
+  className?: string;
+}) {
+  return (
+    <div className={cn('min-w-0 border-t border-[hsl(var(--border-subtle)/0.42)] pt-2.5 first:border-t-0 first:pt-0', className)}>
+      <div className="flex min-w-0 items-center gap-2">
+        <span
+          className={cn(
+            'min-w-0 truncate font-semibold tabular-nums text-foreground',
+            featured ? 'text-[1.65rem] leading-none sm:text-[2rem]' : 'text-[1.22rem] leading-tight sm:text-[1.45rem]'
+          )}
+          style={{
+            fontFamily: 'system-ui, -apple-system, sans-serif',
+            letterSpacing: '-0.02em',
+          }}
+        >
+          {value}
+        </span>
+        {suffix}
+        {trend != null && (
+          <span
+            className={cn(
+              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium tabular-nums',
+              trend >= 0
+                ? 'bg-[hsl(var(--success)/0.1)] text-[hsl(var(--success))]'
+                : 'bg-[hsl(var(--destructive)/0.1)] text-[hsl(var(--destructive))]'
+            )}
+          >
+            {trend >= 0 ? (
+              <TrendingUp className="h-3 w-3" />
+            ) : (
+              <TrendingDown className="h-3 w-3" />
+            )}
+            {Math.abs(trend).toFixed(1)}%
+          </span>
+        )}
+      </div>
+      <span
+        className="mt-1.5 block text-sm text-muted-foreground"
+        style={{
+          fontFamily: 'system-ui, -apple-system, sans-serif',
+          letterSpacing: '-0.01em',
+        }}
+      >
+        {label}
+      </span>
     </div>
   );
 }

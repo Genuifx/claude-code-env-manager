@@ -1,119 +1,100 @@
-import { useState, useCallback } from 'react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Sector, Label } from 'recharts';
+import { memo, useMemo } from 'react';
 import type { TokenUsageWithCost } from '@/types/analytics';
+import { useLocale } from '@/locales';
 
 interface ModelDistributionProps {
   byModel: Record<string, TokenUsageWithCost>;
 }
 
-const CHART_COLORS = [
-  'hsl(var(--chart-1))',
-  'hsl(var(--chart-2))',
-  'hsl(var(--chart-3))',
+/** Purple palette at descending opacity — cohesive with the other charts. */
+const BAR_COLORS = [
   'hsl(var(--chart-4))',
-  'hsl(var(--chart-5))',
+  'hsl(var(--chart-4) / 0.72)',
+  'hsl(var(--chart-4) / 0.50)',
+  'hsl(var(--chart-4) / 0.34)',
+  'hsl(var(--chart-4) / 0.20)',
 ];
 
-function formatTotal(tokens: number): string {
+function formatTokenCount(tokens: number): string {
   if (tokens >= 1_000_000_000) return `${(tokens / 1_000_000_000).toFixed(1)}B`;
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
   if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}K`;
   return tokens.toString();
 }
 
-const renderActiveShape = (props: any) => {
-  const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill } = props;
-  return (
-    <Sector
-      cx={cx}
-      cy={cy}
-      innerRadius={innerRadius - 2}
-      outerRadius={outerRadius + 4}
-      startAngle={startAngle}
-      endAngle={endAngle}
-      fill={fill}
-      style={{ filter: 'brightness(1.15)', transition: 'all 0.2s ease' }}
-    />
-  );
-};
+export const ModelDistribution = memo(function ModelDistribution({ byModel }: ModelDistributionProps) {
+  const { t } = useLocale();
 
-export function ModelDistribution({ byModel }: ModelDistributionProps) {
-  const [activeIndex, setActiveIndex] = useState<number | undefined>(undefined);
+  const models = useMemo(() => {
+    const entries = Object.entries(byModel);
+    const totalTokens = entries.reduce(
+      (sum, [, usage]) => sum + usage.inputTokens + usage.outputTokens,
+      0,
+    );
 
-  const onPieEnter = useCallback((_: unknown, index: number) => {
-    setActiveIndex(index);
-  }, []);
+    return entries
+      .map(([name, usage]) => {
+        const tokens = usage.inputTokens + usage.outputTokens;
+        const percentage = totalTokens > 0 ? (tokens / totalTokens) * 100 : 0;
+        return { name, tokens, percentage };
+      })
+      .sort((a, b) => b.percentage - a.percentage)
+      .slice(0, 5);
+  }, [byModel]);
 
-  const onPieLeave = useCallback(() => {
-    setActiveIndex(undefined);
-  }, []);
-
-  const models = Object.entries(byModel);
-  const totalTokens = models.reduce(
-    (sum, [, usage]) => sum + usage.inputTokens + usage.outputTokens,
-    0
-  );
-
-  const modelsWithPercentage = models
-    .map(([name, usage]) => {
-      const tokens = usage.inputTokens + usage.outputTokens;
-      const percentage = totalTokens > 0 ? (tokens / totalTokens) * 100 : 0;
-      return { name, usage, tokens, percentage };
-    })
-    .sort((a, b) => b.percentage - a.percentage);
-
-  const pieData = modelsWithPercentage.map(({ name, tokens }) => ({
-    name,
-    value: tokens,
-  }));
+  if (models.length === 0) {
+    return (
+      <div className="flex h-[160px] items-center justify-center text-sm text-muted-foreground">
+        {t('analytics.noDataYet')}
+      </div>
+    );
+  }
 
   return (
-    <div className="flex items-start gap-4">
-      {/* Donut */}
-      <div className="w-[40%]">
-        <ResponsiveContainer width="100%" height={160}>
-          <PieChart>
-            <Pie
-              data={pieData}
-              dataKey="value"
-              innerRadius="60%"
-              outerRadius="80%"
-              {...{ activeIndex } as any}
-              activeShape={renderActiveShape}
-              onMouseEnter={onPieEnter}
-              onMouseLeave={onPieLeave}
-              strokeWidth={0}
-              isAnimationActive={false}
-            >
-              {pieData.map((_, index) => (
-                <Cell
-                  key={index}
-                  fill={CHART_COLORS[index % CHART_COLORS.length]}
-                />
-              ))}
-              <Label
-                value={formatTotal(totalTokens)}
-                position="center"
-                className="text-lg font-bold fill-foreground"
+    <div className="space-y-4">
+      {models.map(({ name, tokens, percentage }, index) => (
+        <div key={name} className="group cursor-default">
+          {/* Label row */}
+          <div className="mb-1.5 flex items-center justify-between">
+            <div className="flex items-center gap-2 min-w-0 max-w-[60%]">
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-full"
+                style={{ backgroundColor: BAR_COLORS[index] ?? BAR_COLORS[BAR_COLORS.length - 1] }}
               />
-            </Pie>
-          </PieChart>
-        </ResponsiveContainer>
-      </div>
-
-      {/* Model List */}
-      <div className="w-[60%] space-y-2 py-2">
-        {modelsWithPercentage.map(({ name, percentage }, index) => (
-          <div key={name} className="flex items-center gap-2 text-sm">
-            <div
-              className="w-2.5 h-2.5 rounded-full shrink-0"
-              style={{ backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }}
-            />
-            <span className="font-medium text-foreground truncate flex-1">{name}</span>
-            <span className="text-muted-foreground shrink-0">{percentage.toFixed(1)}%</span>
+              <span
+                className="text-[13px] font-medium text-foreground truncate"
+                style={{ fontFamily: 'system-ui, -apple-system, sans-serif', letterSpacing: '-0.01em' }}
+              >
+                {name}
+              </span>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span
+                className="text-xs tabular-nums text-muted-foreground"
+                style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}
+              >
+                {formatTokenCount(tokens)}
+              </span>
+              <span
+                className="text-[13px] font-semibold tabular-nums text-foreground"
+                style={{ fontFamily: 'system-ui, -apple-system, sans-serif', letterSpacing: '-0.01em' }}
+              >
+                {percentage.toFixed(1)}%
+              </span>
+            </div>
           </div>
-        ))}
-      </div>
+          {/* Progress bar */}
+          <div className="h-2.5 overflow-hidden rounded-full bg-[hsl(var(--border-subtle))]">
+            <div
+              className="h-full rounded-full transition-all duration-500 ease-out group-hover:brightness-110"
+              style={{
+                width: `${percentage}%`,
+                backgroundColor: BAR_COLORS[index] ?? BAR_COLORS[BAR_COLORS.length - 1],
+              }}
+            />
+          </div>
+        </div>
+      ))}
     </div>
   );
-}
+});
