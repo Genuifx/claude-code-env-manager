@@ -93,7 +93,7 @@ export function useZoom(): void {
         setZoom(current + STEP);
         return;
       }
-      if (key === '-' || key === '_') {
+      if (key === '-') {
         e.preventDefault();
         setZoom(current - STEP);
         return;
@@ -110,7 +110,7 @@ export function useZoom(): void {
     // behaviour of native macOS apps.
     window.addEventListener('keydown', handler, { capture: true });
     return () => {
-      window.removeEventListener('keydown', handler, { capture: true } as EventListenerOptions);
+      window.removeEventListener('keydown', handler, { capture: true });
     };
   }, []);
 }
