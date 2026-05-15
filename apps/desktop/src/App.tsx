@@ -8,6 +8,7 @@ import { Workspace } from '@/pages/Workspace';
 import { useAppStore, type Environment, type LaunchClient } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
+import { useZoom } from '@/hooks/useZoom';
 import { Toaster, toast } from 'sonner';
 import { LocaleProvider, useLocale } from '@/locales';
 import type { UsageStats } from '@/types/analytics';
@@ -522,6 +523,9 @@ function App() {
   }), [handleLaunch, navigateToTab]);
 
   useKeyboardShortcuts(globalShortcuts);
+
+  // Mac-native zoom shortcuts: Cmd+= / Cmd+- / Cmd+0.
+  useZoom();
 
   // Handle launch with specific directory
   const handleLaunchWithDir = useCallback(async (workingDir: string, client?: LaunchClient) => {
