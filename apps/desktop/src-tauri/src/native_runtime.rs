@@ -1397,7 +1397,9 @@ fn summarize_interactive_prompt_response(
 
 fn payload_last_error(payload: &SessionEventPayload) -> Option<String> {
     match payload {
-        SessionEventPayload::StdErrLine { line } => non_empty_error(line),
+        SessionEventPayload::StdErrLine { line } if !is_context_usage_probe_error(line) => {
+            non_empty_error(line)
+        }
         SessionEventPayload::Lifecycle { stage, detail } if stage == "error" => {
             non_empty_error(detail)
         }
@@ -1408,6 +1410,12 @@ fn payload_last_error(payload: &SessionEventPayload) -> Option<String> {
         }
         _ => None,
     }
+}
+
+fn is_context_usage_probe_error(message: &str) -> bool {
+    message
+        .trim_start()
+        .starts_with("[context_usage] getContextUsage failed:")
 }
 
 fn is_native_terminal_status(status: &str) -> bool {
@@ -1474,8 +1482,20 @@ fn read_native_runtime_state_from(path: &Path) -> io::Result<NativeRuntimeState>
     }
 
     let content = fs::read_to_string(path)?;
-    serde_json::from_str::<NativeRuntimeState>(&content)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+    let mut state = serde_json::from_str::<NativeRuntimeState>(&content)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+
+    for record in &mut state.sessions {
+        if record
+            .last_error
+            .as_deref()
+            .is_some_and(is_context_usage_probe_error)
+        {
+            record.last_error = None;
+        }
+    }
+
+    Ok(state)
 }
 
 fn persist_native_runtime_state_to(
@@ -1539,14 +1559,15 @@ fn build_runtime_bootstrap_options(
 mod tests {
     use super::{
         drain_helper_output_lines, merge_helper_env_path,
-        native_session_allows_dangerously_skip_permissions, HelperInputCommand, NativeProvider,
-        NativeRuntimeManager, NativeSessionHandle, NativeSessionOptions, NativeSessionRecord,
-        NativeTransport, PromptImage,
+        native_session_allows_dangerously_skip_permissions, read_native_runtime_state_from,
+        HelperInputCommand, NativeProvider, NativeRuntimeManager, NativeSessionHandle,
+        NativeSessionOptions, NativeSessionRecord, NativeTransport, PromptImage,
     };
     use crate::event_bus::{SessionEventPayload, SessionStore};
     use crate::native_event_log::NativeEventLog;
     use chrono::Utc;
     use std::collections::HashMap;
+    use std::fs;
     use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, Mutex};
 
@@ -1689,6 +1710,58 @@ mod tests {
                 reason: "done".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn context_usage_probe_stderr_does_not_set_last_error() {
+        let runtime_id = "native-context-usage-probe";
+        let manager = manager_with_handle(runtime_id);
+
+        manager
+            .process_helper_stdout(
+                runtime_id,
+                r#"{"type":"event","payload":{"type":"stderr_line","line":"[context_usage] getContextUsage failed: Error: q.match is not a function"}}"#,
+            )
+            .expect("process context usage probe stderr");
+
+        let summary = manager.summary_for(runtime_id).expect("summary");
+        assert_eq!(summary.last_error, None);
+
+        let batch = manager
+            .replay_events(runtime_id, None)
+            .expect("replay events");
+        assert_eq!(batch.events.len(), 1);
+        assert_eq!(
+            batch.events[0].payload,
+            SessionEventPayload::StdErrLine {
+                line: "[context_usage] getContextUsage failed: Error: q.match is not a function"
+                    .to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn read_state_clears_persisted_context_usage_probe_error() {
+        let mut record = native_record("native-context-usage-state", "ready", true);
+        record.last_error = Some(
+            "[context_usage] getContextUsage failed: Error: q.match is not a function".to_string(),
+        );
+        let state_path = std::env::temp_dir().join(format!(
+            "ccem-native-runtime-context-usage-state-{}.json",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default(),
+        ));
+        let serialized = serde_json::to_string(&serde_json::json!({
+            "sessions": [record],
+        }))
+        .expect("serialize state");
+        fs::write(&state_path, serialized).expect("write state");
+
+        let state = read_native_runtime_state_from(&state_path).expect("read state");
+
+        assert_eq!(state.sessions.len(), 1);
+        assert_eq!(state.sessions[0].last_error, None);
+
+        let _ = fs::remove_file(state_path);
     }
 
     #[test]

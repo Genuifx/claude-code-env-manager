@@ -141,6 +141,7 @@ let claudeSawPartialThinking = false;
 let claudeTurnCompletionEmitted = false;
 const claudeSeenMessageIds = new Set<string>();
 let claudePlanExitPromptPending = false;
+let claudeContextUsageFailureKey: string | null = null;
 let codexClient: Codex | null = null;
 let codexThread: any = null;
 let codexLastContextUsageKey: string | null = null;
@@ -893,6 +894,7 @@ async function emitClaudeContextUsage() {
   if (!currentClaudeQuery) return;
   try {
     const ctx = await currentClaudeQuery.getContextUsage();
+    claudeContextUsageFailureKey = null;
     emitEvent({
       type: 'context_usage',
       provider: 'claude',
@@ -911,10 +913,16 @@ async function emitClaudeContextUsage() {
       })),
     });
   } catch (err) {
-    const stack = err instanceof Error ? err.stack : String(err);
+    const message = err instanceof Error ? err.message : String(err);
+    const detail = `Claude context usage unavailable: ${message}`;
+    if (detail === claudeContextUsageFailureKey) {
+      return;
+    }
+    claudeContextUsageFailureKey = detail;
     emitEvent({
-      type: 'stderr_line',
-      line: `[context_usage] getContextUsage failed: ${stack}`,
+      type: 'lifecycle',
+      stage: 'context_usage_unavailable',
+      detail,
     });
   }
 }
@@ -1106,6 +1114,7 @@ async function consumeClaudeMessages() {
     throw new Error('Native runtime helper not initialized');
   }
 
+  claudeContextUsageFailureKey = null;
   claudePlanExitPromptPending = false;
   const permission = normalizeClaudePermissionMode(initCommand.perm_mode, {
     allowDangerouslySkipPermissions: initCommand.allow_dangerously_skip_permissions === true,
