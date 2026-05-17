@@ -2,6 +2,22 @@ export type HistorySource = 'claude' | 'codex' | 'opencode';
 
 export type HistorySourceFilter = 'all' | HistorySource;
 
+export type SessionTaskStage = 'ideation' | 'implementation' | 'validation' | 'release' | 'done';
+
+export type SessionStickerId =
+  | 'focused'
+  | 'excited'
+  | 'calm'
+  | 'blocked'
+  | 'confused'
+  | 'waiting'
+  | 'urgent'
+  | 'reviewing'
+  | 'shipping'
+  | 'celebrating'
+  | 'risky'
+  | 'archived';
+
 export interface HistorySessionItem {
   id: string;
   source: HistorySource;
@@ -11,6 +27,9 @@ export interface HistorySessionItem {
   projectName: string;
   envName?: string;
   configSource?: 'ccem' | 'native';
+  taskStage?: SessionTaskStage;
+  taskSticker?: SessionStickerId;
+  taskLabel?: string;
 }
 
 export interface ConversationContentBlock {

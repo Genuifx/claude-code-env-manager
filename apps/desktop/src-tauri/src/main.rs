@@ -25,6 +25,7 @@ mod proxy_debug;
 mod remote;
 mod runtime;
 mod session;
+mod session_annotations;
 mod session_provenance;
 mod skills;
 mod system_proxy;
@@ -3123,6 +3124,8 @@ fn main() {
             get_conversation_messages,
             get_conversation_segments,
             title_overrides::set_session_title,
+            session_annotations::set_session_annotation,
+            session_annotations::clear_session_annotation,
             skills::search_skills_stream,
             skills::list_installed_skills,
             skills::list_workspace_skills,

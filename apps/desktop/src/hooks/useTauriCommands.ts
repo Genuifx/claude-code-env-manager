@@ -3,6 +3,7 @@ import { useAppStore, type Environment, type Session, type ArrangeLayout, type I
 import { useCallback } from 'react';
 import { toast } from 'sonner';
 import { shallow } from 'zustand/shallow';
+import type { SessionStickerId, SessionTaskStage } from '@/features/conversations/types';
 import type {
   ChannelKind,
   HeadlessSessionSummary,
@@ -1194,6 +1195,24 @@ export function useTauriCommands() {
     await invoke('set_session_title', { source, sessionId, title });
   }, []);
 
+  const setSessionAnnotation = useCallback(async (
+    source: string,
+    sessionId: string,
+    annotation: {
+      stage?: SessionTaskStage;
+      sticker?: SessionStickerId;
+      label?: string;
+    }
+  ): Promise<void> => {
+    await invoke('set_session_annotation', {
+      source,
+      sessionId,
+      stage: annotation.stage ?? null,
+      sticker: annotation.sticker ?? null,
+      label: annotation.label ?? null,
+    });
+  }, []);
+
   return {
     loadEnvironments,
     loadCurrentEnv,
@@ -1299,5 +1318,6 @@ export function useTauriCommands() {
     clearProxyTraffic,
     openTextInVSCode,
     setSessionTitle,
+    setSessionAnnotation,
   };
 }

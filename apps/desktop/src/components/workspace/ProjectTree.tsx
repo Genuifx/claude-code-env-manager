@@ -1,14 +1,22 @@
 import { memo, useMemo, useState, useDeferredValue, useCallback, useRef, useEffect } from 'react';
-import { ChevronRight, FolderOpen, FolderClosed, MessageSquare, RefreshCw, Search, SquarePen } from 'lucide-react';
+import { Check, ChevronRight, FolderOpen, FolderClosed, MessageSquare, RefreshCw, Search, SquarePen, Sticker, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { getHistorySessionDisplay } from '@/components/history/historySession';
 import { useLocale } from '@/locales';
 import type { Environment, LaunchClient } from '@/store';
-import type { HistorySessionItem } from '@/features/conversations/types';
+import type { HistorySessionItem, SessionStickerId, SessionTaskStage } from '@/features/conversations/types';
 import { AgentLaunchSplitButton } from './AgentLaunchSplitButton';
 import { SessionTreeItemIcon, resolveSessionClient } from './sessionTreeIcons';
 import type { WorkspaceSessionDecoration } from './useWorkspaceSessionDecorations';
+import {
+  SESSION_STICKERS,
+  SESSION_TASK_STAGES,
+  getSessionStickerDefinition,
+  getSessionTaskStageDefinition,
+  getStickerSpriteStyle,
+} from './sessionAnnotations';
 
 interface ProjectTreeProps {
   sessions: HistorySessionItem[];
@@ -24,6 +32,14 @@ interface ProjectTreeProps {
   opencodeInstalled?: boolean;
   /** Save a title override. Returns a promise so callers can await it. */
   onSaveTitle?: (session: HistorySessionItem, title: string) => Promise<void>;
+  onSaveAnnotation?: (
+    session: HistorySessionItem,
+    annotation: {
+      stage?: SessionTaskStage;
+      sticker?: SessionStickerId;
+      label?: string;
+    }
+  ) => Promise<void>;
   onSessionsChanged?: () => Promise<void>;
   onCreateForProject?: (projectPath: string) => void;
 }
@@ -78,6 +94,306 @@ function ProjectTreeSkeleton() {
 }
 
 const PAGE_SIZE = 10;
+const MAX_LABEL_LENGTH = 24;
+
+function hasSessionAnnotation(session: HistorySessionItem) {
+  return !!(session.taskStage || session.taskSticker || session.taskLabel?.trim());
+}
+
+function SessionStickerPreview({
+  sticker,
+  className,
+}: {
+  sticker?: SessionStickerId;
+  className?: string;
+}) {
+  const definition = getSessionStickerDefinition(sticker);
+  if (!definition) {
+    return null;
+  }
+
+  return (
+    <span
+      className={cn(
+        'inline-flex h-4 w-4 shrink-0 rounded-[5px] bg-cover bg-center ring-1 ring-border/50',
+        className
+      )}
+      style={getStickerSpriteStyle(definition)}
+      aria-hidden="true"
+    />
+  );
+}
+
+function SessionStagePill({ stage, t }: { stage?: SessionTaskStage; t: (key: string) => string }) {
+  const definition = getSessionTaskStageDefinition(stage);
+  if (!definition) {
+    return null;
+  }
+
+  return (
+    <span
+      className={cn(
+        'inline-flex h-4 shrink-0 items-center rounded-full border px-1.5 text-[10px] font-medium leading-none',
+        definition.className
+      )}
+    >
+      {t(definition.labelKey)}
+    </span>
+  );
+}
+
+function SessionAnnotationSummary({
+  session,
+  t,
+  onClear,
+}: {
+  session: HistorySessionItem;
+  t: (key: string) => string;
+  onClear?: () => void;
+}) {
+  if (!hasSessionAnnotation(session)) {
+    return null;
+  }
+
+  return (
+    <div className="mt-1 flex min-w-0 items-center gap-1.5 pl-[22px]">
+      <SessionStickerPreview sticker={session.taskSticker} />
+      <SessionStagePill stage={session.taskStage} t={t} />
+      {session.taskLabel ? (
+        <span className="min-w-0 truncate text-[10px] leading-none text-muted-foreground/80">
+          {session.taskLabel}
+        </span>
+      ) : null}
+      {onClear ? (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onClear();
+          }}
+          aria-label={t('workspace.annotationClear')}
+          title={t('workspace.annotationClear')}
+          className={cn(
+            'ml-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full',
+            'text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground'
+          )}
+        >
+          <X className="h-3 w-3" />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function SessionAnnotationPopover({
+  session,
+  t,
+  onSaveAnnotation,
+  onSessionsChanged,
+}: {
+  session: HistorySessionItem;
+  t: (key: string) => string;
+  onSaveAnnotation?: ProjectTreeProps['onSaveAnnotation'];
+  onSessionsChanged?: ProjectTreeProps['onSessionsChanged'];
+}) {
+  const [open, setOpen] = useState(false);
+  const [draftStage, setDraftStage] = useState<SessionTaskStage | undefined>(session.taskStage);
+  const [draftSticker, setDraftSticker] = useState<SessionStickerId | undefined>(session.taskSticker);
+  const [draftLabel, setDraftLabel] = useState(session.taskLabel ?? '');
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    setDraftStage(session.taskStage);
+    setDraftSticker(session.taskSticker);
+    setDraftLabel(session.taskLabel ?? '');
+  }, [open, session.taskLabel, session.taskStage, session.taskSticker]);
+
+  const save = useCallback(async () => {
+    if (!onSaveAnnotation) {
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await onSaveAnnotation(session, {
+        stage: draftStage,
+        sticker: draftSticker,
+        label: draftLabel.trim() || undefined,
+      });
+      await onSessionsChanged?.();
+      setOpen(false);
+    } catch (error) {
+      console.error('Failed to save session annotation:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [draftLabel, draftStage, draftSticker, onSaveAnnotation, onSessionsChanged, session]);
+
+  const clear = useCallback(async () => {
+    if (!onSaveAnnotation) {
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await onSaveAnnotation(session, {});
+      await onSessionsChanged?.();
+      setOpen(false);
+    } catch (error) {
+      console.error('Failed to clear session annotation:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [onSaveAnnotation, onSessionsChanged, session]);
+
+  if (!onSaveAnnotation) {
+    return null;
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+          }}
+          aria-label={t('workspace.annotationOpen')}
+          title={t('workspace.annotationOpen')}
+          className={cn(
+            'absolute left-2 top-1.5 z-10 inline-flex h-6 w-6 items-center justify-center rounded-md',
+            'border border-border/60 bg-surface-raised text-muted-foreground shadow-sm transition-all',
+            'opacity-0 hover:border-primary/30 hover:bg-primary/8 hover:text-primary',
+            'group-hover/session:opacity-100 group-focus-within/session:opacity-100 data-[state=open]:opacity-100'
+          )}
+        >
+          <Sticker className="h-3.5 w-3.5" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        side="right"
+        sideOffset={8}
+        className="w-[320px] rounded-lg border-border/70 bg-popover/95 p-3 shadow-xl backdrop-blur-xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-foreground">{t('workspace.annotationTitle')}</p>
+            <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+              {getHistorySessionDisplay(session, t('history.untitledSession'))}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            aria-label={t('common.close')}
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">
+              {t('workspace.annotationStage')}
+            </p>
+            <div className="grid grid-cols-5 gap-1.5">
+              {SESSION_TASK_STAGES.map((stage) => {
+                const selected = draftStage === stage.id;
+                return (
+                  <button
+                    key={stage.id}
+                    type="button"
+                    onClick={() => setDraftStage(selected ? undefined : stage.id)}
+                    className={cn(
+                      'inline-flex h-7 items-center justify-center rounded-md border text-[11px] transition-colors',
+                      selected
+                        ? stage.className
+                        : 'border-border/60 bg-muted/20 text-muted-foreground hover:bg-muted/50 hover:text-foreground'
+                    )}
+                  >
+                    {t(stage.labelKey)}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">
+              {t('workspace.annotationSticker')}
+            </p>
+            <div className="grid grid-cols-6 gap-1.5">
+              {SESSION_STICKERS.map((sticker) => {
+                const selected = draftSticker === sticker.id;
+                return (
+                  <button
+                    key={sticker.id}
+                    type="button"
+                    onClick={() => setDraftSticker(selected ? undefined : sticker.id)}
+                    aria-label={t(sticker.labelKey)}
+                    title={t(sticker.labelKey)}
+                    className={cn(
+                      'inline-flex h-9 items-center justify-center rounded-md border transition-all',
+                      selected
+                        ? 'border-primary/50 bg-primary/10 ring-1 ring-primary/25'
+                        : 'border-border/60 bg-muted/20 hover:bg-muted/50'
+                    )}
+                  >
+                    <span
+                      className="h-6 w-6 rounded-md bg-cover bg-center"
+                      style={getStickerSpriteStyle(sticker)}
+                    />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-[11px] font-medium text-muted-foreground">
+              {t('workspace.annotationLabel')}
+            </label>
+            <input
+              value={draftLabel}
+              onChange={(event) => setDraftLabel(event.target.value.slice(0, MAX_LABEL_LENGTH))}
+              placeholder={t('workspace.annotationLabelPlaceholder')}
+              className={cn(
+                'h-8 w-full rounded-md border border-border bg-surface-raised px-2 text-xs text-foreground outline-none',
+                'placeholder:text-muted-foreground focus:border-primary/50 focus:ring-1 focus:ring-primary/20'
+              )}
+            />
+          </div>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={clear}
+            disabled={isSaving || !hasSessionAnnotation(session)}
+            className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+          >
+            <X className="h-3.5 w-3.5" />
+            {t('workspace.annotationClear')}
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={isSaving}
+            className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-60"
+          >
+            <Check className="h-3.5 w-3.5" />
+            {isSaving ? t('workspace.annotationSaving') : t('workspace.annotationSave')}
+          </button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 export const ProjectTree = memo(function ProjectTree({
   sessions,
@@ -92,6 +408,7 @@ export const ProjectTree = memo(function ProjectTree({
   codexInstalled = false,
   opencodeInstalled = false,
   onSaveTitle,
+  onSaveAnnotation,
   onSessionsChanged,
   onCreateForProject,
 }: ProjectTreeProps) {
@@ -143,6 +460,16 @@ export const ProjectTree = memo(function ProjectTree({
       console.error('Failed to save title:', err);
     }
   }, [onSaveTitle, onSessionsChanged]);
+  const clearAnnotation = useCallback(async (session: HistorySessionItem) => {
+    try {
+      if (onSaveAnnotation) {
+        await onSaveAnnotation(session, {});
+      }
+      await onSessionsChanged?.();
+    } catch (err) {
+      console.error('Failed to clear session annotation:', err);
+    }
+  }, [onSaveAnnotation, onSessionsChanged]);
   const deferredSearch = useDeferredValue(search);
   const [expandedProjects, setExpandedProjects] = useState<Set<string> | null>(null);
   const [projectVisibleCount, setProjectVisibleCount] = useState<Record<string, number>>({});
@@ -412,41 +739,64 @@ export const ProjectTree = memo(function ProjectTree({
                           />
                         </div>
                       ) : (
-                        <button
+                        <div
                           key={key}
-                          type="button"
+                          role="button"
+                          tabIndex={0}
                           onClick={() => onSelect(session)}
                           onDoubleClick={() => {
                             setEditingKey(key);
                             setEditValue(getHistorySessionDisplay(session, ''));
                           }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              onSelect(session);
+                            }
+                          }}
                           className={cn(
-                            'w-full flex items-center gap-2 pl-9 pr-3 py-1.5 text-left transition-all rounded-md mx-1 border-l-2',
+                            'group/session relative mx-1 w-full rounded-md border-l-2 py-1.5 pl-12 pr-3 text-left transition-all outline-none',
+                            'focus-visible:ring-1 focus-visible:ring-primary/30',
                             isSelected
                               ? 'bg-primary/10 text-primary border-primary'
                               : 'hover:bg-muted/50 text-muted-foreground hover:text-foreground border-transparent'
                           )}
                         >
-                          <span title={getIconTitle(session)}>
-                            <SessionTreeItemIcon
-                              session={session}
-                              environment={resolveEnvironment(session)}
-                              decoration={decorationsBySessionKey[key]}
-                              isSelected={isSelected}
-                            />
-                          </span>
-                          <span className="text-[12px] truncate flex-1">{getHistorySessionDisplay(session, t('history.untitledSession'))}</span>
-                          {freshDotKeys.has(key) ? (
-                            <span className="relative inline-flex items-center justify-center shrink-0 w-5 h-3.5">
-                              <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-amber-500/25 opacity-75" />
-                              <span className="relative w-1.5 h-1.5 rounded-full bg-amber-500" />
+                          <SessionAnnotationPopover
+                            session={session}
+                            t={t}
+                            onSaveAnnotation={onSaveAnnotation}
+                            onSessionsChanged={onSessionsChanged}
+                          />
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span title={getIconTitle(session)}>
+                              <SessionTreeItemIcon
+                                session={session}
+                                environment={resolveEnvironment(session)}
+                                decoration={decorationsBySessionKey[key]}
+                                isSelected={isSelected}
+                              />
                             </span>
-                          ) : (
-                            <span className="text-[10px] text-muted-foreground shrink-0">
-                              {formatRelativeTime(session.timestamp)}
+                            <span className="min-w-0 flex-1 truncate text-[12px]">
+                              {getHistorySessionDisplay(session, t('history.untitledSession'))}
                             </span>
-                          )}
-                        </button>
+                            {freshDotKeys.has(key) ? (
+                              <span className="relative inline-flex h-3.5 w-5 shrink-0 items-center justify-center">
+                                <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-amber-500/25 opacity-75" />
+                                <span className="relative h-1.5 w-1.5 rounded-full bg-amber-500" />
+                              </span>
+                            ) : (
+                              <span className="shrink-0 text-[10px] text-muted-foreground">
+                                {formatRelativeTime(session.timestamp)}
+                              </span>
+                            )}
+                          </div>
+                          <SessionAnnotationSummary
+                            session={session}
+                            t={t}
+                            onClear={onSaveAnnotation ? () => void clearAnnotation(session) : undefined}
+                          />
+                        </div>
                       );
                     })}
                     {hasMore && (

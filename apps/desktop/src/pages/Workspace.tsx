@@ -180,6 +180,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     checkCodexInstalled,
     checkOpenCodeInstalled,
     setSessionTitle,
+    setSessionAnnotation,
     createNativeSession,
     getNativeSessionEvents,
     listNativeSessions,
@@ -1466,6 +1467,9 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
           opencodeInstalled={opencodeInstalled}
           onSaveTitle={async (session, title) => {
             await setSessionTitle(session.source, session.id, title);
+          }}
+          onSaveAnnotation={async (session, annotation) => {
+            await setSessionAnnotation(session.source, session.id, annotation);
           }}
           onSessionsChanged={async () => {
             invalidateHistoryCache();

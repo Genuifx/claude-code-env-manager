@@ -34,6 +34,12 @@ pub struct HistorySession {
     pub env_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_stage: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_sticker: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_label: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -235,6 +241,16 @@ pub async fn get_conversation_history(
             }
         }
 
+        // Overlay user-edited task stage, expressive sticker, and short label.
+        let annotations = crate::session_annotations::SessionAnnotations::load();
+        for session in &mut sessions {
+            if let Some(annotation) = annotations.get(&session.source, &session.id) {
+                session.task_stage = annotation.stage.clone();
+                session.task_sticker = annotation.sticker.clone();
+                session.task_label = annotation.label.clone();
+            }
+        }
+
         Ok(sessions)
     })
     .await
@@ -387,6 +403,9 @@ fn load_claude_history_from_paths(
                     project_name,
                     env_name: None,
                     config_source: None,
+                    task_stage: None,
+                    task_sticker: None,
+                    task_label: None,
                 },
             );
         }
@@ -736,6 +755,16 @@ fn merge_history_session_metadata(winner: &mut HistorySession, donor: &HistorySe
             winner.config_source = Some(config_source);
         }
     }
+
+    if winner.task_stage.is_none() {
+        winner.task_stage = donor.task_stage.clone();
+    }
+    if winner.task_sticker.is_none() {
+        winner.task_sticker = donor.task_sticker.clone();
+    }
+    if winner.task_label.is_none() {
+        winner.task_label = donor.task_label.clone();
+    }
 }
 
 fn merge_claude_history_session(
@@ -857,6 +886,9 @@ fn parse_claude_project_session_index(path: &Path) -> Option<HistorySession> {
         project_name,
         env_name: None,
         config_source: None,
+        task_stage: None,
+        task_sticker: None,
+        task_label: None,
     })
 }
 
@@ -1130,6 +1162,9 @@ fn upsert_codex_history_session(
                 project_name: "unknown".to_string(),
                 env_name: None,
                 config_source: None,
+                task_stage: None,
+                task_sticker: None,
+                task_label: None,
             },
         );
     }
@@ -1245,6 +1280,9 @@ fn load_codex_history_from_config(config: &CodexPathConfig) -> Result<Vec<Histor
                 project_name,
                 env_name: None,
                 config_source: None,
+                task_stage: None,
+                task_sticker: None,
+                task_label: None,
             })
         })
         .collect::<Vec<_>>();
@@ -2293,6 +2331,9 @@ fn parse_opencode_history_session(value: &serde_json::Value) -> Option<HistorySe
                 .map(|item| item.config_source.clone())
                 .or_else(|| Some("native".to_string()))
         }),
+        task_stage: None,
+        task_sticker: None,
+        task_label: None,
     })
 }
 
@@ -2558,6 +2599,9 @@ fn local_opencode_session_to_history_session(
         project_name,
         env_name: session.env_name,
         config_source: session.config_source,
+        task_stage: None,
+        task_sticker: None,
+        task_label: None,
     }
 }
 
@@ -3353,6 +3397,9 @@ mod tests {
                 project_name: "unknown".to_string(),
                 env_name: Some(super::opencode::OPENCODE_NATIVE_ENV_NAME.to_string()),
                 config_source: Some("native".to_string()),
+                task_stage: None,
+                task_sticker: None,
+                task_label: None,
             },
         );
 
@@ -3367,6 +3414,9 @@ mod tests {
                 project_name: "demo".to_string(),
                 env_name: Some("Fixture Anthropic".to_string()),
                 config_source: Some("ccem".to_string()),
+                task_stage: None,
+                task_sticker: None,
+                task_label: None,
             },
         );
 
@@ -3586,6 +3636,9 @@ mod tests {
                 project_name: "baymax".to_string(),
                 env_name: Some("3891".to_string()),
                 config_source: Some("ccem".to_string()),
+                task_stage: None,
+                task_sticker: None,
+                task_label: None,
             },
             HistorySession {
                 id: "session-plain".to_string(),
@@ -3596,6 +3649,9 @@ mod tests {
                 project_name: "baymax".to_string(),
                 env_name: None,
                 config_source: None,
+                task_stage: None,
+                task_sticker: None,
+                task_label: None,
             },
             HistorySession {
                 id: "session-later".to_string(),
@@ -3606,6 +3662,9 @@ mod tests {
                 project_name: "baymax".to_string(),
                 env_name: Some("3891".to_string()),
                 config_source: Some("ccem".to_string()),
+                task_stage: None,
+                task_sticker: None,
+                task_label: None,
             },
         ];
 
@@ -3649,6 +3708,9 @@ mod tests {
                 project_name: "baymax".to_string(),
                 env_name: Some("3891".to_string()),
                 config_source: Some("ccem".to_string()),
+                task_stage: None,
+                task_sticker: None,
+                task_label: None,
             },
             HistorySession {
                 id: "provider-session-1".to_string(),
@@ -3659,6 +3721,9 @@ mod tests {
                 project_name: "baymax".to_string(),
                 env_name: None,
                 config_source: None,
+                task_stage: None,
+                task_sticker: None,
+                task_label: None,
             },
         ];
 
@@ -3696,6 +3761,9 @@ mod tests {
             project_name: "baymax".to_string(),
             env_name: Some("3891".to_string()),
             config_source: Some("ccem".to_string()),
+            task_stage: None,
+            task_sticker: None,
+            task_label: None,
         }];
 
         let deduped = dedupe_history_sessions_with_provenance_records(sessions, &records);
