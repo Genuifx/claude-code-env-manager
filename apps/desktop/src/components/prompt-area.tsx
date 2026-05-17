@@ -306,7 +306,7 @@ export const PromptArea = forwardRef<PromptAreaHandle, PromptAreaProps>(function
           data-test-id={dataTestId}
           className={cn(
             'prompt-area-editor',
-            'w-full min-w-0 break-words whitespace-pre-wrap outline-none',
+            'w-full min-w-0 max-w-full overflow-x-hidden break-words whitespace-pre-wrap outline-none [overflow-wrap:anywhere] [word-break:break-word]',
             'text-sm leading-relaxed',
             disabled && 'cursor-not-allowed opacity-50',
           )}
