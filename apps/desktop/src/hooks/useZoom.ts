@@ -1,14 +1,17 @@
 import { useEffect } from 'react';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
 
 // macOS-native style zoom shortcuts for the whole desktop app:
 //   Cmd/Ctrl + =  (also '+')  -> zoom in
 //   Cmd/Ctrl + -              -> zoom out
 //   Cmd/Ctrl + 0              -> reset to 100%
 //
-// The zoom level is applied via the non-standard but widely-supported CSS
-// `zoom` property on the document root, which scales layout, typography and
-// hit-testing together — matching what users expect from native Mac apps.
-// It is persisted to localStorage so the choice survives reloads.
+// Uses Tauri's built-in `webview.setZoom()` (under the hood:
+// `plugin:webview|set_webview_zoom`) so the entire webview scales the way a
+// browser's Cmd-+/- does, instead of layering CSS hacks. The chosen level is
+// persisted to localStorage so it survives reloads. The shortcut listener is
+// installed in the capture phase so it wins against inputs, textareas,
+// terminals, and other contenteditable surfaces — matching native macOS apps.
 
 const STORAGE_KEY = 'ccem-zoom-level';
 const MIN_ZOOM = 0.5;
@@ -38,16 +41,13 @@ function readStoredZoom(): number {
   }
 }
 
-function applyZoom(value: number): void {
-  const root = document.documentElement;
-  if (!root) return;
-  // `zoom` is supported in Chromium-based WebKit (Tauri's webview on macOS
-  // uses WKWebView, which also supports it). Setting an empty string at 1.0
-  // keeps the DOM clean.
-  if (value === DEFAULT_ZOOM) {
-    root.style.removeProperty('zoom');
-  } else {
-    root.style.zoom = String(value);
+async function applyZoom(value: number): Promise<void> {
+  try {
+    await getCurrentWebview().setZoom(value);
+  } catch (err) {
+    // The webview API can fail outside of a Tauri shell (e.g. browser preview)
+    // or if the permission is missing. Don't crash the UI in that case.
+    console.warn('[useZoom] setZoom failed', err);
   }
 }
 
@@ -67,7 +67,7 @@ export function useZoom(): void {
   useEffect(() => {
     // Restore the persisted zoom on mount.
     const initial = readStoredZoom();
-    applyZoom(initial);
+    void applyZoom(initial);
 
     let current = initial;
 
@@ -75,7 +75,7 @@ export function useZoom(): void {
       const clamped = roundZoom(clamp(next));
       if (clamped === current) return;
       current = clamped;
-      applyZoom(clamped);
+      void applyZoom(clamped);
       persistZoom(clamped);
     };
 
@@ -105,9 +105,6 @@ export function useZoom(): void {
       }
     };
 
-    // Use capture so the shortcuts work even when focus is inside inputs,
-    // textareas, terminals or other contenteditable surfaces — matching the
-    // behaviour of native macOS apps.
     window.addEventListener('keydown', handler, { capture: true });
     return () => {
       window.removeEventListener('keydown', handler, { capture: true });
