@@ -264,7 +264,7 @@ export const ProjectTree = memo(function ProjectTree({
   }, [decorationsBySessionKey, resolveEnvironment, t]);
 
   return (
-    <div className="w-[280px] shrink-0 flex flex-col bg-sidebar backdrop-blur-xl">
+    <div className="flex w-[clamp(220px,30vw,280px)] shrink-0 flex-col bg-sidebar backdrop-blur-xl">
       {/* Header: Dual Launch Button + Search */}
       <div className="shrink-0 p-3 flex flex-col gap-2">
         <AgentLaunchSplitButton
