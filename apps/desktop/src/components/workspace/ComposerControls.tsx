@@ -127,23 +127,23 @@ export function ComposerControls({
   const effortLevels = provider === 'codex' ? CODEX_EFFORT_LEVELS : CLAUDE_EFFORT_LEVELS;
 
   return (
-    <>
+    <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
       <Popover open={envEffortOpen} onOpenChange={setEnvEffortOpen}>
         <PopoverTrigger asChild>
           <button
             type="button"
             className={cn(
-              'flex h-8 items-center gap-2 rounded-xl px-2.5 text-[12px] text-foreground',
+              'flex h-8 min-w-0 max-w-full items-center gap-2 rounded-xl px-2.5 text-[12px] text-foreground',
               'cursor-pointer outline-none transition-all duration-150',
               'hover:bg-white/[0.06] focus:ring-2 focus:ring-primary/30',
             )}
           >
             <EnvironmentLobeIcon hint={currentEnvironmentIconHint} />
-            <span className="truncate">{envName}</span>
-            <span className="text-muted-foreground/60">·</span>
-            <Gauge className="h-3 w-3 shrink-0 text-muted-foreground" />
-            <span className="text-muted-foreground">{t(EFFORT_I18N_KEYS[effort])}</span>
-            <ChevronDown className="h-3 w-3 opacity-50" />
+            <span className="min-w-0 max-w-[120px] truncate">{envName}</span>
+            <span className="text-muted-foreground/60 max-[760px]:hidden">·</span>
+            <Gauge className="h-3 w-3 shrink-0 text-muted-foreground max-[760px]:hidden" />
+            <span className="shrink-0 whitespace-nowrap text-muted-foreground max-[760px]:hidden">{t(EFFORT_I18N_KEYS[effort])}</span>
+            <ChevronDown className="h-3 w-3 shrink-0 opacity-50" />
           </button>
         </PopoverTrigger>
         <PopoverContent
@@ -228,7 +228,7 @@ export function ComposerControls({
         <SelectTrigger
           variant="plain"
           className={cn(
-            'h-8 w-auto min-w-[146px] rounded-xl px-2.5 text-[12px] text-foreground',
+            'h-8 w-auto min-w-[112px] shrink-0 rounded-xl px-2.5 text-[12px] text-foreground',
             isRiskyPermissionMode(normalizedPermMode) && 'text-destructive',
           )}
         >
@@ -314,6 +314,6 @@ export function ComposerControls({
           </div>
         </SelectContent>
       </Select>
-    </>
+    </div>
   );
 }

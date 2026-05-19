@@ -1260,22 +1260,22 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
   }, [isActive, activeLiveStatus, activeLiveStoppingId, stopNativeSession]);
 
   const renderComposeView = () => (
-    <div className="flex h-full min-h-0 flex-col items-center px-8">
+    <div className="flex h-full min-h-0 flex-col items-center px-4 sm:px-6 lg:px-8">
       <div className="flex flex-1 flex-col items-center justify-end">
-        <div className="mb-6 flex items-center justify-center gap-3">
-          <h2 className="text-2xl font-semibold tracking-tight text-foreground">
+        <div className="mb-6 flex max-w-full flex-wrap items-center justify-center gap-x-3 gap-y-2 text-center">
+          <h2 className="shrink-0 whitespace-nowrap text-2xl font-semibold tracking-tight text-foreground">
             {t('workspace.composeTitle')}
           </h2>
           <button
             type="button"
             onClick={() => void handlePickComposeDir()}
-            className="inline-flex items-center gap-1.5 text-2xl font-semibold tracking-tight text-muted-foreground transition-colors hover:text-foreground"
+            className="inline-flex min-w-0 max-w-full items-center justify-center gap-1.5 text-2xl font-semibold tracking-tight text-muted-foreground transition-colors hover:text-foreground"
           >
-            <FolderOpen className="h-4 w-4" />
-            <span className="max-w-[300px] truncate">
+            <FolderOpen className="h-4 w-4 shrink-0" />
+            <span className="min-w-0 max-w-[300px] truncate">
               {effectiveComposeDirLabel || t('workspace.composeSelectFolder')}
             </span>
-            <ChevronDown className="h-3.5 w-3.5" />
+            <ChevronDown className="h-3.5 w-3.5 shrink-0" />
           </button>
         </div>
       </div>

@@ -1239,7 +1239,7 @@ export function WorkspaceSessionComposer({
   ]);
 
   return (
-    <div className="px-4 pb-3 pt-2">
+    <div className="px-2 pb-3 pt-2 sm:px-4">
       <div ref={composerShellRef} className="relative mx-auto w-full max-w-5xl">
         {combinedAboveComposer ? (
           <div className="workspace-attention-dock pointer-events-none absolute inset-x-0 bottom-[calc(100%-18px)] z-10 flex justify-center">

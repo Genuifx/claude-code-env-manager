@@ -1,10 +1,9 @@
 import { useEffect } from 'react';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 
-// macOS-native style zoom shortcuts for the whole desktop app:
-//   Cmd/Ctrl + =  (also '+')  -> zoom in
-//   Cmd/Ctrl + -              -> zoom out
-//   Cmd/Ctrl + 0              -> reset to 100%
+// Native-style zoom shortcuts for the whole desktop app:
+//   Cmd+= / Cmd++ / Cmd+- / Cmd+0 on macOS
+//   Ctrl+= / Ctrl++ / Ctrl+- / Ctrl+0 elsewhere
 //
 // Uses Tauri's built-in `webview.setZoom()` (under the hood:
 // `plugin:webview|set_webview_zoom`) so the entire webview scales the way a
@@ -15,9 +14,20 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 
 const STORAGE_KEY = 'ccem-zoom-level';
 const MIN_ZOOM = 0.5;
-const MAX_ZOOM = 2.0;
+const MAX_ZOOM = 1.3;
 const STEP = 0.1;
 const DEFAULT_ZOOM = 1.0;
+
+function isMacPlatform(): boolean {
+  const platform = navigator.platform || '';
+  const userAgent = navigator.userAgent || '';
+  return /\b(Mac|iPhone|iPad|iPod)\b/.test(platform) || userAgent.includes('Macintosh');
+}
+
+function isZoomModifier(e: KeyboardEvent, isMac: boolean): boolean {
+  if (e.altKey) return false;
+  return isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+}
 
 function clamp(value: number): number {
   if (Number.isNaN(value)) return DEFAULT_ZOOM;
@@ -70,6 +80,7 @@ export function useZoom(): void {
     void applyZoom(initial);
 
     let current = initial;
+    const isMac = isMacPlatform();
 
     const setZoom = (next: number) => {
       const clamped = roundZoom(clamp(next));
@@ -80,11 +91,7 @@ export function useZoom(): void {
     };
 
     const handler = (e: KeyboardEvent) => {
-      // Only react to Cmd (macOS) / Ctrl (other platforms) combos.
-      if (!(e.metaKey || e.ctrlKey)) return;
-      // Ignore combinations that include Alt, which usually belong to other
-      // application shortcuts.
-      if (e.altKey) return;
+      if (!isZoomModifier(e, isMac)) return;
 
       const key = e.key;
       // Cmd+= and Cmd++ (Shift+=) both mean "zoom in" on macOS.
