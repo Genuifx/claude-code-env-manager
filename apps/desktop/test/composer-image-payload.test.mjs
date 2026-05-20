@@ -41,5 +41,5 @@ test('live session sends queued and direct composer images to native runtime', a
 
   assert.match(replyBlock, /const images = extractComposerImagePayloads\(payload\.attachments \?\? \[\]\);/);
   assert.match(replyBlock, /requestImages = images\.length > 0 \? images : undefined;/);
-  assert.match(replyBlock, /await sendNativeSessionInput\(session\.runtime_id, requestText, requestImages, requestText\);/);
+  assert.match(replyBlock, /await sendNativeSessionInput\(session\.runtime_id, requestText, requestImages, promptEntry\.text\);/);
 });

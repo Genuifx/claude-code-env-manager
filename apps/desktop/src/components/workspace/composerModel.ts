@@ -429,6 +429,10 @@ function stripStructuredSkillTokens(text: string): string {
     .trim();
 }
 
+export function buildComposerDisplayText(text: string): string {
+  return stripStructuredSkillTokens(text);
+}
+
 export function buildComposerPromptWithSelectedSkills(
   text: string,
   selectedSkills: SelectedSkillContent[],
