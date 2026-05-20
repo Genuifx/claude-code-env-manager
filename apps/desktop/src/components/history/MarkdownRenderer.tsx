@@ -5,6 +5,7 @@ import { Check, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { getPerformanceMode } from '@/lib/performance';
+import { isMarkdownCodeBlock } from './markdownCodeBlocks';
 
 interface MarkdownRendererProps {
   content: string;
@@ -391,16 +392,17 @@ export function MarkdownRenderer({
           ),
 
           // Code — inline and block
-          code: ({ className: codeClassName, children, node }) => {
+          code: ({ className: codeClassName, children }) => {
             const match = /language-(\w+)/.exec(codeClassName || '');
-            const codeString = String(children).replace(/\n$/, '');
-            const isBlock = Boolean((node?.position && match) || codeClassName);
+            const rawCodeString = String(children);
+            const codeString = rawCodeString.replace(/\n$/, '');
+            const isBlock = isMarkdownCodeBlock(codeClassName, rawCodeString);
 
             if (isBlock) {
               const language = match?.[1] || 'text';
               return (
                 <CodeBlockFrame language={language} code={codeString} codeTone={codeTone}>
-                  {shouldReduceCodeRendering ? (
+                  {shouldReduceCodeRendering || language === 'text' ? (
                     <PlainCodeBlock code={codeString} codeTone={codeTone} />
                   ) : (
                     <Suspense fallback={<PlainCodeBlock code={codeString} codeTone={codeTone} />}>
