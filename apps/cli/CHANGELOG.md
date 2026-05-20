@@ -1,5 +1,11 @@
 # ccem
 
+## 2.6.0
+
+### Minor Changes
+
+- Ship desktop workspace polish for native zoom shortcuts, session stability, and project tree session annotations.
+
 ## 2.5.0
 
 ### Minor Changes
