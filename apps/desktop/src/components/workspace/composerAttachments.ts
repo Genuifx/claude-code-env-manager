@@ -39,6 +39,7 @@ export type ComposerAttachment = ComposerFileAttachment | ComposerTextAttachment
 
 export interface ComposerSubmitPayload {
   text: string;
+  displayText?: string;
   attachments: ComposerAttachment[];
 }
 

@@ -73,6 +73,7 @@ import {
   type ComposerSubmitPayload,
 } from './composerAttachments';
 import {
+  buildComposerDisplayText,
   buildComposerPromptWithSelectedSkills,
   buildComposerSuggestions,
   parseComposerTokens,
@@ -86,6 +87,7 @@ import { composerSegmentsReferenceImageAttachment } from './composerImageReferen
 export interface ComposerQueuedMessage {
   id: string;
   text: string;
+  displayText?: string;
   planMode?: boolean;
   attachments?: ComposerAttachment[];
 }
@@ -609,7 +611,7 @@ function ComposerQueueDock({
             </div>
             <div className="min-w-0 flex-1">
               <p className="line-clamp-2 whitespace-pre-wrap text-[11px] leading-4.5 text-foreground/92">
-                {message.text}
+                {message.displayText ?? message.text}
               </p>
               {message.attachments?.length ? (
                 <p className="mt-0.5 text-[9px] leading-4 text-muted-foreground/80">
@@ -1122,6 +1124,7 @@ export function WorkspaceSessionComposer({
     const promptValue = promptAreaRef.current?.getPlainText() ?? segmentsToPlainText(composerSegments);
     const currentAttachments = attachmentsRef.current;
     let text = promptValue.trim();
+    const displayText = buildComposerDisplayText(promptValue);
     const selectedSkillFiles = Array.from(new Set([
       ...selectedSkillTokens
         .filter((token) => token.path)
@@ -1141,6 +1144,7 @@ export function WorkspaceSessionComposer({
 
     const payload: ComposerSubmitPayload = {
       text,
+      displayText,
       attachments: currentAttachments,
     };
 

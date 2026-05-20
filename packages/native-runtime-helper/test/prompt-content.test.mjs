@@ -60,3 +60,31 @@ test('appends unmatched images after the remaining prompt text', async () => {
     { type: 'image', image: image('one', '[Image #1]') },
   ]);
 });
+
+test('keeps selected skill prompts multimodal when the image placeholder is in user_request', async () => {
+  const { buildPromptContentParts } = await importPromptContentModule();
+
+  const prompt = [
+    '<selected_skills>',
+    '<skill name="impeccable" path="/tmp/impeccable/SKILL.md" directory="/tmp/impeccable">',
+    '<content>',
+    '# Skill body',
+    '</content>',
+    '</skill>',
+    '</selected_skills>',
+    '',
+    '<user_request>',
+    '/impeccable craft [Image #1] 调整这个布局',
+    '</user_request>',
+  ].join('\n');
+  const parts = buildPromptContentParts(prompt, [
+    image('one', '[Image #1]'),
+  ]);
+
+  assert.equal(parts.length, 3);
+  assert.equal(parts[1].type, 'image');
+  assert.deepEqual(parts[1].image, image('one', '[Image #1]'));
+  assert.match(parts[0].text, /<selected_skills>/);
+  assert.match(parts[2].text, /调整这个布局/);
+  assert.doesNotMatch(parts[0].text + parts[2].text, /\[Image #1\]/);
+});

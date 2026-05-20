@@ -126,7 +126,7 @@ test('dollar query is skill-only and structured tokens parse by exact SKILL.md p
 });
 
 test('selected skill content expands into compact prompt block', async () => {
-  const { buildComposerPromptWithSelectedSkills } = await importComposerModel();
+  const { buildComposerDisplayText, buildComposerPromptWithSelectedSkills } = await importComposerModel();
 
   const prompt = buildComposerPromptWithSelectedSkills(
     'please use /duplicate now',
@@ -145,6 +145,34 @@ test('selected skill content expands into compact prompt block', async () => {
   assert.match(prompt, /path="\/tmp\/project\/duplicate\/SKILL\.md"/);
   assert.match(prompt, /<resource_hints>\n- \/tmp\/project\/duplicate\/scripts/);
   assert.match(prompt, /<user_request>\nplease use \/duplicate now\n<\/user_request>/);
+
+  assert.equal(
+    buildComposerDisplayText('please use [/duplicate](/tmp/project/duplicate/SKILL.md) now'),
+    'please use /duplicate now',
+  );
+});
+
+test('selected skill prompt augmentation stays out of user-visible display text', async () => {
+  const composerSource = await fs.readFile(
+    path.join(desktopDir, 'src', 'components', 'workspace', 'WorkspaceSessionComposer.tsx'),
+    'utf8',
+  );
+  const workspaceSource = await fs.readFile(
+    path.join(desktopDir, 'src', 'pages', 'Workspace.tsx'),
+    'utf8',
+  );
+  const nativeViewSource = await fs.readFile(
+    path.join(desktopDir, 'src', 'components', 'workspace', 'WorkspaceNativeSessionView.tsx'),
+    'utf8',
+  );
+
+  assert.match(composerSource, /const displayText = buildComposerDisplayText\(promptValue\);/);
+  assert.match(composerSource, /displayText,/);
+  assert.match(workspaceSource, /const displayPrompt = payload\?\.displayText \?\? rawPrompt;/);
+  assert.match(workspaceSource, /const previewPrompt = buildComposerPromptPreview\(displayPrompt, attachments\);/);
+  assert.match(nativeViewSource, /const displayText = payload\?\.displayText \?\? text;/);
+  assert.match(nativeViewSource, /buildComposerPromptPreview\(payload\.displayText \?\? payload\.text, payload\.attachments \?\? \[\]\)/);
+  assert.match(nativeViewSource, /sendNativeSessionInput\(session\.runtime_id, requestText, requestImages, promptEntry\.text\)/);
 });
 
 test('image attachments are referenced only while their chip or placeholder remains', async () => {

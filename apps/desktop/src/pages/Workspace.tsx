@@ -1030,6 +1030,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
 
   const handleCreateNativeConversation = useCallback(async (payload?: ComposerSubmitPayload) => {
     const rawPrompt = payload?.text ?? composePrompt;
+    const displayPrompt = payload?.displayText ?? rawPrompt;
     const attachments = payload?.attachments ?? [];
     const prompt = buildComposerPromptText(rawPrompt, attachments);
     const images = extractComposerImagePayloads(attachments);
@@ -1037,7 +1038,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     if ((!prompt && images.length === 0) || !workingDir) {
       return false;
     }
-    const previewPrompt = buildComposerPromptPreview(rawPrompt, attachments);
+    const previewPrompt = buildComposerPromptPreview(displayPrompt, attachments);
 
     const dispatch = resolveComposerDispatch({
       provider: composeProvider,
@@ -1121,6 +1122,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     }
 
     const rawPrompt = payload?.text ?? historyComposerText;
+    const displayPrompt = payload?.displayText ?? rawPrompt;
     const attachments = payload?.attachments ?? [];
     const prompt = buildComposerPromptText(rawPrompt, attachments);
     const images = extractComposerImagePayloads(attachments);
@@ -1129,7 +1131,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     }
 
     const provider = selectedSession.source;
-    const previewPrompt = buildComposerPromptPreview(rawPrompt, attachments);
+    const previewPrompt = buildComposerPromptPreview(displayPrompt, attachments);
     const dispatch = resolveComposerDispatch({
       provider,
       prompt,
