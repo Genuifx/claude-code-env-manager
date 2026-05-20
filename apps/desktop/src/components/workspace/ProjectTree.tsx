@@ -1,5 +1,5 @@
 import { memo, useMemo, useState, useDeferredValue, useCallback, useRef, useEffect } from 'react';
-import { Check, ChevronRight, FolderOpen, FolderClosed, MessageSquare, RefreshCw, Search, SquarePen, Sticker, X } from 'lucide-react';
+import { Check, ChevronRight, FolderOpen, FolderClosed, MessageSquare, RefreshCw, Search, SquarePen, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -15,7 +15,6 @@ import {
   SESSION_TASK_STAGES,
   getSessionStickerDefinition,
   getSessionTaskStageDefinition,
-  getStickerSpriteStyle,
 } from './sessionAnnotations';
 
 interface ProjectTreeProps {
@@ -103,86 +102,41 @@ function hasSessionAnnotation(session: HistorySessionItem) {
 function SessionStickerPreview({
   sticker,
   className,
+  size = 'md',
 }: {
   sticker?: SessionStickerId;
   className?: string;
+  size?: 'xs' | 'sm' | 'md' | 'lg';
 }) {
   const definition = getSessionStickerDefinition(sticker);
   if (!definition) {
     return null;
   }
 
+  const sizeClasses = {
+    xs: { frame: 'h-3.5 w-3.5', image: 'h-3.5 w-3.5' },
+    sm: { frame: 'h-[18px] w-[18px]', image: 'h-[18px] w-[18px]' },
+    md: { frame: 'h-5 w-5', image: 'h-5 w-5' },
+    lg: { frame: 'h-12 w-12', image: 'h-12 w-12' },
+  };
+  const previewSize = sizeClasses[size];
+
   return (
     <span
       className={cn(
-        'inline-flex h-4 w-4 shrink-0 rounded-[5px] bg-cover bg-center ring-1 ring-border/50',
+        'inline-flex shrink-0 items-center justify-center',
+        previewSize.frame,
         className
       )}
-      style={getStickerSpriteStyle(definition)}
       aria-hidden="true"
-    />
-  );
-}
-
-function SessionStagePill({ stage, t }: { stage?: SessionTaskStage; t: (key: string) => string }) {
-  const definition = getSessionTaskStageDefinition(stage);
-  if (!definition) {
-    return null;
-  }
-
-  return (
-    <span
-      className={cn(
-        'inline-flex h-4 shrink-0 items-center rounded-full border px-1.5 text-[10px] font-medium leading-none',
-        definition.className
-      )}
     >
-      {t(definition.labelKey)}
+      <img
+        src={definition.imageUrl}
+        alt=""
+        draggable={false}
+        className={cn(previewSize.image, 'object-contain drop-shadow-sm')}
+      />
     </span>
-  );
-}
-
-function SessionAnnotationSummary({
-  session,
-  t,
-  onClear,
-}: {
-  session: HistorySessionItem;
-  t: (key: string) => string;
-  onClear?: () => void;
-}) {
-  if (!hasSessionAnnotation(session)) {
-    return null;
-  }
-
-  return (
-    <div className="mt-1 flex min-w-0 items-center gap-1.5 pl-[22px]">
-      <SessionStickerPreview sticker={session.taskSticker} />
-      <SessionStagePill stage={session.taskStage} t={t} />
-      {session.taskLabel ? (
-        <span className="min-w-0 truncate text-[10px] leading-none text-muted-foreground/80">
-          {session.taskLabel}
-        </span>
-      ) : null}
-      {onClear ? (
-        <button
-          type="button"
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onClear();
-          }}
-          aria-label={t('workspace.annotationClear')}
-          title={t('workspace.annotationClear')}
-          className={cn(
-            'ml-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full',
-            'text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground'
-          )}
-        >
-          <X className="h-3 w-3" />
-        </button>
-      ) : null}
-    </div>
   );
 }
 
@@ -190,12 +144,12 @@ function SessionAnnotationPopover({
   session,
   t,
   onSaveAnnotation,
-  onSessionsChanged,
+  variant = 'badge',
 }: {
   session: HistorySessionItem;
   t: (key: string) => string;
   onSaveAnnotation?: ProjectTreeProps['onSaveAnnotation'];
-  onSessionsChanged?: ProjectTreeProps['onSessionsChanged'];
+  variant?: 'badge' | 'inline';
 }) {
   const [open, setOpen] = useState(false);
   const [draftStage, setDraftStage] = useState<SessionTaskStage | undefined>(session.taskStage);
@@ -223,14 +177,13 @@ function SessionAnnotationPopover({
         sticker: draftSticker,
         label: draftLabel.trim() || undefined,
       });
-      await onSessionsChanged?.();
       setOpen(false);
     } catch (error) {
       console.error('Failed to save session annotation:', error);
     } finally {
       setIsSaving(false);
     }
-  }, [draftLabel, draftStage, draftSticker, onSaveAnnotation, onSessionsChanged, session]);
+  }, [draftLabel, draftStage, draftSticker, onSaveAnnotation, session]);
 
   const clear = useCallback(async () => {
     if (!onSaveAnnotation) {
@@ -239,154 +192,198 @@ function SessionAnnotationPopover({
     setIsSaving(true);
     try {
       await onSaveAnnotation(session, {});
-      await onSessionsChanged?.();
       setOpen(false);
     } catch (error) {
       console.error('Failed to clear session annotation:', error);
     } finally {
       setIsSaving(false);
     }
-  }, [onSaveAnnotation, onSessionsChanged, session]);
+  }, [onSaveAnnotation, session]);
 
   if (!onSaveAnnotation) {
     return null;
   }
 
+  const triggerSticker = session.taskSticker ?? 'confused';
+  const stageDefinition = getSessionTaskStageDefinition(session.taskStage);
+  const shouldShowAnnotationPeek = variant === 'inline' && !!(stageDefinition || session.taskLabel?.trim());
+  const annotationPeekParts = [
+    stageDefinition ? t(stageDefinition.labelKey) : null,
+    session.taskLabel?.trim() || null,
+  ].filter(Boolean);
+
+  const triggerButton = (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+      }}
+      aria-label={t('workspace.annotationOpen')}
+      title={t('workspace.annotationOpen')}
+      className={cn(
+        variant === 'inline'
+          ? cn(
+              'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md',
+              'transition-transform duration-150 hover:scale-105'
+            )
+          : cn(
+              'absolute -bottom-0.5 -right-0.5 z-10 inline-flex h-3.5 w-3.5 items-center justify-center rounded-[5px]',
+              'bg-surface-raised/95 shadow-sm ring-1 ring-border/70 transition-all duration-150',
+              'hover:scale-110 hover:ring-primary/35',
+              session.taskSticker
+                ? 'opacity-100'
+                : 'opacity-0 group-hover/session:opacity-100 group-focus-within/session:opacity-100 data-[state=open]:opacity-100'
+            )
+      )}
+    >
+      <SessionStickerPreview
+        sticker={triggerSticker}
+        size={variant === 'inline' ? 'md' : 'xs'}
+        className={cn(!session.taskSticker && 'opacity-50')}
+      />
+    </button>
+  );
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-          }}
-          aria-label={t('workspace.annotationOpen')}
-          title={t('workspace.annotationOpen')}
-          className={cn(
-            'absolute left-2 top-1.5 z-10 inline-flex h-6 w-6 items-center justify-center rounded-md',
-            'border border-border/60 bg-surface-raised text-muted-foreground shadow-sm transition-all',
-            'opacity-0 hover:border-primary/30 hover:bg-primary/8 hover:text-primary',
-            'group-hover/session:opacity-100 group-focus-within/session:opacity-100 data-[state=open]:opacity-100'
-          )}
-        >
-          <Sticker className="h-3.5 w-3.5" />
-        </button>
-      </PopoverTrigger>
+      {shouldShowAnnotationPeek ? (
+        <span className="group/annotation relative inline-flex h-5 w-5 shrink-0 items-center justify-center">
+          <PopoverTrigger asChild>{triggerButton}</PopoverTrigger>
+          <span
+            aria-hidden="true"
+            className={cn(
+              'pointer-events-none absolute left-full top-1/2 z-50 ml-2 hidden max-w-[240px] -translate-y-1/2',
+              'whitespace-nowrap rounded-lg border border-border/60 bg-popover/98 px-2.5 py-1.5 text-left shadow-xl backdrop-blur-xl',
+              'group-hover/annotation:block group-focus-within/annotation:block'
+            )}
+          >
+            <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium leading-none text-foreground">
+              <span className="min-w-0 truncate">{annotationPeekParts.join(' · ')}</span>
+            </span>
+          </span>
+        </span>
+      ) : (
+        <PopoverTrigger asChild>{triggerButton}</PopoverTrigger>
+      )}
       <PopoverContent
         align="start"
         side="right"
         sideOffset={8}
-        className="w-[320px] rounded-lg border-border/70 bg-popover/95 p-3 shadow-xl backdrop-blur-xl"
+        className="frosted-panel glass-noise w-[320px] rounded-xl p-3 shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="mb-3 flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-xs font-semibold text-foreground">{t('workspace.annotationTitle')}</p>
-            <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-              {getHistorySessionDisplay(session, t('history.untitledSession'))}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setOpen(false)}
-            aria-label={t('common.close')}
-            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
+        {/* Header — compact, click outside dismisses */}
+        <p className="mb-2.5 text-[12px] font-semibold tracking-tight text-foreground">
+          {t('workspace.annotationTitle')}
+        </p>
+
+        {/* Stage pills — tight inline row */}
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {SESSION_TASK_STAGES.map((stage) => {
+            const selected = draftStage === stage.id;
+            return (
+              <button
+                key={stage.id}
+                type="button"
+                onClick={() => setDraftStage(selected ? undefined : stage.id)}
+                className={cn(
+                  'inline-flex h-[22px] items-center rounded-md px-2 text-[10px] font-medium',
+                  'transition-all duration-[var(--duration-fast,150ms)]',
+                  selected
+                    ? cn(stage.className, 'shadow-sm')
+                    : 'bg-muted/25 text-muted-foreground hover:bg-muted/50 hover:text-foreground'
+                )}
+              >
+                {t(stage.labelKey)}
+              </button>
+            );
+          })}
         </div>
 
-        <div className="space-y-3">
-          <div>
-            <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">
-              {t('workspace.annotationStage')}
-            </p>
-            <div className="grid grid-cols-5 gap-1.5">
-              {SESSION_TASK_STAGES.map((stage) => {
-                const selected = draftStage === stage.id;
-                return (
-                  <button
-                    key={stage.id}
-                    type="button"
-                    onClick={() => setDraftStage(selected ? undefined : stage.id)}
-                    className={cn(
-                      'inline-flex h-7 items-center justify-center rounded-md border text-[11px] transition-colors',
-                      selected
-                        ? stage.className
-                        : 'border-border/60 bg-muted/20 text-muted-foreground hover:bg-muted/50 hover:text-foreground'
-                    )}
-                  >
-                    {t(stage.labelKey)}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div>
-            <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">
-              {t('workspace.annotationSticker')}
-            </p>
-            <div className="grid grid-cols-6 gap-1.5">
-              {SESSION_STICKERS.map((sticker) => {
-                const selected = draftSticker === sticker.id;
-                return (
-                  <button
-                    key={sticker.id}
-                    type="button"
-                    onClick={() => setDraftSticker(selected ? undefined : sticker.id)}
-                    aria-label={t(sticker.labelKey)}
-                    title={t(sticker.labelKey)}
-                    className={cn(
-                      'inline-flex h-9 items-center justify-center rounded-md border transition-all',
-                      selected
-                        ? 'border-primary/50 bg-primary/10 ring-1 ring-primary/25'
-                        : 'border-border/60 bg-muted/20 hover:bg-muted/50'
-                    )}
-                  >
-                    <span
-                      className="h-6 w-6 rounded-md bg-cover bg-center"
-                      style={getStickerSpriteStyle(sticker)}
-                    />
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div>
-            <label className="mb-1.5 block text-[11px] font-medium text-muted-foreground">
-              {t('workspace.annotationLabel')}
-            </label>
-            <input
-              value={draftLabel}
-              onChange={(event) => setDraftLabel(event.target.value.slice(0, MAX_LABEL_LENGTH))}
-              placeholder={t('workspace.annotationLabelPlaceholder')}
-              className={cn(
-                'h-8 w-full rounded-md border border-border bg-surface-raised px-2 text-xs text-foreground outline-none',
-                'placeholder:text-muted-foreground focus:border-primary/50 focus:ring-1 focus:ring-primary/20'
-              )}
-            />
-          </div>
+        {/* Sticker grid — compact 4-col, tactile hover */}
+        <div className="mb-3 grid grid-cols-4 gap-1.5">
+          {SESSION_STICKERS.map((sticker) => {
+            const selected = draftSticker === sticker.id;
+            return (
+              <button
+                key={sticker.id}
+                type="button"
+                onClick={() => setDraftSticker(selected ? undefined : sticker.id)}
+                aria-label={t(sticker.labelKey)}
+                title={t(sticker.labelKey)}
+                className={cn(
+                  'group/sticker relative inline-flex h-[52px] items-center justify-center rounded-lg',
+                  'transition-all duration-[var(--duration-fast,150ms)]',
+                  selected
+                    ? 'bg-primary/10 shadow-[inset_0_0_0_1.5px_hsl(var(--primary)/0.3)]'
+                    : 'hover:bg-muted/30 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:shadow-none'
+                )}
+              >
+                <SessionStickerPreview
+                  sticker={sticker.id}
+                  size="lg"
+                  className={cn(
+                    'transition-transform duration-[var(--duration-fast,150ms)]',
+                    '!h-9 !w-9',
+                    !selected && 'group-hover/sticker:scale-110'
+                  )}
+                />
+                {selected && (
+                  <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
+                    <Check className="h-2 w-2" strokeWidth={3} />
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
-        <div className="mt-3 flex items-center justify-between gap-2">
+        {/* Label input — inline, no section header */}
+        <div className="relative mb-3">
+          <input
+            value={draftLabel}
+            onChange={(event) => setDraftLabel(event.target.value.slice(0, MAX_LABEL_LENGTH))}
+            placeholder={t('workspace.annotationLabelPlaceholder')}
+            className={cn(
+              'h-8 w-full rounded-lg border border-border/50 bg-surface-sunken/50 px-2.5 text-[12px] text-foreground outline-none',
+              'transition-all duration-[var(--duration-fast,150ms)]',
+              'placeholder:text-muted-foreground/50',
+              'focus:border-primary/40 focus:ring-1 focus:ring-primary/15'
+            )}
+          />
+          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[9px] tabular-nums text-muted-foreground/40">
+            {draftLabel.length}/{MAX_LABEL_LENGTH}
+          </span>
+        </div>
+
+        {/* Footer — tight action row */}
+        <div className="flex items-center justify-between gap-2">
           <button
             type="button"
             onClick={clear}
             disabled={isSaving || !hasSessionAnnotation(session)}
-            className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+            className={cn(
+              'inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground',
+              'transition-colors duration-[var(--duration-fast,150ms)]',
+              'hover:bg-muted/40 hover:text-foreground',
+              'disabled:pointer-events-none disabled:opacity-30'
+            )}
           >
-            <X className="h-3.5 w-3.5" />
+            <X className="h-3 w-3" />
             {t('workspace.annotationClear')}
           </button>
           <button
             type="button"
             onClick={save}
             disabled={isSaving}
-            className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-60"
+            className={cn(
+              'inline-flex h-7 items-center gap-1 rounded-md bg-primary px-3 text-[11px] font-medium text-primary-foreground',
+              'transition-all duration-[var(--duration-fast,150ms)]',
+              'hover:bg-primary/90 active:scale-[0.96]',
+              'disabled:pointer-events-none disabled:opacity-50'
+            )}
           >
-            <Check className="h-3.5 w-3.5" />
+            <Check className="h-3 w-3" />
             {isSaving ? t('workspace.annotationSaving') : t('workspace.annotationSave')}
           </button>
         </div>
@@ -460,16 +457,7 @@ export const ProjectTree = memo(function ProjectTree({
       console.error('Failed to save title:', err);
     }
   }, [onSaveTitle, onSessionsChanged]);
-  const clearAnnotation = useCallback(async (session: HistorySessionItem) => {
-    try {
-      if (onSaveAnnotation) {
-        await onSaveAnnotation(session, {});
-      }
-      await onSessionsChanged?.();
-    } catch (err) {
-      console.error('Failed to clear session annotation:', err);
-    }
-  }, [onSaveAnnotation, onSessionsChanged]);
+
   const deferredSearch = useDeferredValue(search);
   const [expandedProjects, setExpandedProjects] = useState<Set<string> | null>(null);
   const [projectVisibleCount, setProjectVisibleCount] = useState<Record<string, number>>({});
@@ -715,7 +703,10 @@ export const ProjectTree = memo(function ProjectTree({
                           key={key}
                           className="w-full flex items-center gap-2 pl-9 pr-3 py-1.5 mx-1 rounded-md bg-surface-raised"
                         >
-                          <span title={getIconTitle(session)}>
+                          <span
+                            className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center"
+                            title={getIconTitle(session)}
+                          >
                             <SessionTreeItemIcon
                               session={session}
                               environment={resolveEnvironment(session)}
@@ -755,47 +746,59 @@ export const ProjectTree = memo(function ProjectTree({
                             }
                           }}
                           className={cn(
-                            'group/session relative mx-1 w-full rounded-md border-l-2 py-1.5 pl-12 pr-3 text-left transition-all outline-none',
+                            'group/session relative mx-1 w-full rounded-lg py-1.5 pl-9 pr-3 text-left transition-all outline-none',
                             'focus-visible:ring-1 focus-visible:ring-primary/30',
                             isSelected
-                              ? 'bg-primary/10 text-primary border-primary'
-                              : 'hover:bg-muted/50 text-muted-foreground hover:text-foreground border-transparent'
+                              ? 'bg-primary/[0.08] text-primary'
+                              : 'hover:bg-muted/50 text-muted-foreground hover:text-foreground'
                           )}
                         >
-                          <SessionAnnotationPopover
-                            session={session}
-                            t={t}
-                            onSaveAnnotation={onSaveAnnotation}
-                            onSessionsChanged={onSessionsChanged}
-                          />
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span title={getIconTitle(session)}>
-                              <SessionTreeItemIcon
-                                session={session}
-                                environment={resolveEnvironment(session)}
-                                decoration={decorationsBySessionKey[key]}
-                                isSelected={isSelected}
-                              />
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            <span
+                              className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center"
+                              title={getIconTitle(session)}
+                            >
+                              {session.taskSticker ? (
+                                <SessionAnnotationPopover
+                                  session={session}
+                                  t={t}
+                                  onSaveAnnotation={onSaveAnnotation}
+                                  variant="inline"
+                                />
+                              ) : (
+                                <>
+                                  <SessionTreeItemIcon
+                                    session={session}
+                                    environment={resolveEnvironment(session)}
+                                    decoration={decorationsBySessionKey[key]}
+                                    isSelected={isSelected}
+                                  />
+                                  <SessionAnnotationPopover
+                                    session={session}
+                                    t={t}
+                                    onSaveAnnotation={onSaveAnnotation}
+                                    variant="badge"
+                                  />
+                                </>
+                              )}
                             </span>
-                            <span className="min-w-0 flex-1 truncate text-[12px]">
+                            <span className="min-w-0 flex-1 truncate text-[13px] leading-tight font-medium">
                               {getHistorySessionDisplay(session, t('history.untitledSession'))}
                             </span>
-                            {freshDotKeys.has(key) ? (
-                              <span className="relative inline-flex h-3.5 w-5 shrink-0 items-center justify-center">
-                                <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-amber-500/25 opacity-75" />
-                                <span className="relative h-1.5 w-1.5 rounded-full bg-amber-500" />
-                              </span>
-                            ) : (
-                              <span className="shrink-0 text-[10px] text-muted-foreground">
-                                {formatRelativeTime(session.timestamp)}
-                              </span>
-                            )}
+                            <span className="shrink-0 text-[10px] tabular-nums inline-flex items-center gap-1.5">
+                              {/* Default: show timestamp or fresh dot */}
+                              {freshDotKeys.has(key) ? (
+                                <span className="relative inline-flex h-3.5 w-5 shrink-0 items-center justify-center group-hover/session:hidden">
+                                  <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-amber-500/25 opacity-75" />
+                                  <span className="relative h-1.5 w-1.5 rounded-full bg-amber-500" />
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground/60 group-hover/session:hidden">
+                                  {formatRelativeTime(session.timestamp)}
+                                </span>
+                              )}
+                            </span>
                           </div>
-                          <SessionAnnotationSummary
-                            session={session}
-                            t={t}
-                            onClear={onSaveAnnotation ? () => void clearAnnotation(session) : undefined}
-                          />
                         </div>
                       );
                     })}

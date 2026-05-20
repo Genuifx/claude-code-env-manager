@@ -1470,6 +1470,19 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
           }}
           onSaveAnnotation={async (session, annotation) => {
             await setSessionAnnotation(session.source, session.id, annotation);
+            invalidateHistoryCache();
+            setSessions((currentSessions) =>
+              currentSessions.map((currentSession) =>
+                currentSession.source === session.source && currentSession.id === session.id
+                  ? {
+                      ...currentSession,
+                      taskStage: annotation.stage,
+                      taskSticker: annotation.sticker,
+                      taskLabel: annotation.label?.trim() || undefined,
+                    }
+                  : currentSession
+              )
+            );
           }}
           onSessionsChanged={async () => {
             invalidateHistoryCache();

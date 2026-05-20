@@ -1,4 +1,15 @@
-import stickerSheetUrl from '@/assets/session-sticker-sheet.png';
+import archivedStickerUrl from '@/assets/session-stickers/archived.png';
+import blockedStickerUrl from '@/assets/session-stickers/blocked.png';
+import calmStickerUrl from '@/assets/session-stickers/calm.png';
+import celebratingStickerUrl from '@/assets/session-stickers/celebrating.png';
+import confusedStickerUrl from '@/assets/session-stickers/confused.png';
+import excitedStickerUrl from '@/assets/session-stickers/excited.png';
+import focusedStickerUrl from '@/assets/session-stickers/focused.png';
+import reviewingStickerUrl from '@/assets/session-stickers/reviewing.png';
+import riskyStickerUrl from '@/assets/session-stickers/risky.png';
+import shippingStickerUrl from '@/assets/session-stickers/shipping.png';
+import urgentStickerUrl from '@/assets/session-stickers/urgent.png';
+import waitingStickerUrl from '@/assets/session-stickers/waiting.png';
 import type { SessionStickerId, SessionTaskStage } from '@/features/conversations/types';
 
 export interface SessionTaskStageDefinition {
@@ -10,31 +21,30 @@ export interface SessionTaskStageDefinition {
 export interface SessionStickerDefinition {
   id: SessionStickerId;
   labelKey: string;
-  col: number;
-  row: number;
+  imageUrl: string;
 }
 
 export const SESSION_TASK_STAGES: SessionTaskStageDefinition[] = [
-  { id: 'ideation', labelKey: 'workspace.annotationStageIdeation', className: 'bg-violet-500/15 text-violet-300 border-violet-400/20' },
-  { id: 'implementation', labelKey: 'workspace.annotationStageImplementation', className: 'bg-sky-500/15 text-sky-300 border-sky-400/20' },
-  { id: 'validation', labelKey: 'workspace.annotationStageValidation', className: 'bg-amber-500/15 text-amber-300 border-amber-400/20' },
-  { id: 'release', labelKey: 'workspace.annotationStageRelease', className: 'bg-teal-500/15 text-teal-300 border-teal-400/20' },
-  { id: 'done', labelKey: 'workspace.annotationStageDone', className: 'bg-emerald-500/15 text-emerald-300 border-emerald-400/20' },
+  { id: 'ideation', labelKey: 'workspace.annotationStageIdeation', className: 'bg-violet-50 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300' },
+  { id: 'implementation', labelKey: 'workspace.annotationStageImplementation', className: 'bg-sky-50 dark:bg-sky-500/15 text-sky-600 dark:text-sky-300' },
+  { id: 'validation', labelKey: 'workspace.annotationStageValidation', className: 'bg-amber-50 dark:bg-amber-500/15 text-amber-600 dark:text-amber-300' },
+  { id: 'release', labelKey: 'workspace.annotationStageRelease', className: 'bg-teal-50 dark:bg-teal-500/15 text-teal-600 dark:text-teal-300' },
+  { id: 'done', labelKey: 'workspace.annotationStageDone', className: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-300' },
 ];
 
 export const SESSION_STICKERS: SessionStickerDefinition[] = [
-  { id: 'focused', labelKey: 'workspace.annotationStickerFocused', col: 0, row: 0 },
-  { id: 'excited', labelKey: 'workspace.annotationStickerExcited', col: 1, row: 0 },
-  { id: 'calm', labelKey: 'workspace.annotationStickerCalm', col: 2, row: 0 },
-  { id: 'blocked', labelKey: 'workspace.annotationStickerBlocked', col: 3, row: 0 },
-  { id: 'confused', labelKey: 'workspace.annotationStickerConfused', col: 0, row: 1 },
-  { id: 'waiting', labelKey: 'workspace.annotationStickerWaiting', col: 1, row: 1 },
-  { id: 'urgent', labelKey: 'workspace.annotationStickerUrgent', col: 2, row: 1 },
-  { id: 'reviewing', labelKey: 'workspace.annotationStickerReviewing', col: 3, row: 1 },
-  { id: 'shipping', labelKey: 'workspace.annotationStickerShipping', col: 0, row: 2 },
-  { id: 'celebrating', labelKey: 'workspace.annotationStickerCelebrating', col: 1, row: 2 },
-  { id: 'risky', labelKey: 'workspace.annotationStickerRisky', col: 2, row: 2 },
-  { id: 'archived', labelKey: 'workspace.annotationStickerArchived', col: 3, row: 2 },
+  { id: 'focused', labelKey: 'workspace.annotationStickerFocused', imageUrl: focusedStickerUrl },
+  { id: 'excited', labelKey: 'workspace.annotationStickerExcited', imageUrl: excitedStickerUrl },
+  { id: 'calm', labelKey: 'workspace.annotationStickerCalm', imageUrl: calmStickerUrl },
+  { id: 'blocked', labelKey: 'workspace.annotationStickerBlocked', imageUrl: blockedStickerUrl },
+  { id: 'confused', labelKey: 'workspace.annotationStickerConfused', imageUrl: confusedStickerUrl },
+  { id: 'waiting', labelKey: 'workspace.annotationStickerWaiting', imageUrl: waitingStickerUrl },
+  { id: 'urgent', labelKey: 'workspace.annotationStickerUrgent', imageUrl: urgentStickerUrl },
+  { id: 'reviewing', labelKey: 'workspace.annotationStickerReviewing', imageUrl: reviewingStickerUrl },
+  { id: 'shipping', labelKey: 'workspace.annotationStickerShipping', imageUrl: shippingStickerUrl },
+  { id: 'celebrating', labelKey: 'workspace.annotationStickerCelebrating', imageUrl: celebratingStickerUrl },
+  { id: 'risky', labelKey: 'workspace.annotationStickerRisky', imageUrl: riskyStickerUrl },
+  { id: 'archived', labelKey: 'workspace.annotationStickerArchived', imageUrl: archivedStickerUrl },
 ];
 
 export function getSessionTaskStageDefinition(stage?: SessionTaskStage) {
@@ -43,12 +53,4 @@ export function getSessionTaskStageDefinition(stage?: SessionTaskStage) {
 
 export function getSessionStickerDefinition(sticker?: SessionStickerId) {
   return SESSION_STICKERS.find((item) => item.id === sticker);
-}
-
-export function getStickerSpriteStyle(sticker: SessionStickerDefinition) {
-  return {
-    backgroundImage: `url(${stickerSheetUrl})`,
-    backgroundSize: '400% 300%',
-    backgroundPosition: `${(sticker.col / 3) * 100}% ${(sticker.row / 2) * 100}%`,
-  };
 }
