@@ -1,5 +1,11 @@
 # ccem
 
+## 2.8.0
+
+### Minor Changes
+
+- Enable npm trusted publishing for CLI releases.
+
 ## 2.7.0
 
 ### Minor Changes
