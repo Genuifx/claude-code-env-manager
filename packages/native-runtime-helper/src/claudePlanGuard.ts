@@ -2,10 +2,6 @@ import os from 'node:os';
 import path from 'node:path';
 
 const PLAN_MODE_BLOCKED_TOOLS = new Set([
-  'Agent',
-  'Bash',
-  'KillShell',
-  'Task',
   'Write',
   'Edit',
   'MultiEdit',
@@ -17,13 +13,6 @@ export type ClaudePlanModePreToolUseInput = {
   tool_name?: string;
   tool_input?: unknown;
   tool_use_id?: string;
-};
-
-export type ClaudePlanModeBlockedTool = {
-  toolName: string;
-  toolUseId: string;
-  input: Record<string, unknown>;
-  reason: string;
 };
 
 type ClaudePlanModeHookOutput = {
@@ -76,7 +65,6 @@ export function shouldBlockClaudeToolInPlanMode(toolName: string, input: Record<
 
 export function buildClaudePlanModePreToolUseHook(
   isPlanMode: () => boolean,
-  onBlockedTool?: (blockedTool: ClaudePlanModeBlockedTool) => void,
 ) {
   return async function claudePlanModePreToolUseHook(
     input: ClaudePlanModePreToolUseInput,
@@ -92,13 +80,6 @@ export function buildClaudePlanModePreToolUseHook(
     }
 
     const reason = `Plan mode is active. Confirm the plan before running ${toolName}.`;
-    onBlockedTool?.({
-      toolName,
-      toolUseId: input.tool_use_id ?? '',
-      input: toolInput,
-      reason,
-    });
-
     return {
       continue: true,
       hookSpecificOutput: {
@@ -112,11 +93,10 @@ export function buildClaudePlanModePreToolUseHook(
 
 export function buildClaudePlanModeHooks(
   isPlanMode: () => boolean,
-  onBlockedTool?: (blockedTool: ClaudePlanModeBlockedTool) => void,
 ) {
   return {
     PreToolUse: [{
-      hooks: [buildClaudePlanModePreToolUseHook(isPlanMode, onBlockedTool)],
+      hooks: [buildClaudePlanModePreToolUseHook(isPlanMode)],
     }],
   };
 }

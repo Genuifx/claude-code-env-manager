@@ -16194,10 +16194,6 @@ async function applyClaudePermissionModeToQuery(query, permMode) {
 import os2 from "node:os";
 import path3 from "node:path";
 var PLAN_MODE_BLOCKED_TOOLS = /* @__PURE__ */ new Set([
-  "Agent",
-  "Bash",
-  "KillShell",
-  "Task",
   "Write",
   "Edit",
   "MultiEdit",
@@ -16233,7 +16229,7 @@ function shouldBlockClaudeToolInPlanMode(toolName, input) {
   }
   return !isClaudeInternalPlanFile(toolName, input);
 }
-function buildClaudePlanModePreToolUseHook(isPlanMode, onBlockedTool) {
+function buildClaudePlanModePreToolUseHook(isPlanMode) {
   return async function claudePlanModePreToolUseHook(input) {
     if (!isPlanMode() || input.hook_event_name !== "PreToolUse") {
       return { continue: true };
@@ -16244,12 +16240,6 @@ function buildClaudePlanModePreToolUseHook(isPlanMode, onBlockedTool) {
       return { continue: true };
     }
     const reason = `Plan mode is active. Confirm the plan before running ${toolName}.`;
-    onBlockedTool?.({
-      toolName,
-      toolUseId: input.tool_use_id ?? "",
-      input: toolInput,
-      reason
-    });
     return {
       continue: true,
       hookSpecificOutput: {
@@ -16260,10 +16250,10 @@ function buildClaudePlanModePreToolUseHook(isPlanMode, onBlockedTool) {
     };
   };
 }
-function buildClaudePlanModeHooks(isPlanMode, onBlockedTool) {
+function buildClaudePlanModeHooks(isPlanMode) {
   return {
     PreToolUse: [{
-      hooks: [buildClaudePlanModePreToolUseHook(isPlanMode, onBlockedTool)]
+      hooks: [buildClaudePlanModePreToolUseHook(isPlanMode)]
     }]
   };
 }
@@ -16522,7 +16512,6 @@ var claudeSawPartialText = false;
 var claudeSawPartialThinking = false;
 var claudeTurnCompletionEmitted = false;
 var claudeSeenMessageIds = /* @__PURE__ */ new Set();
-var claudePlanExitPromptPending = false;
 var claudeContextUsageFailureKey = null;
 var codexClient = null;
 var codexThread = null;
@@ -16820,30 +16809,6 @@ function emitClaudeToolUseCompleted(toolUseId, resultSummary, success) {
     raw_name: rawName,
     result_summary: resultSummary,
     success
-  });
-}
-function emitClaudePlanExitPromptForBlockedTool(blockedTool) {
-  if (claudePlanExitPromptPending) {
-    return;
-  }
-  claudePlanExitPromptPending = true;
-  const inputSummary = summarizeClaudeToolInput(blockedTool.toolName, blockedTool.input);
-  const syntheticToolUseId = `plan-exit:${blockedTool.toolUseId || blockedTool.toolName}:${Date.now()}`;
-  const planSummary = [
-    `Claude is ready to run ${blockedTool.toolName}.`,
-    inputSummary,
-    "Confirm before leaving Plan mode and executing changes."
-  ].filter(Boolean).join(" ");
-  emitClaudeToolUseStarted({
-    toolUseId: syntheticToolUseId,
-    rawName: "ExitPlanMode",
-    inputSummary: planSummary,
-    needsResponse: true,
-    prompt: {
-      prompt_type: "plan_exit",
-      allowed_prompts: ["\u7EE7\u7EED\u6267\u884C"],
-      plan_summary: planSummary
-    }
   });
 }
 function summarizeClaudeToolResult(block) {
@@ -17145,7 +17110,6 @@ function applySettingsToInitCommand(settings) {
   if (!initCommand) return false;
   if (settings.permMode !== void 0) {
     initCommand.perm_mode = settings.permMode;
-    claudePlanExitPromptPending = false;
   }
   if (settings.envVars !== void 0) initCommand.env_vars = settings.envVars;
   if (settings.envName !== void 0) initCommand.env_name = settings.envName;
@@ -17199,7 +17163,6 @@ function teardownClaudeSession() {
   claudeInputQueue = null;
   currentClaudeQuery = null;
   claudeConsumeLoop = null;
-  claudePlanExitPromptPending = false;
   resetClaudeTurnTracking();
 }
 function teardownCodexSession(envChanged) {
@@ -17212,7 +17175,6 @@ async function consumeClaudeMessages() {
     throw new Error("Native runtime helper not initialized");
   }
   claudeContextUsageFailureKey = null;
-  claudePlanExitPromptPending = false;
   const permission = normalizeClaudePermissionMode(initCommand.perm_mode, {
     allowDangerouslySkipPermissions: initCommand.allow_dangerously_skip_permissions === true
   });
@@ -17236,8 +17198,7 @@ async function consumeClaudeMessages() {
       allowedTools: ensureClaudeSkillToolAllowed(initCommand.allowed_tools),
       disallowedTools: initCommand.disallowed_tools ?? void 0,
       hooks: buildClaudePlanModeHooks(
-        () => initCommand?.provider === "claude" && initCommand.perm_mode === "plan",
-        emitClaudePlanExitPromptForBlockedTool
+        () => initCommand?.provider === "claude" && initCommand.perm_mode === "plan"
       ),
       canUseTool: async (toolName, input, options) => {
         if (isClaudeAskUserQuestionTool(toolName)) {

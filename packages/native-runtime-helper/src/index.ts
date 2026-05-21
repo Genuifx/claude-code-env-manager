@@ -7,10 +7,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { buildClaudeQueryEnv } from './claudeEnv';
 import { applyClaudePermissionModeToQuery } from './claudePermissionControl';
-import {
-  buildClaudePlanModeHooks,
-  type ClaudePlanModeBlockedTool,
-} from './claudePlanGuard';
+import { buildClaudePlanModeHooks } from './claudePlanGuard';
 import {
   CLAUDE_SKILL_SETTING_SOURCES,
   ensureClaudeSkillToolAllowed,
@@ -140,7 +137,6 @@ let claudeSawPartialText = false;
 let claudeSawPartialThinking = false;
 let claudeTurnCompletionEmitted = false;
 const claudeSeenMessageIds = new Set<string>();
-let claudePlanExitPromptPending = false;
 let claudeContextUsageFailureKey: string | null = null;
 let codexClient: Codex | null = null;
 let codexThread: any = null;
@@ -585,33 +581,6 @@ function emitClaudeToolUseCompleted(toolUseId: string, resultSummary: string, su
   });
 }
 
-function emitClaudePlanExitPromptForBlockedTool(blockedTool: ClaudePlanModeBlockedTool) {
-  if (claudePlanExitPromptPending) {
-    return;
-  }
-  claudePlanExitPromptPending = true;
-
-  const inputSummary = summarizeClaudeToolInput(blockedTool.toolName, blockedTool.input);
-  const syntheticToolUseId = `plan-exit:${blockedTool.toolUseId || blockedTool.toolName}:${Date.now()}`;
-  const planSummary = [
-    `Claude is ready to run ${blockedTool.toolName}.`,
-    inputSummary,
-    'Confirm before leaving Plan mode and executing changes.',
-  ].filter(Boolean).join(' ');
-
-  emitClaudeToolUseStarted({
-    toolUseId: syntheticToolUseId,
-    rawName: 'ExitPlanMode',
-    inputSummary: planSummary,
-    needsResponse: true,
-    prompt: {
-      prompt_type: 'plan_exit',
-      allowed_prompts: ['继续执行'],
-      plan_summary: planSummary,
-    },
-  });
-}
-
 function summarizeClaudeToolResult(block: Record<string, unknown>) {
   const content = block.content;
   if (typeof content === 'string' && content.trim()) {
@@ -1034,7 +1003,6 @@ function applySettingsToInitCommand(settings: RuntimeSettingsPatch) {
   if (!initCommand) return false;
   if (settings.permMode !== undefined) {
     initCommand.perm_mode = settings.permMode;
-    claudePlanExitPromptPending = false;
   }
   if (settings.envVars !== undefined) initCommand.env_vars = settings.envVars;
   if (settings.envName !== undefined) initCommand.env_name = settings.envName;
@@ -1099,7 +1067,6 @@ function teardownClaudeSession() {
   claudeInputQueue = null;
   currentClaudeQuery = null;
   claudeConsumeLoop = null;
-  claudePlanExitPromptPending = false;
   resetClaudeTurnTracking();
 }
 
@@ -1115,7 +1082,6 @@ async function consumeClaudeMessages() {
   }
 
   claudeContextUsageFailureKey = null;
-  claudePlanExitPromptPending = false;
   const permission = normalizeClaudePermissionMode(initCommand.perm_mode, {
     allowDangerouslySkipPermissions: initCommand.allow_dangerously_skip_permissions === true,
   });
@@ -1141,7 +1107,6 @@ async function consumeClaudeMessages() {
       disallowedTools: initCommand.disallowed_tools ?? undefined,
       hooks: buildClaudePlanModeHooks(
         () => initCommand?.provider === 'claude' && initCommand.perm_mode === 'plan',
-        emitClaudePlanExitPromptForBlockedTool,
       ),
       canUseTool: async (toolName, input, options) => {
         if (isClaudeAskUserQuestionTool(toolName)) {
