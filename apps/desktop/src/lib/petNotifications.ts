@@ -82,8 +82,16 @@ function sessionLastError(session: PetNotificationSourceSession): string | null 
   return isNativeSession(session) ? session.last_error ?? null : null;
 }
 
+export function buildPetNotificationId(
+  provider: 'claude' | 'codex',
+  runtimeId: string,
+  status: string,
+): string {
+  return `pet:${provider}:${runtimeId}:${status}`;
+}
+
 function notificationId(session: PetNotificationSourceSession): string {
-  return `pet:${sessionProvider(session)}:${sessionRuntimeId(session)}:${session.status}`;
+  return buildPetNotificationId(sessionProvider(session), sessionRuntimeId(session), session.status);
 }
 
 function toneForStatus(status: string): PetNotificationTone {
@@ -132,9 +140,8 @@ export function buildPetNotifications(
     .map((session) => {
       const tone = toneForStatus(session.status);
       const id = notificationId(session);
-      const isTerminal = TERMINAL_STATUSES.has(session.status);
       const isAttention = tone === 'attention';
-      const shouldShow = isAttention || !isTerminal || !readNotificationIds.has(id);
+      const shouldShow = isAttention || !readNotificationIds.has(id);
 
       if (!shouldShow) {
         return null;
@@ -152,7 +159,7 @@ export function buildPetNotifications(
         tone,
         updatedAt: sessionUpdatedAt(session),
         projectDir: sessionProjectDir(session),
-        markReadOnOpen: isTerminal && !isAttention,
+        markReadOnOpen: !isAttention,
       } satisfies PetNotificationItem;
     })
     .filter((item): item is PetNotificationItem => item !== null)

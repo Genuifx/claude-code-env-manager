@@ -47,8 +47,7 @@ pub fn get_pet_notification_read_state() -> Result<PetNotificationReadState, Str
     serde_json::from_str(&content).map_err(|e| format!("parse pet notification state: {e}"))
 }
 
-#[tauri::command]
-pub fn mark_pet_notification_read(
+fn mark_pet_notification_read_state(
     notification_id: String,
 ) -> Result<PetNotificationReadState, String> {
     let mut state = get_pet_notification_read_state()?;
@@ -58,9 +57,20 @@ pub fn mark_pet_notification_read(
 }
 
 #[tauri::command]
+pub fn mark_pet_notification_read(
+    app: AppHandle,
+    notification_id: String,
+) -> Result<PetNotificationReadState, String> {
+    let state = mark_pet_notification_read_state(notification_id)?;
+    app.emit("pet-notification-read-state-updated", ())
+        .map_err(|e| format!("emit pet read state update: {e}"))?;
+    Ok(state)
+}
+
+#[tauri::command]
 pub fn open_pet_notification(app: AppHandle, request: PetOpenSessionRequest) -> Result<(), String> {
     if request.mark_read {
-        mark_pet_notification_read(request.notification_id.clone())?;
+        mark_pet_notification_read_state(request.notification_id.clone())?;
         app.emit("pet-notification-read-state-updated", ())
             .map_err(|e| format!("emit pet read state update: {e}"))?;
     }

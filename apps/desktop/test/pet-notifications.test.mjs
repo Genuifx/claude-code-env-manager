@@ -94,7 +94,7 @@ test('shows running sessions and unread terminal sessions, but hides read termin
     notifications.map((item) => item.runtimeId),
     ['running-1', 'done-1'],
   );
-  assert.equal(notifications[0].markReadOnOpen, false);
+  assert.equal(notifications[0].markReadOnOpen, true);
   assert.equal(notifications[1].markReadOnOpen, true);
 });
 
@@ -138,6 +138,37 @@ test('includes raw interactive sessions returned directly from Tauri IPC', async
   assert.equal(notifications[0].runtimeId, 'raw-running-1');
   assert.equal(notifications[0].title, 'raw-project');
   assert.equal(notifications[0].updatedAt, '2026-05-01T08:05:00.000Z');
+});
+
+test('hides opened running notifications while allowing later status updates to surface', async () => {
+  const { buildPetNotifications } = await importPetNotifications();
+  const runningReadId = 'pet:claude:raw-running-1:running';
+
+  const runningNotifications = buildPetNotifications(
+    [
+      tauriInteractiveSession({
+        id: 'raw-running-1',
+        status: 'running',
+      }),
+    ],
+    new Set([runningReadId]),
+  );
+
+  assert.equal(runningNotifications.length, 0);
+
+  const stoppedNotifications = buildPetNotifications(
+    [
+      tauriInteractiveSession({
+        id: 'raw-running-1',
+        status: 'stopped',
+      }),
+    ],
+    new Set([runningReadId]),
+  );
+
+  assert.equal(stoppedNotifications.length, 1);
+  assert.equal(stoppedNotifications[0].id, 'pet:claude:raw-running-1:stopped');
+  assert.equal(stoppedNotifications[0].markReadOnOpen, true);
 });
 
 test('sorts newest updates first and limits the stack to five bubbles', async () => {
