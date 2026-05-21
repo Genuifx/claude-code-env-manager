@@ -1,5 +1,11 @@
 # ccem
 
+## 2.7.0
+
+### Minor Changes
+
+- Align Claude Plan mode tool gating with Claude Agent SDK behavior.
+
 ## 2.6.0
 
 ### Minor Changes
