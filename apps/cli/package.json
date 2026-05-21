@@ -3,6 +3,11 @@
   "version": "2.7.0",
   "type": "module",
   "description": "Claude Code Environment Manager",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Genuifx/claude-code-env-manager.git",
+    "directory": "apps/cli"
+  },
   "author": {
     "name": "Genuifx",
     "email": "genuifx@gmail.com",
@@ -14,7 +19,7 @@
     "scripts"
   ],
   "bin": {
-    "ccem": "./dist/index.js"
+    "ccem": "dist/index.js"
   },
   "scripts": {
     "generate-logo": "bash scripts/generate-logo.sh",
