@@ -1332,6 +1332,10 @@ async function consumeClaudeMessages() {
             type: 'session_completed',
             reason: message.errors?.join('\n') || message.subtype,
           });
+          if (!claudeTurnCompletionEmitted) {
+            claudeTurnCompletionEmitted = true;
+            emitStatus('ready', 'Ready for the next prompt.');
+          }
         }
         continue;
       }
