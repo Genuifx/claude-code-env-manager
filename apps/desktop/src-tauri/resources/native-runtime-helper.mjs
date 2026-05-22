@@ -16639,6 +16639,19 @@ function resetClaudeTurnTracking() {
   claudeTurnCompletionEmitted = false;
   claudeSeenMessageIds.clear();
 }
+function emitClaudeTurnCompleted(detail) {
+  if (claudeTurnCompletionEmitted) {
+    return false;
+  }
+  claudeTurnCompletionEmitted = true;
+  emitEvent({
+    type: "lifecycle",
+    stage: "turn_completed",
+    detail
+  });
+  emitStatus("ready", "Ready for the next prompt.");
+  return true;
+}
 function categorizeClaudeTool(name) {
   if (name.includes("AskUser") || name.includes("Question")) {
     return userInputToolCategory(name, "question");
@@ -17341,14 +17354,8 @@ async function consumeClaudeMessages() {
             });
             emitStatus("processing", "Claude is processing a turn.");
           }
-          if (message.state === "idle" && !claudeTurnCompletionEmitted) {
-            claudeTurnCompletionEmitted = true;
-            emitEvent({
-              type: "lifecycle",
-              stage: "turn_completed",
-              detail: "Claude turn completed."
-            });
-            emitStatus("ready", "Ready for the next prompt.");
+          if (message.state === "idle") {
+            emitClaudeTurnCompleted("Claude turn completed.");
           }
         }
         claudeLastSessionState = message.state;
@@ -17376,26 +17383,16 @@ async function consumeClaudeMessages() {
           });
         }
         if (message.subtype === "success") {
-          if (!claudeTurnCompletionEmitted) {
-            claudeTurnCompletionEmitted = true;
-            emitEvent({
-              type: "lifecycle",
-              stage: "turn_completed",
-              detail: message.result || "Claude turn completed."
-            });
-            emitStatus("ready", "Ready for the next prompt.");
-          }
+          emitClaudeTurnCompleted(message.result || "Claude turn completed.");
           await new Promise((resolve) => setImmediate(resolve));
           await emitClaudeContextUsage();
         } else {
+          const reason = message.errors?.join("\n") || message.subtype;
+          emitClaudeTurnCompleted(reason || "Claude turn completed.");
           emitEvent({
             type: "session_completed",
-            reason: message.errors?.join("\n") || message.subtype
+            reason
           });
-          if (!claudeTurnCompletionEmitted) {
-            claudeTurnCompletionEmitted = true;
-            emitStatus("ready", "Ready for the next prompt.");
-          }
         }
         continue;
       }
@@ -17422,7 +17419,7 @@ async function ensureClaudeSession() {
   if (initCommand.provider !== "claude") {
     return;
   }
-  if (!claudeConsumeLoop) {
+  if (!claudeConsumeLoop || !claudeInputQueue) {
     let loop;
     loop = consumeClaudeMessages().catch((error) => {
       const isAbort = error instanceof Error && error.name === "AbortError";
@@ -17445,6 +17442,19 @@ async function ensureClaudeSession() {
       }
     });
     claudeConsumeLoop = loop;
+  }
+}
+async function ensureClaudePromptQueueReady() {
+  if (claudeConsumeLoop && claudeTurnCompletionEmitted && claudeLastSessionState !== "idle") {
+    const settlingLoop = claudeConsumeLoop;
+    claudeInputQueue?.close();
+    currentClaudeQuery?.close();
+    await settlingLoop.catch(() => {
+    });
+  }
+  await ensureClaudeSession();
+  if (!claudeInputQueue) {
+    await ensureClaudeSession();
   }
 }
 function enqueueClaudePrompt(text, images) {
@@ -17744,7 +17754,7 @@ async function handleCommand(command) {
     const initialImages = command.initial_images?.length ? command.initial_images : null;
     if (initialText || initialImages) {
       if (command.provider === "claude") {
-        await ensureClaudeSession();
+        await ensureClaudePromptQueueReady();
         enqueueClaudePrompt(initialText, initialImages);
       } else {
         promptQueue.push({ text: initialText, images: initialImages });
@@ -17844,7 +17854,7 @@ async function handleCommand(command) {
       return;
     }
     if (initCommand?.provider === "claude") {
-      await ensureClaudeSession();
+      await ensureClaudePromptQueueReady();
       enqueueClaudePrompt(command.text.trim(), command.images);
     } else {
       promptQueue.push({ text: command.text.trim(), images: command.images });

@@ -14,6 +14,7 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ccem-helper-claude-restart-test-'));
   const outfile = path.join(tempDir, 'native-runtime-helper.mjs');
   const firstResultSubtype = options.firstResultSubtype ?? 'success';
+  const settleDelayMsAfterResult = options.settleDelayMsAfterResult ?? 0;
 
   await build({
     entryPoints: [path.join(packageDir, 'src', 'index.ts')],
@@ -34,6 +35,7 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
           loader: 'js',
           contents: `
             const firstResultSubtype = ${JSON.stringify(firstResultSubtype)};
+            const settleDelayMsAfterResult = ${JSON.stringify(settleDelayMsAfterResult)};
             let queryCount = 0;
             export function query({ prompt }) {
               const turn = ++queryCount;
@@ -57,6 +59,9 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
                     yield { type: 'result', subtype: firstResultSubtype, errors: ['hit turn limit'], session_id };
                   } else {
                     yield { type: 'result', subtype: 'success', result: 'done ' + turn, session_id };
+                  }
+                  if (settleDelayMsAfterResult > 0) {
+                    await new Promise((resolve) => setTimeout(resolve, settleDelayMsAfterResult));
                   }
                 },
               };
@@ -261,5 +266,73 @@ test('marks Claude helper ready after a non-success result so the workspace can 
       && output.payload.text === 'mock response 2',
     stderrRef,
     'second Claude response',
+  );
+});
+
+test('does not drop prompts sent while a completed one-shot Claude query is settling', async (t) => {
+  const helperPath = await buildHelperWithMockClaudeSdk({
+    settleDelayMsAfterResult: 120,
+  });
+  const helper = spawn(process.execPath, [helperPath], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  t.after(() => {
+    helper.kill('SIGTERM');
+  });
+
+  const outputs = [];
+  const stderrRef = { value: '' };
+  let stdoutBuffer = '';
+
+  helper.stdout.setEncoding('utf8');
+  helper.stdout.on('data', (chunk) => {
+    stdoutBuffer += chunk;
+    let newlineIndex = stdoutBuffer.indexOf('\n');
+    while (newlineIndex >= 0) {
+      const line = stdoutBuffer.slice(0, newlineIndex).trim();
+      stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+      if (line) {
+        outputs.push(JSON.parse(line));
+      }
+      newlineIndex = stdoutBuffer.indexOf('\n');
+    }
+  });
+
+  helper.stderr.setEncoding('utf8');
+  helper.stderr.on('data', (chunk) => {
+    stderrRef.value += chunk;
+  });
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'init',
+    provider: 'claude',
+    env_name: 'default',
+    perm_mode: 'dev',
+    working_dir: os.tmpdir(),
+    initial_prompt: 'first',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'status'
+      && output.status === 'ready'
+      && output.detail === 'Ready for the next prompt.',
+    stderrRef,
+    'ready status before one-shot query settles',
+  );
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'prompt',
+    text: 'second',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'event'
+      && output.payload?.type === 'assistant_chunk'
+      && output.payload.text === 'mock response 2',
+    stderrRef,
+    'second Claude response after settling restart',
   );
 });
