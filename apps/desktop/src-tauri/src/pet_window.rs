@@ -2,8 +2,10 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder}
 
 pub const PET_WINDOW_LABEL: &str = "desktop-pet";
 
-const PET_WINDOW_WIDTH: f64 = 520.0;
-const PET_WINDOW_HEIGHT: f64 = 360.0;
+const PET_WINDOW_INITIAL_WIDTH: f64 = 144.0;
+const PET_WINDOW_INITIAL_HEIGHT: f64 = 144.0;
+const PET_WINDOW_MAX_WIDTH: f64 = 520.0;
+const PET_WINDOW_MAX_HEIGHT: f64 = 360.0;
 const PET_WINDOW_MARGIN: f64 = 28.0;
 
 pub fn sync_pet_window_visibility(app: &AppHandle, enabled: bool) -> Result<(), String> {
@@ -52,6 +54,15 @@ fn set_pet_activation_policy(_app: &AppHandle, _enabled: bool) -> Result<(), Str
     Ok(())
 }
 
+#[tauri::command]
+pub fn resize_pet_window(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
+    let Some(window) = app.get_webview_window(PET_WINDOW_LABEL) else {
+        return Ok(());
+    };
+
+    resize_and_position_pet_window(&window, width, height)
+}
+
 fn build_pet_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     let builder = WebviewWindowBuilder::new(
         app,
@@ -67,7 +78,7 @@ fn build_pet_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     .always_on_top(!cfg!(target_os = "macos"))
     .visible_on_all_workspaces(!cfg!(target_os = "macos"))
     .skip_taskbar(true)
-    .inner_size(PET_WINDOW_WIDTH, PET_WINDOW_HEIGHT)
+    .inner_size(PET_WINDOW_INITIAL_WIDTH, PET_WINDOW_INITIAL_HEIGHT)
     .visible(false);
 
     #[cfg(not(target_os = "macos"))]
@@ -111,6 +122,18 @@ fn configure_pet_window(window: &WebviewWindow) -> Result<(), String> {
     }
 }
 
+fn resize_and_position_pet_window(
+    window: &WebviewWindow,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    let size = pet_window_size(width, height);
+    window
+        .set_size(tauri::Size::Logical(size))
+        .map_err(|e| format!("resize pet window: {e}"))?;
+    position_pet_window_for_size(window, size.width, size.height)
+}
+
 fn apply_pet_window_after_show(window: &WebviewWindow) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
@@ -139,6 +162,7 @@ fn apply_pet_window_macos_behavior(window: &WebviewWindow) -> Result<(), String>
             ns_window.setHidesOnDeactivate(false);
             ns_window.setCanHide(false);
         }
+        ns_window.setDelegate(None);
         ns_window.setLevel(NSStatusWindowLevel);
         unsafe {
             ns_window.orderFrontRegardless();
@@ -191,6 +215,36 @@ where
 }
 
 fn position_pet_window(window: &WebviewWindow) -> Result<(), String> {
+    position_pet_window_for_size(window, PET_WINDOW_INITIAL_WIDTH, PET_WINDOW_INITIAL_HEIGHT)
+}
+
+fn pet_window_size(width: f64, height: f64) -> tauri::LogicalSize<f64> {
+    tauri::LogicalSize {
+        width: clamp_pet_window_dimension(
+            width,
+            PET_WINDOW_INITIAL_WIDTH,
+            PET_WINDOW_MAX_WIDTH,
+        ),
+        height: clamp_pet_window_dimension(
+            height,
+            PET_WINDOW_INITIAL_HEIGHT,
+            PET_WINDOW_MAX_HEIGHT,
+        ),
+    }
+}
+
+fn clamp_pet_window_dimension(value: f64, min: f64, max: f64) -> f64 {
+    if !value.is_finite() {
+        return min;
+    }
+    value.ceil().clamp(min, max)
+}
+
+fn position_pet_window_for_size(
+    window: &WebviewWindow,
+    window_width: f64,
+    window_height: f64,
+) -> Result<(), String> {
     let Some(monitor) = window
         .primary_monitor()
         .map_err(|e| format!("pet window monitor: {e}"))?
@@ -201,9 +255,9 @@ fn position_pet_window(window: &WebviewWindow) -> Result<(), String> {
     let position = monitor.position();
     let size = monitor.size();
     let scale = monitor.scale_factor();
-    let x = position.x as f64 + (size.width as f64 / scale) - PET_WINDOW_WIDTH - PET_WINDOW_MARGIN;
+    let x = position.x as f64 + (size.width as f64 / scale) - window_width - PET_WINDOW_MARGIN;
     let y =
-        position.y as f64 + (size.height as f64 / scale) - PET_WINDOW_HEIGHT - PET_WINDOW_MARGIN;
+        position.y as f64 + (size.height as f64 / scale) - window_height - PET_WINDOW_MARGIN;
 
     window
         .set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }))
@@ -242,5 +296,25 @@ mod tests {
         assert!(!behavior.contains(NSWindowCollectionBehavior::FullScreenNone));
         assert!(!behavior.contains(NSWindowCollectionBehavior::Primary));
         assert!(!behavior.contains(NSWindowCollectionBehavior::Auxiliary));
+    }
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::*;
+
+    #[test]
+    fn pet_window_size_clamps_to_visible_content_bounds() {
+        let tiny = pet_window_size(1.2, 2.8);
+        assert_eq!(tiny.width, PET_WINDOW_INITIAL_WIDTH);
+        assert_eq!(tiny.height, PET_WINDOW_INITIAL_HEIGHT);
+
+        let content = pet_window_size(486.2, 351.1);
+        assert_eq!(content.width, 487.0);
+        assert_eq!(content.height, 352.0);
+
+        let huge = pet_window_size(9999.0, f64::INFINITY);
+        assert_eq!(huge.width, PET_WINDOW_MAX_WIDTH);
+        assert_eq!(huge.height, PET_WINDOW_INITIAL_HEIGHT);
     }
 }

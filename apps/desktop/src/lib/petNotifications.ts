@@ -1,8 +1,10 @@
-import type { NativeSessionSummary } from '@/lib/tauri-ipc';
+import type { NativeSessionSummary, SessionEventRecord } from '@/lib/tauri-ipc';
 import type { Session as InteractiveSession } from '@/store';
 import type { PetNotificationItem, PetNotificationTone } from '@/types/pet';
 
 export const PET_NOTIFICATION_LIMIT = 5;
+const PET_MESSAGE_PREVIEW_LIMIT = 96;
+const THINKING_MESSAGE = '正在思考';
 
 const TERMINAL_STATUSES = new Set(['stopped', 'error', 'failed', 'interrupted', 'handoff']);
 const ATTENTION_STATUSES = new Set([
@@ -32,9 +34,21 @@ interface TauriInteractiveSession {
 }
 
 export type PetNotificationSourceSession =
-  | NativeSessionSummary
-  | InteractiveSession
-  | TauriInteractiveSession;
+  (
+    | NativeSessionSummary
+    | InteractiveSession
+    | TauriInteractiveSession
+  ) & {
+    title?: string | null;
+    displayTitle?: string | null;
+    display_title?: string | null;
+    latestModelOutput?: string | null;
+    latest_model_output?: string | null;
+    latestAssistantOutput?: string | null;
+    latest_assistant_output?: string | null;
+    lastAssistantMessage?: string | null;
+    last_assistant_message?: string | null;
+  };
 
 function isNativeSession(session: PetNotificationSourceSession): session is NativeSessionSummary {
   return 'runtime_id' in session;
@@ -47,10 +61,6 @@ function sessionRuntimeId(session: PetNotificationSourceSession): string {
 function sessionProvider(session: PetNotificationSourceSession): 'claude' | 'codex' {
   const provider = isNativeSession(session) ? session.provider : session.client;
   return provider === 'codex' ? 'codex' : 'claude';
-}
-
-function sessionProviderLabel(session: PetNotificationSourceSession): string {
-  return sessionProvider(session) === 'codex' ? 'Codex' : 'Claude';
 }
 
 function sessionProviderSessionId(session: PetNotificationSourceSession): string | null {
@@ -78,8 +88,72 @@ function sessionUpdatedAt(session: PetNotificationSourceSession): string {
   return isNativeSession(session) ? session.updated_at || session.created_at : sessionCreatedAt(session);
 }
 
-function sessionLastError(session: PetNotificationSourceSession): string | null {
-  return isNativeSession(session) ? session.last_error ?? null : null;
+function normalizeInlineText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function nonEmptyText(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? normalizeInlineText(value) : null;
+}
+
+function previewText(value: string, limit = PET_MESSAGE_PREVIEW_LIMIT): string {
+  const normalized = normalizeInlineText(value);
+  const chars = Array.from(normalized);
+  if (chars.length <= limit) {
+    return normalized;
+  }
+  return `${chars.slice(0, limit).join('').trimEnd()}…`;
+}
+
+function sessionTitle(session: PetNotificationSourceSession): string {
+  return nonEmptyText(session.title)
+    ?? nonEmptyText(session.displayTitle)
+    ?? nonEmptyText(session.display_title)
+    ?? basename(sessionProjectDir(session));
+}
+
+function sessionLatestModelOutput(session: PetNotificationSourceSession): string | null {
+  return nonEmptyText(session.latestModelOutput)
+    ?? nonEmptyText(session.latest_model_output)
+    ?? nonEmptyText(session.latestAssistantOutput)
+    ?? nonEmptyText(session.latest_assistant_output)
+    ?? nonEmptyText(session.lastAssistantMessage)
+    ?? nonEmptyText(session.last_assistant_message);
+}
+
+export function buildPetDisplayFromEvents(
+  events: Pick<SessionEventRecord, 'payload'>[],
+): { title: string | null; latestModelOutput: string | null } {
+  const firstUserPrompt = events
+    .map((event) => event.payload)
+    .find((payload) => payload.type === 'user_prompt' && nonEmptyText(payload.text));
+
+  let latestAssistantIndex = -1;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const payload = events[index]?.payload;
+    if (payload?.type === 'assistant_chunk' && nonEmptyText(payload.text)) {
+      latestAssistantIndex = index;
+      break;
+    }
+  }
+
+  const chunks: string[] = [];
+  if (latestAssistantIndex >= 0) {
+    for (let index = latestAssistantIndex; index >= 0; index -= 1) {
+      const payload = events[index]?.payload;
+      if (payload?.type !== 'assistant_chunk') {
+        break;
+      }
+      if (payload.text.trim()) {
+        chunks.unshift(payload.text);
+      }
+    }
+  }
+
+  return {
+    title: firstUserPrompt?.type === 'user_prompt' ? nonEmptyText(firstUserPrompt.text) : null,
+    latestModelOutput: chunks.length > 0 ? normalizeInlineText(chunks.join('')) : null,
+  };
 }
 
 export function buildPetNotificationId(
@@ -119,17 +193,9 @@ function labelForTone(tone: PetNotificationTone): string {
 }
 
 function defaultMessage(session: PetNotificationSourceSession, tone: PetNotificationTone): string {
-  const lastError = sessionLastError(session);
-  if (lastError?.trim()) {
-    return lastError.trim();
-  }
-  if (tone === 'attention') {
-    return '这条会话需要你处理';
-  }
-  if (tone === 'running') {
-    return `${sessionProviderLabel(session)} 正在运行`;
-  }
-  return '点开查看结果';
+  void tone;
+  const latestOutput = sessionLatestModelOutput(session);
+  return latestOutput ? previewText(latestOutput) : THINKING_MESSAGE;
 }
 
 export function buildPetNotifications(
@@ -152,7 +218,7 @@ export function buildPetNotifications(
         runtimeId: sessionRuntimeId(session),
         provider: sessionProvider(session),
         providerSessionId: sessionProviderSessionId(session),
-        title: basename(sessionProjectDir(session)),
+        title: sessionTitle(session),
         message: defaultMessage(session, tone),
         status: session.status,
         statusLabel: labelForTone(tone),

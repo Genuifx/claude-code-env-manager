@@ -2709,6 +2709,63 @@ div[data-tauri-decorum-tb] {
   transition: width var(--duration-normal) var(--ease-decelerate);
 }
 
+/* === Desktop pet overlay cat === */
+.pet-overlay-cat {
+  position: relative;
+  isolation: isolate;
+  flex: 0 0 auto;
+}
+
+.pet-overlay-cat__open-eye {
+  position: absolute;
+  z-index: 1;
+  top: 40.5%;
+  width: 16%;
+  height: 10.5%;
+  border-radius: 999px;
+  background:
+    radial-gradient(ellipse at 50% 50%, rgba(255, 196, 55, 0.98) 0 68%, rgba(255, 196, 55, 0) 74%);
+  animation: pet-cat-open-eye-blink 5.2s steps(1, end) infinite;
+}
+
+.pet-overlay-cat__open-eye::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 28%;
+  height: 54%;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: #3a240b;
+}
+
+.pet-overlay-cat__open-eye--left {
+  left: 30.8%;
+  transform: rotate(-2deg);
+}
+
+.pet-overlay-cat__open-eye--right {
+  right: 30.8%;
+  transform: rotate(2deg);
+}
+
+@keyframes pet-cat-open-eye-blink {
+  0%, 74%, 94%, 100% {
+    opacity: 1;
+  }
+  78%, 90% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pet-overlay-cat__open-eye {
+    animation: none;
+    opacity: 0;
+  }
+}
+
 /* === Pet widget — pixel RPG game card === */
 
 .pet-card {

@@ -116,7 +116,7 @@ test('includes legacy interactive sessions launched from the desktop app', async
   assert.equal(notifications.length, 1);
   assert.equal(notifications[0].runtimeId, 'legacy-running-1');
   assert.equal(notifications[0].title, 'legacy-project');
-  assert.equal(notifications[0].message, 'Claude 正在运行');
+  assert.equal(notifications[0].message, '正在思考');
   assert.equal(notifications[0].statusLabel, '运行中');
 });
 
@@ -138,6 +138,80 @@ test('includes raw interactive sessions returned directly from Tauri IPC', async
   assert.equal(notifications[0].runtimeId, 'raw-running-1');
   assert.equal(notifications[0].title, 'raw-project');
   assert.equal(notifications[0].updatedAt, '2026-05-01T08:05:00.000Z');
+});
+
+test('uses the session title and latest model output preview when available', async () => {
+  const { buildPetNotifications } = await importPetNotifications();
+  const notifications = buildPetNotifications(
+    [
+      session({
+        title: '修复桌面猫跨桌面显示',
+        latestModelOutput: '已经定位到 macOS Spaces 的窗口行为，需要把桌面宠物作为跨 Space 浮窗处理。',
+      }),
+    ],
+    new Set(),
+  );
+
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].title, '修复桌面猫跨桌面显示');
+  assert.equal(notifications[0].message, '已经定位到 macOS Spaces 的窗口行为，需要把桌面宠物作为跨 Space 浮窗处理。');
+});
+
+test('falls back to thinking text when no model output is available', async () => {
+  const { buildPetNotifications } = await importPetNotifications();
+  const notifications = buildPetNotifications(
+    [
+      session({
+        title: '等待模型输出',
+        latestModelOutput: '   ',
+      }),
+    ],
+    new Set(),
+  );
+
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].title, '等待模型输出');
+  assert.equal(notifications[0].message, '正在思考');
+});
+
+test('extracts title and latest assistant turn from native session events', async () => {
+  const { buildPetDisplayFromEvents } = await importPetNotifications();
+  const display = buildPetDisplayFromEvents([
+    {
+      runtime_id: 'runtime-1',
+      seq: 1,
+      occurred_at: '2026-05-01T08:00:00.000Z',
+      payload: { type: 'user_prompt', text: '帮我完善桌面猫气泡', image_count: 0 },
+    },
+    {
+      runtime_id: 'runtime-1',
+      seq: 2,
+      occurred_at: '2026-05-01T08:00:01.000Z',
+      payload: { type: 'assistant_chunk', text: '我会先看现有通知逻辑，' },
+    },
+    {
+      runtime_id: 'runtime-1',
+      seq: 3,
+      occurred_at: '2026-05-01T08:00:02.000Z',
+      payload: { type: 'assistant_chunk', text: '再把文案改成最新输出。' },
+    },
+    {
+      runtime_id: 'runtime-1',
+      seq: 4,
+      occurred_at: '2026-05-01T08:00:03.000Z',
+      payload: {
+        type: 'tool_use_started',
+        tool_use_id: 'tool-1',
+        category: { category: 'search', raw_name: 'rg' },
+        raw_name: 'rg',
+        input_summary: '查找通知逻辑',
+        needs_response: false,
+      },
+    },
+  ]);
+
+  assert.equal(display.title, '帮我完善桌面猫气泡');
+  assert.equal(display.latestModelOutput, '我会先看现有通知逻辑，再把文案改成最新输出。');
 });
 
 test('hides opened running notifications while allowing later status updates to surface', async () => {
@@ -205,5 +279,5 @@ test('uses concise Chinese status labels for different session states', async ()
     notifications.map((item) => item.statusLabel),
     ['需要处理', '失败', '已中断'],
   );
-  assert.equal(notifications[1].message, 'network closed');
+  assert.equal(notifications[1].message, '正在思考');
 });
