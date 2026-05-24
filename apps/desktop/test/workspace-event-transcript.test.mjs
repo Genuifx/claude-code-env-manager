@@ -152,6 +152,56 @@ test('live transcript records process timing metadata for duration display', asy
   assert.equal(toolBlock._completedAt, Date.parse('2026-05-01T00:00:05.000Z'));
 });
 
+test('renders unmatched failed tool results as visible assistant errors', async () => {
+  const { buildMessagesFromEvents } = await importWorkspaceEventTranscript();
+
+  const messages = buildMessagesFromEvents(
+    [],
+    [],
+    [
+      event(1, { type: 'user_prompt', text: '用不存在的 Skill: CC', image_count: 0 }),
+      event(2, {
+        type: 'tool_use_completed',
+        tool_use_id: 'missing-skill',
+        raw_name: 'Skill',
+        result_summary: 'Skill not found: CC',
+        success: false,
+      }),
+    ],
+  );
+
+  assert.deepEqual(
+    messages.map((message) => [message.msgType, message.content]),
+    [
+      ['user', '用不存在的 Skill: CC'],
+      ['assistant', 'Skill not found: CC'],
+    ],
+  );
+});
+
+test('session summary refresh treats runtime error events as boundary events', async () => {
+  const { sessionEventsNeedSummaryRefresh } = await importWorkspaceEventTranscript();
+
+  assert.equal(sessionEventsNeedSummaryRefresh([
+    event(1, { type: 'assistant_chunk', text: 'still streaming' }),
+  ]), false);
+  assert.equal(sessionEventsNeedSummaryRefresh([
+    event(2, { type: 'stderr_line', line: 'Skill not found: CC' }),
+  ]), true);
+  assert.equal(sessionEventsNeedSummaryRefresh([
+    event(3, { type: 'lifecycle', stage: 'error', detail: 'Native runtime failed' }),
+  ]), true);
+  assert.equal(sessionEventsNeedSummaryRefresh([
+    event(4, {
+      type: 'tool_use_completed',
+      tool_use_id: 'missing-skill',
+      raw_name: 'Skill',
+      result_summary: 'Skill not found: CC',
+      success: false,
+    }),
+  ]), true);
+});
+
 test('dedupes live events linearly while preserving first-seen order', async () => {
   const { dedupeEvents } = await importWorkspaceEventTranscript();
 

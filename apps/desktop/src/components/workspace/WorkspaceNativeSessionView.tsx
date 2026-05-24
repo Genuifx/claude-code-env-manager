@@ -67,6 +67,7 @@ import {
   buildBaseMessages,
   buildMessagesFromEvents,
   filterConfirmedLocalUserPrompts,
+  sessionEventsNeedSummaryRefresh,
   splitLocalUserPromptsForReplay,
   stabilizeMessageRefs,
   type LocalUserPrompt,
@@ -174,27 +175,6 @@ function hasImmediateAttentionEvent(events: SessionEventRecord[]) {
         return false;
     }
   });
-}
-
-function hasSummaryBoundaryEvent(events: SessionEventRecord[]) {
-  return events.some((event) =>
-    event.payload.type === 'session_completed'
-    || (
-      event.payload.type === 'lifecycle'
-      && [
-        'compacting',
-        'compact_completed',
-        'compact_failed',
-        'ready',
-        'runtime_resume',
-        'turn_completed',
-      ].includes(event.payload.stage)
-    )
-    || event.payload.type === 'permission_required'
-    || event.payload.type === 'permission_responded'
-    || event.payload.type === 'terminal_prompt_required'
-    || event.payload.type === 'terminal_prompt_resolved'
-  );
 }
 
 function nativeEventCacheKey(runtimeId: string) {
@@ -1169,7 +1149,7 @@ export function WorkspaceNativeSessionView({
       startTransition(updateEvents);
     }
 
-    return hasSummaryBoundaryEvent(batch.events);
+    return sessionEventsNeedSummaryRefresh(batch.events);
   }, [getNativeSessionEvents, session.runtime_id]);
 
   const rawAttentionState = useMemo(

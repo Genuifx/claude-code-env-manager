@@ -359,6 +359,34 @@ export function appendSessionEvents(
   return [...previous, ...nextEvents];
 }
 
+export function sessionEventsNeedSummaryRefresh(events: SessionEventRecord[]) {
+  return events.some((event) => {
+    switch (event.payload.type) {
+      case 'session_completed':
+      case 'stderr_line':
+      case 'permission_required':
+      case 'permission_responded':
+      case 'terminal_prompt_required':
+      case 'terminal_prompt_resolved':
+        return true;
+      case 'tool_use_completed':
+        return event.payload.success === false;
+      case 'lifecycle':
+        return [
+          'compacting',
+          'compact_completed',
+          'compact_failed',
+          'error',
+          'ready',
+          'runtime_resume',
+          'turn_completed',
+        ].includes(event.payload.stage);
+      default:
+        return false;
+    }
+  });
+}
+
 function stableUnknownEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (a == null || b == null) return a === b;
@@ -773,6 +801,15 @@ export function buildMessagesFromEvents(
             occurredAt,
           )
         ) {
+          break;
+        }
+        if (!event.payload.success) {
+          const fallbackName = event.payload.raw_name?.trim() || 'Tool';
+          appendErrorMessage(
+            `tool-result-error-${event.seq}`,
+            event.payload.result_summary || `${fallbackName} failed.`,
+            occurredAt,
+          );
           break;
         }
         const resultBlock = {
