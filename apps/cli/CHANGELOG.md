@@ -1,5 +1,11 @@
 # ccem
 
+## 2.10.0
+
+### Minor Changes
+
+- Release desktop workspace and analytics improvements, including generated session titles, runtime error visibility, IME submit handling, titlebar alignment, and refined usage summaries.
+
 ## 2.9.0
 
 ### Minor Changes
