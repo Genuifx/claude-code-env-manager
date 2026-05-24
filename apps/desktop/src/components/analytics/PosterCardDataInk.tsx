@@ -130,9 +130,16 @@ export function PosterCardDataInk({
         <div style={{ fontSize: 11, fontWeight: 500, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 }}>
           {t(timeRange === 'day' ? 'analytics.shareDayTokens' : timeRange === 'month' ? 'analytics.shareMonthTokens' : 'analytics.shareWeekTokens')}
         </div>
-        <div style={{ fontSize: 64, fontWeight: 900, color: '#1a1a2e', letterSpacing: -3, lineHeight: 1 }}>
-          {formatLargeNumber(rangeTokens)}
-        </div>
+        {/* Adaptive font size so large numbers never overflow the 440px card */}
+        {(() => {
+          const numStr = formatLargeNumber(rangeTokens);
+          const fontSize = numStr.length <= 8 ? 64 : numStr.length <= 11 ? 48 : 36;
+          return (
+            <div style={{ fontSize, fontWeight: 900, color: '#1a1a2e', letterSpacing: -3, lineHeight: 1, wordBreak: 'keep-all' }}>
+              {numStr}
+            </div>
+          );
+        })()}
         <div style={{ fontSize: 14, fontWeight: 400, color: '#6b7280', marginTop: 6 }}>
           tokens consumed by @{username || 'developer'}
         </div>

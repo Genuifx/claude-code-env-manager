@@ -1,9 +1,12 @@
 import { memo, useMemo } from 'react';
-import type { TokenUsageWithCost } from '@/types/analytics';
+import type { ModelBreakdownHistory, TokenUsageWithCost } from '@/types/analytics';
 import { useLocale } from '@/locales';
 
 interface ModelDistributionProps {
-  byModel: Record<string, TokenUsageWithCost>;
+  /** Time-sliced model breakdown from backend. When provided, aggregates all visible buckets. */
+  breakdown?: ModelBreakdownHistory;
+  /** Fallback cumulative total when breakdown is not available. */
+  byModel?: Record<string, TokenUsageWithCost>;
 }
 
 /** Purple palette at descending opacity — cohesive with the other charts. */
@@ -15,6 +18,10 @@ const BAR_COLORS = [
   'hsl(var(--chart-4) / 0.20)',
 ];
 
+function sumTokens(usage: TokenUsageWithCost): number {
+  return usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
+}
+
 function formatTokenCount(tokens: number): string {
   if (tokens >= 1_000_000_000) return `${(tokens / 1_000_000_000).toFixed(1)}B`;
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
@@ -22,25 +29,46 @@ function formatTokenCount(tokens: number): string {
   return tokens.toString();
 }
 
-export const ModelDistribution = memo(function ModelDistribution({ byModel }: ModelDistributionProps) {
+export const ModelDistribution = memo(function ModelDistribution({ breakdown, byModel }: ModelDistributionProps) {
   const { t } = useLocale();
 
   const models = useMemo(() => {
-    const entries = Object.entries(byModel);
-    const totalTokens = entries.reduce(
-      (sum, [, usage]) => sum + usage.inputTokens + usage.outputTokens,
-      0,
-    );
+    // Aggregate from time-sliced breakdown when available (links to chart granularity).
+    if (breakdown && Object.keys(breakdown).length > 0) {
+      const modelTotals = new Map<string, number>();
+
+      for (const bucket of Object.values(breakdown)) {
+        for (const [model, usage] of Object.entries(bucket)) {
+          const tokens = sumTokens(usage);
+          modelTotals.set(model, (modelTotals.get(model) ?? 0) + tokens);
+        }
+      }
+
+      const totalTokens = Array.from(modelTotals.values()).reduce((sum, v) => sum + v, 0);
+
+      return Array.from(modelTotals.entries())
+        .map(([name, tokens]) => ({
+          name,
+          tokens,
+          percentage: totalTokens > 0 ? (tokens / totalTokens) * 100 : 0,
+        }))
+        .sort((a, b) => b.percentage - a.percentage)
+        .slice(0, 5);
+    }
+
+    // Fallback to cumulative byModel.
+    const entries = Object.entries(byModel ?? {});
+    const totalTokens = entries.reduce((sum, [, usage]) => sum + sumTokens(usage), 0);
 
     return entries
       .map(([name, usage]) => {
-        const tokens = usage.inputTokens + usage.outputTokens;
+        const tokens = sumTokens(usage);
         const percentage = totalTokens > 0 ? (tokens / totalTokens) * 100 : 0;
         return { name, tokens, percentage };
       })
       .sort((a, b) => b.percentage - a.percentage)
       .slice(0, 5);
-  }, [byModel]);
+  }, [breakdown, byModel]);
 
   if (models.length === 0) {
     return (
