@@ -54,6 +54,7 @@ type PromptAreaEventHandlers = {
   pushUndo: (segments: Segment[]) => void
   resetUndoHistory: () => void
   isComposing: React.RefObject<boolean>
+  isWithinCompositionCooldown: () => boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +114,7 @@ export function usePromptAreaEvents(deps: EventHandlerDeps): PromptAreaEventHand
   } = deps
 
   const isComposing = useRef(false)
+  const compositionEndTime = useRef(0) // Track when composition ended (timestamp)
   const undoState = useRef<UndoState>({ undoStack: [], redoStack: [] })
 
   // Track previous segments for undo stack
@@ -355,6 +357,7 @@ export function usePromptAreaEvents(deps: EventHandlerDeps): PromptAreaEventHand
 
   const handleCompositionEnd = useCallback(() => {
     isComposing.current = false
+    compositionEndTime.current = Date.now() // Record when composition ended
     // Run trigger detection after composition ends
     runTriggerDetection()
   }, [runTriggerDetection])
@@ -424,6 +427,18 @@ export function usePromptAreaEvents(deps: EventHandlerDeps): PromptAreaEventHand
     [readSegmentsFromDOM, onChange, renderSegmentsToDOM, onUndo, onRedo],
   )
 
+  /**
+   * Check if we're within the cooldown period after IME composition ended.
+   * This prevents Enter key from accidentally submitting when the user
+   * is selecting candidates from the IME popup.
+   */
+  const isWithinCompositionCooldown = useCallback((): boolean => {
+    const COOLDOWN_MS = 100 // 100ms cooldown after composition ends
+    const now = Date.now()
+    const timeSinceCompositionEnd = now - compositionEndTime.current
+    return timeSinceCompositionEnd < COOLDOWN_MS
+  }, [])
+
   return {
     handlePaste,
     handleCopy,
@@ -437,6 +452,7 @@ export function usePromptAreaEvents(deps: EventHandlerDeps): PromptAreaEventHand
     pushUndo,
     resetUndoHistory,
     isComposing,
+    isWithinCompositionCooldown,
   }
 }
 
