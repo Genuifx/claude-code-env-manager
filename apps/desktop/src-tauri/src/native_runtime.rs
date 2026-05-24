@@ -990,21 +990,28 @@ impl NativeRuntimeManager {
                     .map(|value| value.trim().to_string())
                     .filter(|value| !value.is_empty());
                 let mut applied = false;
+                let mut next_status = status.clone();
                 self.update_record(runtime_id, |record| {
-                    if record.status == "error"
-                        && !matches!(status.as_str(), "error" | "stopped" | "handoff")
+                    if status == "error"
+                        && is_recoverable_native_helper_error(record, normalized_detail.as_deref())
                     {
+                        next_status = "interrupted".to_string();
+                    }
+                    if record.status == "error" && !is_native_terminal_status(&next_status) {
                         return;
                     }
                     applied = true;
-                    record.status = status.clone();
-                    record.is_active = !matches!(status.as_str(), "stopped" | "error" | "handoff");
+                    record.status = next_status.clone();
+                    record.is_active = !is_native_terminal_status(&next_status);
                     record.updated_at = Utc::now();
                     if status == "error" {
                         record.last_error = normalized_detail.clone().or_else(|| {
                             Some("Native runtime helper reported an error.".to_string())
                         });
-                    } else if matches!(status.as_str(), "ready" | "processing" | "initializing") {
+                    } else if matches!(
+                        next_status.as_str(),
+                        "ready" | "processing" | "initializing"
+                    ) {
                         record.last_error = None;
                     }
                 })?;
@@ -1015,7 +1022,7 @@ impl NativeRuntimeManager {
                     self.append_event(
                         runtime_id,
                         SessionEventPayload::Lifecycle {
-                            stage: status.clone(),
+                            stage: next_status,
                             detail,
                         },
                     )?;
@@ -1048,7 +1055,7 @@ impl NativeRuntimeManager {
             .lock()
             .map_err(|_| "Failed to lock native runtime records".to_string())?
             .get(runtime_id)
-            .map(|record| matches!(record.status.as_str(), "stopped" | "handoff" | "error"))
+            .map(|record| is_native_terminal_status(&record.status))
             .unwrap_or(false);
 
         if !expected_terminal {
@@ -1059,7 +1066,12 @@ impl NativeRuntimeManager {
                     .unwrap_or_default()
             );
             self.update_record(runtime_id, |record| {
-                record.status = "error".to_string();
+                record.status = if is_recoverable_native_process_exit(record) {
+                    "interrupted"
+                } else {
+                    "error"
+                }
+                .to_string();
                 record.is_active = false;
                 record.updated_at = Utc::now();
                 if record.last_error.is_none() {
@@ -1525,6 +1537,25 @@ fn is_context_usage_probe_error(message: &str) -> bool {
 
 fn is_native_terminal_status(status: &str) -> bool {
     matches!(status, "stopped" | "error" | "handoff" | "interrupted")
+}
+
+fn is_recoverable_native_process_exit(record: &NativeSessionRecord) -> bool {
+    record
+        .provider_session_id
+        .as_deref()
+        .is_some_and(|session_id| !session_id.trim().is_empty())
+}
+
+fn is_recoverable_native_helper_error(record: &NativeSessionRecord, detail: Option<&str>) -> bool {
+    is_recoverable_native_process_exit(record)
+        && detail.is_some_and(is_recoverable_native_process_error)
+}
+
+fn is_recoverable_native_process_error(message: &str) -> bool {
+    let normalized = message.to_ascii_lowercase();
+    normalized.contains("terminated by signal")
+        || normalized.contains("signal sigkill")
+        || normalized.contains("sigkill")
 }
 
 fn reactivate_record_for_reconnect(record: &mut NativeSessionRecord) -> bool {
@@ -2121,6 +2152,56 @@ mod tests {
     }
 
     #[test]
+    fn provider_sigkill_error_is_recoverable_after_session_meta() {
+        let runtime_id = "native-provider-sigkill";
+        let manager = manager_with_handle(runtime_id);
+        manager
+            .update_record(runtime_id, |record| {
+                record.provider_session_id = Some("provider-session-1".to_string());
+                record.can_handoff_to_terminal = true;
+                record.status = "processing".to_string();
+                record.is_active = true;
+            })
+            .expect("set processing record");
+
+        manager
+            .process_helper_stdout(
+                runtime_id,
+                r#"{"type":"status","status":"error","detail":"Claude Code process terminated by signal SIGKILL"}"#,
+            )
+            .expect("process recoverable error status");
+
+        let summary = manager.summary_for(runtime_id).expect("summary");
+        assert_eq!(summary.status, "interrupted");
+        assert!(!summary.is_active);
+        assert_eq!(
+            summary.last_error.as_deref(),
+            Some("Claude Code process terminated by signal SIGKILL")
+        );
+    }
+
+    #[test]
+    fn provider_sigkill_without_session_meta_stays_error() {
+        let runtime_id = "native-provider-startup-sigkill";
+        let manager = manager_with_handle(runtime_id);
+
+        manager
+            .process_helper_stdout(
+                runtime_id,
+                r#"{"type":"status","status":"error","detail":"Claude Code process terminated by signal SIGKILL"}"#,
+            )
+            .expect("process error status");
+
+        let summary = manager.summary_for(runtime_id).expect("summary");
+        assert_eq!(summary.status, "error");
+        assert!(!summary.is_active);
+        assert_eq!(
+            summary.last_error.as_deref(),
+            Some("Claude Code process terminated by signal SIGKILL")
+        );
+    }
+
+    #[test]
     fn retryable_child_write_errors_match_dead_helper_states() {
         assert!(is_retryable_native_child_write_error(
             "Native sidecar child is not available"
@@ -2169,6 +2250,97 @@ mod tests {
         assert!(manager
             .is_current_handle(runtime_id, &replacement_handle)
             .expect("current handle check"));
+    }
+
+    #[test]
+    fn unexpected_helper_exit_after_provider_session_is_recoverable() {
+        let runtime_id = "native-helper-reclaimed";
+        let manager = manager_with_handle(runtime_id);
+        let handle = manager
+            .handles
+            .lock()
+            .expect("handles")
+            .get(runtime_id)
+            .expect("handle")
+            .clone();
+        manager
+            .update_record(runtime_id, |record| {
+                record.provider_session_id = Some("provider-session-1".to_string());
+                record.can_handoff_to_terminal = true;
+                record.status = "ready".to_string();
+                record.is_active = true;
+            })
+            .expect("set ready record");
+
+        manager
+            .mark_process_exit(runtime_id, Some(9), &handle)
+            .expect("mark process exit");
+
+        let summary = manager.summary_for(runtime_id).expect("summary");
+        assert_eq!(summary.status, "interrupted");
+        assert!(!summary.is_active);
+        assert_eq!(
+            summary.last_error.as_deref(),
+            Some("Native runtime sidecar exited unexpectedly with code 9.")
+        );
+        assert!(!manager
+            .is_current_handle(runtime_id, &handle)
+            .expect("current handle check"));
+    }
+
+    #[test]
+    fn unexpected_helper_exit_before_provider_session_stays_error() {
+        let runtime_id = "native-helper-startup-crash";
+        let manager = manager_with_handle(runtime_id);
+        let handle = manager
+            .handles
+            .lock()
+            .expect("handles")
+            .get(runtime_id)
+            .expect("handle")
+            .clone();
+
+        manager
+            .mark_process_exit(runtime_id, Some(1), &handle)
+            .expect("mark process exit");
+
+        let summary = manager.summary_for(runtime_id).expect("summary");
+        assert_eq!(summary.status, "error");
+        assert!(!summary.is_active);
+        assert_eq!(
+            summary.last_error.as_deref(),
+            Some("Native runtime sidecar exited unexpectedly with code 1.")
+        );
+    }
+
+    #[test]
+    fn interrupted_helper_exit_keeps_recoverable_status() {
+        let runtime_id = "native-interrupted-helper-exit";
+        let manager = manager_with_handle(runtime_id);
+        let handle = manager
+            .handles
+            .lock()
+            .expect("handles")
+            .get(runtime_id)
+            .expect("handle")
+            .clone();
+        manager
+            .update_record(runtime_id, |record| {
+                record.provider_session_id = Some("provider-session-1".to_string());
+                record.status = "interrupted".to_string();
+                record.is_active = false;
+                record.last_error = Some("Turn interrupted.".to_string());
+            })
+            .expect("set interrupted record");
+
+        manager
+            .mark_process_exit(runtime_id, Some(9), &handle)
+            .expect("mark process exit");
+
+        let summary = manager.summary_for(runtime_id).expect("summary");
+        assert_eq!(summary.status, "interrupted");
+        assert!(!summary.is_active);
+        assert_eq!(summary.last_error.as_deref(), Some("Turn interrupted."));
     }
 
     #[test]
