@@ -1,5 +1,11 @@
 # ccem
 
+## 2.9.0
+
+### Minor Changes
+
+- Stabilize native desktop session continuation after completed Claude turns and recover reclaimed native sessions for resume.
+
 ## 2.8.1
 
 ### Patch Changes
