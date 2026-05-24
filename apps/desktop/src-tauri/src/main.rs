@@ -131,7 +131,7 @@ enum WindowControlAction {
 const MACOS_TRAFFIC_LIGHT_INSET_X: f32 = 24.0;
 
 #[cfg(target_os = "macos")]
-const MACOS_TRAFFIC_LIGHT_INSET_Y: f32 = 30.0;
+const MACOS_TRAFFIC_LIGHT_INSET_Y: f32 = 24.0;
 
 #[cfg(target_os = "macos")]
 fn should_use_reduced_window_effects(settings: &DesktopSettings) -> bool {
