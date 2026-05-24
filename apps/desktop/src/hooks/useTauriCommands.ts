@@ -3,6 +3,7 @@ import { useAppStore, type Environment, type Session, type ArrangeLayout, type I
 import { useCallback } from 'react';
 import { toast } from 'sonner';
 import { shallow } from 'zustand/shallow';
+import type { SessionStickerId, SessionTaskStage } from '@/features/conversations/types';
 import type {
   ChannelKind,
   HeadlessSessionSummary,
@@ -1047,6 +1048,10 @@ export function useTauriCommands() {
     setCronRuns(taskId, runs);
   }, [setCronRuns]);
 
+  const getCronRunDetail = useCallback(async (taskId: string, runId: string) => {
+    return invoke<CronTaskRun>('get_cron_run_detail', { taskId, runId });
+  }, []);
+
   const retryCronTask = useCallback(async (id: string) => {
     await invoke('retry_cron_task', { id });
   }, []);
@@ -1190,6 +1195,24 @@ export function useTauriCommands() {
     await invoke('set_session_title', { source, sessionId, title });
   }, []);
 
+  const setSessionAnnotation = useCallback(async (
+    source: string,
+    sessionId: string,
+    annotation: {
+      stage?: SessionTaskStage;
+      sticker?: SessionStickerId;
+      label?: string;
+    }
+  ): Promise<void> => {
+    await invoke('set_session_annotation', {
+      source,
+      sessionId,
+      stage: annotation.stage ?? null,
+      sticker: annotation.sticker ?? null,
+      label: annotation.label ?? null,
+    });
+  }, []);
+
   return {
     loadEnvironments,
     loadCurrentEnv,
@@ -1267,6 +1290,7 @@ export function useTauriCommands() {
     deleteCronTask,
     toggleCronTask,
     loadCronTaskRuns,
+    getCronRunDetail,
     retryCronTask,
     getCronNextRuns,
     listCronTemplates,
@@ -1294,5 +1318,6 @@ export function useTauriCommands() {
     clearProxyTraffic,
     openTextInVSCode,
     setSessionTitle,
+    setSessionAnnotation,
   };
 }

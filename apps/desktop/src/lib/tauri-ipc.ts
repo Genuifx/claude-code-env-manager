@@ -816,7 +816,29 @@ export type SessionEventPayload =
   | { type: 'terminal_prompt_required'; prompt_kind: TerminalPromptKind; prompt_text: string }
   | { type: 'terminal_prompt_resolved'; prompt_kind: TerminalPromptKind; approved: boolean }
   | { type: 'session_completed'; reason: string }
-  | { type: 'gap_notification'; last_seen_seq: number; oldest_available_seq: number };
+  | { type: 'gap_notification'; last_seen_seq: number; oldest_available_seq: number }
+  | {
+      type: 'token_usage';
+      provider: string;
+      input_tokens: number;
+      output_tokens: number;
+      cache_read_tokens: number;
+      cache_creation_tokens: number;
+      total_cost_usd?: number | null;
+      scope?: string | null;
+    }
+  | {
+      type: 'context_usage';
+      provider: string;
+      used_tokens: number;
+      max_tokens: number;
+      raw_max_tokens?: number | null;
+      percentage: number;
+      auto_compact_threshold?: number | null;
+      is_auto_compact_enabled: boolean;
+      model: string;
+      categories: Array<{ name: string; tokens: number }>;
+    };
 
 export interface ProxyTrafficPage {
   items: ProxyTrafficItem[];

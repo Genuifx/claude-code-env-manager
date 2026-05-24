@@ -151,6 +151,15 @@ test('restarts Claude query after a completed turn so later prompts are consumed
     'first Claude response',
   );
 
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'status'
+      && output.status === 'ready'
+      && output.detail === 'Ready for the next prompt.',
+    stderrRef,
+    'ready status after the first Claude turn',
+  );
+
   helper.stdin.write(`${JSON.stringify({
     type: 'prompt',
     text: 'second',

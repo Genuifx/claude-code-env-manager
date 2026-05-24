@@ -71,6 +71,8 @@ import {
   stabilizeMessageRefs,
   type LocalUserPrompt,
 } from './workspaceEventTranscript';
+import { ContextWindowIndicator } from './ContextWindowIndicator';
+import { computeSessionUsage } from './workspaceUsage';
 
 function ProcessingActionIcon({ stopping = false }: { stopping?: boolean }) {
   return (
@@ -101,6 +103,7 @@ type InteractivePromptReplyPayload =
   | {
       kind: 'text';
       text: string;
+      displayText?: string;
       attachments?: ComposerAttachment[];
     }
   | {
@@ -178,7 +181,14 @@ function hasSummaryBoundaryEvent(events: SessionEventRecord[]) {
     event.payload.type === 'session_completed'
     || (
       event.payload.type === 'lifecycle'
-      && ['compacting', 'compact_completed', 'compact_failed'].includes(event.payload.stage)
+      && [
+        'compacting',
+        'compact_completed',
+        'compact_failed',
+        'ready',
+        'runtime_resume',
+        'turn_completed',
+      ].includes(event.payload.stage)
     )
     || event.payload.type === 'permission_required'
     || event.payload.type === 'permission_responded'
@@ -997,6 +1007,7 @@ export function WorkspaceNativeSessionView({
   const [queuedMessages, setQueuedMessages] = useState<Array<{
     id: string;
     text: string;
+    displayText?: string;
     planMode: boolean;
     attachments: ComposerAttachment[];
   }>>([]);
@@ -1013,6 +1024,8 @@ export function WorkspaceNativeSessionView({
   const scrollSettleTimeoutRef = useRef<number | null>(null);
   const prevEventCountRef = useRef(0);
   const tickInFlightRef = useRef(false);
+
+  const sessionUsage = useMemo(() => computeSessionUsage(events), [events]);
 
   useEffect(() => {
     const cachedEvents = readCachedNativeEvents(session.runtime_id);
@@ -1431,7 +1444,7 @@ export function WorkspaceNativeSessionView({
   }, [buildDispatchText]);
 
   const sendPromptBatch = useCallback(async (
-    prompts: Array<{ id: string; text: string; planMode: boolean; attachments: ComposerAttachment[] }>,
+    prompts: Array<{ id: string; text: string; displayText?: string; planMode: boolean; attachments: ComposerAttachment[] }>,
   ) => {
     const allAttachments = prompts.flatMap((p) => p.attachments);
     const images = extractComposerImagePayloads(allAttachments);
@@ -1445,13 +1458,13 @@ export function WorkspaceNativeSessionView({
     }
 
     const previewText = prompts.length === 1
-      ? buildComposerPromptPreview(prompts[0]!.text, prompts[0]!.attachments)
+      ? buildComposerPromptPreview(prompts[0]!.displayText ?? prompts[0]!.text, prompts[0]!.attachments)
       : [
-          buildComposerPromptPreview(prompts[0]!.text, prompts[0]!.attachments),
+          buildComposerPromptPreview(prompts[0]!.displayText ?? prompts[0]!.text, prompts[0]!.attachments),
           '',
           '另外还有这些后续消息，请按顺序继续处理：',
           ...prompts.slice(1).map((prompt, index) =>
-            `${index + 2}. ${buildComposerPromptPreview(prompt.text, prompt.attachments)}`,
+            `${index + 2}. ${buildComposerPromptPreview(prompt.displayText ?? prompt.text, prompt.attachments)}`,
           ),
         ].join('\n');
 
@@ -1537,7 +1550,7 @@ export function WorkspaceNativeSessionView({
         ? payload.text
         : payload.kind === 'plan_exit'
           ? payload.text
-          : buildComposerPromptPreview(payload.text, payload.attachments ?? []),
+          : buildComposerPromptPreview(payload.displayText ?? payload.text, payload.attachments ?? []),
       timestamp: Date.now(),
       afterEventSeq: latestEventSeq(latestEventsRef.current) ?? undefined,
     };
@@ -1625,7 +1638,7 @@ export function WorkspaceNativeSessionView({
               },
         });
       } else {
-        await sendNativeSessionInput(session.runtime_id, requestText, requestImages, requestText);
+        await sendNativeSessionInput(session.runtime_id, requestText, requestImages, promptEntry.text);
       }
       await pollEvents();
       await refreshSummary({ force: true });
@@ -1736,6 +1749,7 @@ export function WorkspaceNativeSessionView({
 
   const handleSend = useCallback(async (payload?: ComposerSubmitPayload) => {
     const text = payload?.text ?? composerText.trim();
+    const displayText = payload?.displayText ?? text;
     const attachments = payload?.attachments ?? [];
     if (!text && attachments.length === 0) {
       return false;
@@ -1744,6 +1758,7 @@ export function WorkspaceNativeSessionView({
     const nextPrompt = {
       id: `user-${Date.now()}`,
       text,
+      displayText,
       planMode: composerPlanModeEnabled,
       attachments,
     };
@@ -1778,6 +1793,7 @@ export function WorkspaceNativeSessionView({
       return sendInteractivePromptReply({
         kind: 'text',
         text,
+        displayText,
         attachments,
       });
     }
@@ -2018,31 +2034,34 @@ export function WorkspaceNativeSessionView({
           />
         )}
         secondaryActions={(
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="h-9 w-9 rounded-full"
-                    aria-label={t('workspace.nativeOpenTerminal')}
-                    title={t('workspace.nativeOpenTerminal')}
-                    disabled={isHandingOff}
-                    onClick={() => void handleHandoff()}
-                  >
-                    {isHandingOff ? (
-                      <LoaderCircle className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <TerminalSquare className="h-4 w-4" />
-                    )}
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="top">{t('workspace.nativeOpenTerminal')}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <>
+            <ContextWindowIndicator usage={sessionUsage} />
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex">
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-9 w-9 rounded-full"
+                      aria-label={t('workspace.nativeOpenTerminal')}
+                      title={t('workspace.nativeOpenTerminal')}
+                      disabled={isHandingOff}
+                      onClick={() => void handleHandoff()}
+                    >
+                      {isHandingOff ? (
+                        <LoaderCircle className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <TerminalSquare className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top">{t('workspace.nativeOpenTerminal')}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </>
         )}
       />
     </div>

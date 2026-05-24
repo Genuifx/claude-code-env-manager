@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Bot, MessageSquareWarning, Play, QrCode, Square } from 'lucide-react';
+import { Circle, MessageSquareWarning, Play, QrCode, Square } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { toast } from 'sonner';
-import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import {
@@ -15,6 +14,9 @@ import {
 import { useLocale } from '@/locales';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import type { WeixinBridgeStatus, WeixinLoginSession, WeixinSettings } from '@/lib/tauri-ipc';
+
+const INPUT_CLS =
+  'w-full px-3.5 py-2.5 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 transition-all';
 
 function parsePeerIdsInput(input: string): string[] {
   return Array.from(
@@ -286,111 +288,150 @@ export function WeixinPanel() {
 
   return (
     <>
-      <Card className="p-5">
-        <div className="mb-4 flex items-start justify-between gap-4">
-          <div>
-            <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              <Bot className="h-4 w-4 text-primary" />
-              {t('settings.weixinTitle')}
-            </h3>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {t('settings.weixinDesc')}
-            </p>
-          </div>
-        </div>
+      <div className="space-y-5">
+        {/* ─── Status Hero ─── */}
+        <div className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] bg-black/[0.02] dark:bg-white/[0.03] p-5">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              {/* Status indicator */}
+              <div className={`
+                flex h-10 w-10 items-center justify-center rounded-full
+                ${status.running
+                  ? 'bg-success/10'
+                  : 'bg-muted/10'
+                }
+              `}>
+                <Circle
+                  className={`h-3 w-3 ${
+                    status.running
+                      ? 'fill-success text-success'
+                      : 'fill-muted-foreground/40 text-muted-foreground/40'
+                  }`}
+                />
+              </div>
 
-        <div className="space-y-4">
-          <ToggleSetting
-            checked={settings.enabled}
-            onChange={(enabled) => setSettings((current) => ({ ...current, enabled }))}
-            title={t('settings.weixinEnabled')}
-            description={t('settings.weixinEnabledDesc')}
-            disabled={controlsDisabled}
-          />
+              <div>
+                <div className="flex items-center gap-2.5">
+                  <h3 className="text-base font-semibold text-foreground tracking-tight">
+                    {t('settings.weixinTitle')}
+                  </h3>
+                  <span className={`
+                    inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium
+                    ${status.running
+                      ? 'bg-success/10 text-success'
+                      : status.configured
+                        ? 'bg-warning/10 text-warning'
+                        : 'bg-muted/50 text-muted-foreground'
+                    }
+                  `}>
+                    {status.running
+                      ? t('settings.weixinRunning')
+                      : status.configured
+                        ? t('settings.weixinConfigured')
+                        : t('settings.weixinNotConfigured')
+                    }
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[13px] text-muted-foreground">
+                  {settings.botAccountId
+                    ? t('settings.weixinBotAccount').replace('{accountId}', settings.botAccountId)
+                    : t('settings.weixinDesc')
+                  }
+                </p>
+              </div>
+            </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="weixin-peer-ids">{t('settings.weixinAllowedPeers')}</Label>
-            <textarea
-              id="weixin-peer-ids"
-              value={allowedPeerIdsInput}
-              onChange={(event) => setAllowedPeerIdsInput(event.target.value)}
-              placeholder={t('settings.weixinAllowedPeersPlaceholder')}
-              disabled={controlsDisabled}
-              className="min-h-[96px] w-full rounded-xl border border-black/[0.08] bg-black/[0.03] px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 dark:border-white/[0.08] dark:bg-white/[0.06]"
-            />
-            <p className="text-xs text-muted-foreground">{t('settings.weixinAllowedPeersDesc')}</p>
-          </div>
-
-          <div className="space-y-2 rounded-2xl border border-black/8 bg-black/[0.02] px-4 py-3 dark:border-white/[0.08] dark:bg-white/[0.03]">
-            <p className="text-sm font-medium text-foreground">{t('settings.weixinCapabilityTitle')}</p>
-            <p className="text-xs text-muted-foreground">{t('settings.weixinCapabilityDesc')}</p>
-          </div>
-        </div>
-
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t glass-divider pt-4">
-          <div className="space-y-1 text-xs text-muted-foreground">
-            <p>
-              {t('settings.weixinStatusLine').replace(
-                '{status}',
-                status.running
-                  ? t('settings.weixinRunning')
-                  : status.configured
-                    ? t('settings.weixinConfigured')
-                    : t('settings.weixinNotConfigured')
+            {/* Primary actions */}
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                className="rounded-full px-4"
+                onClick={handleStartLogin}
+                disabled={controlsDisabled || isStartingLogin || status.running}
+              >
+                <QrCode className="mr-1.5 h-3.5 w-3.5" />
+                {t('settings.weixinLogin')}
+              </Button>
+              {status.running ? (
+                <Button
+                  variant="outline"
+                  className="rounded-full px-5"
+                  onClick={handleStop}
+                  disabled={controlsDisabled || isToggling}
+                >
+                  <Square className="mr-1.5 h-3.5 w-3.5" />
+                  {t('settings.weixinStop')}
+                </Button>
+              ) : (
+                <Button
+                  className="rounded-full px-5"
+                  onClick={handleStart}
+                  disabled={controlsDisabled || isToggling || !(settings.botToken || '').trim()}
+                >
+                  <Play className="mr-1.5 h-3.5 w-3.5" />
+                  {t('settings.weixinStart')}
+                </Button>
               )}
-            </p>
-            {settings.botAccountId ? (
-              <p>{t('settings.weixinBotAccount').replace('{accountId}', settings.botAccountId)}</p>
-            ) : null}
-            {status.lastError ? (
-              <p className="flex items-center gap-1.5 text-destructive">
-                <MessageSquareWarning className="h-3.5 w-3.5" />
-                {status.lastError}
-              </p>
-            ) : null}
+            </div>
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          {/* Error display */}
+          {status.lastError && (
+            <div className="mt-3 flex items-start gap-2 rounded-xl bg-destructive/5 px-3.5 py-2.5">
+              <MessageSquareWarning className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+              <p className="text-xs text-destructive">{status.lastError}</p>
+            </div>
+          )}
+        </div>
+
+        {/* ─── Configuration Section ─── */}
+        <div className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] bg-black/[0.02] dark:bg-white/[0.03] p-5 space-y-5">
+          <div className="space-y-4">
+            <ToggleSetting
+              checked={settings.enabled}
+              onChange={(enabled) => setSettings((current) => ({ ...current, enabled }))}
+              title={t('settings.weixinEnabled')}
+              description={t('settings.weixinEnabledDesc')}
+              disabled={controlsDisabled}
+            />
+
+            <div className="space-y-1.5">
+              <Label htmlFor="weixin-peer-ids" className="text-xs font-medium text-muted-foreground">
+                {t('settings.weixinAllowedPeers')}
+              </Label>
+              <textarea
+                id="weixin-peer-ids"
+                value={allowedPeerIdsInput}
+                onChange={(event) => setAllowedPeerIdsInput(event.target.value)}
+                placeholder={t('settings.weixinAllowedPeersPlaceholder')}
+                disabled={controlsDisabled}
+                className={`${INPUT_CLS} min-h-[96px] resize-y`}
+              />
+              <p className="text-[11px] text-muted-foreground">{t('settings.weixinAllowedPeersDesc')}</p>
+            </div>
+          </div>
+
+          {/* Capability notice */}
+          <div className="rounded-xl border border-black/[0.04] dark:border-white/[0.06] bg-black/[0.01] dark:bg-white/[0.02] px-4 py-3">
+            <p className="text-sm font-medium text-foreground">{t('settings.weixinCapabilityTitle')}</p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">{t('settings.weixinCapabilityDesc')}</p>
+          </div>
+
+          {/* Save button */}
+          <div className="flex justify-end pt-1">
             <Button
               variant="outline"
-              className="glass-btn-outline"
+              className="rounded-full px-5"
               onClick={handleSave}
               disabled={controlsDisabled || isSaving}
             >
               {isSaving ? t('common.loading') : t('settings.weixinSave')}
             </Button>
-            <Button
-              variant="outline"
-              className="glass-btn-outline"
-              onClick={handleStartLogin}
-              disabled={controlsDisabled || isStartingLogin || status.running}
-            >
-              <QrCode className="mr-1.5 h-3.5 w-3.5" />
-              {t('settings.weixinLogin')}
-            </Button>
-            {status.running ? (
-              <Button
-                variant="outline"
-                className="glass-btn-outline"
-                onClick={handleStop}
-                disabled={controlsDisabled || isToggling}
-              >
-                <Square className="mr-1.5 h-3.5 w-3.5" />
-                {t('settings.weixinStop')}
-              </Button>
-            ) : (
-              <Button
-                onClick={handleStart}
-                disabled={controlsDisabled || isToggling || !(settings.botToken || '').trim()}
-              >
-                <Play className="mr-1.5 h-3.5 w-3.5" />
-                {t('settings.weixinStart')}
-              </Button>
-            )}
           </div>
         </div>
-      </Card>
+      </div>
 
+      {/* ─── QR Code Login Dialog ─── */}
       <Dialog open={loginDialogOpen} onOpenChange={setLoginDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -398,8 +439,8 @@ export function WeixinPanel() {
             <DialogDescription>{loginSession?.message ?? t('settings.weixinLoginDesc')}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            {loginSession?.qrCodeUrl ? (
-              <div className="flex justify-center rounded-2xl border border-black/8 bg-white p-4 dark:border-white/[0.08]">
+            {loginSession?.qrCodeUrl && (
+              <div className="flex justify-center rounded-2xl border border-black/[0.06] dark:border-white/[0.08] bg-white p-4">
                 <QRCodeSVG
                   value={loginSession.qrCodeUrl}
                   size={280}
@@ -409,12 +450,12 @@ export function WeixinPanel() {
                   fgColor="#111111"
                 />
               </div>
-            ) : null}
+            )}
             <div className="space-y-1 text-xs text-muted-foreground">
               <p>{t('settings.weixinLoginState').replace('{status}', loginSession?.status ?? 'pending')}</p>
-              {loginSession?.botAccountId ? (
+              {loginSession?.botAccountId && (
                 <p>{t('settings.weixinBotAccount').replace('{accountId}', loginSession.botAccountId)}</p>
-              ) : null}
+              )}
             </div>
           </div>
         </DialogContent>

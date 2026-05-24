@@ -28,9 +28,15 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '22'
-          cache: 'pnpm'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Setup npm trusted publishing
+        run: |
+          npm install -g npm@^11.5.1
+          node --version
+          npm --version
 
       - name: Install dependencies
         run: pnpm install
@@ -57,6 +63,6 @@ jobs:
           echo "Publishing with tag: $(cat $GITHUB_OUTPUT | grep tag | cut -d= -f2)"
 
       - name: Publish ccem (CLI)
-        run: pnpm --filter ccem publish --no-git-checks --tag ${{ steps.npm-tag.outputs.tag }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          cd apps/cli
+          npm publish --no-git-checks --tag ${{ steps.npm-tag.outputs.tag }}

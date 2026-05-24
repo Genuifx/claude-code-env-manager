@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "input=$(cat); file=$(echo \"$input\" | jq -r '.tool_input.file_path // \"\"'); if echo \"$file\" | grep -qE '\\.(env|pem|key)$'; then echo 'BLOCKED: Cannot write sensitive files (.env, .pem, .key)' >&2; exit 2; fi; exit 0"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "input=$(cat); file=$(echo \"$input\" | jq -r '.tool_input.file_path // .tool_input.path // \"\"'); if [ -n \"$file\" ] && echo \"$file\" | grep -qE '\\.(ts|tsx)$'; then lines=$(wc -l < \"$file\" 2>/dev/null || echo 0); if [ \"$lines\" -gt 1000 ]; then echo \"WARNING: $file is $lines lines (>1000 limit). Consider splitting.\" >&2; fi; fi; exit 0"
+          }
+        ]
+      }
+    ]
+  }
+}

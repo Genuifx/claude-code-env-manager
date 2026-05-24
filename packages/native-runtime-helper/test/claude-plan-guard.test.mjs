@@ -28,11 +28,7 @@ async function importClaudePlanGuardModule() {
 
 test('denies mutating workspace tools while Claude runtime is still in plan mode', async () => {
   const { buildClaudePlanModePreToolUseHook } = await importClaudePlanGuardModule();
-  const blockedTools = [];
-  const hook = buildClaudePlanModePreToolUseHook(
-    () => true,
-    (blocked) => blockedTools.push(blocked),
-  );
+  const hook = buildClaudePlanModePreToolUseHook(() => true);
 
   const result = await hook({
     hook_event_name: 'PreToolUse',
@@ -48,16 +44,11 @@ test('denies mutating workspace tools while Claude runtime is still in plan mode
     result.hookSpecificOutput?.permissionDecisionReason,
     /Plan mode/,
   );
-  assert.deepEqual(blockedTools.map((entry) => entry.toolName), ['Write']);
 });
 
 test('allows Claude internal plan-file writes while in plan mode', async () => {
   const { buildClaudePlanModePreToolUseHook } = await importClaudePlanGuardModule();
-  const blockedTools = [];
-  const hook = buildClaudePlanModePreToolUseHook(
-    () => true,
-    (blocked) => blockedTools.push(blocked),
-  );
+  const hook = buildClaudePlanModePreToolUseHook(() => true);
 
   const result = await hook({
     hook_event_name: 'PreToolUse',
@@ -70,16 +61,11 @@ test('allows Claude internal plan-file writes while in plan mode', async () => {
 
   assert.equal(result.continue, true);
   assert.equal(result.hookSpecificOutput, undefined);
-  assert.deepEqual(blockedTools, []);
 });
 
-test('denies delegated Agent tools while Claude runtime is still in plan mode', async () => {
+test('allows delegated Agent tools while Claude runtime is still in plan mode', async () => {
   const { buildClaudePlanModePreToolUseHook } = await importClaudePlanGuardModule();
-  const blockedTools = [];
-  const hook = buildClaudePlanModePreToolUseHook(
-    () => true,
-    (blocked) => blockedTools.push(blocked),
-  );
+  const hook = buildClaudePlanModePreToolUseHook(() => true);
 
   const result = await hook({
     hook_event_name: 'PreToolUse',
@@ -91,12 +77,43 @@ test('denies delegated Agent tools while Claude runtime is still in plan mode', 
     tool_use_id: 'tool-agent',
   });
 
-  assert.equal(result.hookSpecificOutput?.permissionDecision, 'deny');
-  assert.match(
-    result.hookSpecificOutput?.permissionDecisionReason,
-    /Agent/,
-  );
-  assert.deepEqual(blockedTools.map((entry) => entry.toolName), ['Agent']);
+  assert.equal(result.continue, true);
+  assert.equal(result.hookSpecificOutput, undefined);
+});
+
+test('allows legacy delegated Task tools while Claude runtime is still in plan mode', async () => {
+  const { buildClaudePlanModePreToolUseHook } = await importClaudePlanGuardModule();
+  const hook = buildClaudePlanModePreToolUseHook(() => true);
+
+  const result = await hook({
+    hook_event_name: 'PreToolUse',
+    tool_name: 'Task',
+    tool_input: {
+      subagent_type: 'Explore',
+      description: 'Explore project files',
+    },
+    tool_use_id: 'tool-task',
+  });
+
+  assert.equal(result.continue, true);
+  assert.equal(result.hookSpecificOutput, undefined);
+});
+
+test('lets shell tools reach the normal permission flow while in plan mode', async () => {
+  const { buildClaudePlanModePreToolUseHook } = await importClaudePlanGuardModule();
+  const hook = buildClaudePlanModePreToolUseHook(() => true);
+
+  const result = await hook({
+    hook_event_name: 'PreToolUse',
+    tool_name: 'Bash',
+    tool_input: {
+      command: 'rg "PlanMode" packages/native-runtime-helper/src',
+    },
+    tool_use_id: 'tool-bash',
+  });
+
+  assert.equal(result.continue, true);
+  assert.equal(result.hookSpecificOutput, undefined);
 });
 
 test('does not gate mutating tools after Claude runtime exits plan mode', async () => {

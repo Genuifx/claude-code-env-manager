@@ -1,7 +1,7 @@
-import { Globe, Edit2, Trash2 } from 'lucide-react';
+import { useState } from 'react';
+import { Globe, Edit2, Trash2, Search } from 'lucide-react';
 import { useAppStore, type Environment } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
-import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { ModelIcon } from '@/components/history/ModelIcon';
@@ -29,7 +29,7 @@ interface EnvListProps {
   viewMode?: 'grid' | 'list';
 }
 
-export function EnvList({ onEdit, onDelete, viewMode = 'list' }: EnvListProps) {
+export function EnvList({ onEdit, onDelete, viewMode = 'grid' }: EnvListProps) {
   const { environments, currentEnv } = useAppStore(
     (state) => ({
       environments: state.environments,
@@ -39,50 +39,81 @@ export function EnvList({ onEdit, onDelete, viewMode = 'list' }: EnvListProps) {
   );
   const { switchEnvironment } = useTauriCommands();
   const { t } = useLocale();
+  const [filter, setFilter] = useState('');
 
   if (environments.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
-        <div className="w-16 h-16 rounded-lg glass-icon-container flex items-center justify-center mb-4">
-          <Globe className="w-8 h-8 text-muted-foreground/40" />
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <div className="w-12 h-12 rounded-xl border border-border-subtle bg-surface-raised flex items-center justify-center mb-3">
+          <Globe className="w-6 h-6 text-muted-foreground/40" />
         </div>
-        <h3 className="text-lg font-medium text-foreground mb-1">{t('environments.noEnvTitle')}</h3>
+        <h3 className="text-[15px] font-semibold text-foreground mb-1 tracking-[-0.22px]">
+          {t('environments.noEnvTitle')}
+        </h3>
         <p className="text-sm text-muted-foreground">{t('environments.noEnvHint')}</p>
       </div>
     );
   }
 
-  if (viewMode === 'grid') {
-    return (
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-        {environments.map((env) => (
-          <EnvCompactCard
-            key={env.name}
-            name={env.name}
-            env={env}
-            isActive={env.name === currentEnv}
-            onSelect={() => switchEnvironment(env.name)}
-            onEdit={() => onEdit?.(env.name)}
-            onDelete={() => onDelete?.(env.name)}
-          />
-        ))}
-      </div>
-    );
-  }
+  // Filter environments by name or domain
+  const filtered = filter
+    ? environments.filter((env) =>
+        env.name.toLowerCase().includes(filter.toLowerCase()) ||
+        extractDomain(env.baseUrl).toLowerCase().includes(filter.toLowerCase())
+      )
+    : environments;
 
   return (
-    <div className="space-y-3">
-      {environments.map((env) => (
-        <EnvCard
-          key={env.name}
-          name={env.name}
-          env={env}
-          isActive={env.name === currentEnv}
-          onSelect={() => switchEnvironment(env.name)}
-          onEdit={() => onEdit?.(env.name)}
-          onDelete={() => onDelete?.(env.name)}
-        />
-      ))}
+    <div>
+      {/* Search filter — show when 5+ environments */}
+      {environments.length >= 5 && (
+        <div className="relative mb-3">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50" />
+          <input
+            type="text"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder={t('environments.searchPlaceholder') || '搜索环境...'}
+            className="w-full h-8 pl-8 pr-3 rounded-lg border border-border-subtle bg-background text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/40 transition-colors"
+          />
+        </div>
+      )}
+
+      {viewMode === 'grid' ? (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
+          {filtered.map((env) => (
+            <EnvGridCard
+              key={env.name}
+              name={env.name}
+              env={env}
+              isActive={env.name === currentEnv}
+              onSelect={() => switchEnvironment(env.name)}
+              onEdit={() => onEdit?.(env.name)}
+              onDelete={() => onDelete?.(env.name)}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {filtered.map((env) => (
+            <EnvListCard
+              key={env.name}
+              name={env.name}
+              env={env}
+              isActive={env.name === currentEnv}
+              onSelect={() => switchEnvironment(env.name)}
+              onEdit={() => onEdit?.(env.name)}
+              onDelete={() => onDelete?.(env.name)}
+            />
+          ))}
+        </div>
+      )}
+
+      {filter && filtered.length === 0 && (
+        <p className="text-sm text-muted-foreground text-center py-6">
+          {t('common.noResults') || '没有匹配的环境'}
+        </p>
+      )}
     </div>
   );
 }
@@ -96,212 +127,154 @@ interface EnvCardProps {
   onDelete: () => void;
 }
 
-function EnvCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardProps) {
-  const { t } = useLocale();
-  const runtimeModel = env.runtimeModel || 'opus';
+/**
+ * Compact grid card — dense, scannable.
+ * Smaller padding, tighter spacing, more columns.
+ */
+function EnvGridCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardProps) {
   const defaultOpusModel = env.defaultOpusModel || 'claude-opus-4-1-20250805';
-  const defaultHaikuModel = env.defaultHaikuModel || t('environments.notSet');
+  const runtimeModel = env.runtimeModel || 'opus';
 
   return (
     <div
       className={cn(
-        'group relative p-5 rounded-2xl cursor-pointer glass-noise glass-env-card',
-        isActive && 'active'
+        'group relative p-3 rounded-xl cursor-pointer border transition-all duration-150 active:scale-[0.97]',
+        isActive
+          ? 'border-primary/50 bg-primary/[0.03]'
+          : 'border-border-subtle bg-surface-raised/60 hover:border-border hover:bg-surface-raised'
       )}
       onClick={onSelect}
     >
-      <div className="flex items-start gap-4">
-        {/* Icon — vendor brand */}
+      {/* Header: icon + name */}
+      <div className="flex items-center gap-2 mb-2">
         <div className={cn(
-          'w-12 h-12 rounded-lg flex items-center justify-center shrink-0',
+          'w-7 h-7 rounded-lg flex items-center justify-center shrink-0',
           isActive
-            ? 'bg-primary/15'
-            : 'glass-icon-container'
-        )}
-          style={isActive ? {
-            boxShadow: '0 0 16px hsl(var(--primary) / 0.15), 0 0 4px hsl(var(--primary) / 0.2)',
-          } : undefined}
-        >
-          <ModelIcon model={defaultOpusModel} size={24} />
+            ? 'bg-primary/10'
+            : 'bg-background border border-border-subtle'
+        )}>
+          <ModelIcon model={defaultOpusModel} size={14} />
         </div>
-
-        {/* Content */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <h3 className="text-lg font-semibold text-foreground">{name}</h3>
-            {name === 'official' && (
-              <span className="text-[10px] font-medium glass-badge text-muted-foreground px-2 py-0.5 rounded-full uppercase">
-                {t('environments.default')}
-              </span>
-            )}
-          </div>
-          <div className="space-y-1">
-            <p className="text-sm text-muted-foreground truncate">
-              <span className="text-muted-foreground/80">
-                {t('environmentDialog.baseUrl')}:
-              </span>{' '}
-              {env.baseUrl || 'api.anthropic.com'}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              <span className="text-muted-foreground/80">
-                {t('environmentDialog.runtimeModel')}:
-              </span>{' '}
-              {runtimeModel}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              <span className="text-muted-foreground/80">
-                {t('environmentDialog.defaultOpusModel')}:
-              </span>{' '}
-              {defaultOpusModel}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              <span className="text-muted-foreground/80">
-                {t('environmentDialog.defaultHaikuModel')}:
-              </span>{' '}
-              {defaultHaikuModel}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              <span className="text-muted-foreground/80">
-                {t('environmentDialog.authToken')}:
-              </span>{' '}
-              {maskAuthToken(env.authToken, t('environments.notSet'))}
-            </p>
-          </div>
+          <h3 className="text-[13px] font-semibold text-foreground truncate leading-tight">
+            {name}
+          </h3>
         </div>
-
-        {/* Right-top: status badge + switch */}
-        <div className="flex items-center gap-1 shrink-0">
-          {isActive && (
-            <span className="flex items-center gap-1.5 text-xs font-medium text-primary mr-1">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/75 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
-              </span>
-              {t('environments.currentlyActive')}
-            </span>
-          )}
-          {!isActive && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-3 text-primary hover:text-primary hover:bg-primary/10 opacity-0 group-hover:opacity-100 transition-opacity"
-              onClick={(e) => {
-                e.stopPropagation();
-                onSelect();
-              }}
-            >
-              {t('environments.switchTo')}
-            </Button>
-          )}
-        </div>
+        {isActive && (
+          <span className="flex h-2 w-2 shrink-0">
+            <span className="inline-flex rounded-full h-2 w-2 bg-primary"></span>
+          </span>
+        )}
       </div>
 
-      {/* Bottom-right: edit / delete */}
-      <div className="absolute bottom-3 right-4 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 px-2 text-muted-foreground hover:text-foreground"
-          onClick={(e) => {
-            e.stopPropagation();
-            onEdit();
-          }}
+      {/* Compact info */}
+      <div className="space-y-0.5 text-[11px] text-muted-foreground">
+        <p className="truncate">{extractDomain(env.baseUrl)}</p>
+        <p className="truncate">
+          <span className="text-muted-foreground/60">runtime:</span> {runtimeModel}
+        </p>
+      </div>
+
+      {/* Hover actions */}
+      <div className="absolute top-2 right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          type="button"
+          className="w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-background transition-colors"
+          onClick={(e) => { e.stopPropagation(); onEdit(); }}
         >
-          <Edit2 className="w-3.5 h-3.5 mr-1" />
-          {t('common.edit')}
-        </Button>
-        {name === 'official' ? (
-          <span className="h-7 px-2 inline-flex items-center text-xs font-medium text-muted-foreground glass-badge rounded-md cursor-not-allowed">
-            {t('common.protected')}
-          </span>
-        ) : (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-destructive hover:text-destructive hover:bg-destructive/10"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
+          <Edit2 className="w-3 h-3" />
+        </button>
+        {name !== 'official' && (
+          <button
+            type="button"
+            className="w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
           >
-            <Trash2 className="w-3.5 h-3.5 mr-1" />
-            {t('common.delete')}
-          </Button>
+            <Trash2 className="w-3 h-3" />
+          </button>
         )}
       </div>
     </div>
   );
 }
 
-function EnvCompactCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardProps) {
+/**
+ * Compact list row — single line with key info.
+ */
+function EnvListCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardProps) {
+  const { t } = useLocale();
   const runtimeModel = env.runtimeModel || 'opus';
   const defaultOpusModel = env.defaultOpusModel || 'claude-opus-4-1-20250805';
 
   return (
     <div
       className={cn(
-        'group relative p-4 rounded-xl cursor-pointer glass-noise glass-card hover:-translate-y-0.5 transition-all',
-        isActive && 'active ring-2 ring-primary/50'
+        'group relative flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer border transition-all duration-150 active:scale-[0.99]',
+        isActive
+          ? 'border-primary/50 bg-primary/[0.03]'
+          : 'border-border-subtle bg-surface-raised/60 hover:border-border hover:bg-surface-raised'
       )}
       onClick={onSelect}
-      style={isActive ? {
-        boxShadow: '0 0 24px hsl(var(--primary) / 0.2), 0 0 8px hsl(var(--primary) / 0.3)',
-      } : undefined}
     >
-      {/* 顶部:图标 + 名称 + 徽章 */}
-      <div className="flex items-center gap-2 mb-3">
-        <div className={cn(
-          'w-8 h-8 rounded-md flex items-center justify-center shrink-0',
-          isActive
-            ? 'bg-primary/15'
-            : 'glass-icon-container'
-        )}>
-          <ModelIcon model={defaultOpusModel} size={18} />
-        </div>
-        <h4 className="font-semibold text-sm truncate flex-1">{name}</h4>
-        {isActive && (
-          <span className="relative flex h-2 w-2 shrink-0">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/75 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
-          </span>
-        )}
+      {/* Icon */}
+      <div className={cn(
+        'w-8 h-8 rounded-lg flex items-center justify-center shrink-0',
+        isActive
+          ? 'bg-primary/10'
+          : 'bg-background border border-border-subtle'
+      )}>
+        <ModelIcon model={defaultOpusModel} size={16} />
       </div>
 
-      {/* 中部:模型 */}
-      <p className="text-xs text-muted-foreground truncate">
-        {defaultOpusModel}
-      </p>
-      <p className="text-[11px] text-muted-foreground/70 truncate mb-2">
-        runtime: {runtimeModel}
-      </p>
+      {/* Name + domain */}
+      <div className="flex-1 min-w-0 flex items-center gap-3">
+        <div className="min-w-0 flex-shrink-0" style={{ width: '120px' }}>
+          <h3 className="text-[13px] font-semibold text-foreground truncate">{name}</h3>
+        </div>
+        <span className="text-[11px] text-muted-foreground truncate hidden sm:inline">
+          {extractDomain(env.baseUrl)}
+        </span>
+        <span className="text-[11px] text-muted-foreground truncate hidden lg:inline">
+          runtime: {runtimeModel}
+        </span>
+        <span className="text-[11px] font-mono text-muted-foreground/70 truncate hidden xl:inline">
+          {maskAuthToken(env.authToken, t('environments.notSet'))}
+        </span>
+      </div>
 
-      {/* 底部:域名 */}
-      <p className="text-xs text-muted-foreground/70 truncate">
-        {extractDomain(env.baseUrl)}
-      </p>
+      {/* Status */}
+      {isActive && (
+        <span className="flex items-center gap-1.5 shrink-0">
+          <span className="inline-flex rounded-full h-2 w-2 bg-primary"></span>
+          <span className="text-[11px] font-medium text-primary hidden sm:inline">{t('environments.currentlyActive')}</span>
+        </span>
+      )}
 
-      {/* 悬停操作层 */}
-      <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+      {/* Hover actions */}
+      <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+        {!isActive && (
+          <button
+            type="button"
+            className="h-6 px-2 rounded-md text-[11px] font-medium text-primary hover:bg-primary/10 transition-colors"
+            onClick={(e) => { e.stopPropagation(); onSelect(); }}
+          >
+            {t('environments.switchTo')}
+          </button>
+        )}
         <button
           type="button"
-          className="w-7 h-7 rounded-md flex items-center justify-center glass-subtle hover:bg-surface-raised text-muted-foreground hover:text-foreground transition-colors"
-          onClick={(e) => {
-            e.stopPropagation();
-            onEdit();
-          }}
+          className="w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-background transition-colors"
+          onClick={(e) => { e.stopPropagation(); onEdit(); }}
         >
-          <Edit2 className="w-3.5 h-3.5" />
+          <Edit2 className="w-3 h-3" />
         </button>
         {name !== 'official' && (
           <button
             type="button"
-            className="w-7 h-7 rounded-md flex items-center justify-center glass-subtle hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
+            className="w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
           >
-            <Trash2 className="w-3.5 h-3.5" />
+            <Trash2 className="w-3 h-3" />
           </button>
         )}
       </div>

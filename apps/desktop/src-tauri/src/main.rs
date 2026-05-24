@@ -27,6 +27,7 @@ mod proxy_debug;
 mod remote;
 mod runtime;
 mod session;
+mod session_annotations;
 mod session_provenance;
 mod skills;
 mod system_proxy;
@@ -568,7 +569,7 @@ async fn launch_claude_code(
     });
 
     let perm = if client_name == "claude" {
-        perm_mode.clone().unwrap_or_else(|| "dev".to_string())
+        resolve_effective_perm_mode(perm_mode.clone())
     } else {
         "n/a".to_string()
     };
@@ -592,7 +593,11 @@ async fn launch_claude_code(
         &work_dir,
         &session_id,
         &resolved_env_name,
-        perm_mode.as_deref(),
+        if client_name == "claude" {
+            Some(perm.as_str())
+        } else {
+            perm_mode.as_deref()
+        },
         resume_session_id.as_deref(),
         &client_name,
     );
@@ -695,6 +700,22 @@ fn resolve_headless_working_dir(working_dir: Option<String>) -> String {
         .unwrap_or_else(|| ".".to_string())
 }
 
+fn resolve_default_perm_mode() -> String {
+    config::read_config()
+        .ok()
+        .and_then(|cfg| cfg.default_mode)
+        .map(|mode| mode.trim().to_string())
+        .filter(|mode| !mode.is_empty())
+        .unwrap_or_else(|| "dev".to_string())
+}
+
+fn resolve_effective_perm_mode(perm_mode: Option<String>) -> String {
+    perm_mode
+        .map(|mode| mode.trim().to_string())
+        .filter(|mode| !mode.is_empty())
+        .unwrap_or_else(resolve_default_perm_mode)
+}
+
 fn parse_native_provider(provider: &str) -> Result<NativeProvider, String> {
     match provider.trim().to_lowercase().as_str() {
         "claude" => Ok(NativeProvider::Claude),
@@ -728,7 +749,7 @@ async fn create_managed_session(
         app,
         HeadlessSessionOptions {
             env_name: resolved.env_name,
-            perm_mode: perm_mode.unwrap_or_else(|| "dev".to_string()),
+            perm_mode: resolve_effective_perm_mode(perm_mode),
             working_dir: effective_working_dir,
             resume_session_id,
             initial_prompt,
@@ -984,7 +1005,7 @@ async fn create_native_session(
 ) -> Result<NativeSessionSummary, String> {
     let provider = parse_native_provider(&provider)?;
     let effective_working_dir = resolve_headless_working_dir(working_dir);
-    let effective_perm_mode = perm_mode.unwrap_or_else(|| "dev".to_string());
+    let effective_perm_mode = resolve_effective_perm_mode(perm_mode);
     let effective_runtime_perm_mode = runtime_perm_mode
         .map(|mode| mode.trim().to_string())
         .filter(|mode| !mode.is_empty() && mode != &effective_perm_mode);
@@ -1429,7 +1450,7 @@ async fn create_interactive_session(
     let session_id = generate_session_id();
     let resolved = resolve_claude_env(&env_name)?;
     let effective_working_dir = resolve_headless_working_dir(working_dir);
-    let effective_perm_mode = perm_mode.unwrap_or_else(|| "dev".to_string());
+    let effective_perm_mode = resolve_effective_perm_mode(perm_mode);
     let mut env_vars = resolved.env_vars;
     let resume_target = resume_session_id.clone();
 
@@ -3115,6 +3136,8 @@ fn main() {
             get_conversation_messages,
             get_conversation_segments,
             title_overrides::set_session_title,
+            session_annotations::set_session_annotation,
+            session_annotations::clear_session_annotation,
             skills::search_skills_stream,
             skills::list_installed_skills,
             skills::list_workspace_skills,

@@ -118,6 +118,22 @@ impl NativeEventLog {
         })
     }
 
+    pub fn newest_seq(&self, runtime_id: &str) -> Result<Option<u64>, String> {
+        self.flush_pending()?;
+        self.with_conn(|conn| {
+            let seq = conn
+                .query_row(
+                    "SELECT MAX(seq) FROM native_session_events WHERE runtime_id = ?1",
+                    [runtime_id],
+                    |row| row.get::<_, Option<i64>>(0),
+                )
+                .map_err(|error| {
+                    format!("Failed to query newest native event seq: {}", error)
+                })?;
+            Ok(seq.and_then(non_negative_i64_to_u64))
+        })
+    }
+
     fn write_records(&self, records: &[SessionEventRecord]) -> Result<(), String> {
         self.with_conn(|conn| {
             let tx = conn.transaction().map_err(|error| {
@@ -366,7 +382,9 @@ fn should_flush_after_append(payload: &SessionEventPayload) -> bool {
         | SessionEventPayload::PermissionRequired { .. }
         | SessionEventPayload::PermissionResponded { .. }
         | SessionEventPayload::TerminalPromptRequired { .. }
-        | SessionEventPayload::TerminalPromptResolved { .. } => true,
+        | SessionEventPayload::TerminalPromptResolved { .. }
+        | SessionEventPayload::TokenUsage { .. }
+        | SessionEventPayload::ContextUsage { .. } => true,
         SessionEventPayload::ToolUseStarted { needs_response, .. } => *needs_response,
         SessionEventPayload::ToolUseCompleted { .. } => true,
         _ => false,

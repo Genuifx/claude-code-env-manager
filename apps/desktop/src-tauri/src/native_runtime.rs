@@ -472,8 +472,10 @@ impl NativeRuntimeManager {
         let images_ref = images
             .filter(|imgs| !imgs.is_empty())
             .map(|imgs| imgs.as_slice());
-        self.write_to_child(
-            &handle,
+        self.write_to_child_with_reconnect(
+            app,
+            runtime_id,
+            handle,
             &HelperInputCommand::Prompt {
                 text,
                 images: images_ref,
@@ -490,8 +492,10 @@ impl NativeRuntimeManager {
         approved: bool,
     ) -> Result<(), String> {
         let handle = self.ensure_handle(app.clone(), runtime_id)?;
-        self.write_to_child(
-            &handle,
+        self.write_to_child_with_reconnect(
+            app,
+            runtime_id,
+            handle,
             &HelperInputCommand::PermissionResponse {
                 request_id,
                 approved,
@@ -515,8 +519,10 @@ impl NativeRuntimeManager {
 
         let handle = self.ensure_handle(app.clone(), runtime_id)?;
         self.append_interactive_prompt_response_event(runtime_id, display_text, answers)?;
-        self.write_to_child(
-            &handle,
+        self.write_to_child_with_reconnect(
+            app,
+            runtime_id,
+            handle,
             &HelperInputCommand::InteractivePromptResponse {
                 tool_use_id,
                 prompt_type,
@@ -536,8 +542,10 @@ impl NativeRuntimeManager {
         effort: Option<&str>,
     ) -> Result<(), String> {
         let handle = self.ensure_handle(app.clone(), runtime_id)?;
-        self.write_to_child(
-            &handle,
+        self.write_to_child_with_reconnect(
+            app,
+            runtime_id,
+            handle,
             &HelperInputCommand::UpdateSettings {
                 env_name,
                 perm_mode,
@@ -582,8 +590,10 @@ impl NativeRuntimeManager {
             .as_deref()
             .unwrap_or(display_perm_mode.as_str());
 
-        self.write_to_child(
-            &handle,
+        self.write_to_child_with_reconnect(
+            app,
+            runtime_id,
+            handle,
             &HelperInputCommand::UpdateSettings {
                 env_name: None,
                 perm_mode: Some(helper_perm_mode),
@@ -755,7 +765,7 @@ impl NativeRuntimeManager {
             return Ok(handle);
         }
 
-        let record = self
+        let mut record = self
             .records
             .lock()
             .map_err(|_| "Failed to lock native runtime records".to_string())?
@@ -763,12 +773,29 @@ impl NativeRuntimeManager {
             .cloned()
             .ok_or_else(|| format!("Native runtime {} not found", runtime_id))?;
 
+        if reactivate_record_for_reconnect(&mut record) {
+            let reactivated = record.clone();
+            self.update_record(runtime_id, |stored| {
+                *stored = reactivated.clone();
+            })?;
+        }
+
         let options = build_runtime_bootstrap_options(&record)?;
+
+        let start_seq = self
+            .event_log
+            .newest_seq(runtime_id)
+            .unwrap_or(None)
+            .map(|seq| seq + 1)
+            .unwrap_or(1);
 
         let handle = Arc::new(NativeSessionHandle {
             record: Mutex::new(record.clone()),
             child: Mutex::new(None),
-            events: Mutex::new(SessionStore::new(runtime_id.to_string())),
+            events: Mutex::new(SessionStore::with_start_seq(
+                runtime_id.to_string(),
+                start_seq,
+            )),
             helper_env_vars: options.helper_env_vars.clone(),
             terminal_env_vars: options.terminal_env_vars.clone(),
             claude_path: options.claude_path.clone(),
@@ -843,10 +870,18 @@ impl NativeRuntimeManager {
 
         let manager = self.clone();
         let runtime = runtime_id.to_string();
+        let event_handle = handle.clone();
         tauri::async_runtime::spawn(async move {
             let mut stdout_buffer = Vec::new();
             let mut stderr_buffer = Vec::new();
             while let Some(event) = rx.recv().await {
+                if !manager
+                    .is_current_handle(&runtime, &event_handle)
+                    .unwrap_or(false)
+                {
+                    break;
+                }
+
                 match event {
                     CommandEvent::Stdout(line) => {
                         for text in drain_helper_output_lines(&mut stdout_buffer, &line) {
@@ -880,7 +915,7 @@ impl NativeRuntimeManager {
                                 line: format!("Native sidecar error: {}", error),
                             },
                         );
-                        let _ = manager.mark_process_exit(&runtime, Some(1));
+                        let _ = manager.mark_process_exit(&runtime, Some(1), &event_handle);
                         break;
                     }
                     CommandEvent::Terminated(payload) => {
@@ -889,7 +924,7 @@ impl NativeRuntimeManager {
                             &mut stdout_buffer,
                             &mut stderr_buffer,
                         );
-                        let _ = manager.mark_process_exit(&runtime, payload.code);
+                        let _ = manager.mark_process_exit(&runtime, payload.code, &event_handle);
                         break;
                     }
                     _ => {}
@@ -998,7 +1033,16 @@ impl NativeRuntimeManager {
         }
     }
 
-    fn mark_process_exit(&self, runtime_id: &str, exit_code: Option<i32>) -> Result<(), String> {
+    fn mark_process_exit(
+        &self,
+        runtime_id: &str,
+        exit_code: Option<i32>,
+        handle: &Arc<NativeSessionHandle>,
+    ) -> Result<(), String> {
+        if !self.is_current_handle(runtime_id, handle)? {
+            return Ok(());
+        }
+
         let expected_terminal = self
             .records
             .lock()
@@ -1030,7 +1074,7 @@ impl NativeRuntimeManager {
             )?;
         }
 
-        self.remove_handle(runtime_id)
+        self.remove_handle_if_current(runtime_id, handle)
     }
 
     fn write_to_child(
@@ -1050,6 +1094,41 @@ impl NativeRuntimeManager {
         child
             .write(format!("{}\n", line).as_bytes())
             .map_err(|error| format!("Failed to write to native sidecar stdin: {}", error))
+    }
+
+    fn write_to_child_with_reconnect(
+        self: &Arc<Self>,
+        app: &AppHandle,
+        runtime_id: &str,
+        handle: Arc<NativeSessionHandle>,
+        command: &HelperInputCommand<'_>,
+    ) -> Result<(), String> {
+        match self.write_to_child(&handle, command) {
+            Ok(()) => Ok(()),
+            Err(error) if is_retryable_native_child_write_error(&error) => {
+                let _ = self.append_event(
+                    runtime_id,
+                    SessionEventPayload::Lifecycle {
+                        stage: "runtime_resume".to_string(),
+                        detail: format!(
+                            "Restarting native runtime helper after write failed: {}",
+                            error
+                        ),
+                    },
+                );
+                let _ = self.kill_child(runtime_id);
+                self.remove_handle(runtime_id)?;
+                self.update_record(runtime_id, |record| {
+                    record.status = "initializing".to_string();
+                    record.is_active = true;
+                    record.last_error = None;
+                    record.updated_at = Utc::now();
+                })?;
+                let next_handle = self.ensure_handle(app.clone(), runtime_id)?;
+                self.write_to_child(&next_handle, command)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn request_child_stop(&self, runtime_id: &str) -> Result<bool, String> {
@@ -1185,6 +1264,39 @@ impl NativeRuntimeManager {
             .map_err(|_| "Failed to lock native runtime handles".to_string())?
             .remove(runtime_id);
         Ok(())
+    }
+
+    fn remove_handle_if_current(
+        &self,
+        runtime_id: &str,
+        handle: &Arc<NativeSessionHandle>,
+    ) -> Result<(), String> {
+        let mut handles = self
+            .handles
+            .lock()
+            .map_err(|_| "Failed to lock native runtime handles".to_string())?;
+        let is_current = handles
+            .get(runtime_id)
+            .map(|current| Arc::ptr_eq(current, handle))
+            .unwrap_or(false);
+        if is_current {
+            handles.remove(runtime_id);
+        }
+        Ok(())
+    }
+
+    fn is_current_handle(
+        &self,
+        runtime_id: &str,
+        handle: &Arc<NativeSessionHandle>,
+    ) -> Result<bool, String> {
+        Ok(self
+            .handles
+            .lock()
+            .map_err(|_| "Failed to lock native runtime handles".to_string())?
+            .get(runtime_id)
+            .map(|current| Arc::ptr_eq(current, handle))
+            .unwrap_or(false))
     }
 
     fn kill_child(&self, runtime_id: &str) -> Result<(), String> {
@@ -1390,7 +1502,9 @@ fn summarize_interactive_prompt_response(
 
 fn payload_last_error(payload: &SessionEventPayload) -> Option<String> {
     match payload {
-        SessionEventPayload::StdErrLine { line } => non_empty_error(line),
+        SessionEventPayload::StdErrLine { line } if !is_context_usage_probe_error(line) => {
+            non_empty_error(line)
+        }
         SessionEventPayload::Lifecycle { stage, detail } if stage == "error" => {
             non_empty_error(detail)
         }
@@ -1403,8 +1517,31 @@ fn payload_last_error(payload: &SessionEventPayload) -> Option<String> {
     }
 }
 
+fn is_context_usage_probe_error(message: &str) -> bool {
+    message
+        .trim_start()
+        .starts_with("[context_usage] getContextUsage failed:")
+}
+
 fn is_native_terminal_status(status: &str) -> bool {
     matches!(status, "stopped" | "error" | "handoff" | "interrupted")
+}
+
+fn reactivate_record_for_reconnect(record: &mut NativeSessionRecord) -> bool {
+    if !matches!(record.status.as_str(), "error" | "interrupted") {
+        return false;
+    }
+
+    record.status = "initializing".to_string();
+    record.is_active = true;
+    record.last_error = None;
+    record.updated_at = Utc::now();
+    true
+}
+
+fn is_retryable_native_child_write_error(message: &str) -> bool {
+    message == "Native sidecar child is not available"
+        || message.starts_with("Failed to write to native sidecar stdin:")
 }
 
 fn merge_colon_path_values(primary: &str, secondary: &str) -> String {
@@ -1467,8 +1604,20 @@ fn read_native_runtime_state_from(path: &Path) -> io::Result<NativeRuntimeState>
     }
 
     let content = fs::read_to_string(path)?;
-    serde_json::from_str::<NativeRuntimeState>(&content)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+    let mut state = serde_json::from_str::<NativeRuntimeState>(&content)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+
+    for record in &mut state.sessions {
+        if record
+            .last_error
+            .as_deref()
+            .is_some_and(is_context_usage_probe_error)
+        {
+            record.last_error = None;
+        }
+    }
+
+    Ok(state)
 }
 
 fn persist_native_runtime_state_to(
@@ -1531,17 +1680,35 @@ fn build_runtime_bootstrap_options(
 #[cfg(test)]
 mod tests {
     use super::{
-        drain_helper_output_lines, merge_helper_env_path,
-        native_session_allows_dangerously_skip_permissions, HelperInputCommand, NativeProvider,
-        NativeRuntimeManager, NativeSessionHandle, NativeSessionOptions, NativeSessionRecord,
-        NativeTransport, PromptImage,
+        drain_helper_output_lines, is_retryable_native_child_write_error, merge_helper_env_path,
+        native_session_allows_dangerously_skip_permissions, reactivate_record_for_reconnect,
+        read_native_runtime_state_from, HelperInputCommand, NativeProvider, NativeRuntimeManager,
+        NativeSessionHandle, NativeSessionOptions, NativeSessionRecord, NativeTransport,
+        PromptImage,
     };
     use crate::event_bus::{SessionEventPayload, SessionStore};
     use crate::native_event_log::NativeEventLog;
     use chrono::Utc;
     use std::collections::HashMap;
+    use std::fs;
     use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, Mutex};
+
+    fn native_session_handle(record: NativeSessionRecord) -> Arc<NativeSessionHandle> {
+        let runtime_id = record.runtime_id.clone();
+        Arc::new(NativeSessionHandle {
+            record: Mutex::new(record),
+            child: Mutex::new(None),
+            events: Mutex::new(SessionStore::new(&runtime_id)),
+            helper_env_vars: HashMap::new(),
+            terminal_env_vars: HashMap::new(),
+            claude_path: None,
+            codex_path: None,
+            codex_base_url: None,
+            codex_api_key: None,
+            alive: AtomicBool::new(true),
+        })
+    }
 
     fn manager_with_handle(runtime_id: &str) -> NativeRuntimeManager {
         let record = NativeSessionRecord {
@@ -1561,21 +1728,10 @@ mod tests {
             can_handoff_to_terminal: false,
             last_error: None,
         };
-        let handle = NativeSessionHandle {
-            record: Mutex::new(record.clone()),
-            child: Mutex::new(None),
-            events: Mutex::new(SessionStore::new(runtime_id)),
-            helper_env_vars: HashMap::new(),
-            terminal_env_vars: HashMap::new(),
-            claude_path: None,
-            codex_path: None,
-            codex_base_url: None,
-            codex_api_key: None,
-            alive: AtomicBool::new(true),
-        };
+        let handle = native_session_handle(record.clone());
         let manager = NativeRuntimeManager {
             records: Mutex::new(HashMap::from([(runtime_id.to_string(), record)])),
-            handles: Mutex::new(HashMap::from([(runtime_id.to_string(), Arc::new(handle))])),
+            handles: Mutex::new(HashMap::from([(runtime_id.to_string(), handle)])),
             state_path: std::env::temp_dir()
                 .join(format!("ccem-native-runtime-test-{runtime_id}.json")),
             event_log: NativeEventLog::new(
@@ -1682,6 +1838,58 @@ mod tests {
                 reason: "done".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn context_usage_probe_stderr_does_not_set_last_error() {
+        let runtime_id = "native-context-usage-probe";
+        let manager = manager_with_handle(runtime_id);
+
+        manager
+            .process_helper_stdout(
+                runtime_id,
+                r#"{"type":"event","payload":{"type":"stderr_line","line":"[context_usage] getContextUsage failed: Error: q.match is not a function"}}"#,
+            )
+            .expect("process context usage probe stderr");
+
+        let summary = manager.summary_for(runtime_id).expect("summary");
+        assert_eq!(summary.last_error, None);
+
+        let batch = manager
+            .replay_events(runtime_id, None)
+            .expect("replay events");
+        assert_eq!(batch.events.len(), 1);
+        assert_eq!(
+            batch.events[0].payload,
+            SessionEventPayload::StdErrLine {
+                line: "[context_usage] getContextUsage failed: Error: q.match is not a function"
+                    .to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn read_state_clears_persisted_context_usage_probe_error() {
+        let mut record = native_record("native-context-usage-state", "ready", true);
+        record.last_error = Some(
+            "[context_usage] getContextUsage failed: Error: q.match is not a function".to_string(),
+        );
+        let state_path = std::env::temp_dir().join(format!(
+            "ccem-native-runtime-context-usage-state-{}.json",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default(),
+        ));
+        let serialized = serde_json::to_string(&serde_json::json!({
+            "sessions": [record],
+        }))
+        .expect("serialize state");
+        fs::write(&state_path, serialized).expect("write state");
+
+        let state = read_native_runtime_state_from(&state_path).expect("read state");
+
+        assert_eq!(state.sessions.len(), 1);
+        assert_eq!(state.sessions[0].last_error, None);
+
+        let _ = fs::remove_file(state_path);
     }
 
     #[test]
@@ -1910,6 +2118,68 @@ mod tests {
             summary.last_error.as_deref(),
             Some("Native CLI binary not found")
         );
+    }
+
+    #[test]
+    fn retryable_child_write_errors_match_dead_helper_states() {
+        assert!(is_retryable_native_child_write_error(
+            "Native sidecar child is not available"
+        ));
+        assert!(is_retryable_native_child_write_error(
+            "Failed to write to native sidecar stdin: Broken pipe"
+        ));
+        assert!(!is_retryable_native_child_write_error(
+            "Failed to encode helper command: invalid payload"
+        ));
+    }
+
+    #[test]
+    fn stale_helper_exit_does_not_mark_reconnected_session_error() {
+        let runtime_id = "native-stale-helper-exit";
+        let manager = manager_with_handle(runtime_id);
+        let stale_handle = manager
+            .handles
+            .lock()
+            .expect("handles")
+            .get(runtime_id)
+            .expect("stale handle")
+            .clone();
+
+        let replacement_record = native_record(runtime_id, "ready", true);
+        let replacement_handle = native_session_handle(replacement_record);
+        manager
+            .insert_handle(runtime_id.to_string(), replacement_handle.clone())
+            .expect("insert replacement handle");
+        manager
+            .update_record(runtime_id, |record| {
+                record.status = "ready".to_string();
+                record.is_active = true;
+                record.last_error = None;
+            })
+            .expect("set reconnected record ready");
+
+        manager
+            .mark_process_exit(runtime_id, Some(1), &stale_handle)
+            .expect("ignore stale exit");
+
+        let summary = manager.summary_for(runtime_id).expect("summary");
+        assert_eq!(summary.status, "ready");
+        assert!(summary.is_active);
+        assert_eq!(summary.last_error, None);
+        assert!(manager
+            .is_current_handle(runtime_id, &replacement_handle)
+            .expect("current handle check"));
+    }
+
+    #[test]
+    fn reconnect_reactivates_error_record_for_user_continue() {
+        let mut record = native_record("native-reactivate-error", "error", false);
+        record.last_error = Some("Native runtime sidecar exited unexpectedly.".to_string());
+
+        assert!(reactivate_record_for_reconnect(&mut record));
+        assert_eq!(record.status, "initializing");
+        assert!(record.is_active);
+        assert_eq!(record.last_error, None);
     }
 
     #[test]

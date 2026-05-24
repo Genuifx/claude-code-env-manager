@@ -1,5 +1,41 @@
 # ccem
 
+## 2.8.1
+
+### Patch Changes
+
+- Recover native session continuation after the runtime helper exits.
+
+## 2.8.0
+
+### Minor Changes
+
+- Enable npm trusted publishing for CLI releases.
+
+## 2.7.0
+
+### Minor Changes
+
+- Align Claude Plan mode tool gating with Claude Agent SDK behavior.
+
+## 2.6.0
+
+### Minor Changes
+
+- Ship desktop workspace polish for native zoom shortcuts, session stability, and project tree session annotations.
+
+## 2.5.0
+
+### Minor Changes
+
+- Refine the desktop glass redesign with responsive analytics summary, compact usage heatmap, and titlebar-aligned session controls.
+
+## 2.4.0
+
+### Minor Changes
+
+- Show live context window usage in desktop workspace sessions.
+
 ## 2.3.1
 
 ### Patch Changes

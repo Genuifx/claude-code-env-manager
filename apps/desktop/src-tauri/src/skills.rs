@@ -130,7 +130,7 @@ fn yaml_mapping_value<'a>(
     mapping: &'a serde_yaml::Mapping,
     key: &str,
 ) -> Option<&'a serde_yaml::Value> {
-    mapping.get(&serde_yaml::Value::String(key.to_string()))
+    mapping.get(serde_yaml::Value::String(key.to_string()))
 }
 
 fn yaml_value_to_string(value: &serde_yaml::Value) -> Option<String> {
@@ -419,7 +419,7 @@ fn scan_skills_dir_with_options(dir: &Path, options: &SkillScanOptions) -> Vec<I
 
 /// Scan a directory for skills (each subdirectory with SKILL.md).
 fn scan_skills_dir(
-    dir: &PathBuf,
+    dir: &Path,
     scope: &str,
     agents: &[String],
     source: Option<&str>,

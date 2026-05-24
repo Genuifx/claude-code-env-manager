@@ -64,7 +64,6 @@ function AppLayoutBody({
 
   const subtitleKeyMap: Record<string, string> = {
     workspace: 'workspace.subtitle',
-    sessions: 'sessions.subtitle',
     environments: 'environments.description',
     skills: 'skills.subtitle',
     history: 'history.subtitle',
@@ -82,7 +81,7 @@ function AppLayoutBody({
 
       <Sidebar>
         {open && (
-          <SideRail activeTab={activeTab} onTabChange={onTabChange} onTabPrefetch={onTabPrefetch} glassMuted={isWorkspace} />
+          <SideRail activeTab={activeTab} onTabChange={onTabChange} onTabPrefetch={onTabPrefetch} glassMuted={false} />
         )}
       </Sidebar>
 
@@ -110,6 +109,7 @@ function AppLayoutBody({
                 {pageActions}
               </div>
             )}
+            <div id="page-actions-slot" className="flex items-center gap-2.5 ml-auto relative z-[110] empty:hidden" />
           </div>
         )}
         <main
@@ -117,7 +117,7 @@ function AppLayoutBody({
             ? 'scroll-glass-root flex-1 overflow-hidden relative z-10'
             : 'scroll-glass-root flex-1 overflow-y-auto px-8 py-4 relative z-10'}
         >
-          <div className={fullBleed ? 'w-full h-full' : 'max-w-6xl'}>
+          <div className={fullBleed ? 'w-full h-full' : 'w-full min-w-0'}>
             {children}
           </div>
         </main>

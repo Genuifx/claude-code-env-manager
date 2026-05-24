@@ -190,6 +190,7 @@ export function Workspace({
     checkCodexInstalled,
     checkOpenCodeInstalled,
     setSessionTitle,
+    setSessionAnnotation,
     createNativeSession,
     getNativeSessionEvents,
     listNativeSessions,
@@ -1124,6 +1125,7 @@ export function Workspace({
 
   const handleCreateNativeConversation = useCallback(async (payload?: ComposerSubmitPayload) => {
     const rawPrompt = payload?.text ?? composePrompt;
+    const displayPrompt = payload?.displayText ?? rawPrompt;
     const attachments = payload?.attachments ?? [];
     const prompt = buildComposerPromptText(rawPrompt, attachments);
     const images = extractComposerImagePayloads(attachments);
@@ -1131,7 +1133,7 @@ export function Workspace({
     if ((!prompt && images.length === 0) || !workingDir) {
       return false;
     }
-    const previewPrompt = buildComposerPromptPreview(rawPrompt, attachments);
+    const previewPrompt = buildComposerPromptPreview(displayPrompt, attachments);
 
     const dispatch = resolveComposerDispatch({
       provider: composeProvider,
@@ -1215,6 +1217,7 @@ export function Workspace({
     }
 
     const rawPrompt = payload?.text ?? historyComposerText;
+    const displayPrompt = payload?.displayText ?? rawPrompt;
     const attachments = payload?.attachments ?? [];
     const prompt = buildComposerPromptText(rawPrompt, attachments);
     const images = extractComposerImagePayloads(attachments);
@@ -1223,7 +1226,7 @@ export function Workspace({
     }
 
     const provider = selectedSession.source;
-    const previewPrompt = buildComposerPromptPreview(rawPrompt, attachments);
+    const previewPrompt = buildComposerPromptPreview(displayPrompt, attachments);
     const dispatch = resolveComposerDispatch({
       provider,
       prompt,
@@ -1355,22 +1358,22 @@ export function Workspace({
   }, [isActive, activeLiveStatus, activeLiveStoppingId, stopNativeSession]);
 
   const renderComposeView = () => (
-    <div className="flex h-full min-h-0 flex-col items-center px-8">
+    <div className="flex h-full min-h-0 flex-col items-center px-4 sm:px-6 lg:px-8">
       <div className="flex flex-1 flex-col items-center justify-end">
-        <div className="mb-6 flex items-center justify-center gap-3">
-          <h2 className="text-2xl font-semibold tracking-tight text-foreground">
+        <div className="mb-6 flex max-w-full flex-wrap items-center justify-center gap-x-3 gap-y-2 text-center">
+          <h2 className="shrink-0 whitespace-nowrap text-2xl font-semibold tracking-tight text-foreground">
             {t('workspace.composeTitle')}
           </h2>
           <button
             type="button"
             onClick={() => void handlePickComposeDir()}
-            className="inline-flex items-center gap-1.5 text-2xl font-semibold tracking-tight text-muted-foreground transition-colors hover:text-foreground"
+            className="inline-flex min-w-0 max-w-full items-center justify-center gap-1.5 text-2xl font-semibold tracking-tight text-muted-foreground transition-colors hover:text-foreground"
           >
-            <FolderOpen className="h-4 w-4" />
-            <span className="max-w-[300px] truncate">
+            <FolderOpen className="h-4 w-4 shrink-0" />
+            <span className="min-w-0 max-w-[300px] truncate">
               {effectiveComposeDirLabel || t('workspace.composeSelectFolder')}
             </span>
-            <ChevronDown className="h-3.5 w-3.5" />
+            <ChevronDown className="h-3.5 w-3.5 shrink-0" />
           </button>
         </div>
       </div>
@@ -1561,6 +1564,22 @@ export function Workspace({
           opencodeInstalled={opencodeInstalled}
           onSaveTitle={async (session, title) => {
             await setSessionTitle(session.source, session.id, title);
+          }}
+          onSaveAnnotation={async (session, annotation) => {
+            await setSessionAnnotation(session.source, session.id, annotation);
+            invalidateHistoryCache();
+            setSessions((currentSessions) =>
+              currentSessions.map((currentSession) =>
+                currentSession.source === session.source && currentSession.id === session.id
+                  ? {
+                      ...currentSession,
+                      taskStage: annotation.stage,
+                      taskSticker: annotation.sticker,
+                      taskLabel: annotation.label?.trim() || undefined,
+                    }
+                  : currentSession
+              )
+            );
           }}
           onSessionsChanged={async () => {
             invalidateHistoryCache();

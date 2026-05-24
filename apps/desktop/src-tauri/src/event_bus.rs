@@ -76,7 +76,13 @@ pub enum TerminalPromptKind {
     Permission,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ContextUsageCategory {
+    pub name: String,
+    pub tokens: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionEventPayload {
     UserPrompt {
@@ -142,9 +148,33 @@ pub enum SessionEventPayload {
         last_seen_seq: u64,
         oldest_available_seq: u64,
     },
+    TokenUsage {
+        provider: String,
+        input_tokens: u64,
+        output_tokens: u64,
+        cache_read_tokens: u64,
+        cache_creation_tokens: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        total_cost_usd: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scope: Option<String>,
+    },
+    ContextUsage {
+        provider: String,
+        used_tokens: u64,
+        max_tokens: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        raw_max_tokens: Option<u64>,
+        percentage: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        auto_compact_threshold: Option<u64>,
+        is_auto_compact_enabled: bool,
+        model: String,
+        categories: Vec<ContextUsageCategory>,
+    },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionEventRecord {
     pub runtime_id: String,
     pub seq: u64,
@@ -152,7 +182,7 @@ pub struct SessionEventRecord {
     pub payload: SessionEventPayload,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ReplayBatch {
     pub gap_detected: bool,
     pub oldest_available_seq: Option<u64>,
@@ -211,6 +241,15 @@ impl SessionStore {
         }
     }
 
+    pub fn with_start_seq(runtime_id: impl Into<String>, start_seq: u64) -> Self {
+        Self {
+            runtime_id: runtime_id.into(),
+            capacity: DEFAULT_SESSION_EVENT_CAPACITY,
+            next_seq: start_seq,
+            events: VecDeque::with_capacity(DEFAULT_SESSION_EVENT_CAPACITY),
+        }
+    }
+
     pub fn append(&mut self, payload: SessionEventPayload) -> SessionEventRecord {
         let record = SessionEventRecord {
             runtime_id: self.runtime_id.clone(),
@@ -253,8 +292,8 @@ impl SessionStore {
 #[cfg(test)]
 mod tests {
     use super::{
-        InteractiveToolPrompt, SessionEventPayload, SessionStore, ToolCategory, ToolQuestionOption,
-        ToolQuestionPrompt, UserInputKind,
+        ContextUsageCategory, InteractiveToolPrompt, SessionEventPayload, SessionStore,
+        ToolCategory, ToolQuestionOption, ToolQuestionPrompt, UserInputKind,
     };
 
     #[test]
@@ -358,6 +397,32 @@ mod tests {
                 line: "legacy".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn usage_events_round_trip_with_context_window_snapshot() {
+        let payload = SessionEventPayload::ContextUsage {
+            provider: "codex".to_string(),
+            used_tokens: 167_000,
+            max_tokens: 258_400,
+            raw_max_tokens: Some(258_400),
+            percentage: 64.6,
+            auto_compact_threshold: None,
+            is_auto_compact_enabled: true,
+            model: "gpt-5.5-codex".to_string(),
+            categories: vec![ContextUsageCategory {
+                name: "messages".to_string(),
+                tokens: 167_000,
+            }],
+        };
+
+        let encoded = serde_json::to_value(&payload).expect("serialize");
+        assert_eq!(encoded["type"], "context_usage");
+        assert_eq!(encoded["raw_max_tokens"], 258_400);
+
+        let decoded: SessionEventPayload =
+            serde_json::from_value(encoded).expect("deserialize context usage");
+        assert_eq!(decoded, payload);
     }
 
     #[test]

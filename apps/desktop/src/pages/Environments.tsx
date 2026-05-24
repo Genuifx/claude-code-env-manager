@@ -7,7 +7,6 @@ import type { PermissionModeName } from '@ccem/core/browser';
 import { useAppStore } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useLocale } from '../locales';
-import { LaunchButton } from '@/components/ui/LaunchButton';
 import { EnvironmentsSkeleton } from '@/components/ui/skeleton-states';
 import { shallow } from 'zustand/shallow';
 
@@ -35,7 +34,7 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
 
   // View mode state with localStorage persistence
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(
-    () => (localStorage.getItem('ccem-env-view-mode') as 'grid' | 'list') || 'list'
+    () => (localStorage.getItem('ccem-env-view-mode') as 'grid' | 'list') || 'grid'
   );
 
   // FTUE: read flag synchronously at mount
@@ -65,8 +64,8 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
   }
 
   return (
-    <div className="page-transition-enter space-y-6">
-      {/* Error banner — inline, never full-page */}
+    <div className="page-transition-enter w-full">
+      {/* Error banner */}
       {error && error.includes('environment') && (
         <ErrorBanner
           message={t('environments.failedToLoad')}
@@ -75,22 +74,22 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
         />
       )}
 
-      {/* Environment list */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+      {/* Environment list section */}
+      <section className="mb-12">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-[17px] font-semibold text-foreground tracking-[-0.37px]">
             {t('environments.configuredEnvs')}
-          </h3>
-          <div className="flex items-center gap-2">
+          </h2>
+          <div className="flex items-center gap-3">
             {/* View Mode Toggle */}
-            <div className="flex items-center gap-0.5 p-0.5 rounded-lg glass-subtle">
+            <div className="flex items-center gap-0.5 p-[3px] rounded-full border border-border-subtle bg-surface-raised/50">
               <button
                 type="button"
                 onClick={() => setViewMode('grid')}
-                className={`h-7 w-7 rounded-md flex items-center justify-center transition-all duration-150 ${
+                className={`h-7 w-7 rounded-full flex items-center justify-center transition-all duration-150 ${
                   viewMode === 'grid'
-                    ? 'seg-active text-foreground'
-                    : 'text-muted-foreground seg-hover hover:text-foreground'
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
                 }`}
                 title={t('environments.viewGrid')}
               >
@@ -99,105 +98,102 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
               <button
                 type="button"
                 onClick={() => setViewMode('list')}
-                className={`h-7 w-7 rounded-md flex items-center justify-center transition-all duration-150 ${
+                className={`h-7 w-7 rounded-full flex items-center justify-center transition-all duration-150 ${
                   viewMode === 'list'
-                    ? 'seg-active text-foreground'
-                    : 'text-muted-foreground seg-hover hover:text-foreground'
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
                 }`}
                 title={t('environments.viewList')}
               >
                 <List className="w-3.5 h-3.5" />
               </button>
             </div>
-            <LaunchButton
-              size="sm"
-              onClick={onAddEnv}
-              icon={<Plus className="w-3.5 h-3.5" />}
+            {/* Add button — pill style */}
+            <button
+              type="button"
+              onClick={() => onAddEnv?.()}
+              className="inline-flex items-center gap-1.5 h-8 px-4 rounded-full bg-primary text-primary-foreground text-sm font-medium tracking-[-0.22px] transition-transform active:scale-95 hover:bg-primary-hover"
             >
+              <Plus className="w-3.5 h-3.5" />
               {t('environments.addEnv')}
-            </LaunchButton>
+            </button>
           </div>
         </div>
+
         <EnvList onEdit={onEditEnv} onDelete={onDeleteEnv} viewMode={viewMode} />
 
         {/* FTUE: Ghost card for adding first environment */}
         {showGhostCard && (
           <button
             type="button"
-            className="w-full rounded-2xl p-4 flex flex-col items-center
-              justify-center cursor-pointer gap-2 min-h-[120px]
-              glass-ghost-card group mt-4"
+            className="w-full mt-4 rounded-2xl border border-dashed border-border p-8 flex flex-col items-center justify-center cursor-pointer gap-2 group transition-colors hover:border-primary/40 hover:bg-primary/[0.02]"
             onClick={() => onAddEnv?.()}
           >
-            <Plus className="w-5 h-5 text-muted-foreground/50 group-hover:text-muted-foreground/70 transition-colors" />
-            <span className="text-sm text-muted-foreground">{t('environments.addEnv')}</span>
-            <span className="text-xs text-muted-foreground/50 group-hover:text-muted-foreground/70 transition-colors duration-150">
+            <Plus className="w-5 h-5 text-muted-foreground/50 group-hover:text-primary/60 transition-colors" />
+            <span className="text-sm font-medium text-muted-foreground group-hover:text-foreground transition-colors">
+              {t('environments.addEnv')}
+            </span>
+            <span className="text-xs text-muted-foreground/60">
               {t('environments.ghostCardHint')}
             </span>
           </button>
         )}
-      </div>
+      </section>
 
-      {/* Permission Mode Section */}
-      <div className="border-t glass-divider pt-8">
-        <h3 className="text-lg font-semibold text-foreground mb-4">
-          {t('environments.permissionMode')}
-        </h3>
-
-        <div className="space-y-4">
-          {/* Default Permission Label */}
-          <div>
-            <div className="font-medium text-foreground mb-1">
-              {t('environments.defaultPermission')}
-            </div>
-            <div className="text-sm text-muted-foreground mb-4">
-              {t('environments.userLevelHint')}
-            </div>
-          </div>
-
-          {/* Permission Mode Card Grid */}
-          <div className="grid grid-cols-2 gap-3">
-            {Object.entries(PERMISSION_PRESETS).map(([key]) => {
-              const isActive = (defaultMode || permissionMode) === key;
-              const ModeIcon = getModeIcon(key as PermissionModeName);
-              const displayName = MODE_DISPLAY_NAMES[key as PermissionModeName] || key;
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => {
-                    const mode = key as PermissionModeName;
-                    setDefaultMode(mode);
-                    setPermissionMode(mode);
-                  }}
-                  className={`text-left p-4 rounded-lg cursor-pointer glass-mode-card ${
-                    isActive ? 'active' : ''
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <ModeIcon className={`w-4 h-4 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
-                    <span className={`font-semibold ${isActive ? 'text-primary' : 'text-foreground'}`}>
-                      {displayName}
-                    </span>
-                    <span className="font-mono text-[10px] text-muted-foreground/60 ml-auto">
-                      {key}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground line-clamp-2">
-                    {t(`environments.permMode_${key}_desc`)}
-                  </p>
-                  {isActive && (
-                    <p className="text-[11px] text-muted-foreground/80 leading-relaxed border-t glass-divider pt-2 mt-2">
-                      {t(`environments.permMode_${key}_detail`)}
-                    </p>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+      {/* Permission Mode Section — surface color change as divider */}
+      <section className="rounded-2xl bg-surface-raised/50 border border-border-subtle p-6">
+        <div className="mb-5">
+          <h2 className="text-[17px] font-semibold text-foreground tracking-[-0.37px] mb-1">
+            {t('environments.permissionMode')}
+          </h2>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            {t('environments.userLevelHint')}
+          </p>
         </div>
-      </div>
 
+        {/* Permission Mode Chips — configurator-option-chip style */}
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5">
+          {Object.entries(PERMISSION_PRESETS).map(([key]) => {
+            const isActive = (defaultMode || permissionMode) === key;
+            const ModeIcon = getModeIcon(key as PermissionModeName);
+            const displayName = MODE_DISPLAY_NAMES[key as PermissionModeName] || key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => {
+                  const mode = key as PermissionModeName;
+                  setDefaultMode(mode);
+                  setPermissionMode(mode);
+                }}
+                className={`text-left px-4 py-3 rounded-xl cursor-pointer border transition-all duration-150 active:scale-[0.97] ${
+                  isActive
+                    ? 'border-primary/60 bg-primary/[0.04] shadow-sm'
+                    : 'border-border-subtle bg-background hover:border-border hover:bg-surface-raised/30'
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-0.5">
+                  <ModeIcon className={`w-4 h-4 shrink-0 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
+                  <span className={`text-sm font-semibold tracking-[-0.22px] ${isActive ? 'text-primary' : 'text-foreground'}`}>
+                    {displayName}
+                  </span>
+                  <span className="font-mono text-[10px] text-muted-foreground/50 ml-auto">
+                    {key}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2 pl-6">
+                  {t(`environments.permMode_${key}_desc`)}
+                </p>
+                {isActive && (
+                  <p className="text-[11px] text-muted-foreground/70 leading-relaxed border-t border-border-subtle pt-2 mt-2 pl-6">
+                    {t(`environments.permMode_${key}_detail`)}
+                  </p>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </section>
     </div>
   );
 }

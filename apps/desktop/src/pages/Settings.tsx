@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Moon, Sun, MonitorSmartphone, Lightbulb, Terminal, CheckCircle2, XCircle, Copy, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search, FolderOpen, X, Sparkles, Clock, Image, BellRing, RefreshCw, Download, RotateCw } from 'lucide-react';
-import { Card } from '@/components/ui/card';
+import { Moon, Sun, MonitorSmartphone, Lightbulb, Terminal, CheckCircle2, XCircle, Copy, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search, FolderOpen, X, Sparkles, Clock, Image, BellRing, RefreshCw, Download, RotateCw, Palette, AppWindow, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { useAppStore } from '@/store';
@@ -46,6 +45,8 @@ interface InstallStatusState {
 }
 
 type UpdateStatus = 'idle' | 'checking' | 'available' | 'installing' | 'ready';
+
+type SectionId = 'appearance' | 'application' | 'notifications' | 'ai' | 'permission' | 'about';
 
 const CCEM_REPO_URL = 'https://github.com/Genuifx/claude-code-env-manager';
 
@@ -105,6 +106,7 @@ export function Settings() {
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>('idle');
   const [updateInfo, setUpdateInfo] = useState<AppUpdateMetadata | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [activeSection, setActiveSection] = useState<SectionId>('appearance');
   const loaded = useRef(false);
 
   // Load CLI install status in parallel so the About card updates once.
@@ -359,487 +361,545 @@ export function Settings() {
     return <SettingsSkeleton />;
   }
 
-  const themeOptions: { key: 'dark' | 'light' | 'system'; icon: typeof Moon; label: string }[] = [
-    { key: 'dark', icon: Moon, label: t('settings.dark') },
+  const themeOptions: { key: 'light' | 'dark' | 'system'; icon: typeof Moon; label: string }[] = [
     { key: 'light', icon: Sun, label: t('settings.light') },
+    { key: 'dark', icon: Moon, label: t('settings.dark') },
     { key: 'system', icon: MonitorSmartphone, label: t('settings.system') },
   ];
 
-  return (
-    <div className="page-transition-enter space-y-5">
-      {/* Row 1: Appearance + Application side by side */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {/* Appearance */}
-        <Card className="p-5">
-          <h3 className="text-sm font-semibold text-foreground mb-4">
-            {t('settings.appearance')}
-          </h3>
-          <div className="space-y-4">
-            {/* Theme -- segmented control */}
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-2">
-                {t('settings.theme')}
-              </label>
-              <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg glass-subtle">
-                {themeOptions.map(({ key, icon: Icon, label }) => (
-                  <button
-                    key={key}
-                    onClick={() => setTheme(key)}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-all duration-150 ${
-                      theme === key
-                        ? 'seg-active text-foreground'
-                        : 'seg-hover text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    <Icon className="w-3.5 h-3.5" /> {label}
-                  </button>
-                ))}
-              </div>
-            </div>
+  const sections: { id: SectionId; icon: typeof Palette; label: string }[] = [
+    { id: 'appearance', icon: Palette, label: t('settings.appearance') },
+    { id: 'application', icon: AppWindow, label: t('settings.application') },
+    { id: 'notifications', icon: BellRing, label: t('settings.notifications') },
+    { id: 'ai', icon: Sparkles, label: t('settings.aiEnhancement') },
+    { id: 'permission', icon: Shield, label: t('settings.defaultPermission') },
+    { id: 'about', icon: Info, label: t('settings.about') },
+  ];
 
-            {/* Language -- segmented control */}
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-2">
-                语言 / Language
-              </label>
-              <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg glass-subtle">
-                <button
-                  onClick={() => setLang('zh')}
-                className={`px-3 py-1.5 rounded-md text-sm transition-all duration-150 ${
-                    lang === 'zh'
-                      ? 'seg-active text-foreground'
-                      : 'seg-hover text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  中文
-                </button>
-                <button
-                  onClick={() => setLang('en')}
-                  className={`px-3 py-1.5 rounded-md text-sm transition-all duration-150 ${
-                    lang === 'en'
-                      ? 'seg-active text-foreground'
-                      : 'seg-hover text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  English
-                </button>
-              </div>
-            </div>
+  const activeSectionLabel = sections.find((s) => s.id === activeSection)?.label ?? '';
 
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-                {t('settings.performanceMode')}
-              </label>
-              <p className="text-xs text-muted-foreground/80 mb-2">
-                {t('settings.performanceModeDesc')}
-              </p>
-              <Select
-                value={performanceMode}
-                onValueChange={(value) => setPerformanceMode(value as PerformancePreference)}
-              >
-                <SelectTrigger className="w-full h-auto px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="auto">{t('settings.performanceModeAuto')}</SelectItem>
-                  <SelectItem value="reduced">{t('settings.performanceModeReduced')}</SelectItem>
-                  <SelectItem value="default">{t('settings.performanceModeDefault')}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </Card>
-
-        {/* Application */}
-        <Card className="p-5">
-          <h3 className="text-sm font-semibold text-foreground mb-4">
-            {t('settings.application')}
-          </h3>
-          <div className="space-y-4">
-            <ToggleSetting
-              checked={autoStart}
-              onChange={setAutoStart}
-              title={t('settings.autoStart')}
-              description={t('settings.autoStartDesc')}
-            />
-            <ToggleSetting
-              checked={startMinimized}
-              onChange={setStartMinimized}
-              title={t('settings.startMinimized')}
-              description={t('settings.startMinimizedDesc')}
-            />
-            <ToggleSetting
-              checked={closeToTray}
-              onChange={setCloseToTray}
-              title={t('settings.closeToTray')}
-              description={t('settings.closeToTrayDesc')}
-            />
-            <ToggleSetting
-              checked={desktopPetEnabled}
-              onChange={setDesktopPetEnabled}
-              title={t('settings.desktopPetEnabled')}
-              description={t('settings.desktopPetEnabledDesc')}
-            />
-          </div>
-        </Card>
+  const renderAppearanceSection = () => (
+    <div className="space-y-5">
+      {/* Theme */}
+      <div>
+        <label className="block text-sm font-medium text-foreground mb-2">
+          {t('settings.theme')}
+        </label>
+        <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg border border-border-subtle bg-muted/30">
+          {themeOptions.map(({ key, icon: Icon, label }) => (
+            <button
+              key={key}
+              onClick={() => setTheme(key)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-all duration-150 active:scale-[0.97] ${
+                theme === key
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5" /> {label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <Card className="p-5">
-        <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
-          <BellRing className="w-4 h-4 text-primary" />
-          {t('settings.notifications')}
-        </h3>
-        <div className="space-y-4">
-          <ToggleSetting
-            checked={desktopNotificationsEnabled}
-            onChange={setDesktopNotificationsEnabled}
-            title={t('settings.desktopNotificationsEnabled')}
-            description={t('settings.desktopNotificationsEnabledDesc')}
-          />
+      <div className="border-t border-border-subtle" />
 
-          <div className={`space-y-4 transition-opacity duration-150 ${desktopNotificationsEnabled ? '' : 'opacity-50 pointer-events-none'}`}>
-            <ToggleSetting
-              checked={notifyOnTaskCompleted}
-              onChange={setNotifyOnTaskCompleted}
-              title={t('settings.notifyOnTaskCompleted')}
-              description={t('settings.notifyOnTaskCompletedDesc')}
-            />
-            <ToggleSetting
-              checked={notifyOnTaskFailed}
-              onChange={setNotifyOnTaskFailed}
-              title={t('settings.notifyOnTaskFailed')}
-              description={t('settings.notifyOnTaskFailedDesc')}
-            />
-            <ToggleSetting
-              checked={notifyOnActionRequired}
-              onChange={setNotifyOnActionRequired}
-              title={t('settings.notifyOnActionRequired')}
-              description={t('settings.notifyOnActionRequiredDesc')}
-            />
-          </div>
+      {/* Language */}
+      <div>
+        <label className="block text-sm font-medium text-foreground mb-2">
+          {t('settings.language') || '语言 / Language'}
+        </label>
+        <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg border border-border-subtle bg-muted/30">
+          <button
+            onClick={() => setLang('zh')}
+            className={`px-3 py-1.5 rounded-md text-sm transition-all duration-150 active:scale-[0.97] ${
+              lang === 'zh'
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            中文
+          </button>
+          <button
+            onClick={() => setLang('en')}
+            className={`px-3 py-1.5 rounded-md text-sm transition-all duration-150 active:scale-[0.97] ${
+              lang === 'en'
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            English
+          </button>
+        </div>
+      </div>
 
-          <div className="pt-2 border-t glass-divider flex flex-wrap items-center gap-2">
+      <div className="border-t border-border-subtle" />
+
+      {/* Performance Mode */}
+      <div>
+        <label className="block text-sm font-medium text-foreground mb-1">
+          {t('settings.performanceMode')}
+        </label>
+        <p className="text-sm text-muted-foreground mb-2">
+          {t('settings.performanceModeDesc')}
+        </p>
+        <Select
+          value={performanceMode}
+          onValueChange={(value) => setPerformanceMode(value as PerformancePreference)}
+        >
+          <SelectTrigger className="w-full max-w-xs h-9 rounded-lg border border-border-subtle text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="auto">{t('settings.performanceModeAuto')}</SelectItem>
+            <SelectItem value="reduced">{t('settings.performanceModeReduced')}</SelectItem>
+            <SelectItem value="default">{t('settings.performanceModeDefault')}</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
+
+  const renderApplicationSection = () => (
+    <div className="space-y-5">
+      <ToggleSetting
+        checked={autoStart}
+        onChange={setAutoStart}
+        title={t('settings.autoStart')}
+        description={t('settings.autoStartDesc')}
+      />
+      <div className="border-t border-border-subtle" />
+      <ToggleSetting
+        checked={startMinimized}
+        onChange={setStartMinimized}
+        title={t('settings.startMinimized')}
+        description={t('settings.startMinimizedDesc')}
+      />
+      <div className="border-t border-border-subtle" />
+      <ToggleSetting
+        checked={closeToTray}
+        onChange={setCloseToTray}
+        title={t('settings.closeToTray')}
+        description={t('settings.closeToTrayDesc')}
+      />
+      <div className="border-t border-border-subtle" />
+      <ToggleSetting
+        checked={desktopPetEnabled}
+        onChange={setDesktopPetEnabled}
+        title={t('settings.desktopPetEnabled')}
+        description={t('settings.desktopPetEnabledDesc')}
+      />
+    </div>
+  );
+
+  const renderNotificationsSection = () => (
+    <div className="space-y-5">
+      <ToggleSetting
+        checked={desktopNotificationsEnabled}
+        onChange={setDesktopNotificationsEnabled}
+        title={t('settings.desktopNotificationsEnabled')}
+        description={t('settings.desktopNotificationsEnabledDesc')}
+      />
+
+      <div className="border-t border-border-subtle" />
+
+      <div className={`space-y-5 transition-opacity duration-150 ${desktopNotificationsEnabled ? '' : 'opacity-50 pointer-events-none'}`}>
+        <ToggleSetting
+          checked={notifyOnTaskCompleted}
+          onChange={setNotifyOnTaskCompleted}
+          title={t('settings.notifyOnTaskCompleted')}
+          description={t('settings.notifyOnTaskCompletedDesc')}
+        />
+        <div className="border-t border-border-subtle" />
+        <ToggleSetting
+          checked={notifyOnTaskFailed}
+          onChange={setNotifyOnTaskFailed}
+          title={t('settings.notifyOnTaskFailed')}
+          description={t('settings.notifyOnTaskFailedDesc')}
+        />
+        <div className="border-t border-border-subtle" />
+        <ToggleSetting
+          checked={notifyOnActionRequired}
+          onChange={setNotifyOnActionRequired}
+          title={t('settings.notifyOnActionRequired')}
+          description={t('settings.notifyOnActionRequiredDesc')}
+        />
+      </div>
+
+      <div className="border-t border-border-subtle" />
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="active:scale-[0.97] transition-transform"
+          onClick={async () => {
+            try {
+              await invoke('send_test_notification');
+              toast.success(t('settings.notificationTestSent'));
+            } catch (error) {
+              toast.error(t('settings.notificationTestFailed').replace('{error}', String(error)));
+            }
+          }}
+        >
+          <BellRing className="w-3.5 h-3.5 mr-1.5" />
+          {t('settings.notificationTest')}
+        </Button>
+        <p className="text-sm text-muted-foreground">
+          {t('settings.notificationHint')}
+        </p>
+      </div>
+    </div>
+  );
+
+  const renderAiSection = () => (
+    <div className="space-y-5">
+      {/* Default Working Directory */}
+      <div>
+        <div className="text-sm font-medium text-foreground">{t('settings.defaultWorkingDir')}</div>
+        <div className="text-sm text-muted-foreground mt-0.5 mb-2">{t('settings.defaultWorkingDirDesc')}</div>
+        {defaultWorkingDir ? (
+          <div className="flex items-center gap-2">
+            <FolderOpen className="w-3.5 h-3.5 text-primary shrink-0" />
+            <span className="text-sm font-mono text-foreground truncate flex-1">{defaultWorkingDir}</span>
             <Button
               variant="outline"
               size="sm"
-              className="glass-btn-outline"
+              className="active:scale-[0.97] transition-transform h-7 text-xs"
               onClick={async () => {
-                try {
-                  await invoke('send_test_notification');
-                  toast.success(t('settings.notificationTestSent'));
-                } catch (error) {
-                  toast.error(t('settings.notificationTestFailed').replace('{error}', String(error)));
-                }
+                const path = await openDirectoryPicker();
+                if (path) await saveDefaultWorkingDir(path);
               }}
             >
-              <BellRing className="w-3.5 h-3.5 mr-1.5" />
-              {t('settings.notificationTest')}
+              {t('workspace.changeDir')}
             </Button>
-            <p className="text-xs text-muted-foreground/80">
-              {t('settings.notificationHint')}
-            </p>
+            <button
+              onClick={() => saveDefaultWorkingDir(null)}
+              className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            className="active:scale-[0.97] transition-transform"
+            onClick={async () => {
+              const path = await openDirectoryPicker();
+              if (path) await saveDefaultWorkingDir(path);
+            }}
+          >
+            <FolderOpen className="w-3.5 h-3.5 mr-1.5" />
+            {t('settings.selectDir')}
+          </Button>
+        )}
+      </div>
+
+      <div className="border-t border-border-subtle" />
+
+      <ToggleSetting
+        checked={aiEnhanced}
+        onChange={setAiEnhanced}
+        title={t('settings.aiEnhancementToggle')}
+        description={t('settings.aiEnhancementToggleDesc')}
+      />
+
+      <div className="border-t border-border-subtle" />
+
+      <div className={`space-y-5 transition-opacity duration-150 ${aiEnhanced ? '' : 'opacity-50 pointer-events-none'}`}>
+        <div>
+          <label className="block text-sm font-medium text-foreground mb-1">
+            {t('settings.aiEnhancementEnv')}
+          </label>
+          <p className="text-sm text-muted-foreground mb-2">{t('settings.aiEnhancementEnvDesc')}</p>
+          <Select value={aiEnvName ?? '__default__'} onValueChange={(v) => setAiEnvName(v === '__default__' ? null : v)}>
+            <SelectTrigger className="w-full max-w-xs h-9 rounded-lg border border-border-subtle text-sm">
+              <SelectValue placeholder={t('settings.aiEnhancementEnvPlaceholder')} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__default__">{t('settings.aiEnhancementEnvPlaceholder')}</SelectItem>
+              {environments.map((env) => (
+                <SelectItem key={env.name} value={env.name}>{env.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="border-t border-border-subtle" />
+
+        <div>
+          <p className="text-sm text-muted-foreground mb-2">{t('settings.aiEnhancementFeatures')}</p>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Search className="w-3.5 h-3.5 text-primary shrink-0" />
+              {t('settings.aiEnhancementFeatureSkill')}
+            </div>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Clock className="w-3.5 h-3.5 text-primary shrink-0" />
+              {t('settings.aiEnhancementFeatureCron')}
+            </div>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Image className="w-3.5 h-3.5 text-primary shrink-0" />
+              {t('settings.aiEnhancementFeaturePoster')}
+            </div>
           </div>
         </div>
-      </Card>
+      </div>
+    </div>
+  );
 
-      {/* Row 2: AI Enhancement */}
-      <Card className="p-5">
-        <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-primary" />
-          {t('settings.aiEnhancement')}
-        </h3>
-        <div className="space-y-4">
-          {/* Default Working Directory */}
-          <div>
-            <div className="mb-2">
-              <div className="text-sm font-medium text-foreground">{t('settings.defaultWorkingDir')}</div>
-              <div className="text-xs text-muted-foreground mt-0.5">{t('settings.defaultWorkingDirDesc')}</div>
-            </div>
-            {defaultWorkingDir ? (
-              <div className="flex items-center gap-2">
-                <FolderOpen className="w-3.5 h-3.5 text-primary shrink-0" />
-                <span className="text-sm font-mono text-foreground truncate flex-1">{defaultWorkingDir}</span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="glass-btn-outline h-7 text-xs"
-                  onClick={async () => {
-                    const path = await openDirectoryPicker();
-                    if (path) await saveDefaultWorkingDir(path);
-                  }}
-                >
-                  {t('workspace.changeDir')}
-                </Button>
-                <button
-                  onClick={() => saveDefaultWorkingDir(null)}
-                  className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/[0.06] transition-colors"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
+  const renderPermissionSection = () => (
+    <div className="space-y-5">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
+        <Lightbulb className="w-3.5 h-3.5 text-primary shrink-0" />
+        {t('settings.defaultPermissionHint')}
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        {Object.entries(PERMISSION_PRESETS).map(([key]) => {
+          const mode = key as PermissionModeName;
+          const isActive = (defaultMode || 'dev') === mode;
+          const ModeIcon = getModeIcon(mode);
+          const displayName = MODE_DISPLAY_NAMES[mode] || key;
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => { setDefaultMode(mode); setPermissionMode(mode); }}
+              className={`text-left p-3.5 rounded-lg cursor-pointer border transition-all duration-150 active:scale-[0.97] ${
+                isActive
+                  ? 'border-primary bg-primary/5 ring-1 ring-primary/20'
+                  : 'border-border-subtle hover:border-border hover:bg-muted/30'
+              }`}
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <ModeIcon className={`w-3.5 h-3.5 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
+                <span className={`text-sm font-semibold ${isActive ? 'text-primary' : 'text-foreground'}`}>
+                  {displayName}
+                </span>
+                <span className="font-mono text-[10px] text-muted-foreground/60 ml-auto">
+                  {key}
+                </span>
               </div>
+              <p className="text-xs text-muted-foreground line-clamp-2">
+                {t(`environments.permMode_${key}_desc`)}
+              </p>
+              {isActive && (
+                <p className="text-xs text-muted-foreground/80 leading-relaxed border-t border-border-subtle pt-2 mt-2">
+                  {t(`environments.permMode_${key}_detail`)}
+                </p>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const renderAboutSection = () => (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-muted-foreground">
+          {t('settings.version')}
+        </span>
+        <span className="text-sm font-medium text-foreground">
+          {appVersion ? `v${appVersion}` : t('settings.notAvailable')}
+        </span>
+      </div>
+      <div className="border-t border-border-subtle" />
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-muted-foreground">
+          {t('settings.webkitVersion')}
+        </span>
+        <span className="text-sm font-medium text-foreground font-mono">
+          {webkitVersion ?? t('settings.notAvailable')}
+        </span>
+      </div>
+      <div className="border-t border-border-subtle" />
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-muted-foreground flex items-center gap-1.5">
+          <Terminal className="w-3.5 h-3.5" />
+          {t('settings.cliStatus')}
+        </span>
+        <InstallStatusBadge status={installStatus.ccem} />
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-muted-foreground">
+          {t('settings.claudeCodeStatus')}
+        </span>
+        <InstallStatusBadge status={installStatus.claude} />
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-muted-foreground">
+          {t('settings.codexStatus')}
+        </span>
+        <InstallStatusBadge status={installStatus.codex} />
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-muted-foreground">
+          {t('settings.opencodeStatus')}
+        </span>
+        <InstallStatusBadge status={installStatus.opencode} />
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-muted-foreground">
+          {t('settings.tmuxStatus')}
+        </span>
+        <InstallStatusBadge status={installStatus.tmux} />
+      </div>
+      {installStatus.ccem === false && (
+        <>
+          <div className="border-t border-border-subtle" />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(t('settings.cliInstallCmd'));
+                toast.success(t('settings.cliInstallCmd'));
+              }}
+              className="inline-flex items-center gap-1 text-xs font-mono text-primary hover:text-primary/80 border border-border-subtle px-2 py-1 rounded-md active:scale-[0.97] transition-all"
+            >
+              <Copy className="w-3 h-3" />
+              {t('settings.cliInstallCmd')}
+            </button>
+          </div>
+          <p className="text-sm text-muted-foreground flex items-center gap-1">
+            <Lightbulb className="w-3 h-3 text-primary shrink-0" />
+            {t('settings.cliInstallHint')}
+          </p>
+        </>
+      )}
+      {installStatus.tmux === false && (
+        <>
+          <div className="border-t border-border-subtle" />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(t('settings.tmuxInstallCmd'));
+                toast.success(t('settings.tmuxInstallCmd'));
+              }}
+              className="inline-flex items-center gap-1 text-xs font-mono text-primary hover:text-primary/80 border border-border-subtle px-2 py-1 rounded-md active:scale-[0.97] transition-all"
+            >
+              <Copy className="w-3 h-3" />
+              {t('settings.tmuxInstallCmd')}
+            </button>
+          </div>
+          <p className="text-sm text-muted-foreground flex items-center gap-1">
+            <Lightbulb className="w-3 h-3 text-primary shrink-0" />
+            {t('settings.tmuxInstallHint')}
+          </p>
+        </>
+      )}
+      {updateInfo && (
+        <>
+          <div className="border-t border-border-subtle" />
+          <div className="rounded-lg border border-border-subtle px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground">
+                {formatMessage(t('settings.updateAvailable'), { version: updateInfo.version })}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {updateInfo.channel === 'beta' ? t('settings.updateChannelBeta') : t('settings.updateChannelStable')}
+                <span className="mx-1">·</span>
+                <span className="font-mono">{updateInfo.releaseTag}</span>
+              </p>
+            </div>
+            {updateStatus === 'ready' ? (
+              <Button variant="outline" size="sm" className="active:scale-[0.97] transition-transform shrink-0" onClick={handleRestartForUpdate}>
+                <RotateCw className="w-3.5 h-3.5 mr-1.5" />
+                {t('settings.restartToUpdate')}
+              </Button>
             ) : (
               <Button
                 variant="outline"
                 size="sm"
-                className="glass-btn-outline"
-                onClick={async () => {
-                  const path = await openDirectoryPicker();
-                  if (path) await saveDefaultWorkingDir(path);
-                }}
+                className="active:scale-[0.97] transition-transform shrink-0"
+                disabled={updateStatus === 'installing'}
+                onClick={handleInstallUpdate}
               >
-                <FolderOpen className="w-3.5 h-3.5 mr-1.5" />
-                {t('settings.selectDir')}
+                <Download className="w-3.5 h-3.5 mr-1.5" />
+                {updateStatus === 'installing' ? t('settings.installingUpdate') : t('settings.downloadUpdate')}
               </Button>
             )}
           </div>
+        </>
+      )}
+      {updateError && (
+        <p className="text-xs text-destructive">
+          {updateError}
+        </p>
+      )}
+      <div className="border-t border-border-subtle" />
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="active:scale-[0.97] transition-transform"
+          disabled={updateStatus === 'checking' || updateStatus === 'installing'}
+          onClick={handleCheckUpdate}
+        >
+          <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${updateStatus === 'checking' ? 'animate-spin' : ''}`} />
+          {updateStatus === 'checking' ? t('settings.checkingUpdate') : t('settings.checkUpdate')}
+        </Button>
+        <Button variant="outline" size="sm" className="active:scale-[0.97] transition-transform" onClick={() => window.open(updateInfo?.releaseUrl ?? CCEM_REPO_URL, '_blank')}>
+          GitHub
+        </Button>
+        <Button variant="outline" size="sm" className="active:scale-[0.97] transition-transform" onClick={() => window.open(`${CCEM_REPO_URL}/issues`, '_blank')}>
+          {t('settings.feedback')}
+        </Button>
+      </div>
+    </div>
+  );
 
-          <div className="pt-2 border-t glass-divider">
-            <ToggleSetting
-              checked={aiEnhanced}
-              onChange={setAiEnhanced}
-              title={t('settings.aiEnhancementToggle')}
-              description={t('settings.aiEnhancementToggleDesc')}
-            />
-          </div>
+  const renderSectionContent = () => {
+    switch (activeSection) {
+      case 'appearance':
+        return renderAppearanceSection();
+      case 'application':
+        return renderApplicationSection();
+      case 'notifications':
+        return renderNotificationsSection();
+      case 'ai':
+        return renderAiSection();
+      case 'permission':
+        return renderPermissionSection();
+      case 'about':
+        return renderAboutSection();
+      default:
+        return null;
+    }
+  };
 
-          <div className={`space-y-3 transition-opacity duration-150 ${aiEnhanced ? '' : 'opacity-50 pointer-events-none'}`}>
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-                {t('settings.aiEnhancementEnv')}
-              </label>
-              <p className="text-xs text-muted-foreground/80 mb-2">{t('settings.aiEnhancementEnvDesc')}</p>
-              <Select value={aiEnvName ?? '__default__'} onValueChange={(v) => setAiEnvName(v === '__default__' ? null : v)}>
-                <SelectTrigger className="w-full h-auto px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm">
-                  <SelectValue placeholder={t('settings.aiEnhancementEnvPlaceholder')} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__default__">{t('settings.aiEnhancementEnvPlaceholder')}</SelectItem>
-                  {environments.map((env) => (
-                    <SelectItem key={env.name} value={env.name}>{env.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="pt-2 border-t glass-divider">
-              <p className="text-xs text-muted-foreground mb-2">{t('settings.aiEnhancementFeatures')}</p>
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Search className="w-3.5 h-3.5 text-primary shrink-0" />
-                  {t('settings.aiEnhancementFeatureSkill')}
-                </div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Clock className="w-3.5 h-3.5 text-primary shrink-0" />
-                  {t('settings.aiEnhancementFeatureCron')}
-                </div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Image className="w-3.5 h-3.5 text-primary shrink-0" />
-                  {t('settings.aiEnhancementFeaturePoster')}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </Card>
-
-      {/* Row 3: Default Permission — full width card grid */}
-      <Card className="p-5">
-        <div className="flex items-baseline justify-between mb-4">
-          <h3 className="text-sm font-semibold text-foreground">
-            {t('settings.defaultPermission')}
-          </h3>
-          <p className="text-[11px] text-muted-foreground flex items-center gap-1">
-            <Lightbulb className="w-3 h-3 text-primary" />
-            {t('settings.defaultPermissionHint')}
-          </p>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          {Object.entries(PERMISSION_PRESETS).map(([key]) => {
-            const mode = key as PermissionModeName;
-            const isActive = (defaultMode || 'dev') === mode;
-            const ModeIcon = getModeIcon(mode);
-            const displayName = MODE_DISPLAY_NAMES[mode] || key;
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => { setDefaultMode(mode); setPermissionMode(mode); }}
-                className={`text-left p-3.5 rounded-lg cursor-pointer glass-mode-card ${
-                  isActive ? 'active' : ''
-                }`}
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <ModeIcon className={`w-3.5 h-3.5 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
-                  <span className={`text-sm font-semibold ${isActive ? 'text-primary' : 'text-foreground'}`}>
-                    {displayName}
-                  </span>
-                  <span className="font-mono text-[10px] text-muted-foreground/60 ml-auto">
-                    {key}
-                  </span>
-                </div>
-                <p className="text-xs text-muted-foreground line-clamp-2">
-                  {t(`environments.permMode_${key}_desc`)}
-                </p>
-                {isActive && (
-                  <p className="text-[11px] text-muted-foreground/80 leading-relaxed border-t glass-divider pt-2 mt-2">
-                    {t(`environments.permMode_${key}_detail`)}
-                  </p>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </Card>
-
-      {/* Row 4: About */}
-      <Card className="p-5">
-        <h3 className="text-sm font-semibold text-foreground mb-4">
-          {t('settings.about')}
-        </h3>
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">
-              {t('settings.version')}
-            </span>
-            <span className="text-sm font-medium text-foreground">
-              {appVersion ? `v${appVersion}` : t('settings.notAvailable')}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">
-              {t('settings.webkitVersion')}
-            </span>
-            <span className="text-sm font-medium text-foreground font-mono">
-              {webkitVersion ?? t('settings.notAvailable')}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground flex items-center gap-1.5">
-              <Terminal className="w-3.5 h-3.5" />
-              {t('settings.cliStatus')}
-            </span>
-            <InstallStatusBadge status={installStatus.ccem} />
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">
-              {t('settings.claudeCodeStatus')}
-            </span>
-            <InstallStatusBadge status={installStatus.claude} />
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">
-              {t('settings.codexStatus')}
-            </span>
-            <InstallStatusBadge status={installStatus.codex} />
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">
-              {t('settings.opencodeStatus')}
-            </span>
-            <InstallStatusBadge status={installStatus.opencode} />
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">
-              {t('settings.tmuxStatus')}
-            </span>
-            <InstallStatusBadge status={installStatus.tmux} />
-          </div>
-          {installStatus.ccem === false && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(t('settings.cliInstallCmd'));
-                  toast.success(t('settings.cliInstallCmd'));
-                }}
-                className="inline-flex items-center gap-1 text-[11px] font-mono text-primary hover:text-primary/80 glass-btn-outline px-2 py-0.5 rounded-md"
-              >
-                <Copy className="w-3 h-3" />
-                {t('settings.cliInstallCmd')}
-              </button>
-            </div>
-          )}
-          {installStatus.ccem === false && (
-            <p className="text-xs text-muted-foreground/80 flex items-center gap-1">
-              <Lightbulb className="w-3 h-3 text-primary shrink-0" />
-              {t('settings.cliInstallHint')}
-            </p>
-          )}
-          {installStatus.tmux === false && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(t('settings.tmuxInstallCmd'));
-                  toast.success(t('settings.tmuxInstallCmd'));
-                }}
-                className="inline-flex items-center gap-1 text-[11px] font-mono text-primary hover:text-primary/80 glass-btn-outline px-2 py-0.5 rounded-md"
-              >
-                <Copy className="w-3 h-3" />
-                {t('settings.tmuxInstallCmd')}
-              </button>
-            </div>
-          )}
-          {installStatus.tmux === false && (
-            <p className="text-xs text-muted-foreground/80 flex items-center gap-1">
-              <Lightbulb className="w-3 h-3 text-primary shrink-0" />
-              {t('settings.tmuxInstallHint')}
-            </p>
-          )}
-          {updateInfo && (
-            <div className="rounded-lg glass-subtle px-3 py-2 flex flex-wrap items-center justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-foreground">
-                  {formatMessage(t('settings.updateAvailable'), { version: updateInfo.version })}
-                </p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {updateInfo.channel === 'beta' ? t('settings.updateChannelBeta') : t('settings.updateChannelStable')}
-                  <span className="mx-1">·</span>
-                  <span className="font-mono">{updateInfo.releaseTag}</span>
-                </p>
-              </div>
-              {updateStatus === 'ready' ? (
-                <Button variant="outline" size="sm" className="glass-btn-outline shrink-0" onClick={handleRestartForUpdate}>
-                  <RotateCw className="w-3.5 h-3.5 mr-1.5" />
-                  {t('settings.restartToUpdate')}
-                </Button>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="glass-btn-outline shrink-0"
-                  disabled={updateStatus === 'installing'}
-                  onClick={handleInstallUpdate}
-                >
-                  <Download className="w-3.5 h-3.5 mr-1.5" />
-                  {updateStatus === 'installing' ? t('settings.installingUpdate') : t('settings.downloadUpdate')}
-                </Button>
-              )}
-            </div>
-          )}
-          {updateError && (
-            <p className="text-xs text-destructive">
-              {updateError}
-            </p>
-          )}
-          <div className="flex flex-wrap gap-2 pt-1">
-            <Button
-              variant="outline"
-              size="sm"
-              className="glass-btn-outline"
-              disabled={updateStatus === 'checking' || updateStatus === 'installing'}
-              onClick={handleCheckUpdate}
+  return (
+    <div className="flex h-full">
+      {/* Left Navigation */}
+      <nav className="w-52 shrink-0 border-r border-border-subtle bg-surface-sunken/50 p-3 space-y-0.5">
+        {sections.map((item) => {
+          const Icon = item.icon;
+          const isActive = activeSection === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => setActiveSection(item.id)}
+              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors duration-100 ${
+                isActive
+                  ? 'bg-primary/10 text-primary font-medium'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+              }`}
             >
-              <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${updateStatus === 'checking' ? 'animate-spin' : ''}`} />
-              {updateStatus === 'checking' ? t('settings.checkingUpdate') : t('settings.checkUpdate')}
-            </Button>
-            <Button variant="outline" size="sm" className="glass-btn-outline" onClick={() => window.open(updateInfo?.releaseUrl ?? CCEM_REPO_URL, '_blank')}>
-              GitHub
-            </Button>
-            <Button variant="outline" size="sm" className="glass-btn-outline" onClick={() => window.open(`${CCEM_REPO_URL}/issues`, '_blank')}>
-              {t('settings.feedback')}
-            </Button>
-          </div>
-        </div>
-      </Card>
+              <Icon className="w-4 h-4 shrink-0" />
+              {item.label}
+            </button>
+          );
+        })}
+      </nav>
+
+      {/* Right Content */}
+      <div className="flex-1 overflow-y-auto p-8">
+        <h2 className="text-xl font-semibold text-foreground tracking-tight mb-6">
+          {activeSectionLabel}
+        </h2>
+        {renderSectionContent()}
+      </div>
     </div>
   );
 }
@@ -875,22 +935,30 @@ function ToggleSetting({ checked, onChange, title, description }: {
   description: string;
 }) {
   return (
-    <label className="flex items-center gap-3 cursor-pointer group">
+    <div className="flex items-center justify-between gap-4">
+      <div className="min-w-0">
+        <div className="text-sm font-medium text-foreground">
+          {title}
+        </div>
+        <div className="text-sm text-muted-foreground">
+          {description}
+        </div>
+      </div>
       <button
         type="button"
         role="switch"
         aria-checked={checked}
         onClick={() => onChange(!checked)}
-        className={`glass-toggle ${checked ? 'checked' : ''}`}
-      />
-      <div>
-        <div className="text-sm font-medium text-foreground">
-          {title}
-        </div>
-        <div className="text-xs text-muted-foreground">
-          {description}
-        </div>
-      </div>
-    </label>
+        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out ${
+          checked ? 'bg-primary' : 'bg-muted-foreground/30'
+        }`}
+      >
+        <span
+          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+            checked ? 'translate-x-[22px]' : 'translate-x-[2px]'
+          } mt-[2px]`}
+        />
+      </button>
+    </div>
   );
 }
