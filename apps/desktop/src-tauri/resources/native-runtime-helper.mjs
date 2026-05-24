@@ -16633,6 +16633,90 @@ function getClaudeContentBlocks(message) {
   }
   return content;
 }
+function extractClaudeAssistantContent(message) {
+  const content = getClaudeContentBlocks(message);
+  const text = [];
+  const thinking = [];
+  content.forEach((block) => {
+    if (block?.type === "text" && typeof block.text === "string") {
+      text.push(block.text);
+      return;
+    }
+    if (block?.type === "thinking" && typeof block.thinking === "string") {
+      thinking.push(block.thinking);
+    }
+  });
+  return {
+    text: text.join(""),
+    thinking
+  };
+}
+function extractClaudeAssistantText(message) {
+  return extractClaudeAssistantContent(message).text;
+}
+async function runWorkspaceTitleQuery(command) {
+  const titleInput = command.title_input.trim();
+  if (!titleInput) {
+    emit({ type: "title_result", title: null });
+    return;
+  }
+  const env = buildClaudeQueryEnv({
+    envVars: command.env_vars,
+    effort: command.effort
+  });
+  const model = command.model?.trim() || command.env_vars?.ANTHROPIC_MODEL?.trim() || command.env_vars?.ANTHROPIC_DEFAULT_HAIKU_MODEL?.trim() || command.env_vars?.ANTHROPIC_SMALL_FAST_MODEL?.trim() || "haiku";
+  const prompt = [
+    "\u8BF7\u6839\u636E\u4E0B\u9762\u8FD9\u6761\u5DE5\u4F5C\u95F4\u4F1A\u8BDD\u7684\u7528\u6237\u8BF7\u6C42\u751F\u6210\u4E00\u4E2A ProjectTree \u77ED\u6807\u9898\u3002",
+    "\u8981\u6C42\uFF1A\u53EA\u8F93\u51FA\u6807\u9898\u672C\u8EAB\uFF1B\u4E2D\u6587 4 \u5230 12 \u4E2A\u5B57\u6216\u82F1\u6587 2 \u5230 6 \u4E2A\u8BCD\uFF1B\u4E0D\u8981\u5F15\u53F7\u3001\u6807\u70B9\u3001\u7F16\u53F7\u3001\u89E3\u91CA\u3001Markdown\u3002",
+    "",
+    "\u7528\u6237\u8BF7\u6C42\uFF1A",
+    titleInput
+  ].join("\n");
+  const titleQuery = E$$({
+    prompt,
+    options: {
+      cwd: command.working_dir,
+      env,
+      pathToClaudeCodeExecutable: command.claude_path ?? void 0,
+      includePartialMessages: false,
+      maxTurns: 1,
+      model,
+      persistSession: false,
+      settingSources: [...CLAUDE_SKILL_SETTING_SOURCES],
+      tools: [],
+      permissionMode: "plan"
+    }
+  });
+  const timeoutMs = 3e4;
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    titleQuery.close();
+  }, timeoutMs);
+  try {
+    const chunks = [];
+    for await (const message of titleQuery) {
+      if (message.type === "assistant") {
+        const text = extractClaudeAssistantText(message.message);
+        if (text.trim()) {
+          chunks.push(text);
+        }
+        continue;
+      }
+      if (message.type === "result" && message.subtype !== "success") {
+        throw new Error("Claude title query failed.");
+      }
+    }
+    if (timedOut) {
+      throw new Error(`Claude title query timed out after ${timeoutMs}ms.`);
+    }
+    const title = chunks.join(" ").trim();
+    emit({ type: "title_result", title: title || null });
+  } finally {
+    clearTimeout(timeout);
+    titleQuery.close();
+  }
+}
 function resetClaudeTurnTracking() {
   claudeSawPartialText = false;
   claudeSawPartialThinking = false;
@@ -17740,6 +17824,10 @@ async function runQueuedTurns() {
   }
 }
 async function handleCommand(command) {
+  if (command.type === "title_query") {
+    await runWorkspaceTitleQuery(command);
+    return;
+  }
   if (command.type === "init") {
     initCommand = command;
     currentProviderSessionId = command.provider_session_id ?? null;

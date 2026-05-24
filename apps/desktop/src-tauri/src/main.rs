@@ -27,6 +27,7 @@ mod runtime;
 mod session;
 mod session_annotations;
 mod session_provenance;
+mod session_titles;
 mod skills;
 mod system_proxy;
 mod telegram;
@@ -3124,6 +3125,7 @@ fn main() {
             get_conversation_messages,
             get_conversation_segments,
             title_overrides::set_session_title,
+            session_titles::generate_workspace_session_title,
             session_annotations::set_session_annotation,
             session_annotations::clear_session_annotation,
             skills::search_skills_stream,

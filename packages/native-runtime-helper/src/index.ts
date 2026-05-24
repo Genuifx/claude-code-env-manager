@@ -73,6 +73,16 @@ type UpdateSettingsCommand = {
   effort?: string;
 };
 
+type TitleQueryCommand = {
+  type: 'title_query';
+  title_input: string;
+  working_dir: string;
+  env_vars?: Record<string, string>;
+  claude_path?: string | null;
+  model?: string | null;
+  effort?: string | null;
+};
+
 type RuntimeSettingsPatch = {
   envName?: string;
   permMode?: string;
@@ -90,6 +100,7 @@ type InputCommand =
   | InteractivePromptResponseCommand
   | PermissionResponseCommand
   | UpdateSettingsCommand
+  | TitleQueryCommand
   | StopCommand;
 
 type HelperOutput =
@@ -105,6 +116,10 @@ type HelperOutput =
       type: 'status';
       status: string;
       detail?: string;
+    }
+  | {
+      type: 'title_result';
+      title: string | null;
     };
 
 type PermissionResolver = {
@@ -304,6 +319,81 @@ function extractClaudeAssistantContent(message: unknown): { text: string; thinki
 
 function extractClaudeAssistantText(message: unknown): string {
   return extractClaudeAssistantContent(message).text;
+}
+
+async function runWorkspaceTitleQuery(command: TitleQueryCommand) {
+  const titleInput = command.title_input.trim();
+  if (!titleInput) {
+    emit({ type: 'title_result', title: null });
+    return;
+  }
+
+  const env = buildClaudeQueryEnv({
+    envVars: command.env_vars,
+    effort: command.effort,
+  });
+  const model = command.model?.trim()
+    || command.env_vars?.ANTHROPIC_MODEL?.trim()
+    || command.env_vars?.ANTHROPIC_DEFAULT_HAIKU_MODEL?.trim()
+    || command.env_vars?.ANTHROPIC_SMALL_FAST_MODEL?.trim()
+    || 'haiku';
+  const prompt = [
+    '请根据下面这条工作间会话的用户请求生成一个 ProjectTree 短标题。',
+    '要求：只输出标题本身；中文 4 到 12 个字或英文 2 到 6 个词；不要引号、标点、编号、解释、Markdown。',
+    '',
+    '用户请求：',
+    titleInput,
+  ].join('\n');
+
+  const titleQuery = query({
+    prompt,
+    options: {
+      cwd: command.working_dir,
+      env,
+      pathToClaudeCodeExecutable: command.claude_path ?? undefined,
+      includePartialMessages: false,
+      maxTurns: 1,
+      model,
+      persistSession: false,
+      settingSources: [...CLAUDE_SKILL_SETTING_SOURCES],
+      tools: [],
+      permissionMode: 'plan',
+    },
+  });
+
+  const timeoutMs = 30_000;
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    titleQuery.close();
+  }, timeoutMs);
+
+  try {
+    const chunks: string[] = [];
+    for await (const message of titleQuery) {
+      if (message.type === 'assistant') {
+        const text = extractClaudeAssistantText(message.message);
+        if (text.trim()) {
+          chunks.push(text);
+        }
+        continue;
+      }
+
+      if (message.type === 'result' && (message as { subtype?: string }).subtype !== 'success') {
+        throw new Error('Claude title query failed.');
+      }
+    }
+
+    if (timedOut) {
+      throw new Error(`Claude title query timed out after ${timeoutMs}ms.`);
+    }
+
+    const title = chunks.join(' ').trim();
+    emit({ type: 'title_result', title: title || null });
+  } finally {
+    clearTimeout(timeout);
+    titleQuery.close();
+  }
 }
 
 function extractClaudeAssistantThinking(message: unknown): string[] {
@@ -1727,6 +1817,11 @@ async function runQueuedTurns() {
 }
 
 async function handleCommand(command: InputCommand) {
+  if (command.type === 'title_query') {
+    await runWorkspaceTitleQuery(command);
+    return;
+  }
+
   if (command.type === 'init') {
     initCommand = command;
     currentProviderSessionId = command.provider_session_id ?? null;

@@ -89,6 +89,7 @@ export interface TauriCommands {
   list_proxy_traffic: [{ limit: number; cursor?: string | null }, ProxyTrafficPage];
   get_proxy_traffic_detail: [{ id: string }, ProxyTrafficDetail];
   clear_proxy_traffic: [void, void];
+  generate_workspace_session_title: [{ titleInput: string }, string | null];
   open_text_in_vscode: [{ content: string; suggestedName?: string | null }, string];
   search_workspace_files: [
     {

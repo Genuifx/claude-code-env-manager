@@ -96,3 +96,17 @@ test('keeps cold-start live selection visible before React commits state', async
     });
   assert.equal(stillExistsInColdStartSnapshot, true);
 });
+
+test('upserts generated titles without losing the original prompt anchor', async () => {
+  const { upsertWorkspaceLiveSessionEntry } = await importWorkspaceLiveSessions();
+
+  const first = upsertWorkspaceLiveSessionEntry({}, nativeSession(), {
+    initialPrompt: '帮我给工作间会话生成标题',
+  });
+  const second = upsertWorkspaceLiveSessionEntry(first, nativeSession(), {
+    generatedTitle: '工作间会话标题生成',
+  });
+
+  assert.equal(second['native-1'].initialPrompt, '帮我给工作间会话生成标题');
+  assert.equal(second['native-1'].generatedTitle, '工作间会话标题生成');
+});
