@@ -1,5 +1,11 @@
 # ccem
 
+## 2.11.0
+
+### Minor Changes
+
+- Add a global desktop update status control so update progress is surfaced consistently.
+
 ## 2.10.0
 
 ### Minor Changes
