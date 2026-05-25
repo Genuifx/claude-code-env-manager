@@ -17,6 +17,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { scheduleAfterFirstPaint } from '@/lib/idle';
 import { EnvironmentsSkeleton } from '@/components/ui/skeleton-states';
 import { StartupSplash } from '@/components/layout/StartupSplash';
+import { AppUpdateProvider } from '@/components/app-update/AppUpdateProvider';
 
 const AnalyticsPage = lazy(async () =>
   import('@/pages/Analytics').then((m) => ({ default: m.Analytics }))
@@ -622,64 +623,66 @@ function App() {
 
   return (
     <LocaleProvider>
-      <TooltipProvider delayDuration={120}>
-        {startupReady ? (
-          <AppLayout
-            activeTab={activeTab}
-            onTabChange={navigateToTab}
-            onTabPrefetch={prefetchTab}
-            fullBleed={activeTab === 'history' || activeTab === 'workspace' || activeTab === 'settings'}
-          >
-            <>
-              <div
-                className={activeTab === 'workspace' ? 'h-full w-full' : 'hidden'}
-                hidden={activeTab !== 'workspace'}
-                aria-hidden={activeTab !== 'workspace'}
-              >
-                <Workspace
-                  isActive={activeTab === 'workspace'}
-                  onNavigate={navigateToTab}
-                  onLaunchWithDir={handleLaunchWithDir}
-                />
-              </div>
+      <AppUpdateProvider>
+        <TooltipProvider delayDuration={120}>
+          {startupReady ? (
+            <AppLayout
+              activeTab={activeTab}
+              onTabChange={navigateToTab}
+              onTabPrefetch={prefetchTab}
+              fullBleed={activeTab === 'history' || activeTab === 'workspace' || activeTab === 'settings'}
+            >
+              <>
+                <div
+                  className={activeTab === 'workspace' ? 'h-full w-full' : 'hidden'}
+                  hidden={activeTab !== 'workspace'}
+                  aria-hidden={activeTab !== 'workspace'}
+                >
+                  <Workspace
+                    isActive={activeTab === 'workspace'}
+                    onNavigate={navigateToTab}
+                    onLaunchWithDir={handleLaunchWithDir}
+                  />
+                </div>
 
-              {activeTab !== 'workspace' ? (
-                <Suspense fallback={<PageFallback activeTab={activeTab} />}>
-                  {renderActivePage()}
-                </Suspense>
-              ) : null}
-            </>
-          </AppLayout>
-        ) : (
-          <StartupSplash />
-        )}
+                {activeTab !== 'workspace' ? (
+                  <Suspense fallback={<PageFallback activeTab={activeTab} />}>
+                    {renderActivePage()}
+                  </Suspense>
+                ) : null}
+              </>
+            </AppLayout>
+          ) : (
+            <StartupSplash />
+          )}
 
-        {/* Environment Dialog */}
-        {dialogOpen ? (
-          <Suspense fallback={null}>
-            <EnvironmentDialogComponent
-              open={dialogOpen}
-              onOpenChange={setDialogOpen}
-              mode={dialogMode}
-              environment={getEditingEnv()}
-              onSave={handleSaveEnv}
-              onServerSync={loadFromRemote}
+          {/* Environment Dialog */}
+          {dialogOpen ? (
+            <Suspense fallback={null}>
+              <EnvironmentDialogComponent
+                open={dialogOpen}
+                onOpenChange={setDialogOpen}
+                mode={dialogMode}
+                environment={getEditingEnv()}
+                onSave={handleSaveEnv}
+                onServerSync={loadFromRemote}
+              />
+            </Suspense>
+          ) : null}
+
+          {/* Delete Environment Confirmation Dialog */}
+          {pendingDeleteEnv && (
+            <DeleteEnvConfirmDialog
+              envName={pendingDeleteEnv}
+              onConfirm={confirmDeleteEnv}
+              onCancel={() => setPendingDeleteEnv(null)}
             />
-          </Suspense>
-        ) : null}
+          )}
 
-        {/* Delete Environment Confirmation Dialog */}
-        {pendingDeleteEnv && (
-          <DeleteEnvConfirmDialog
-            envName={pendingDeleteEnv}
-            onConfirm={confirmDeleteEnv}
-            onCancel={() => setPendingDeleteEnv(null)}
-          />
-        )}
-
-        {/* Toast notifications */}
-        <Toaster position="top-center" richColors />
-      </TooltipProvider>
+          {/* Toast notifications */}
+          <Toaster position="top-center" richColors />
+        </TooltipProvider>
+      </AppUpdateProvider>
     </LocaleProvider>
   );
 }

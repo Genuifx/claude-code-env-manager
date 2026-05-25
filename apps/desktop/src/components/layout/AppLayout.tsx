@@ -1,6 +1,7 @@
 import { ReactNode } from 'react';
 import { SideRail } from './SideRail';
 import { MacFullscreenWindowControls } from './MacFullscreenWindowControls';
+import { GlobalUpdateIndicator } from '@/components/app-update/GlobalUpdateIndicator';
 import {
   Sidebar,
   SidebarInset,
@@ -78,6 +79,7 @@ function AppLayoutBody({
   return (
     <>
       <AppSidebarToggleAnchor label={sidebarToggleLabel} />
+      <GlobalUpdateIndicator />
 
       <Sidebar>
         {open && (

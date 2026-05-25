@@ -455,6 +455,13 @@ export interface AppUpdateMetadata {
   body?: string | null;
 }
 
+export interface AppUpdateProgressEvent {
+  phase: 'download-started' | 'download-progress' | 'download-finished' | 'installed';
+  version: string;
+  downloaded: number;
+  total?: number | null;
+}
+
 export interface FavoriteProject {
   path: string;
   name: string;

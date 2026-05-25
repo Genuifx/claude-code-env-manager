@@ -457,6 +457,8 @@
   --ccem-titlebar-height: 48px;
   --ccem-sidebar-toggle-size: 28px;
   --ccem-sidebar-toggle-gap: 4px;
+  --ccem-update-indicator-size: 28px;
+  --ccem-update-indicator-gap: 4px;
   --ccem-sidebar-toggle-clearance: 10px;
   --ccem-window-controls-inset-left: 24px;
   --ccem-window-controls-size: 12px;
@@ -465,6 +467,8 @@
     var(--ccem-window-controls-width, 0px)
     + var(--ccem-sidebar-toggle-gap)
     + var(--ccem-sidebar-toggle-size)
+    + var(--ccem-update-indicator-gap)
+    + var(--ccem-update-indicator-size)
     + var(--ccem-sidebar-toggle-clearance)
   );
 }
@@ -477,6 +481,22 @@
 }
 
 .app-sidebar-toggle-anchor * {
+  -webkit-app-region: no-drag;
+}
+
+.app-update-indicator-anchor {
+  top: 11px;
+  left: calc(
+    var(--ccem-window-controls-width, 0px)
+    + var(--ccem-sidebar-toggle-gap)
+    + var(--ccem-sidebar-toggle-size)
+    + var(--ccem-update-indicator-gap)
+  );
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+
+.app-update-indicator-anchor * {
   -webkit-app-region: no-drag;
 }
 

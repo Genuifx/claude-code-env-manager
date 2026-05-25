@@ -1,9 +1,9 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use semver::Version;
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 const RELEASE_URL_PREFIX: &str =
@@ -22,6 +22,15 @@ pub struct AppUpdateMetadata {
     release_url: String,
     date: Option<String>,
     body: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppUpdateProgressEvent {
+    phase: String,
+    version: String,
+    downloaded: u64,
+    total: Option<u64>,
 }
 
 #[tauri::command]
@@ -58,13 +67,52 @@ pub async fn check_app_update(
 }
 
 #[tauri::command]
-pub async fn install_app_update(pending_update: State<'_, PendingUpdate>) -> Result<(), String> {
+pub async fn install_app_update(
+    app: AppHandle,
+    pending_update: State<'_, PendingUpdate>,
+) -> Result<(), String> {
     let update = take_pending_update(&pending_update)?;
+    let version = update.version.clone();
+    let progress = Arc::new(Mutex::new((0_u64, None)));
 
+    emit_app_update_progress(&app, "download-started", &version, 0, None);
+
+    let chunk_app = app.clone();
+    let chunk_version = version.clone();
+    let chunk_progress = Arc::clone(&progress);
+    let finish_app = app.clone();
+    let finish_version = version.clone();
+    let finish_progress = Arc::clone(&progress);
     update
-        .download_and_install(|_, _| {}, || {})
+        .download_and_install(
+            move |chunk_length, content_length| {
+                let (downloaded, total) =
+                    update_progress_snapshot(&chunk_progress, chunk_length as u64, content_length);
+                emit_app_update_progress(
+                    &chunk_app,
+                    "download-progress",
+                    &chunk_version,
+                    downloaded,
+                    total,
+                );
+            },
+            move || {
+                let (downloaded, total) = read_progress_snapshot(&finish_progress);
+                emit_app_update_progress(
+                    &finish_app,
+                    "download-finished",
+                    &finish_version,
+                    downloaded,
+                    total,
+                );
+            },
+        )
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+
+    let (downloaded, total) = read_progress_snapshot(&progress);
+    emit_app_update_progress(&app, "installed", &version, downloaded, total);
+    Ok(())
 }
 
 #[tauri::command]
@@ -117,6 +165,43 @@ fn take_pending_update(pending_update: &State<'_, PendingUpdate>) -> Result<Upda
         .map_err(|_| "Pending update state is unavailable".to_string())?
         .take()
         .ok_or_else(|| "No pending update to install".to_string())
+}
+
+fn emit_app_update_progress(
+    app: &AppHandle,
+    phase: &str,
+    version: &str,
+    downloaded: u64,
+    total: Option<u64>,
+) {
+    let payload = AppUpdateProgressEvent {
+        phase: phase.to_string(),
+        version: version.to_string(),
+        downloaded,
+        total,
+    };
+    let _ = app.emit("app-update-progress", payload);
+}
+
+fn update_progress_snapshot(
+    progress: &Arc<Mutex<(u64, Option<u64>)>>,
+    chunk_length: u64,
+    content_length: Option<u64>,
+) -> (u64, Option<u64>) {
+    match progress.lock() {
+        Ok(mut guard) => {
+            guard.0 = guard.0.saturating_add(chunk_length);
+            if content_length.is_some() {
+                guard.1 = content_length;
+            }
+            (guard.0, guard.1)
+        }
+        Err(_) => (chunk_length, content_length),
+    }
+}
+
+fn read_progress_snapshot(progress: &Arc<Mutex<(u64, Option<u64>)>>) -> (u64, Option<u64>) {
+    progress.lock().map(|guard| (guard.0, guard.1)).unwrap_or((0, None))
 }
 
 #[cfg(test)]
