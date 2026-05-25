@@ -272,31 +272,11 @@ fn sanitize_generated_title(raw: &str) -> Option<String> {
         .find(|line| !line.trim().is_empty())
         .unwrap_or("")
         .trim()
-        .trim_start_matches(|ch| matches!(ch, '"' | '\'' | '`' | '“' | '‘' | '[' | '【'))
-        .trim_end_matches(|ch| {
-            matches!(
-                ch,
-                '"' | '\''
-                    | '`'
-                    | '”'
-                    | '’'
-                    | ']'
-                    | '】'
-                    | '。'
-                    | '.'
-                    | '！'
-                    | '!'
-                    | '？'
-                    | '?'
-                    | '，'
-                    | ','
-                    | '、'
-                    | '；'
-                    | ';'
-                    | '：'
-                    | ':'
-            )
-        })
+        .trim_start_matches(['"', '\'', '`', '“', '‘', '[', '【'])
+        .trim_end_matches([
+            '"', '\'', '`', '”', '’', ']', '】', '。', '.', '！', '!', '？', '?', '，', ',', '、',
+            '；', ';', '：', ':',
+        ])
         .trim()
         .to_string();
 
