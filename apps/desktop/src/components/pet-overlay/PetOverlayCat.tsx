@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type PointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import catHoverPuffed from '@/assets/pet/golden-cat-hover-puffed.png';
 import catHoverRise from '@/assets/pet/golden-cat-hover-rise.png';
@@ -277,6 +277,7 @@ function drawCatFrame(canvas: HTMLCanvasElement, frame: CatFrame) {
 
 export function PetOverlayCat({ className, notification, onDragStart }: PetOverlayCatProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [isFurRaised, setIsFurRaised] = useState(false);
   const catState = useMemo(() => petCatStateForNotification(notification), [notification]);
 
   useEffect(() => {
@@ -343,13 +344,13 @@ export function PetOverlayCat({ className, notification, onDragStart }: PetOverl
   return (
     <div
       className={cn(
-        'pet-overlay-cat pointer-events-auto h-[256px] w-[256px] cursor-grab active:cursor-grabbing',
+        'pet-overlay-cat pointer-events-none h-[256px] w-[256px]',
         className ?? '-ml-[72px]',
       )}
+      data-fur-raised={isFurRaised ? 'true' : 'false'}
       data-cat-state={catState}
       role="img"
       aria-label="桌面猫"
-      onPointerDown={handlePointerDown}
     >
       <div className="pet-overlay-cat__base">
         <canvas
@@ -374,6 +375,13 @@ export function PetOverlayCat({ className, notification, onDragStart }: PetOverl
           src={catHoverPuffed}
         />
       </div>
+      <div
+        className="pet-overlay-cat__hit-area"
+        aria-hidden="true"
+        onPointerDown={handlePointerDown}
+        onPointerEnter={() => setIsFurRaised(true)}
+        onPointerLeave={() => setIsFurRaised(false)}
+      />
     </div>
   );
 }

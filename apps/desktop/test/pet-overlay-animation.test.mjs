@@ -21,6 +21,12 @@ test('desktop pet cat uses the image generated state sprite', async () => {
   assert.match(catSource, /golden-cat-hover-puffed\.png/);
   assert.match(catSource, /h-\[256px\] w-\[256px\]/);
   assert.match(catSource, /-ml-\[72px\]/);
+  assert.match(catSource, /pointer-events-none/);
+  assert.match(catSource, /pet-overlay-cat__hit-area/);
+  assert.match(catSource, /onPointerEnter=\{\(\) => setIsFurRaised\(true\)\}/);
+  assert.match(catSource, /onPointerLeave=\{\(\) => setIsFurRaised\(false\)\}/);
+  assert.match(catSource, /onPointerDown=\{handlePointerDown\}/);
+  assert.match(catSource, /data-fur-raised=\{isFurRaised \? 'true' : 'false'\}/);
   assert.doesNotMatch(catSource, /drop-shadow|filter:\s*drop-shadow/);
   assert.match(catSource, /<canvas/);
   assert.match(catSource, /pet-overlay-cat__hover-fur/);
@@ -38,7 +44,14 @@ test('desktop pet cat uses the image generated state sprite', async () => {
   assert.doesNotMatch(cssSource, /pet-cat-open-eye-blink/);
   assert.match(cssSource, /pet-overlay-cat__base/);
   assert.match(cssSource, /pet-overlay-cat__hover-fur/);
+  assert.match(cssSource, /pet-overlay-cat__hit-area/);
+  assert.match(cssSource, /--pet-cat-hit-left/);
+  assert.match(cssSource, /--pet-cat-hit-top/);
+  assert.match(cssSource, /--pet-cat-hit-width/);
+  assert.match(cssSource, /--pet-cat-hit-height/);
   assert.match(cssSource, /--pet-cat-hover-frame-size/);
+  assert.doesNotMatch(cssSource, /\.pet-overlay-cat:hover/);
+  assert.match(cssSource, /\.pet-overlay-cat\[data-fur-raised='true'\]/);
   assert.match(cssSource, /@keyframes pet-cat-hover-fur-rise/);
   assert.match(cssSource, /@keyframes pet-cat-hover-fur-puffed/);
   assert.match(cssSource, /@keyframes pet-cat-hover-base-out/);
@@ -129,15 +142,18 @@ test('desktop pet hides the cat and ignores clicks when there are no bubbles', a
 });
 
 test('desktop pet cat starts native window dragging', async () => {
-  const [overlaySource, catSource] = await Promise.all([
+  const [overlaySource, catSource, cssSource] = await Promise.all([
     fs.readFile(path.join(desktopDir, 'src', 'pages', 'PetOverlay.tsx'), 'utf8'),
     fs.readFile(path.join(desktopDir, 'src', 'components', 'pet-overlay', 'PetOverlayCat.tsx'), 'utf8'),
+    fs.readFile(path.join(desktopDir, 'src', 'index.css'), 'utf8'),
   ]);
 
   assert.match(catSource, /getCurrentWindow/);
   assert.match(catSource, /startDragging/);
   assert.match(catSource, /onDragStart/);
-  assert.match(catSource, /cursor-grab/);
+  assert.match(catSource, /pet-overlay-cat__hit-area/);
+  assert.match(cssSource, /\.pet-overlay-cat__hit-area[\s\S]*cursor: grab/);
+  assert.match(cssSource, /\.pet-overlay-cat__hit-area:active[\s\S]*cursor: grabbing/);
   assert.match(overlaySource, /markPetWindowMoved/);
   assert.match(overlaySource, /<PetOverlayCat[\s\S]*onDragStart=\{markPetWindowMoved\}/);
 });

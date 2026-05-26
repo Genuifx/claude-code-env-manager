@@ -2766,6 +2766,10 @@ div[data-tauri-decorum-tb] {
 
 /* === Desktop pet overlay cat === */
 .pet-overlay-cat {
+  --pet-cat-hit-left: 70px;
+  --pet-cat-hit-top: 128px;
+  --pet-cat-hit-width: 128px;
+  --pet-cat-hit-height: 112px;
   position: relative;
   isolation: isolate;
   flex: 0 0 auto;
@@ -2817,19 +2821,35 @@ div[data-tauri-decorum-tb] {
   --pet-cat-hover-frame-top: 112.63px;
 }
 
-.pet-overlay-cat:hover .pet-overlay-cat__base {
+.pet-overlay-cat__hit-area {
+  position: absolute;
+  left: var(--pet-cat-hit-left);
+  top: var(--pet-cat-hit-top);
+  width: var(--pet-cat-hit-width);
+  height: var(--pet-cat-hit-height);
+  border-radius: 999px;
+  cursor: grab;
+  pointer-events: auto;
+  z-index: 3;
+}
+
+.pet-overlay-cat__hit-area:active {
+  cursor: grabbing;
+}
+
+.pet-overlay-cat[data-fur-raised='true'] .pet-overlay-cat__base {
   animation: pet-cat-hover-base-out 360ms step-end forwards;
 }
 
-.pet-overlay-cat:hover .pet-overlay-cat__hover-fur {
+.pet-overlay-cat[data-fur-raised='true'] .pet-overlay-cat__hover-fur {
   opacity: 1;
 }
 
-.pet-overlay-cat:hover .pet-overlay-cat__hover-frame-rise {
+.pet-overlay-cat[data-fur-raised='true'] .pet-overlay-cat__hover-frame-rise {
   animation: pet-cat-hover-fur-rise 360ms step-end forwards;
 }
 
-.pet-overlay-cat:hover .pet-overlay-cat__hover-frame-puffed {
+.pet-overlay-cat[data-fur-raised='true'] .pet-overlay-cat__hover-frame-puffed {
   animation: pet-cat-hover-fur-puffed 360ms step-end forwards, pet-cat-hover-angry-twitch 180ms 360ms infinite;
 }
 
@@ -2886,12 +2906,12 @@ div[data-tauri-decorum-tb] {
     animation: none;
   }
 
-  .pet-overlay-cat:hover .pet-overlay-cat__base {
+  .pet-overlay-cat[data-fur-raised='true'] .pet-overlay-cat__base {
     opacity: 0;
     animation: none;
   }
 
-  .pet-overlay-cat:hover .pet-overlay-cat__hover-frame-puffed {
+  .pet-overlay-cat[data-fur-raised='true'] .pet-overlay-cat__hover-frame-puffed {
     opacity: 1;
     animation: none;
   }
