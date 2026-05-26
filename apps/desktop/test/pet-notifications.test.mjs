@@ -79,6 +79,20 @@ function tauriInteractiveSession(overrides = {}) {
   };
 }
 
+function codexHistorySession(overrides = {}) {
+  return {
+    id: 'codex-thread-1',
+    client: 'codex',
+    workingDir: '/tmp/codex-project',
+    startedAt: '2026-05-01T08:00:00.000Z',
+    updatedAt: '2026-05-01T08:06:00.000Z',
+    status: 'stopped',
+    title: 'Codex 桌面会话',
+    latestModelOutput: '已经读取 Codex 的会话记录。',
+    ...overrides,
+  };
+}
+
 test('shows running sessions and unread terminal sessions, but hides read terminal sessions', async () => {
   const { buildPetNotifications } = await importPetNotifications();
   const notifications = buildPetNotifications(
@@ -214,6 +228,56 @@ test('extracts title and latest assistant turn from native session events', asyn
   assert.equal(display.latestModelOutput, '我会先看现有通知逻辑，再把文案改成最新输出。');
 });
 
+test('extracts latest visible assistant output from Codex history messages', async () => {
+  const { buildPetDisplayFromConversationMessages } = await importPetNotifications();
+  const display = buildPetDisplayFromConversationMessages([
+    {
+      msgType: 'user',
+      content: [{ type: 'text', text: '我也要看到 codex 的' }],
+    },
+    {
+      msgType: 'assistant',
+      content: [{ type: 'thinking', thinking: '内部推理不该出现在气泡里' }],
+    },
+    {
+      msgType: 'assistant',
+      content: [
+        { type: 'tool_use', name: 'rg', input: { query: 'codex history' } },
+      ],
+    },
+    {
+      msgType: 'assistant',
+      content: [
+        { type: 'text', text: '我会把 Codex 历史会话接到桌面猫通知里。' },
+      ],
+    },
+  ]);
+
+  assert.equal(display.title, '我也要看到 codex 的');
+  assert.equal(display.latestModelOutput, '我会把 Codex 历史会话接到桌面猫通知里。');
+});
+
+test('includes external Codex history sessions with their latest output', async () => {
+  const { buildPetNotifications } = await importPetNotifications();
+  const notifications = buildPetNotifications(
+    [
+      codexHistorySession(),
+      session({
+        runtime_id: 'older-native',
+        updated_at: '2026-05-01T08:05:00.000Z',
+      }),
+    ],
+    new Set(),
+  );
+
+  assert.equal(notifications[0].runtimeId, 'codex-thread-1');
+  assert.equal(notifications[0].provider, 'codex');
+  assert.equal(notifications[0].title, 'Codex 桌面会话');
+  assert.equal(notifications[0].message, '已经读取 Codex 的会话记录。');
+  assert.equal(notifications[0].updatedAt, '2026-05-01T08:06:00.000Z');
+  assert.equal(notifications[0].markReadOnOpen, true);
+});
+
 test('hides opened running notifications while allowing later status updates to surface', async () => {
   const { buildPetNotifications } = await importPetNotifications();
   const runningReadId = 'pet:claude:raw-running-1:running';
@@ -245,7 +309,7 @@ test('hides opened running notifications while allowing later status updates to 
   assert.equal(stoppedNotifications[0].markReadOnOpen, true);
 });
 
-test('sorts newest updates first and limits the stack to five bubbles', async () => {
+test('sorts newest updates first and limits the stack to three bubbles', async () => {
   const { buildPetNotifications } = await importPetNotifications();
   const sessions = Array.from({ length: 7 }, (_, index) =>
     session({
@@ -257,11 +321,58 @@ test('sorts newest updates first and limits the stack to five bubbles', async ()
 
   const notifications = buildPetNotifications(sessions, new Set());
 
-  assert.equal(notifications.length, 5);
+  assert.equal(notifications.length, 3);
   assert.deepEqual(
     notifications.map((item) => item.runtimeId),
-    ['runtime-6', 'runtime-5', 'runtime-4', 'runtime-3', 'runtime-2'],
+    ['runtime-6', 'runtime-5', 'runtime-4'],
   );
+});
+
+test('dismissed attention notifications stay hidden until their status changes', async () => {
+  const { buildPetNotifications } = await importPetNotifications();
+  const dismissedAttentionId = 'pet:codex:waiting-1:waiting_for_approval';
+
+  const dismissed = buildPetNotifications(
+    [
+      session({
+        runtime_id: 'waiting-1',
+        status: 'waiting_for_approval',
+      }),
+    ],
+    new Set([dismissedAttentionId]),
+  );
+
+  assert.equal(dismissed.length, 0);
+
+  const runningAgain = buildPetNotifications(
+    [
+      session({
+        runtime_id: 'waiting-1',
+        status: 'running',
+      }),
+    ],
+    new Set([dismissedAttentionId]),
+  );
+
+  assert.equal(runningAgain.length, 1);
+  assert.equal(runningAgain[0].id, 'pet:codex:waiting-1:running');
+});
+
+test('opens attention notifications as read so clicked bubbles disappear immediately', async () => {
+  const { buildPetNotifications } = await importPetNotifications();
+  const notifications = buildPetNotifications(
+    [
+      session({
+        runtime_id: 'waiting-open-1',
+        status: 'waiting_for_approval',
+      }),
+    ],
+    new Set(),
+  );
+
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].tone, 'attention');
+  assert.equal(notifications[0].markReadOnOpen, true);
 });
 
 test('uses concise Chinese status labels for different session states', async () => {

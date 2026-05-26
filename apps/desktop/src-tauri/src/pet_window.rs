@@ -4,8 +4,8 @@ pub const PET_WINDOW_LABEL: &str = "desktop-pet";
 
 const PET_WINDOW_INITIAL_WIDTH: f64 = 144.0;
 const PET_WINDOW_INITIAL_HEIGHT: f64 = 144.0;
-const PET_WINDOW_MAX_WIDTH: f64 = 520.0;
-const PET_WINDOW_MAX_HEIGHT: f64 = 360.0;
+const PET_WINDOW_MAX_WIDTH: f64 = 560.0;
+const PET_WINDOW_MAX_HEIGHT: f64 = 420.0;
 const PET_WINDOW_MARGIN: f64 = 28.0;
 
 pub fn sync_pet_window_visibility(app: &AppHandle, enabled: bool) -> Result<(), String> {
@@ -55,12 +55,17 @@ fn set_pet_activation_policy(_app: &AppHandle, _enabled: bool) -> Result<(), Str
 }
 
 #[tauri::command]
-pub fn resize_pet_window(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
+pub fn resize_pet_window(
+    app: AppHandle,
+    width: f64,
+    height: f64,
+    preserve_position: Option<bool>,
+) -> Result<(), String> {
     let Some(window) = app.get_webview_window(PET_WINDOW_LABEL) else {
         return Ok(());
     };
 
-    resize_and_position_pet_window(&window, width, height)
+    resize_and_position_pet_window(&window, width, height, preserve_position.unwrap_or(false))
 }
 
 fn build_pet_window(app: &AppHandle) -> Result<WebviewWindow, String> {
@@ -87,6 +92,9 @@ fn build_pet_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     let window = builder
         .build()
         .map_err(|e| format!("build pet window: {e}"))?;
+    window
+        .set_ignore_cursor_events(true)
+        .map_err(|e| format!("pet window initial cursor passthrough: {e}"))?;
 
     #[cfg(target_os = "macos")]
     {
@@ -98,6 +106,20 @@ fn build_pet_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     }
 
     Ok(window)
+}
+
+#[tauri::command]
+pub fn set_pet_window_content_visible(app: AppHandle, visible: bool) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(PET_WINDOW_LABEL) {
+        window
+            .set_ignore_cursor_events(!visible)
+            .map_err(|e| format!("pet window cursor passthrough: {e}"))?;
+        if visible {
+            window.show().map_err(|e| format!("show pet window content: {e}"))?;
+            apply_pet_window_after_show(&window)?;
+        }
+    }
+    Ok(())
 }
 
 fn configure_pet_window(window: &WebviewWindow) -> Result<(), String> {
@@ -126,12 +148,43 @@ fn resize_and_position_pet_window(
     window: &WebviewWindow,
     width: f64,
     height: f64,
+    preserve_position: bool,
 ) -> Result<(), String> {
     let size = pet_window_size(width, height);
+    let next_position = if preserve_position {
+        let scale = window
+            .scale_factor()
+            .map_err(|e| format!("pet window scale factor: {e}"))?;
+        let current_position = window
+            .outer_position()
+            .map_err(|e| format!("pet window position: {e}"))?;
+        let current_size = window
+            .outer_size()
+            .map_err(|e| format!("pet window size: {e}"))?;
+
+        Some(pet_window_position_preserving_anchor(
+            current_position.x as f64 / scale,
+            current_position.y as f64 / scale,
+            current_size.width as f64 / scale,
+            current_size.height as f64 / scale,
+            size.width,
+            size.height,
+        ))
+    } else {
+        None
+    };
+
     window
         .set_size(tauri::Size::Logical(size))
         .map_err(|e| format!("resize pet window: {e}"))?;
-    position_pet_window_for_size(window, size.width, size.height)
+    if let Some(position) = next_position {
+        window
+            .set_position(tauri::Position::Logical(position))
+            .map_err(|e| format!("position moved pet window: {e}"))?;
+        Ok(())
+    } else {
+        position_pet_window_for_size(window, size.width, size.height)
+    }
 }
 
 fn apply_pet_window_after_show(window: &WebviewWindow) -> Result<(), String> {
@@ -240,6 +293,20 @@ fn clamp_pet_window_dimension(value: f64, min: f64, max: f64) -> f64 {
     value.ceil().clamp(min, max)
 }
 
+fn pet_window_position_preserving_anchor(
+    current_x: f64,
+    current_y: f64,
+    current_width: f64,
+    current_height: f64,
+    next_width: f64,
+    next_height: f64,
+) -> tauri::LogicalPosition<f64> {
+    tauri::LogicalPosition {
+        x: current_x + current_width - next_width,
+        y: current_y + current_height - next_height,
+    }
+}
+
 fn position_pet_window_for_size(
     window: &WebviewWindow,
     window_width: f64,
@@ -316,5 +383,20 @@ mod size_tests {
         let huge = pet_window_size(9999.0, f64::INFINITY);
         assert_eq!(huge.width, PET_WINDOW_MAX_WIDTH);
         assert_eq!(huge.height, PET_WINDOW_INITIAL_HEIGHT);
+    }
+
+    #[test]
+    fn pet_window_position_preserves_bottom_right_anchor_after_manual_move() {
+        let position = pet_window_position_preserving_anchor(
+            100.0,
+            200.0,
+            486.0,
+            144.0,
+            520.0,
+            180.0,
+        );
+
+        assert_eq!(position.x, 66.0);
+        assert_eq!(position.y, 164.0);
     }
 }

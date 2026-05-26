@@ -2,7 +2,7 @@ import type { NativeSessionSummary, SessionEventRecord } from '@/lib/tauri-ipc';
 import type { Session as InteractiveSession } from '@/store';
 import type { PetNotificationItem, PetNotificationTone } from '@/types/pet';
 
-export const PET_NOTIFICATION_LIMIT = 5;
+export const PET_NOTIFICATION_LIMIT = 3;
 const PET_MESSAGE_PREVIEW_LIMIT = 96;
 const THINKING_MESSAGE = '正在思考';
 
@@ -33,11 +33,21 @@ interface TauriInteractiveSession {
   status: string;
 }
 
+interface CodexHistoryPetSession {
+  id: string;
+  client: 'codex';
+  workingDir: string;
+  startedAt: string | Date;
+  updatedAt?: string | Date;
+  status: string;
+}
+
 export type PetNotificationSourceSession =
   (
     | NativeSessionSummary
     | InteractiveSession
     | TauriInteractiveSession
+    | CodexHistoryPetSession
   ) & {
     title?: string | null;
     displayTitle?: string | null;
@@ -85,7 +95,16 @@ function sessionCreatedAt(session: PetNotificationSourceSession): string {
 }
 
 function sessionUpdatedAt(session: PetNotificationSourceSession): string {
-  return isNativeSession(session) ? session.updated_at || session.created_at : sessionCreatedAt(session);
+  if (isNativeSession(session)) {
+    return session.updated_at || session.created_at;
+  }
+  if ('updatedAt' in session && session.updatedAt) {
+    return session.updatedAt instanceof Date ? session.updatedAt.toISOString() : String(session.updatedAt);
+  }
+  if ('updated_at' in session && session.updated_at) {
+    return String(session.updated_at);
+  }
+  return sessionCreatedAt(session);
 }
 
 function normalizeInlineText(value: string): string {
@@ -156,6 +175,68 @@ export function buildPetDisplayFromEvents(
   };
 }
 
+interface PetConversationMessage {
+  msgType?: string;
+  msg_type?: string;
+  content?: unknown;
+}
+
+function textFromConversationContent(value: unknown): string | null {
+  if (typeof value === 'string') {
+    return nonEmptyText(value);
+  }
+
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((item) => textFromConversationContent(item))
+      .filter((item): item is string => !!item);
+    return parts.length > 0 ? normalizeInlineText(parts.join(' ')) : null;
+  }
+
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const blockType = typeof record.type === 'string' ? record.type : '';
+  if (blockType === 'thinking' || blockType === 'tool_use' || blockType === 'tool_result') {
+    return null;
+  }
+
+  return nonEmptyText(record.text)
+    ?? nonEmptyText(record.output_text)
+    ?? nonEmptyText(record.outputText)
+    ?? textFromConversationContent(record.content);
+}
+
+function conversationMessageType(message: PetConversationMessage): string {
+  return message.msgType ?? message.msg_type ?? '';
+}
+
+export function buildPetDisplayFromConversationMessages(
+  messages: PetConversationMessage[],
+): { title: string | null; latestModelOutput: string | null } {
+  const firstUserMessage = messages.find((message) => conversationMessageType(message) === 'user');
+  let latestAssistantOutput: string | null = null;
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message || conversationMessageType(message) !== 'assistant') {
+      continue;
+    }
+
+    latestAssistantOutput = textFromConversationContent(message.content);
+    if (latestAssistantOutput) {
+      break;
+    }
+  }
+
+  return {
+    title: firstUserMessage ? textFromConversationContent(firstUserMessage.content) : null,
+    latestModelOutput: latestAssistantOutput,
+  };
+}
+
 export function buildPetNotificationId(
   provider: 'claude' | 'codex',
   runtimeId: string,
@@ -206,14 +287,13 @@ export function buildPetNotifications(
     .map((session) => {
       const tone = toneForStatus(session.status);
       const id = notificationId(session);
-      const isAttention = tone === 'attention';
-      const shouldShow = isAttention || !readNotificationIds.has(id);
+      const shouldShow = !readNotificationIds.has(id);
 
       if (!shouldShow) {
         return null;
       }
 
-      return {
+      const item: PetNotificationItem = {
         id,
         runtimeId: sessionRuntimeId(session),
         provider: sessionProvider(session),
@@ -225,8 +305,9 @@ export function buildPetNotifications(
         tone,
         updatedAt: sessionUpdatedAt(session),
         projectDir: sessionProjectDir(session),
-        markReadOnOpen: !isAttention,
-      } satisfies PetNotificationItem;
+        markReadOnOpen: true,
+      };
+      return item;
     })
     .filter((item): item is PetNotificationItem => item !== null)
     .sort((left, right) => timestamp(right.updatedAt) - timestamp(left.updatedAt))

@@ -3043,6 +3043,7 @@ fn main() {
             pet_notifications::mark_pet_notification_read,
             pet_notifications::open_pet_notification,
             pet_window::resize_pet_window,
+            pet_window::set_pet_window_content_visible,
             app_updates::get_app_version,
             app_updates::check_app_update,
             app_updates::install_app_update,
