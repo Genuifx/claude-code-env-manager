@@ -45,12 +45,19 @@ describe('remote', () => {
       expect(decrypted).toBe(original);
     });
 
-    it('should fail to decrypt with wrong secret', () => {
-      const original = 'test data';
+    it('should reject remote JSON decrypted with a wrong secret', () => {
+      const original = JSON.stringify({
+        environments: {
+          test: {
+            ANTHROPIC_API_KEY: 'test-key',
+          },
+        },
+      });
       const encrypted = encryptWithSecret(original, 'correct-secret');
 
       expect(() => {
-        decryptWithSecret(encrypted, 'wrong-secret');
+        const decrypted = decryptWithSecret(encrypted, 'wrong-secret');
+        JSON.parse(decrypted);
       }).toThrow();
     });
 

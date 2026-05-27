@@ -3125,7 +3125,7 @@ mod tests {
     use rusqlite::Connection;
     use std::collections::HashMap;
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     fn temp_history_dir(prefix: &str) -> PathBuf {
@@ -3138,18 +3138,18 @@ mod tests {
         path
     }
 
-    fn temp_codex_config(root: &PathBuf, sqlite_home: &PathBuf) -> CodexPathConfig {
+    fn temp_codex_config(root: &Path, sqlite_home: &Path) -> CodexPathConfig {
         CodexPathConfig {
-            home_dir: root.clone(),
-            codex_home: root.clone(),
+            home_dir: root.to_path_buf(),
+            codex_home: root.to_path_buf(),
             history_path: root.join("history.jsonl"),
             sessions_root: root.join("sessions"),
             session_index_path: root.join("session_index.jsonl"),
-            sqlite_home: sqlite_home.clone(),
+            sqlite_home: sqlite_home.to_path_buf(),
         }
     }
 
-    fn write_codex_session_file(root: &PathBuf, session_id: &str, cwd: &str) -> PathBuf {
+    fn write_codex_session_file(root: &Path, session_id: &str, cwd: &str) -> PathBuf {
         let session_dir = root.join("sessions").join("2026").join("04").join("15");
         fs::create_dir_all(&session_dir).expect("create codex session dir");
         let path = session_dir.join(format!("rollout-2026-04-15T12-00-00-{session_id}.jsonl"));
@@ -3171,7 +3171,7 @@ mod tests {
     }
 
     fn write_codex_subagent_session_file(
-        root: &PathBuf,
+        root: &Path,
         session_id: &str,
         parent_thread_id: &str,
         cwd: &str,
