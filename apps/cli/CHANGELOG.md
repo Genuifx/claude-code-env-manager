@@ -1,5 +1,11 @@
 # ccem
 
+## 2.12.0
+
+### Minor Changes
+
+- Add the desktop pet companion with session notifications and production hardening.
+
 ## 2.11.0
 
 ### Minor Changes
