@@ -544,7 +544,7 @@ export function Workspace({
         const nextSessions = await fetchHistorySessions('all', force);
 
         if (requestSeq !== refreshRequestSeqRef.current) {
-          return;
+          return null;
         }
 
         syncSessionState(nextSessions);
@@ -564,15 +564,18 @@ export function Workspace({
             }
           }
         }
+
+        return nextSessions;
       } catch (error) {
         if (requestSeq !== refreshRequestSeqRef.current) {
-          return;
+          return null;
         }
 
         console.error('Failed to refresh workspace history:', error);
         if (!silent) {
           toast.error(t('workspace.refreshFailed'));
         }
+        return null;
       } finally {
         if (requestSeq === refreshRequestSeqRef.current) {
           setIsRefreshing(false);
@@ -1031,11 +1034,23 @@ export function Workspace({
         return;
       }
 
-      await refreshWorkspaceData({
+      const refreshedSessions = await refreshWorkspaceData({
         force: true,
         silent: true,
         includeSelectedConversation: false,
       });
+      const refreshedMatchingSession = refreshedSessions?.find((session) => {
+        if (session.id === petOpenRequest.runtimeId) {
+          return true;
+        }
+        if (petOpenRequest.providerSessionId && session.id === petOpenRequest.providerSessionId) {
+          return true;
+        }
+        return false;
+      });
+      if (refreshedMatchingSession) {
+        await handleSelect(refreshedMatchingSession);
+      }
       onPetOpenHandled?.();
     };
 

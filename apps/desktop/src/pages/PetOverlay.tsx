@@ -13,6 +13,7 @@ import type {
   ConversationMessageData,
   HistorySessionItem,
 } from '@/features/conversations/types';
+import { fetchHistorySessions } from '@/features/conversations/historyData';
 import type {
   NativeSessionSummary,
   PetNotificationReadState,
@@ -20,11 +21,17 @@ import type {
 } from '@/lib/tauri-ipc';
 import type { PetNotificationItem, PetOpenSessionRequest } from '@/types/pet';
 
-const REFRESH_INTERVAL_MS = 2500;
+const REFRESH_INTERVAL_MS = 10000;
 const PET_EVENT_PREVIEW_LIMIT = 120;
 const PET_OVERLAY_WINDOW_PADDING = 10;
 const CODEX_HISTORY_RECENCY_MS = 60 * 60 * 1000;
 const CODEX_HISTORY_SCAN_LIMIT = 8;
+
+interface PetDisplayCacheEntry {
+  signature: string;
+  title: string | null;
+  latestModelOutput: string | null;
+}
 
 function readIdsFromState(state: PetNotificationReadState): Set<string> {
   return new Set(state.readNotificationIds || []);
@@ -65,7 +72,19 @@ function isRecentCodexHistorySession(session: HistorySessionItem): boolean {
 
 async function hydrateNativeSessionDisplay(
   session: NativeSessionSummary,
+  displayCache: Map<string, PetDisplayCacheEntry>,
 ): Promise<PetNotificationSourceSession> {
+  const cacheKey = `native:${session.runtime_id}`;
+  const signature = `${session.updated_at || session.created_at}:${session.last_event_seq ?? 'none'}:${session.status}`;
+  const cached = displayCache.get(cacheKey);
+  if (cached?.signature === signature) {
+    return {
+      ...session,
+      title: cached.title,
+      latestModelOutput: cached.latestModelOutput,
+    };
+  }
+
   try {
     const batch = await invoke<ReplayBatch>('get_native_session_events', {
       runtimeId: session.runtime_id,
@@ -73,6 +92,11 @@ async function hydrateNativeSessionDisplay(
       limit: PET_EVENT_PREVIEW_LIMIT,
     });
     const display = buildPetDisplayFromEvents(batch.events);
+    displayCache.set(cacheKey, {
+      signature,
+      title: display.title,
+      latestModelOutput: display.latestModelOutput,
+    });
     return {
       ...session,
       title: display.title,
@@ -86,14 +110,36 @@ async function hydrateNativeSessionDisplay(
 
 async function hydrateCodexHistorySession(
   session: HistorySessionItem,
+  displayCache: Map<string, PetDisplayCacheEntry>,
 ): Promise<PetNotificationSourceSession> {
   const updatedAt = timestampToIso(session.timestamp);
+  const cacheKey = `codex-history:${session.id}`;
+  const signature = `${session.timestamp}:${session.display || ''}`;
+  const cached = displayCache.get(cacheKey);
+  if (cached?.signature === signature) {
+    return {
+      id: session.id,
+      client: 'codex',
+      workingDir: session.project || session.projectName || '',
+      startedAt: updatedAt,
+      updatedAt,
+      status: cached.latestModelOutput ? 'stopped' : 'running',
+      title: session.display || cached.title,
+      latestModelOutput: cached.latestModelOutput,
+    };
+  }
+
   try {
     const messages = await invoke<ConversationMessageData[]>('get_conversation_messages', {
       sessionId: session.id,
       source: 'codex',
     });
     const display = buildPetDisplayFromConversationMessages(messages);
+    displayCache.set(cacheKey, {
+      signature,
+      title: display.title,
+      latestModelOutput: display.latestModelOutput,
+    });
     return {
       id: session.id,
       client: 'codex',
@@ -122,6 +168,7 @@ async function hydrateCodexHistorySession(
 async function hydrateCodexHistorySessions(
   sessions: HistorySessionItem[],
   nativeCodexProviderSessionIds: ReadonlySet<string>,
+  displayCache: Map<string, PetDisplayCacheEntry>,
 ): Promise<PetNotificationSourceSession[]> {
   const recentSessions = sessions
     .filter((session) => session.source === 'codex')
@@ -130,7 +177,7 @@ async function hydrateCodexHistorySessions(
     .sort((left, right) => right.timestamp - left.timestamp)
     .slice(0, CODEX_HISTORY_SCAN_LIMIT);
 
-  return Promise.all(recentSessions.map((session) => hydrateCodexHistorySession(session)));
+  return Promise.all(recentSessions.map((session) => hydrateCodexHistorySession(session, displayCache)));
 }
 
 export function PetOverlay() {
@@ -140,37 +187,52 @@ export function PetOverlay() {
   const petOverlayContentRef = useRef<HTMLDivElement | null>(null);
   const lastPetWindowSizeRef = useRef<{ width: number; height: number } | null>(null);
   const petWindowMovedRef = useRef(false);
+  const displayCacheRef = useRef<Map<string, PetDisplayCacheEntry>>(new Map());
+  const refreshInFlightRef = useRef(false);
+  const refreshQueuedRef = useRef(false);
 
   const refresh = useCallback(async () => {
+    if (refreshInFlightRef.current) {
+      refreshQueuedRef.current = true;
+      return;
+    }
+
+    refreshInFlightRef.current = true;
     try {
-      const [nativeSessions, interactiveSessions, readState] = await Promise.all([
-        invoke<NativeSessionSummary[]>('list_native_sessions'),
-        invoke<PetNotificationSourceSession[]>('list_interactive_sessions'),
-        invoke<PetNotificationReadState>('get_pet_notification_read_state'),
-      ]);
-      const codexHistory = await invoke<HistorySessionItem[]>('get_conversation_history', {
-        source: 'codex',
-      }).catch((error) => {
-        console.debug('Desktop pet Codex history skipped:', error);
-        return [];
-      });
-      const hydratedNativeSessions = await Promise.all(
-        nativeSessions.map((session) => hydrateNativeSessionDisplay(session)),
-      );
-      const nativeCodexProviderSessionIds = new Set(
-        nativeSessions
-          .filter((session) => session.provider === 'codex')
-          .map((session) => session.provider_session_id)
-          .filter((id): id is string => !!id),
-      );
-      const hydratedCodexHistorySessions = await hydrateCodexHistorySessions(
-        codexHistory,
-        nativeCodexProviderSessionIds,
-      );
-      setSessions([...hydratedNativeSessions, ...interactiveSessions, ...hydratedCodexHistorySessions]);
-      setReadIds(readIdsFromState(readState));
-    } catch (error) {
-      console.debug('Desktop pet refresh skipped:', error);
+      do {
+        refreshQueuedRef.current = false;
+        try {
+          const [nativeSessions, interactiveSessions, readState] = await Promise.all([
+            invoke<NativeSessionSummary[]>('list_native_sessions'),
+            invoke<PetNotificationSourceSession[]>('list_interactive_sessions'),
+            invoke<PetNotificationReadState>('get_pet_notification_read_state'),
+          ]);
+          const codexHistory = await fetchHistorySessions('codex').catch((error) => {
+            console.debug('Desktop pet Codex history skipped:', error);
+            return [];
+          });
+          const hydratedNativeSessions = await Promise.all(
+            nativeSessions.map((session) => hydrateNativeSessionDisplay(session, displayCacheRef.current)),
+          );
+          const nativeCodexProviderSessionIds = new Set(
+            nativeSessions
+              .filter((session) => session.provider === 'codex')
+              .map((session) => session.provider_session_id)
+              .filter((id): id is string => !!id),
+          );
+          const hydratedCodexHistorySessions = await hydrateCodexHistorySessions(
+            codexHistory,
+            nativeCodexProviderSessionIds,
+            displayCacheRef.current,
+          );
+          setSessions([...hydratedNativeSessions, ...interactiveSessions, ...hydratedCodexHistorySessions]);
+          setReadIds(readIdsFromState(readState));
+        } catch (error) {
+          console.debug('Desktop pet refresh skipped:', error);
+        }
+      } while (refreshQueuedRef.current);
+    } finally {
+      refreshInFlightRef.current = false;
     }
   }, []);
 

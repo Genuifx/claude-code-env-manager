@@ -87,11 +87,14 @@ test('desktop pet refreshes recent external Codex history sessions', async () =>
     'utf8',
   );
 
-  assert.match(overlaySource, /get_conversation_history/);
+  assert.match(overlaySource, /fetchHistorySessions\('codex'\)/);
   assert.match(overlaySource, /get_conversation_messages/);
   assert.match(overlaySource, /hydrateCodexHistorySession/);
   assert.match(overlaySource, /provider_session_id/);
   assert.match(overlaySource, /CODEX_HISTORY_RECENCY_MS/);
+  assert.match(overlaySource, /displayCacheRef/);
+  assert.match(overlaySource, /refreshInFlightRef/);
+  assert.match(overlaySource, /refreshQueuedRef/);
 });
 
 test('workspace selection marks external Codex pet bubbles as read', async () => {
@@ -103,6 +106,9 @@ test('workspace selection marks external Codex pet bubbles as read', async () =>
   assert.match(workspaceSource, /session\.source === 'codex'/);
   assert.match(workspaceSource, /buildPetNotificationId\('codex', session\.id, 'running'\)/);
   assert.match(workspaceSource, /buildPetNotificationId\('codex', session\.id, 'stopped'\)/);
+  assert.match(workspaceSource, /const refreshedSessions = await refreshWorkspaceData/);
+  assert.match(workspaceSource, /const refreshedMatchingSession = refreshedSessions\?\.find/);
+  assert.match(workspaceSource, /await handleSelect\(refreshedMatchingSession\)/);
 });
 
 test('desktop pet keeps the three-bubble stack close to the cat without clipping', async () => {
@@ -135,6 +141,7 @@ test('desktop pet keeps the three-bubble stack close to the cat without clipping
 
   assert.match(petWindowSource, /PET_WINDOW_MAX_WIDTH: f64 = 560\.0/);
   assert.match(petWindowSource, /PET_WINDOW_MAX_HEIGHT: f64 = 420\.0/);
+  assert.doesNotMatch(petWindowSource, /set_activation_policy|ActivationPolicy::Accessory/);
 });
 
 test('desktop pet hides the cat and ignores clicks when there are no bubbles', async () => {
@@ -148,6 +155,7 @@ test('desktop pet hides the cat and ignores clicks when there are no bubbles', a
   assert.match(overlaySource, /\{hasNotifications \? \(/);
   assert.match(petWindowSource, /set_pet_window_content_visible/);
   assert.match(petWindowSource, /set_ignore_cursor_events\(!visible\)/);
+  assert.match(petWindowSource, /hide pet window content/);
   assert.match(petWindowSource, /setAcceptsMouseMovedEvents\(true\)/);
 });
 
@@ -159,6 +167,9 @@ test('desktop pet cat starts native window dragging', async () => {
   ]);
 
   assert.match(catSource, /getCurrentWindow/);
+  assert.match(catSource, /CAT_HOVER_POLL_INTERVAL_MS = 200/);
+  assert.match(catSource, /WINDOW_METRIC_CACHE_MS = 1000/);
+  assert.match(catSource, /cachedWindowMetrics/);
   assert.match(catSource, /startDragging/);
   assert.match(catSource, /onDragStart/);
   assert.match(catSource, /pet-overlay-cat__hit-area/);

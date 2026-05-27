@@ -17,7 +17,6 @@ pub fn sync_pet_window_visibility(app: &AppHandle, enabled: bool) -> Result<(), 
 }
 
 pub fn show_pet_window(app: &AppHandle) -> Result<(), String> {
-    set_pet_activation_policy(app, true)?;
     let window = match app.get_webview_window(PET_WINDOW_LABEL) {
         Some(window) => window,
         None => build_pet_window(app)?,
@@ -34,23 +33,6 @@ pub fn hide_pet_window(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(PET_WINDOW_LABEL) {
         window.hide().map_err(|e| format!("hide pet window: {e}"))?;
     }
-    set_pet_activation_policy(app, false)?;
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
-fn set_pet_activation_policy(app: &AppHandle, enabled: bool) -> Result<(), String> {
-    let policy = if enabled {
-        tauri::ActivationPolicy::Accessory
-    } else {
-        tauri::ActivationPolicy::Regular
-    };
-    app.set_activation_policy(policy)
-        .map_err(|e| format!("pet activation policy: {e}"))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn set_pet_activation_policy(_app: &AppHandle, _enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
@@ -117,6 +99,8 @@ pub fn set_pet_window_content_visible(app: AppHandle, visible: bool) -> Result<(
         if visible {
             window.show().map_err(|e| format!("show pet window content: {e}"))?;
             apply_pet_window_after_show(&window)?;
+        } else {
+            window.hide().map_err(|e| format!("hide pet window content: {e}"))?;
         }
     }
     Ok(())

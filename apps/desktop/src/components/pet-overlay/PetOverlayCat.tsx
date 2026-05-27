@@ -24,7 +24,8 @@ interface PetOverlayCatProps {
 const CAT_CANVAS_SIZE = 320;
 const CAT_SPRITE_COLUMNS = 3;
 const CAT_SPRITE_ROWS = 2;
-const CAT_HOVER_POLL_INTERVAL_MS = 80;
+const CAT_HOVER_POLL_INTERVAL_MS = 200;
+const WINDOW_METRIC_CACHE_MS = 1000;
 const THINKING_MESSAGE = '正在思考';
 const FRAME_MAP = {
   idle: 0,
@@ -337,6 +338,31 @@ export function PetOverlayCat({ className, notification, onDragStart }: PetOverl
     let cancelled = false;
     let disabled = false;
     let polling = false;
+    let cachedWindowMetrics: {
+      x: number;
+      y: number;
+      scaleFactor: number;
+      sampledAt: number;
+    } | null = null;
+
+    const readWindowMetrics = async () => {
+      const now = Date.now();
+      if (cachedWindowMetrics && now - cachedWindowMetrics.sampledAt <= WINDOW_METRIC_CACHE_MS) {
+        return cachedWindowMetrics;
+      }
+
+      const [windowPosition, scaleFactor] = await Promise.all([
+        appWindow.innerPosition(),
+        appWindow.scaleFactor(),
+      ]);
+      cachedWindowMetrics = {
+        x: windowPosition.x,
+        y: windowPosition.y,
+        scaleFactor,
+        sampledAt: now,
+      };
+      return cachedWindowMetrics;
+    };
 
     const pollGlobalHover = async () => {
       if (cancelled || disabled || polling) {
@@ -350,18 +376,17 @@ export function PetOverlayCat({ className, notification, onDragStart }: PetOverl
 
       polling = true;
       try {
-        const [cursor, windowPosition, scaleFactor] = await Promise.all([
+        const [cursor, windowMetrics] = await Promise.all([
           cursorPosition(),
-          appWindow.innerPosition(),
-          appWindow.scaleFactor(),
+          readWindowMetrics(),
         ]);
         if (cancelled) {
           return;
         }
 
         const rect = hitArea.getBoundingClientRect();
-        const localX = (cursor.x - windowPosition.x) / scaleFactor;
-        const localY = (cursor.y - windowPosition.y) / scaleFactor;
+        const localX = (cursor.x - windowMetrics.x) / windowMetrics.scaleFactor;
+        const localY = (cursor.y - windowMetrics.y) / windowMetrics.scaleFactor;
         const nextIsFurRaised = (
           localX >= rect.left
           && localX <= rect.right
