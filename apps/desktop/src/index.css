@@ -2766,10 +2766,10 @@ div[data-tauri-decorum-tb] {
 
 /* === Desktop pet overlay cat === */
 .pet-overlay-cat {
-  --pet-cat-hit-left: 70px;
-  --pet-cat-hit-top: 128px;
-  --pet-cat-hit-width: 128px;
-  --pet-cat-hit-height: 112px;
+  --pet-cat-hit-left: 76px;
+  --pet-cat-hit-top: 132px;
+  --pet-cat-hit-width: 86px;
+  --pet-cat-hit-height: 108px;
   position: relative;
   isolation: isolate;
   flex: 0 0 auto;

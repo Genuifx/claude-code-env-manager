@@ -45,10 +45,11 @@ test('desktop pet cat uses the image generated state sprite', async () => {
   assert.match(cssSource, /pet-overlay-cat__base/);
   assert.match(cssSource, /pet-overlay-cat__hover-fur/);
   assert.match(cssSource, /pet-overlay-cat__hit-area/);
-  assert.match(cssSource, /--pet-cat-hit-left/);
-  assert.match(cssSource, /--pet-cat-hit-top/);
-  assert.match(cssSource, /--pet-cat-hit-width/);
-  assert.match(cssSource, /--pet-cat-hit-height/);
+  assert.match(cssSource, /--pet-cat-hit-left:\s*76px/);
+  assert.match(cssSource, /--pet-cat-hit-top:\s*132px/);
+  assert.match(cssSource, /--pet-cat-hit-width:\s*86px/);
+  assert.match(cssSource, /--pet-cat-hit-height:\s*108px/);
+  assert.doesNotMatch(cssSource, /--pet-cat-hit-width:\s*128px/);
   assert.match(cssSource, /--pet-cat-hover-frame-size/);
   assert.doesNotMatch(cssSource, /\.pet-overlay-cat:hover/);
   assert.match(cssSource, /\.pet-overlay-cat\[data-fur-raised='true'\]/);
