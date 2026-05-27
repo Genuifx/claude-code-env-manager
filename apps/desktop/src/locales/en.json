@@ -601,6 +601,8 @@
     "startMinimizedDesc": "Do not show main window on startup",
     "closeToTray": "Minimize on Close (instead of quit)",
     "closeToTrayDesc": "Keep app running in background when close button is clicked",
+    "desktopPetEnabled": "Desktop Cat",
+    "desktopPetEnabledDesc": "Show an always-on-top desktop cat with running and unread completed sessions stacked beside it",
     "notifications": "Notifications",
     "desktopNotificationsEnabled": "Enable desktop notifications",
     "desktopNotificationsEnabledDesc": "Show system notifications when tasks finish, fail, or need your attention",

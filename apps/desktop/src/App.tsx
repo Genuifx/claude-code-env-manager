@@ -17,6 +17,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { scheduleAfterFirstPaint } from '@/lib/idle';
 import { EnvironmentsSkeleton } from '@/components/ui/skeleton-states';
 import { StartupSplash } from '@/components/layout/StartupSplash';
+import type { PetOpenSessionRequest } from '@/types/pet';
 import { AppUpdateProvider } from '@/components/app-update/AppUpdateProvider';
 
 const AnalyticsPage = lazy(async () =>
@@ -83,6 +84,7 @@ function App() {
   const [editingEnvName, setEditingEnvName] = useState<string | undefined>();
   const [pendingDeleteEnv, setPendingDeleteEnv] = useState<string | null>(null);
   const [startupReady, setStartupReady] = useState(false);
+  const [petOpenRequest, setPetOpenRequest] = useState<PetOpenSessionRequest | null>(null);
   const lastFocusSyncAtRef = useRef(0);
   const [, startTransition] = useTransition();
 
@@ -249,6 +251,16 @@ function App() {
           return;
         }
         unlisteners.push(listener4);
+
+        const listener5 = await listen<PetOpenSessionRequest>('pet-open-session', (event) => {
+          setPetOpenRequest(event.payload);
+          navigateToTab('workspace');
+        });
+        if (cancelled) {
+          listener5();
+          return;
+        }
+        unlisteners.push(listener5);
       } catch (err) {
         console.error('Failed to setup tray event listeners:', err);
       }
@@ -642,6 +654,8 @@ function App() {
                     isActive={activeTab === 'workspace'}
                     onNavigate={navigateToTab}
                     onLaunchWithDir={handleLaunchWithDir}
+                    petOpenRequest={petOpenRequest}
+                    onPetOpenHandled={() => setPetOpenRequest(null)}
                   />
                 </div>
 

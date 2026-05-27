@@ -17,6 +17,7 @@ export interface WorkspaceSessionDecoration {
   sessionKey: string;
   runtimeId?: string;
   client?: 'claude' | 'codex' | 'opencode';
+  status?: string;
   envName?: string;
   visualState: WorkspaceSessionVisualState;
   attentionKind?: WorkspaceAttentionKind;
@@ -506,6 +507,7 @@ export function useWorkspaceSessionDecorations({
         sessionKey,
         runtimeId: runtime.id,
         client: runtimeClient(runtime),
+        status: runtime.status,
         envName: runtime.envName,
         visualState: attentionKind
           ? 'attention'

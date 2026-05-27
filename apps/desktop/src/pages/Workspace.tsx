@@ -1,4 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import {
   ChevronDown,
   FolderOpen,
@@ -71,6 +72,8 @@ import {
 } from '@/components/workspace/workspaceSessionPreferences';
 import { resolveComposerDispatch } from '@/components/workspace/workspaceComposerDispatch';
 import { trimSeedMessagesBeforeFirstUserPrompt } from '@/components/workspace/workspaceEventTranscript';
+import { buildPetNotificationId } from '@/lib/petNotifications';
+import type { PetOpenSessionRequest } from '@/types/pet';
 
 const LazyHistoryDetail = lazy(async () =>
   import('@/components/workspace/WorkspaceConversationDetail').then((m) => ({
@@ -136,9 +139,16 @@ interface WorkspaceProps {
   isActive?: boolean;
   onNavigate: (tab: string) => void;
   onLaunchWithDir: (dir: string, client?: LaunchClient) => void;
+  petOpenRequest?: PetOpenSessionRequest | null;
+  onPetOpenHandled?: () => void;
 }
 
-export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
+export function Workspace({
+  isActive = true,
+  onNavigate,
+  petOpenRequest = null,
+  onPetOpenHandled,
+}: WorkspaceProps) {
   const { t } = useLocale();
   const {
     isLoadingEnvs,
@@ -534,7 +544,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
         const nextSessions = await fetchHistorySessions('all', force);
 
         if (requestSeq !== refreshRequestSeqRef.current) {
-          return;
+          return null;
         }
 
         syncSessionState(nextSessions);
@@ -554,15 +564,18 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
             }
           }
         }
+
+        return nextSessions;
       } catch (error) {
         if (requestSeq !== refreshRequestSeqRef.current) {
-          return;
+          return null;
         }
 
         console.error('Failed to refresh workspace history:', error);
         if (!silent) {
           toast.error(t('workspace.refreshFailed'));
         }
+        return null;
       } finally {
         if (requestSeq === refreshRequestSeqRef.current) {
           setIsRefreshing(false);
@@ -860,6 +873,48 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
     upsertLiveSessionEntry,
   ]);
 
+  const markPetNotificationReadForSession = useCallback(async (
+    session: HistorySessionItem,
+    liveEntry?: WorkspaceLiveSessionEntry | null,
+  ) => {
+    const liveSession = liveEntry?.session;
+    let runtimeId = liveSession?.runtime_id;
+    let provider: 'claude' | 'codex' | undefined = liveSession?.provider;
+    let status = liveSession?.status;
+
+    if (!runtimeId || !provider || !status) {
+      const decoration = decorationsBySessionKey[toSessionKey(session)];
+      if (!decoration?.runtimeId || !decoration.client || !decoration.status) {
+        if (session.source === 'codex') {
+          await Promise.allSettled([
+            invoke('mark_pet_notification_read', {
+              notificationId: buildPetNotificationId('codex', session.id, 'running'),
+            }),
+            invoke('mark_pet_notification_read', {
+              notificationId: buildPetNotificationId('codex', session.id, 'stopped'),
+            }),
+          ]);
+        }
+        return;
+      }
+      if (decoration.client === 'opencode') {
+        return;
+      }
+
+      runtimeId = decoration.runtimeId;
+      provider = decoration.client;
+      status = decoration.status;
+    }
+
+    try {
+      await invoke('mark_pet_notification_read', {
+        notificationId: buildPetNotificationId(provider, runtimeId, status),
+      });
+    } catch (error) {
+      console.error('Failed to mark pet notification as read from workspace selection:', error);
+    }
+  }, [decorationsBySessionKey]);
+
   useEffect(() => {
     if (!activeLiveEntry || !shouldHydrateLiveEntryFromHistory(activeLiveEntry)) {
       return;
@@ -929,6 +984,7 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
       selectedKeyRef.current = key;
 
       const liveEntry = await ensureLiveEntryForSession(session);
+      await markPetNotificationReadForSession(session, liveEntry);
       if (liveEntry && canRestoreWorkspaceLiveSession(liveEntry.session)) {
         setActiveLiveRuntimeId(liveEntry.session.runtime_id);
         setComposeDir(liveEntry.session.project_dir);
@@ -943,8 +999,72 @@ export function Workspace({ isActive = true, onNavigate }: WorkspaceProps) {
         showLoading: true,
       });
     },
-    [ensureLiveEntryForSession, loadConversation, setSelectedWorkingDir]
+    [ensureLiveEntryForSession, loadConversation, markPetNotificationReadForSession, setSelectedWorkingDir]
   );
+
+  useEffect(() => {
+    if (!isActive || !petOpenRequest) {
+      return;
+    }
+
+    const openFromRequest = async () => {
+      const liveEntry = liveSessionsByRuntimeId[petOpenRequest.runtimeId];
+      if (liveEntry && canRestoreWorkspaceLiveSession(liveEntry.session)) {
+        setActiveLiveRuntimeId(liveEntry.session.runtime_id);
+        setComposeDir(liveEntry.session.project_dir);
+        setSelectedWorkingDir(liveEntry.session.project_dir);
+        setWorkspaceMode('live');
+        onPetOpenHandled?.();
+        return;
+      }
+
+      const matchingSession = sidebarSessions.find((session) => {
+        if (session.id === petOpenRequest.runtimeId) {
+          return true;
+        }
+        if (petOpenRequest.providerSessionId && session.id === petOpenRequest.providerSessionId) {
+          return true;
+        }
+        return false;
+      });
+
+      if (matchingSession) {
+        await handleSelect(matchingSession);
+        onPetOpenHandled?.();
+        return;
+      }
+
+      const refreshedSessions = await refreshWorkspaceData({
+        force: true,
+        silent: true,
+        includeSelectedConversation: false,
+      });
+      const refreshedMatchingSession = refreshedSessions?.find((session) => {
+        if (session.id === petOpenRequest.runtimeId) {
+          return true;
+        }
+        if (petOpenRequest.providerSessionId && session.id === petOpenRequest.providerSessionId) {
+          return true;
+        }
+        return false;
+      });
+      if (refreshedMatchingSession) {
+        await handleSelect(refreshedMatchingSession);
+      }
+      onPetOpenHandled?.();
+    };
+
+    void openFromRequest();
+  }, [
+    handleSelect,
+    isActive,
+    liveSessionsByRuntimeId,
+    onPetOpenHandled,
+    petOpenRequest,
+    refreshWorkspaceData,
+    setSelectedWorkingDir,
+    sidebarSessions,
+  ]);
 
   const openComposer = useCallback((client: 'claude' | 'codex', dir?: string | null) => {
     setComposeProvider(client);

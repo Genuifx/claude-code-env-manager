@@ -792,6 +792,8 @@ pub struct DesktopSettings {
     pub start_minimized: bool,
     #[serde(rename = "closeToTray", default = "default_close_to_tray")]
     pub close_to_tray: bool,
+    #[serde(rename = "desktopPetEnabled", default)]
+    pub desktop_pet_enabled: bool,
     #[serde(rename = "defaultMode", default)]
     pub default_mode: Option<String>,
     #[serde(rename = "performanceMode", default = "default_performance_mode")]
@@ -877,6 +879,7 @@ impl Default for DesktopSettings {
             auto_start: false,
             start_minimized: false,
             close_to_tray: default_close_to_tray(),
+            desktop_pet_enabled: false,
             default_mode: None,
             performance_mode: default_performance_mode(),
             desktop_notifications_enabled: default_desktop_notifications_enabled(),
@@ -1136,5 +1139,42 @@ mod tests {
             resolve_opencode_primary_model(&env).as_deref(),
             Some("claude-haiku-test")
         );
+    }
+}
+
+#[cfg(test)]
+mod desktop_pet_settings_tests {
+    use super::DesktopSettings;
+
+    #[test]
+    fn desktop_pet_setting_defaults_to_disabled() {
+        let settings = DesktopSettings::default();
+        assert!(!settings.desktop_pet_enabled);
+    }
+
+    #[test]
+    fn desktop_pet_setting_uses_camel_case_json_key() {
+        let settings = DesktopSettings {
+            desktop_pet_enabled: true,
+            ..DesktopSettings::default()
+        };
+
+        let serialized = serde_json::to_value(&settings).expect("settings serialize");
+        assert_eq!(serialized["desktopPetEnabled"], true);
+    }
+
+    #[test]
+    fn desktop_pet_setting_is_backward_compatible_when_missing() {
+        let settings: DesktopSettings = serde_json::from_str(
+            r#"{
+                "theme": "system",
+                "autoStart": false,
+                "startMinimized": false,
+                "closeToTray": true
+            }"#,
+        )
+        .expect("settings deserialize");
+
+        assert!(!settings.desktop_pet_enabled);
     }
 }

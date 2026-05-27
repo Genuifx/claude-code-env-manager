@@ -296,6 +296,12 @@
     font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     -webkit-font-smoothing: antialiased;
   }
+
+  html[data-window='desktop-pet'],
+  html[data-window='desktop-pet'] body,
+  html[data-window='desktop-pet'] #root {
+    background: transparent;
+  }
 }
 
 /* === Motion Tokens === */
@@ -2776,6 +2782,159 @@
 div[data-tauri-decorum-tb] {
   width: var(--ccem-window-controls-width, 78px) !important;
   transition: width var(--duration-normal) var(--ease-decelerate);
+}
+
+/* === Desktop pet overlay cat === */
+.pet-overlay-cat {
+  --pet-cat-hit-left: 76px;
+  --pet-cat-hit-top: 132px;
+  --pet-cat-hit-width: 86px;
+  --pet-cat-hit-height: 108px;
+  position: relative;
+  isolation: isolate;
+  flex: 0 0 auto;
+  transform-origin: 50% 88%;
+  animation: pet-cat-canvas-idle 3.2s ease-in-out infinite;
+}
+
+.pet-overlay-cat__base,
+.pet-overlay-cat__hover-fur {
+  position: absolute;
+  inset: 0;
+}
+
+.pet-overlay-cat__base {
+  z-index: 1;
+}
+
+.pet-overlay-cat canvas {
+  display: block;
+}
+
+.pet-overlay-cat__hover-fur {
+  opacity: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.pet-overlay-cat__hover-frame {
+  position: absolute;
+  top: var(--pet-cat-hover-frame-top);
+  left: var(--pet-cat-hover-frame-left);
+  width: var(--pet-cat-hover-frame-size);
+  height: var(--pet-cat-hover-frame-size);
+  object-fit: contain;
+  opacity: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+.pet-overlay-cat__hover-frame-rise {
+  --pet-cat-hover-frame-left: 31.51px;
+  --pet-cat-hover-frame-size: 145.04px;
+  --pet-cat-hover-frame-top: 114.42px;
+}
+
+.pet-overlay-cat__hover-frame-puffed {
+  --pet-cat-hover-frame-left: 28.99px;
+  --pet-cat-hover-frame-size: 149.23px;
+  --pet-cat-hover-frame-top: 112.63px;
+}
+
+.pet-overlay-cat__hit-area {
+  position: absolute;
+  left: var(--pet-cat-hit-left);
+  top: var(--pet-cat-hit-top);
+  width: var(--pet-cat-hit-width);
+  height: var(--pet-cat-hit-height);
+  border-radius: 999px;
+  cursor: grab;
+  pointer-events: auto;
+  z-index: 3;
+}
+
+.pet-overlay-cat__hit-area:active {
+  cursor: grabbing;
+}
+
+.pet-overlay-cat[data-fur-raised='true'] .pet-overlay-cat__base {
+  animation: pet-cat-hover-base-out 360ms step-end forwards;
+}
+
+.pet-overlay-cat[data-fur-raised='true'] .pet-overlay-cat__hover-fur {
+  opacity: 1;
+}
+
+.pet-overlay-cat[data-fur-raised='true'] .pet-overlay-cat__hover-frame-rise {
+  animation: pet-cat-hover-fur-rise 360ms step-end forwards;
+}
+
+.pet-overlay-cat[data-fur-raised='true'] .pet-overlay-cat__hover-frame-puffed {
+  animation: pet-cat-hover-fur-puffed 360ms step-end forwards, pet-cat-hover-angry-twitch 180ms 360ms infinite;
+}
+
+@keyframes pet-cat-canvas-idle {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-2px) scale(1);
+  }
+}
+
+@keyframes pet-cat-hover-base-out {
+  0%, 34% {
+    opacity: 1;
+  }
+  35%, 100% {
+    opacity: 0;
+  }
+}
+
+@keyframes pet-cat-hover-fur-rise {
+  0%, 34% {
+    opacity: 0;
+  }
+  35%, 68% {
+    opacity: 1;
+  }
+  69%, 100% {
+    opacity: 0;
+  }
+}
+
+@keyframes pet-cat-hover-fur-puffed {
+  0%, 68% {
+    opacity: 0;
+  }
+  69%, 100% {
+    opacity: 1;
+  }
+}
+
+@keyframes pet-cat-hover-angry-twitch {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(-1px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pet-overlay-cat {
+    animation: none;
+  }
+
+  .pet-overlay-cat[data-fur-raised='true'] .pet-overlay-cat__base {
+    opacity: 0;
+    animation: none;
+  }
+
+  .pet-overlay-cat[data-fur-raised='true'] .pet-overlay-cat__hover-frame-puffed {
+    opacity: 1;
+    animation: none;
+  }
 }
 
 /* === Pet widget — pixel RPG game card === */

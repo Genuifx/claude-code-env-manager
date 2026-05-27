@@ -601,6 +601,8 @@
     "startMinimizedDesc": "应用启动时不显示主窗口",
     "closeToTray": "关闭窗口时最小化（而非退出）",
     "closeToTrayDesc": "点击关闭按钮时保持应用在后台运行",
+    "desktopPetEnabled": "桌面猫咪",
+    "desktopPetEnabledDesc": "在桌面右下角显示置顶猫咪，并把运行中和未读完成的会话堆叠在旁边",
     "notifications": "通知提醒",
     "desktopNotificationsEnabled": "启用桌面通知",
     "desktopNotificationsEnabledDesc": "任务完成、失败或需要你处理时，在系统层面提醒你",

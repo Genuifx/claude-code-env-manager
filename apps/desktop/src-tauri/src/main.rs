@@ -21,6 +21,8 @@ mod native_runtime;
 mod notifications;
 mod opencode;
 mod permission;
+mod pet_notifications;
+mod pet_window;
 mod proxy_debug;
 mod remote;
 mod runtime;
@@ -2509,6 +2511,7 @@ fn save_settings(app: tauri::AppHandle, settings: DesktopSettings) -> Result<(),
     merged_settings.auto_start = settings.auto_start;
     merged_settings.start_minimized = settings.start_minimized;
     merged_settings.close_to_tray = settings.close_to_tray;
+    merged_settings.desktop_pet_enabled = settings.desktop_pet_enabled;
     merged_settings.default_mode = settings.default_mode;
     merged_settings.performance_mode = settings.performance_mode;
     merged_settings.desktop_notifications_enabled = settings.desktop_notifications_enabled;
@@ -2518,6 +2521,11 @@ fn save_settings(app: tauri::AppHandle, settings: DesktopSettings) -> Result<(),
     merged_settings.ai_enhanced = settings.ai_enhanced;
     merged_settings.ai_env_name = settings.ai_env_name;
     config::write_settings(&merged_settings)?;
+    if let Err(e) =
+        pet_window::sync_pet_window_visibility(&app, merged_settings.desktop_pet_enabled)
+    {
+        errors.push(format!("desktop pet: {}", e));
+    }
     if let Some(notification_prefs_state) = app.try_state::<notifications::NotificationPrefsState>()
     {
         notification_prefs_state.replace_from_settings(&merged_settings);
@@ -3032,6 +3040,11 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             companion::get_companion,
+            pet_notifications::get_pet_notification_read_state,
+            pet_notifications::mark_pet_notification_read,
+            pet_notifications::open_pet_notification,
+            pet_window::resize_pet_window,
+            pet_window::set_pet_window_content_visible,
             app_updates::get_app_version,
             app_updates::check_app_update,
             app_updates::install_app_update,
@@ -3291,6 +3304,16 @@ fn main() {
             if startup_settings.start_minimized {
                 if let Some(w) = app.get_webview_window("main") {
                     let _ = w.hide();
+                }
+            }
+
+            if startup_settings.desktop_pet_enabled {
+                let app_handle = app.handle().clone();
+                if let Err(error) = pet_window::sync_pet_window_visibility(
+                    &app_handle,
+                    startup_settings.desktop_pet_enabled,
+                ) {
+                    eprintln!("Desktop pet startup warning: {}", error);
                 }
             }
 
