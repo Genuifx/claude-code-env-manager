@@ -57,6 +57,22 @@ test('adds live native sessions to the workspace sidebar before provider history
   assert.equal(sessions[0].envName, 'DeepSeek');
 });
 
+test('uses generated live session titles before provider history exists', async () => {
+  const { buildWorkspaceSidebarSessions } = await importWorkspaceSidebarSessions();
+
+  const sessions = buildWorkspaceSidebarSessions([], [
+    {
+      session: nativeSession(),
+      initialPrompt: '请帮我排查工作间会话标题生成逻辑，并补测试',
+      generatedTitle: '排查工作间标题生成',
+    },
+  ]);
+
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0].id, 'native-1');
+  assert.equal(sessions[0].display, '排查工作间标题生成');
+});
+
 test('deduplicates live native sessions after matching provider history appears', async () => {
   const { buildWorkspaceSidebarSessions } = await importWorkspaceSidebarSessions();
   const history = [

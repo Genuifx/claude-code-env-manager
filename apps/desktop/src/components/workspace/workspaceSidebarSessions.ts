@@ -14,6 +14,7 @@ export interface WorkspaceSidebarLiveSessionEntry {
     | 'updated_at'
   >;
   initialPrompt?: string | null;
+  generatedTitle?: string | null;
 }
 
 const TERMINAL_NATIVE_STATUSES = new Set(['stopped', 'error', 'handoff']);
@@ -56,7 +57,8 @@ export function toLiveHistorySessionItem(
   }
 
   const project = entry.session.project_dir.trim();
-  const display = entry.initialPrompt?.trim()
+  const display = entry.generatedTitle?.trim()
+    || entry.initialPrompt?.trim()
     || entry.session.provider_session_id?.trim()
     || `${entry.session.provider === 'codex' ? 'Codex' : 'Claude'} workspace session`;
 

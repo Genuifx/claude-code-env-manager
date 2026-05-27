@@ -1,5 +1,23 @@
 # ccem
 
+## 2.11.0
+
+### Minor Changes
+
+- Add a global desktop update status control so update progress is surfaced consistently.
+
+## 2.10.0
+
+### Minor Changes
+
+- Release desktop workspace and analytics improvements, including generated session titles, runtime error visibility, IME submit handling, titlebar alignment, and refined usage summaries.
+
+## 2.9.0
+
+### Minor Changes
+
+- Stabilize native desktop session continuation after completed Claude turns and recover reclaimed native sessions for resume.
+
 ## 2.8.1
 
 ### Patch Changes

@@ -194,6 +194,9 @@ importers:
       autoprefixer:
         specifier: ^10.4.19
         version: 10.4.24(postcss@8.5.6)
+      esbuild:
+        specifier: ^0.25.11
+        version: 0.25.12
       postcss:
         specifier: ^8.4.38
         version: 8.5.6

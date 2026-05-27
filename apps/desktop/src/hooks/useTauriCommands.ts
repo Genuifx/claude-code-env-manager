@@ -1181,6 +1181,10 @@ export function useTauriCommands() {
     await invoke('clear_proxy_traffic');
   }, []);
 
+  const generateWorkspaceSessionTitle = useCallback(async (titleInput: string): Promise<string | null> => {
+    return invoke<string | null>('generate_workspace_session_title', { titleInput });
+  }, []);
+
   const openTextInVSCode = useCallback(async (
     content: string,
     suggestedName?: string,
@@ -1316,6 +1320,7 @@ export function useTauriCommands() {
     listProxyTraffic,
     getProxyTrafficDetail,
     clearProxyTraffic,
+    generateWorkspaceSessionTitle,
     openTextInVSCode,
     setSessionTitle,
     setSessionAnnotation,

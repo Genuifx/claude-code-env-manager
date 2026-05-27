@@ -1258,7 +1258,7 @@ fn format_week_bucket(date: NaiveDate) -> String {
     let jan1 = NaiveDate::from_ymd_opt(date.year(), 1, 1).unwrap_or(date);
     let days_since_jan1 = date.signed_duration_since(jan1).num_days();
     let week_num =
-        ((days_since_jan1 + jan1.weekday().num_days_from_sunday() as i64 + 7) / 7) as u32;
+        ((days_since_jan1 + jan1.weekday().num_days_from_monday() as i64 + 7) / 7) as u32;
     format!("{}-W{:02}", date.year(), week_num)
 }
 
@@ -1357,8 +1357,8 @@ fn aggregate_cache(cache: &CacheFile, source_filter: Option<&'static str>) -> Us
     let today_str = now.format("%Y-%m-%d").to_string();
 
     let today_date = now.date_naive();
-    let days_since_sunday = today_date.weekday().num_days_from_sunday();
-    let week_start = today_date - chrono::Duration::days(days_since_sunday as i64);
+    let days_since_monday = today_date.weekday().num_days_from_monday();
+    let week_start = today_date - chrono::Duration::days(days_since_monday as i64);
     let month_start =
         NaiveDate::from_ymd_opt(today_date.year(), today_date.month(), 1).unwrap_or(today_date);
 

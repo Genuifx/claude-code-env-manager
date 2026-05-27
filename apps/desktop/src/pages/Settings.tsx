@@ -12,7 +12,7 @@ import { SettingsSkeleton } from '@/components/ui/skeleton-states';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { setPerformancePreference as applyPerformancePreference, type PerformancePreference } from '@/lib/performance';
 import { scheduleAfterFirstPaint } from '@/lib/idle';
-import type { AppUpdateMetadata } from '@/lib/tauri-ipc';
+import { useAppUpdate } from '@/components/app-update/appUpdateContext';
 import { shallow } from 'zustand/shallow';
 
 const MODE_DISPLAY_NAMES: Record<PermissionModeName, string> = {
@@ -43,8 +43,6 @@ interface InstallStatusState {
   opencode: boolean | null;
   tmux: boolean | null;
 }
-
-type UpdateStatus = 'idle' | 'checking' | 'available' | 'installing' | 'ready';
 
 type SectionId = 'appearance' | 'application' | 'notifications' | 'ai' | 'permission' | 'about';
 
@@ -82,6 +80,12 @@ export function Settings() {
     openDirectoryPicker,
     saveDefaultWorkingDir,
   } = useTauriCommands();
+  const {
+    state: updateState,
+    checkForUpdate,
+    downloadUpdate,
+    restartForUpdate,
+  } = useAppUpdate();
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('light');
   const [performanceMode, setPerformanceMode] = useState<PerformancePreference>('auto');
   const [autoStart, setAutoStart] = useState(false);
@@ -103,11 +107,11 @@ export function Settings() {
   const [aiEnvName, setAiEnvName] = useState<string | null>(null);
   const [webkitVersion, setWebkitVersion] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState<string | null>(null);
-  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>('idle');
-  const [updateInfo, setUpdateInfo] = useState<AppUpdateMetadata | null>(null);
-  const [updateError, setUpdateError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<SectionId>('appearance');
   const loaded = useRef(false);
+  const updateStatus = updateState.status;
+  const updateInfo = updateState.updateInfo;
+  const updateError = updateState.error;
 
   // Load CLI install status in parallel so the About card updates once.
   useEffect(() => {
@@ -267,50 +271,15 @@ export function Settings() {
   }, [performanceMode]);
 
   const handleCheckUpdate = async () => {
-    setUpdateStatus('checking');
-    setUpdateError(null);
-
-    try {
-      const nextUpdate = await invoke<AppUpdateMetadata | null>('check_app_update');
-
-      if (!nextUpdate) {
-        setUpdateInfo(null);
-        setUpdateStatus('idle');
-        toast.info(t('settings.upToDate'));
-        return;
-      }
-
-      setUpdateInfo(nextUpdate);
-      setUpdateStatus('available');
-      toast.success(formatMessage(t('settings.updateAvailableToast'), {
-        version: nextUpdate.version,
-      }));
-    } catch (error) {
-      const message = String(error);
-      setUpdateError(message);
-      setUpdateStatus('idle');
-      toast.error(formatMessage(t('settings.updateCheckFailed'), { error: message }));
-    }
+    await checkForUpdate();
   };
 
   const handleInstallUpdate = async () => {
-    setUpdateStatus('installing');
-    setUpdateError(null);
-
-    try {
-      await invoke('install_app_update');
-      setUpdateStatus('ready');
-      toast.success(t('settings.updateInstalled'));
-    } catch (error) {
-      const message = String(error);
-      setUpdateError(message);
-      setUpdateStatus(updateInfo ? 'available' : 'idle');
-      toast.error(formatMessage(t('settings.updateInstallFailed'), { error: message }));
-    }
+    await downloadUpdate();
   };
 
   const handleRestartForUpdate = async () => {
-    await invoke('restart_app');
+    await restartForUpdate();
   };
 
   // Auto-save whenever settings change (skip initial load)
@@ -813,11 +782,11 @@ export function Settings() {
                 variant="outline"
                 size="sm"
                 className="active:scale-[0.97] transition-transform shrink-0"
-                disabled={updateStatus === 'installing'}
+                disabled={updateStatus === 'downloading'}
                 onClick={handleInstallUpdate}
               >
                 <Download className="w-3.5 h-3.5 mr-1.5" />
-                {updateStatus === 'installing' ? t('settings.installingUpdate') : t('settings.downloadUpdate')}
+                {updateStatus === 'downloading' ? t('settings.updateDownloading') : t('settings.downloadUpdate')}
               </Button>
             )}
           </div>
@@ -834,7 +803,7 @@ export function Settings() {
           variant="outline"
           size="sm"
           className="active:scale-[0.97] transition-transform"
-          disabled={updateStatus === 'checking' || updateStatus === 'installing'}
+          disabled={updateStatus === 'checking' || updateStatus === 'downloading'}
           onClick={handleCheckUpdate}
         >
           <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${updateStatus === 'checking' ? 'animate-spin' : ''}`} />

@@ -6,6 +6,7 @@ import type { NativeSessionSummary } from '@/lib/tauri-ipc';
 export interface WorkspaceLiveSessionEntry {
   session: NativeSessionSummary;
   initialPrompt: string | null;
+  generatedTitle?: string | null;
   seedMessages: ConversationMessageData[];
 }
 
@@ -42,16 +43,19 @@ export function upsertWorkspaceLiveSessionEntry(
   session: NativeSessionSummary,
   options: {
     initialPrompt?: string | null;
+    generatedTitle?: string | null;
     seedMessages?: ConversationMessageData[];
   } = {},
 ): WorkspaceLiveSessionsByRuntimeId {
   const existing = previous[session.runtime_id];
   const nextInitialPrompt = options.initialPrompt ?? existing?.initialPrompt ?? null;
+  const nextGeneratedTitle = options.generatedTitle ?? existing?.generatedTitle ?? null;
   const nextSeedMessages = options.seedMessages ?? existing?.seedMessages ?? [];
 
   if (
     existing
     && existing.initialPrompt === nextInitialPrompt
+    && existing.generatedTitle === nextGeneratedTitle
     && existing.seedMessages === nextSeedMessages
     && areNativeSessionSummariesEqual(existing.session, session)
   ) {
@@ -63,6 +67,7 @@ export function upsertWorkspaceLiveSessionEntry(
     [session.runtime_id]: {
       session,
       initialPrompt: nextInitialPrompt,
+      generatedTitle: nextGeneratedTitle,
       seedMessages: nextSeedMessages,
     },
   };

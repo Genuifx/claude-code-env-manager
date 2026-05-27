@@ -512,7 +512,7 @@ export const AnalyticsInsights = memo(function AnalyticsInsights({
           </h3>
           {showSecondaryCharts ? (
             <Suspense fallback={<ChartSkeleton heightClass="h-[160px]" />}>
-              <LazyModelDistribution byModel={deferredByModel} />
+              <LazyModelDistribution breakdown={activeBreakdown ?? undefined} byModel={deferredByModel} />
             </Suspense>
           ) : (
             <ChartSkeleton heightClass="h-[160px]" />

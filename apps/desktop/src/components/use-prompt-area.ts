@@ -958,7 +958,7 @@ export function usePromptArea({
 
       // 2.8 Shift+Enter: insert newline at model level (avoids browser's broken
       // contentEditable behavior near <a> elements)
-      if (e.key === 'Enter' && e.shiftKey && !e.nativeEvent.isComposing && !events.isComposing.current) {
+      if (e.key === 'Enter' && e.shiftKey && !e.nativeEvent.isComposing && !events.isComposing.current && !events.isWithinCompositionCooldown()) {
         e.preventDefault()
         const editor = editorRef.current
         if (editor) {
@@ -977,7 +977,7 @@ export function usePromptArea({
       }
 
       // 3. Submit on Enter (without Shift), skip during IME
-      if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && !events.isComposing.current) {
+      if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && !events.isComposing.current && !events.isWithinCompositionCooldown()) {
         // 3a. Check for list continuation first (only when markdown is enabled)
         const editor = editorRef.current
         if (editor && tryListContinuation(editor)) {

@@ -198,6 +198,7 @@ export function Workspace({
     launchClaudeCode,
     searchWorkspaceFiles,
     stopNativeSession,
+    generateWorkspaceSessionTitle,
   } = useTauriCommands();
 
   const [sessions, setSessions] = useState<HistorySessionItem[]>([]);
@@ -241,6 +242,7 @@ export function Workspace({
   const hasLoadedRef = useRef(false);
   const prevIsActiveRef = useRef(isActive);
   const selectedKeyRef = useRef<string | null>(null);
+  const persistedGeneratedTitleKeysRef = useRef(new Set<string>());
 
   useEffect(() => {
     selectedKeyRef.current = selectedKey;
@@ -282,12 +284,26 @@ export function Workspace({
     session: NativeSessionSummary,
     options: {
       initialPrompt?: string | null;
+      generatedTitle?: string | null;
       seedMessages?: ConversationMessageData[];
     } = {},
   ) => {
     updateLiveSessionsByRuntimeId((previous) =>
       upsertWorkspaceLiveSessionEntry(previous, session, options)
     );
+  }, [updateLiveSessionsByRuntimeId]);
+
+  const setLiveSessionGeneratedTitle = useCallback((runtimeId: string, title: string) => {
+    updateLiveSessionsByRuntimeId((previous) => {
+      const existing = previous[runtimeId];
+      if (!existing) {
+        return previous;
+      }
+
+      return upsertWorkspaceLiveSessionEntry(previous, existing.session, {
+        generatedTitle: title,
+      });
+    });
   }, [updateLiveSessionsByRuntimeId]);
 
   const restoreNativeSessions = useCallback(async () => {
@@ -588,6 +604,32 @@ export function Workspace({
       });
     }, delayMs);
   }, [isActive, refreshWorkspaceData]);
+
+  useEffect(() => {
+    for (const entry of Object.values(liveSessionsByRuntimeId)) {
+      const generatedTitle = entry.generatedTitle?.trim();
+      const providerSessionId = entry.session.provider_session_id?.trim();
+      if (!generatedTitle || !providerSessionId) {
+        continue;
+      }
+
+      const key = `${entry.session.provider}:${providerSessionId}:${generatedTitle}`;
+      if (persistedGeneratedTitleKeysRef.current.has(key)) {
+        continue;
+      }
+
+      persistedGeneratedTitleKeysRef.current.add(key);
+      void setSessionTitle(entry.session.provider, providerSessionId, generatedTitle)
+        .then(() => {
+          invalidateHistoryCache();
+          scheduleWorkspaceRefresh(650);
+        })
+        .catch((error) => {
+          persistedGeneratedTitleKeysRef.current.delete(key);
+          console.error('Failed to persist generated provider session title:', error);
+        });
+    }
+  }, [liveSessionsByRuntimeId, scheduleWorkspaceRefresh, setSessionTitle]);
 
   useEffect(() => {
     void refreshWorkspaceData({
@@ -1133,6 +1175,45 @@ export function Workspace({
     openComposer(composeProvider, projectPath);
   }, [composeProvider, openComposer]);
 
+  const requestWorkspaceSessionTitle = useCallback((session: NativeSessionSummary, titleInput: string) => {
+    const normalizedInput = titleInput.trim();
+    if (!normalizedInput) {
+      return;
+    }
+
+    void generateWorkspaceSessionTitle(normalizedInput)
+      .then(async (generatedTitle) => {
+        const title = generatedTitle?.trim();
+        if (!title) {
+          return;
+        }
+
+        setLiveSessionGeneratedTitle(session.runtime_id, title);
+        await setSessionTitle(session.provider, session.runtime_id, title).catch((error) => {
+          console.error('Failed to persist generated runtime session title:', error);
+        });
+
+        const latestSession = liveSessionsByRuntimeIdRef.current[session.runtime_id]?.session ?? session;
+        const providerSessionId = latestSession.provider_session_id?.trim();
+        if (providerSessionId) {
+          await setSessionTitle(session.provider, providerSessionId, title).catch((error) => {
+            console.error('Failed to persist generated provider session title:', error);
+          });
+        }
+
+        invalidateHistoryCache();
+        scheduleWorkspaceRefresh(650);
+      })
+      .catch((error) => {
+        console.error('Failed to generate workspace session title:', error);
+      });
+  }, [
+    generateWorkspaceSessionTitle,
+    scheduleWorkspaceRefresh,
+    setLiveSessionGeneratedTitle,
+    setSessionTitle,
+  ]);
+
   const handleCreateNativeConversation = useCallback(async (payload?: ComposerSubmitPayload) => {
     const rawPrompt = payload?.text ?? composePrompt;
     const displayPrompt = payload?.displayText ?? rawPrompt;
@@ -1179,6 +1260,7 @@ export function Workspace({
         selectedKeyRef.current = nextKey;
         setSelectedKey(nextKey);
       }
+      requestWorkspaceSessionTitle(summary, previewPrompt);
       setActiveLiveRuntimeId(summary.runtime_id);
       setWorkspaceMode('live');
       setComposePrompt('');
@@ -1205,6 +1287,7 @@ export function Workspace({
     currentEnv,
     effectiveComposeDir,
     permissionMode,
+    requestWorkspaceSessionTitle,
     scheduleWorkspaceRefresh,
     setSelectedWorkingDir,
     upsertLiveSessionEntry,
