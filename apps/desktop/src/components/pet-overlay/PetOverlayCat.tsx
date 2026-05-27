@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import { cursorPosition, getCurrentWindow } from '@tauri-apps/api/window';
 import catHoverPuffed from '@/assets/pet/golden-cat-hover-puffed.png';
 import catHoverRise from '@/assets/pet/golden-cat-hover-rise.png';
 import catStateSprite from '@/assets/pet/golden-cat-imagegen-states.png';
@@ -24,6 +24,7 @@ interface PetOverlayCatProps {
 const CAT_CANVAS_SIZE = 320;
 const CAT_SPRITE_COLUMNS = 3;
 const CAT_SPRITE_ROWS = 2;
+const CAT_HOVER_POLL_INTERVAL_MS = 80;
 const THINKING_MESSAGE = '正在思考';
 const FRAME_MAP = {
   idle: 0,
@@ -277,6 +278,7 @@ function drawCatFrame(canvas: HTMLCanvasElement, frame: CatFrame) {
 
 export function PetOverlayCat({ className, notification, onDragStart }: PetOverlayCatProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const hitAreaRef = useRef<HTMLDivElement | null>(null);
   const [isFurRaised, setIsFurRaised] = useState(false);
   const catState = useMemo(() => petCatStateForNotification(notification), [notification]);
 
@@ -330,6 +332,65 @@ export function PetOverlayCat({ className, notification, onDragStart }: PetOverl
     };
   }, [catState]);
 
+  useEffect(() => {
+    const appWindow = getCurrentWindow();
+    let cancelled = false;
+    let disabled = false;
+    let polling = false;
+
+    const pollGlobalHover = async () => {
+      if (cancelled || disabled || polling) {
+        return;
+      }
+
+      const hitArea = hitAreaRef.current;
+      if (!hitArea) {
+        return;
+      }
+
+      polling = true;
+      try {
+        const [cursor, windowPosition, scaleFactor] = await Promise.all([
+          cursorPosition(),
+          appWindow.innerPosition(),
+          appWindow.scaleFactor(),
+        ]);
+        if (cancelled) {
+          return;
+        }
+
+        const rect = hitArea.getBoundingClientRect();
+        const localX = (cursor.x - windowPosition.x) / scaleFactor;
+        const localY = (cursor.y - windowPosition.y) / scaleFactor;
+        const nextIsFurRaised = (
+          localX >= rect.left
+          && localX <= rect.right
+          && localY >= rect.top
+          && localY <= rect.bottom
+        );
+
+        setIsFurRaised((current) => (
+          current === nextIsFurRaised ? current : nextIsFurRaised
+        ));
+      } catch (error) {
+        disabled = true;
+        console.debug('Desktop pet global hover skipped:', error);
+      } finally {
+        polling = false;
+      }
+    };
+
+    void pollGlobalHover();
+    const interval = window.setInterval(() => {
+      void pollGlobalHover();
+    }, CAT_HOVER_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
+
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) {
       return;
@@ -376,6 +437,7 @@ export function PetOverlayCat({ className, notification, onDragStart }: PetOverl
         />
       </div>
       <div
+        ref={hitAreaRef}
         className="pet-overlay-cat__hit-area"
         aria-hidden="true"
         onPointerDown={handlePointerDown}

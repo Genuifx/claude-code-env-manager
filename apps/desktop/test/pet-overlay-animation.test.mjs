@@ -19,10 +19,18 @@ test('desktop pet cat uses the image generated state sprite', async () => {
   assert.match(catSource, /golden-cat-imagegen-states\.png/);
   assert.match(catSource, /golden-cat-hover-rise\.png/);
   assert.match(catSource, /golden-cat-hover-puffed\.png/);
+  assert.match(catSource, /cursorPosition/);
+  assert.match(catSource, /CAT_HOVER_POLL_INTERVAL_MS/);
   assert.match(catSource, /h-\[256px\] w-\[256px\]/);
   assert.match(catSource, /-ml-\[72px\]/);
   assert.match(catSource, /pointer-events-none/);
   assert.match(catSource, /pet-overlay-cat__hit-area/);
+  assert.match(catSource, /hitAreaRef/);
+  assert.match(catSource, /getBoundingClientRect/);
+  assert.match(catSource, /innerPosition\(\)/);
+  assert.match(catSource, /scaleFactor\(\)/);
+  assert.match(catSource, /window\.setInterval/);
+  assert.match(catSource, /window\.clearInterval/);
   assert.match(catSource, /onPointerEnter=\{\(\) => setIsFurRaised\(true\)\}/);
   assert.match(catSource, /onPointerLeave=\{\(\) => setIsFurRaised\(false\)\}/);
   assert.match(catSource, /onPointerDown=\{handlePointerDown\}/);
