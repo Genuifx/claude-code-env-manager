@@ -140,6 +140,7 @@ test('desktop pet hides the cat and ignores clicks when there are no bubbles', a
   assert.match(overlaySource, /\{hasNotifications \? \(/);
   assert.match(petWindowSource, /set_pet_window_content_visible/);
   assert.match(petWindowSource, /set_ignore_cursor_events\(!visible\)/);
+  assert.match(petWindowSource, /setAcceptsMouseMovedEvents\(true\)/);
 });
 
 test('desktop pet cat starts native window dragging', async () => {

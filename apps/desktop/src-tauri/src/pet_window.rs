@@ -215,6 +215,7 @@ fn apply_pet_window_macos_behavior(window: &WebviewWindow) -> Result<(), String>
             ns_window.setHidesOnDeactivate(false);
             ns_window.setCanHide(false);
         }
+        ns_window.setAcceptsMouseMovedEvents(true);
         ns_window.setDelegate(None);
         ns_window.setLevel(NSStatusWindowLevel);
         unsafe {
