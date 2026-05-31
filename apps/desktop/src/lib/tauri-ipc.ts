@@ -107,6 +107,8 @@ export interface TauriCommands {
     },
     WorkspaceFileSuggestion[]
   ];
+  get_workspace_git_snapshot: [{ workingDir: string }, WorkspaceGitSnapshot];
+  get_workspace_file_diff: [{ workingDir: string; filePath: string }, WorkspaceFileDiff];
   window_control: [
     {
       action: 'close' | 'minimize' | 'toggle-fullscreen' | 'exit-fullscreen';
@@ -785,6 +787,45 @@ export interface WorkspaceFileSuggestion {
   relative_path: string;
   display_name: string;
   is_dir: boolean;
+}
+
+export interface WorkspaceGitChangedFile {
+  path: string;
+  status: string;
+  additions?: number | null;
+  deletions?: number | null;
+}
+
+export interface WorkspaceGitSnapshot {
+  is_repo: boolean;
+  root?: string | null;
+  branch?: string | null;
+  sha?: string | null;
+  upstream?: string | null;
+  dirty_count: number;
+  files: WorkspaceGitChangedFile[];
+  error?: string | null;
+}
+
+export type WorkspaceDiffLineKind = 'context' | 'addition' | 'deletion' | 'hunk' | 'meta';
+
+export interface WorkspaceDiffLine {
+  kind: WorkspaceDiffLineKind;
+  text: string;
+  old_line?: number | null;
+  new_line?: number | null;
+}
+
+export interface WorkspaceFileDiff {
+  path: string;
+  is_repo: boolean;
+  is_binary: boolean;
+  is_untracked: boolean;
+  additions: number;
+  deletions: number;
+  lines: WorkspaceDiffLine[];
+  truncated: boolean;
+  error?: string | null;
 }
 
 export interface ReplayBatch {

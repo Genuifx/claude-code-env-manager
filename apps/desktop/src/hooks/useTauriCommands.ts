@@ -29,6 +29,8 @@ import type {
   UnifiedSessionDebugComparison,
   UnifiedSessionInfo,
   WorkspaceFileSuggestion,
+  WorkspaceGitSnapshot,
+  WorkspaceFileDiff,
 } from '@/lib/tauri-ipc';
 
 interface TauriEnvConfig {
@@ -816,6 +818,19 @@ export function useTauriCommands() {
     });
   }, []);
 
+  const getWorkspaceGitSnapshot = useCallback(async (
+    workingDir: string,
+  ): Promise<WorkspaceGitSnapshot> => {
+    return invoke<WorkspaceGitSnapshot>('get_workspace_git_snapshot', { workingDir });
+  }, []);
+
+  const getWorkspaceFileDiff = useCallback(async (
+    workingDir: string,
+    filePath: string,
+  ): Promise<WorkspaceFileDiff> => {
+    return invoke<WorkspaceFileDiff>('get_workspace_file_diff', { workingDir, filePath });
+  }, []);
+
   const launchOpenCodeWeb = useCallback(async (
     workingDir?: string | null,
     envName?: string | null,
@@ -1294,6 +1309,8 @@ export function useTauriCommands() {
     updateNativeSessionSettings,
     setNativeSessionRuntimePermMode,
     handoffNativeSessionToTerminal,
+    getWorkspaceGitSnapshot,
+    getWorkspaceFileDiff,
     launchOpenCodeWeb,
     loadAppConfig,
     addFavoriteProject,

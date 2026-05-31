@@ -109,7 +109,7 @@ export function WecomPanel() {
   const [isSaving, setIsSaving] = useState(false);
   const [isToggling, setIsToggling] = useState(false);
 
-  const envNames = useMemo(() => Object.keys(environments).sort(), [environments]);
+  const envNames = useMemo(() => environments.map((env) => env.name).sort(), [environments]);
 
   useEffect(() => {
     let cancelled = false;

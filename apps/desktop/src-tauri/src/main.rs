@@ -2809,6 +2809,385 @@ fn clear_proxy_traffic(state: State<Arc<ProxyDebugManager>>) -> Result<(), Strin
     state.clear_traffic()
 }
 
+#[derive(Debug, serde::Serialize)]
+struct WorkspaceGitChangedFile {
+    path: String,
+    status: String,
+    additions: Option<u64>,
+    deletions: Option<u64>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct WorkspaceGitSnapshot {
+    is_repo: bool,
+    root: Option<String>,
+    branch: Option<String>,
+    sha: Option<String>,
+    upstream: Option<String>,
+    dirty_count: u64,
+    files: Vec<WorkspaceGitChangedFile>,
+    error: Option<String>,
+}
+
+fn run_git_command(working_dir: &str, args: &[&str]) -> Result<String, String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(working_dir)
+        .args(args)
+        .output()
+        .map_err(|error| format!("Failed to run git: {}", error))?;
+
+    if output.status.success() {
+        return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(if stderr.is_empty() {
+        format!("git exited with status {}", output.status)
+    } else {
+        stderr
+    })
+}
+
+fn normalize_git_changed_path(raw_path: &str) -> String {
+    let path = raw_path.trim().trim_matches('"');
+
+    if let Some(open_brace_index) = path.find('{') {
+        if let Some(close_brace_offset) = path[open_brace_index + 1..].find('}') {
+            let close_brace_index = open_brace_index + 1 + close_brace_offset;
+            let inner = &path[open_brace_index + 1..close_brace_index];
+            if let Some((_, new_name)) = inner.rsplit_once(" => ") {
+                return format!(
+                    "{}{}{}",
+                    &path[..open_brace_index],
+                    new_name.trim().trim_matches('"'),
+                    &path[close_brace_index + 1..],
+                );
+            }
+        }
+    }
+
+    path.rsplit_once(" -> ")
+        .or_else(|| path.rsplit_once(" => "))
+        .map(|(_, new_path)| new_path.trim().trim_matches('"').to_string())
+        .unwrap_or_else(|| path.to_string())
+}
+
+fn parse_git_status_line(line: &str) -> Option<(String, String)> {
+    if line.len() < 4 {
+        return None;
+    }
+    let status = line.get(0..2)?.trim().to_string();
+    let raw_path = line.get(3..)?.trim();
+    let path = normalize_git_changed_path(raw_path);
+    if path.is_empty() {
+        return None;
+    }
+    Some((path, status))
+}
+
+fn parse_numstat_value(value: &str) -> Option<u64> {
+    value.parse::<u64>().ok()
+}
+
+fn merge_git_numstat(
+    files: &mut HashMap<String, WorkspaceGitChangedFile>,
+    output: &str,
+) {
+    for line in output.lines() {
+        let mut parts = line.splitn(3, '\t');
+        let additions = parts.next().and_then(parse_numstat_value);
+        let deletions = parts.next().and_then(parse_numstat_value);
+        let Some(raw_path) = parts.next().map(str::trim).filter(|path| !path.is_empty()) else {
+            continue;
+        };
+        let path = normalize_git_changed_path(raw_path);
+        let entry = files
+            .entry(path.clone())
+            .or_insert_with(|| WorkspaceGitChangedFile {
+                path: path.clone(),
+                status: "M".to_string(),
+                additions: None,
+                deletions: None,
+            });
+        entry.additions = Some(entry.additions.unwrap_or(0) + additions.unwrap_or(0));
+        entry.deletions = Some(entry.deletions.unwrap_or(0) + deletions.unwrap_or(0));
+    }
+}
+
+#[tauri::command]
+fn get_workspace_git_snapshot(working_dir: String) -> Result<WorkspaceGitSnapshot, String> {
+    let root = match run_git_command(&working_dir, &["rev-parse", "--show-toplevel"]) {
+        Ok(value) if !value.is_empty() => value,
+        Ok(_) => {
+            return Ok(WorkspaceGitSnapshot {
+                is_repo: false,
+                root: None,
+                branch: None,
+                sha: None,
+                upstream: None,
+                dirty_count: 0,
+                files: Vec::new(),
+                error: Some("Not a git repository".to_string()),
+            });
+        }
+        Err(error) => {
+            return Ok(WorkspaceGitSnapshot {
+                is_repo: false,
+                root: None,
+                branch: None,
+                sha: None,
+                upstream: None,
+                dirty_count: 0,
+                files: Vec::new(),
+                error: Some(error),
+            });
+        }
+    };
+
+    let branch = run_git_command(&working_dir, &["branch", "--show-current"])
+        .ok()
+        .filter(|value| !value.is_empty())
+        .or_else(|| run_git_command(&working_dir, &["rev-parse", "--short", "HEAD"]).ok());
+    let sha = run_git_command(&working_dir, &["rev-parse", "--short", "HEAD"]).ok();
+    let upstream = run_git_command(
+        &working_dir,
+        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+    )
+    .ok();
+
+    let mut files = HashMap::new();
+    if let Ok(status_output) = run_git_command(&working_dir, &["status", "--porcelain=v1"]) {
+        for line in status_output.lines() {
+            if let Some((path, status)) = parse_git_status_line(line) {
+                files.insert(
+                    path.clone(),
+                    WorkspaceGitChangedFile {
+                        path,
+                        status,
+                        additions: None,
+                        deletions: None,
+                    },
+                );
+            }
+        }
+    }
+
+    if let Ok(output) = run_git_command(&working_dir, &["diff", "--numstat"]) {
+        merge_git_numstat(&mut files, &output);
+    }
+    if let Ok(output) = run_git_command(&working_dir, &["diff", "--cached", "--numstat"]) {
+        merge_git_numstat(&mut files, &output);
+    }
+
+    let mut file_list = files.into_values().collect::<Vec<_>>();
+    file_list.sort_by(|left, right| left.path.cmp(&right.path));
+    let dirty_count = file_list.len() as u64;
+
+    Ok(WorkspaceGitSnapshot {
+        is_repo: true,
+        root: Some(root),
+        branch,
+        sha,
+        upstream,
+        dirty_count,
+        files: file_list,
+        error: None,
+    })
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+enum WorkspaceDiffLineKind {
+    Context,
+    Addition,
+    Deletion,
+    Hunk,
+    Meta,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct WorkspaceDiffLine {
+    kind: WorkspaceDiffLineKind,
+    text: String,
+    old_line: Option<u64>,
+    new_line: Option<u64>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct WorkspaceFileDiff {
+    path: String,
+    is_repo: bool,
+    is_binary: bool,
+    is_untracked: bool,
+    additions: u64,
+    deletions: u64,
+    lines: Vec<WorkspaceDiffLine>,
+    truncated: bool,
+    error: Option<String>,
+}
+
+const MAX_DIFF_LINES: usize = 2000;
+
+fn parse_unified_diff(raw: &str, untracked: bool) -> (Vec<WorkspaceDiffLine>, u64, u64, bool, bool) {
+    let mut lines = Vec::new();
+    let mut additions = 0u64;
+    let mut deletions = 0u64;
+    let mut is_binary = false;
+    let mut old_line: u64 = 0;
+    let mut new_line: u64 = 0;
+    let mut truncated = false;
+
+    for raw_line in raw.lines() {
+        if lines.len() >= MAX_DIFF_LINES {
+            truncated = true;
+            break;
+        }
+
+        if raw_line.starts_with("Binary files") || raw_line.starts_with("GIT binary patch") {
+            is_binary = true;
+            continue;
+        }
+        // Skip the file header noise; hunks carry the useful signal.
+        if raw_line.starts_with("diff --git")
+            || raw_line.starts_with("index ")
+            || raw_line.starts_with("--- ")
+            || raw_line.starts_with("+++ ")
+            || raw_line.starts_with("new file mode")
+            || raw_line.starts_with("deleted file mode")
+            || raw_line.starts_with("similarity index")
+            || raw_line.starts_with("rename from")
+            || raw_line.starts_with("rename to")
+            || raw_line.starts_with("old mode")
+            || raw_line.starts_with("new mode")
+        {
+            continue;
+        }
+
+        if let Some(rest) = raw_line.strip_prefix("@@") {
+            // Format: @@ -oldStart,oldCount +newStart,newCount @@ optional
+            if let Some(end) = rest.find("@@") {
+                let spec = &rest[..end];
+                for token in spec.split_whitespace() {
+                    if let Some(value) = token.strip_prefix('-') {
+                        old_line = value.split(',').next().and_then(|v| v.parse().ok()).unwrap_or(0);
+                    } else if let Some(value) = token.strip_prefix('+') {
+                        new_line = value.split(',').next().and_then(|v| v.parse().ok()).unwrap_or(0);
+                    }
+                }
+            }
+            lines.push(WorkspaceDiffLine {
+                kind: WorkspaceDiffLineKind::Hunk,
+                text: raw_line.to_string(),
+                old_line: None,
+                new_line: None,
+            });
+            continue;
+        }
+
+        if let Some(text) = raw_line.strip_prefix('+') {
+            additions += 1;
+            lines.push(WorkspaceDiffLine {
+                kind: WorkspaceDiffLineKind::Addition,
+                text: text.to_string(),
+                old_line: None,
+                new_line: Some(new_line),
+            });
+            new_line += 1;
+        } else if let Some(text) = raw_line.strip_prefix('-') {
+            deletions += 1;
+            lines.push(WorkspaceDiffLine {
+                kind: WorkspaceDiffLineKind::Deletion,
+                text: text.to_string(),
+                old_line: Some(old_line),
+                new_line: None,
+            });
+            old_line += 1;
+        } else if let Some(text) = raw_line.strip_prefix(' ') {
+            lines.push(WorkspaceDiffLine {
+                kind: WorkspaceDiffLineKind::Context,
+                text: text.to_string(),
+                old_line: Some(old_line),
+                new_line: Some(new_line),
+            });
+            old_line += 1;
+            new_line += 1;
+        } else if raw_line == "\\ No newline at end of file" {
+            lines.push(WorkspaceDiffLine {
+                kind: WorkspaceDiffLineKind::Meta,
+                text: raw_line.to_string(),
+                old_line: None,
+                new_line: None,
+            });
+        }
+    }
+
+    // For an untracked file rendered via --no-index, every body line counts as an addition.
+    if untracked {
+        deletions = 0;
+    }
+
+    (lines, additions, deletions, is_binary, truncated)
+}
+
+#[tauri::command]
+fn get_workspace_file_diff(working_dir: String, file_path: String) -> Result<WorkspaceFileDiff, String> {
+    let not_repo = |error: Option<String>| WorkspaceFileDiff {
+        path: file_path.clone(),
+        is_repo: false,
+        is_binary: false,
+        is_untracked: false,
+        additions: 0,
+        deletions: 0,
+        lines: Vec::new(),
+        truncated: false,
+        error,
+    };
+
+    match run_git_command(&working_dir, &["rev-parse", "--is-inside-work-tree"]) {
+        Ok(value) if value.trim() == "true" => {}
+        Ok(_) => return Ok(not_repo(Some("Not a git repository".to_string()))),
+        Err(error) => return Ok(not_repo(Some(error))),
+    }
+
+    // Detect untracked files — they have no HEAD/index entry, so use --no-index against /dev/null.
+    let status = run_git_command(&working_dir, &["status", "--porcelain=v1", "--", &file_path])
+        .unwrap_or_default();
+    let is_untracked = status.lines().any(|line| line.starts_with("??"));
+
+    let raw = if is_untracked {
+        // --no-index exits non-zero when files differ, so tolerate the error and use stdout.
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&working_dir)
+            .args(["diff", "--no-color", "--no-index", "--", "/dev/null", &file_path])
+            .output()
+            .map_err(|error| format!("Failed to run git: {}", error))?;
+        String::from_utf8_lossy(&output.stdout).to_string()
+    } else {
+        run_git_command(
+            &working_dir,
+            &["diff", "--no-color", "HEAD", "--", &file_path],
+        )
+        .or_else(|_| run_git_command(&working_dir, &["diff", "--no-color", "--", &file_path]))
+        .unwrap_or_default()
+    };
+
+    let (lines, additions, deletions, is_binary, truncated) = parse_unified_diff(&raw, is_untracked);
+
+    Ok(WorkspaceFileDiff {
+        path: file_path,
+        is_repo: true,
+        is_binary,
+        is_untracked,
+        additions,
+        deletions,
+        lines,
+        truncated,
+        error: None,
+    })
+}
+
 #[tauri::command]
 fn open_text_in_vscode(content: String, suggested_name: Option<String>) -> Result<String, String> {
     let sanitized = sanitize_filename(suggested_name.as_deref().unwrap_or("proxy-debug"));
@@ -3244,6 +3623,8 @@ fn main() {
             list_proxy_traffic,
             get_proxy_traffic_detail,
             clear_proxy_traffic,
+            get_workspace_git_snapshot,
+            get_workspace_file_diff,
             open_text_in_vscode,
             save_file_dialog,
             save_image_dialog,
@@ -3478,6 +3859,12 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    use super::{
+        merge_git_numstat, normalize_git_changed_path, parse_git_status_line,
+        WorkspaceGitChangedFile,
+    };
+    use std::collections::HashMap;
+
     #[test]
     fn test_set_current_env_validates_existence() {
         // 这个测试需要临时配置文件，暂时跳过
@@ -3488,5 +3875,52 @@ mod tests {
     fn test_launch_claude_code_validates_env() {
         // 这个测试需要完整的 Tauri 上下文，暂时跳过
         // 实际测试应该在集成测试中进行
+    }
+
+    #[test]
+    fn git_status_parser_keeps_final_rename_path() {
+        assert_eq!(
+            parse_git_status_line("R  old/path.txt -> new/path.txt"),
+            Some(("new/path.txt".to_string(), "R".to_string()))
+        );
+        assert_eq!(
+            parse_git_status_line("?? docs/report.html"),
+            Some(("docs/report.html".to_string(), "??".to_string()))
+        );
+    }
+
+    #[test]
+    fn git_changed_path_normalizes_numstat_rename_syntax() {
+        assert_eq!(
+            normalize_git_changed_path("src/{old_name.rs => new_name.rs}"),
+            "src/new_name.rs"
+        );
+        assert_eq!(
+            normalize_git_changed_path("old/path.txt => new/path.txt"),
+            "new/path.txt"
+        );
+    }
+
+    #[test]
+    fn git_numstat_merges_worktree_and_cached_counts() {
+        let mut files = HashMap::from([(
+            "src/app.ts".to_string(),
+            WorkspaceGitChangedFile {
+                path: "src/app.ts".to_string(),
+                status: "M".to_string(),
+                additions: None,
+                deletions: None,
+            },
+        )]);
+
+        merge_git_numstat(&mut files, "2\t1\tsrc/app.ts\n-\t-\tassets/{old.png => logo.png}");
+        merge_git_numstat(&mut files, "3\t4\tsrc/app.ts");
+
+        let app = files.get("src/app.ts").unwrap();
+        assert_eq!(app.additions, Some(5));
+        assert_eq!(app.deletions, Some(5));
+        let logo = files.get("assets/logo.png").unwrap();
+        assert_eq!(logo.additions, Some(0));
+        assert_eq!(logo.deletions, Some(0));
     }
 }

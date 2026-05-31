@@ -112,6 +112,7 @@
     "statusEnv": "Environment",
     "statusStreak": "days",
     "statusCronActive": "cron tasks",
+    "reviewEntry": "Review",
     "resumeSession": "Resume",
     "resumed": "Resumed ✓",
     "selectToResume": "Select a conversation to resume",

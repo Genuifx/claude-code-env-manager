@@ -49,7 +49,7 @@ import type {
 } from '@/features/conversations/types';
 import { toSessionKey } from '@/features/conversations/types';
 import { useWorkspaceSessionDecorations } from '@/components/workspace/useWorkspaceSessionDecorations';
-import type { NativeSessionSummary } from '@/lib/tauri-ipc';
+import type { NativeSessionSummary, WorkspaceGitSnapshot } from '@/lib/tauri-ipc';
 import {
   buildWorkspaceSidebarSessions,
   findLiveEntryForSidebarSession,
@@ -63,6 +63,8 @@ import {
   type WorkspaceLiveSessionEntry,
   type WorkspaceLiveSessionsByRuntimeId,
 } from '@/components/workspace/workspaceLiveSessions';
+import { WorkspaceReviewDrawer } from '@/components/workspace/WorkspaceReviewDrawer';
+import { buildWorkspaceReviewModel } from '@/components/workspace/workspaceReview';
 import {
   normalizeEffortForProvider,
   resolveHistorySessionControls,
@@ -180,6 +182,9 @@ export function Workspace({
     }),
     shallow
   );
+  const workspaceReviewOpen = useAppStore((state) => state.reviewPanelOpen);
+  const setWorkspaceReviewOpen = useAppStore((state) => state.setReviewPanelOpen);
+  const setReviewEntry = useAppStore((state) => state.setReviewEntry);
 
   const {
     switchEnvironment,
@@ -199,6 +204,8 @@ export function Workspace({
     searchWorkspaceFiles,
     stopNativeSession,
     generateWorkspaceSessionTitle,
+    getWorkspaceGitSnapshot,
+    getWorkspaceFileDiff,
   } = useTauriCommands();
 
   const [sessions, setSessions] = useState<HistorySessionItem[]>([]);
@@ -229,6 +236,10 @@ export function Workspace({
   const [liveSessionsByRuntimeId, setLiveSessionsByRuntimeId] = useState<WorkspaceLiveSessionsByRuntimeId>({});
   const liveSessionsByRuntimeIdRef = useRef<WorkspaceLiveSessionsByRuntimeId>(liveSessionsByRuntimeId);
   const [activeLiveRuntimeId, setActiveLiveRuntimeId] = useState<string | null>(null);
+  const [hasAttemptedNativeSessionRestore, setHasAttemptedNativeSessionRestore] = useState(false);
+  const [workspaceGitSnapshot, setWorkspaceGitSnapshot] = useState<WorkspaceGitSnapshot | null>(null);
+  const [isRefreshingWorkspaceGitSnapshot, setIsRefreshingWorkspaceGitSnapshot] = useState(false);
+  const workspaceGitSnapshotRequestSeqRef = useRef(0);
   const [isCreatingNativeSession, setIsCreatingNativeSession] = useState(false);
   const [isLaunchingComposeTerminal, setIsLaunchingComposeTerminal] = useState(false);
   const [isResumingHistorySession, setIsResumingHistorySession] = useState(false);
@@ -311,6 +322,7 @@ export function Workspace({
     const persistedRuntimeIds = readPersistedLiveRuntimeIds();
 
     if (persistedRuntimeIds.length === 0) {
+      setHasAttemptedNativeSessionRestore(true);
       return;
     }
 
@@ -363,6 +375,8 @@ export function Workspace({
       setWorkspaceMode('live');
     } catch (error) {
       console.error('Failed to restore native workspace sessions:', error);
+    } finally {
+      setHasAttemptedNativeSessionRestore(true);
     }
   }, [listNativeSessions, replaceLiveSessionsByRuntimeId, setSelectedWorkingDir]);
 
@@ -438,19 +452,27 @@ export function Workspace({
   }, []);
 
   useEffect(() => {
+    if (!hasAttemptedNativeSessionRestore) {
+      return;
+    }
+
     if (activeLiveRuntimeId) {
       localStorage.setItem(ACTIVE_LIVE_RUNTIME_STORAGE_KEY, activeLiveRuntimeId);
       return;
     }
     localStorage.removeItem(ACTIVE_LIVE_RUNTIME_STORAGE_KEY);
-  }, [activeLiveRuntimeId]);
+  }, [activeLiveRuntimeId, hasAttemptedNativeSessionRestore]);
 
   useEffect(() => {
+    if (!hasAttemptedNativeSessionRestore) {
+      return;
+    }
+
     const restorableRuntimeIds = Object.values(liveSessionsByRuntimeId)
       .filter((entry) => canRestoreWorkspaceLiveSession(entry.session))
       .map((entry) => entry.session.runtime_id);
     writePersistedLiveRuntimeIds(restorableRuntimeIds);
-  }, [liveSessionsByRuntimeId]);
+  }, [hasAttemptedNativeSessionRestore, liveSessionsByRuntimeId]);
 
   const activeLiveEntry = activeLiveRuntimeId
     ? liveSessionsByRuntimeId[activeLiveRuntimeId] ?? null
@@ -915,6 +937,149 @@ export function Workspace({
 
   const effectiveComposeDir = composeDir || selectedWorkingDir || defaultWorkingDir || null;
   const effectiveComposeDirLabel = effectiveComposeDir ? getProjectName(effectiveComposeDir) : null;
+  const shouldRenderWorkspaceReview = workspaceMode !== 'live' || !activeLiveEntry;
+  const workspaceReviewWorkingDir = workspaceMode === 'history' && selectedSession
+    ? selectedSession.project || null
+    : effectiveComposeDir;
+  const workspaceReviewSession = useMemo<NativeSessionSummary>(() => {
+    const provider = workspaceMode === 'history' && selectedSession
+      ? selectedSession.source === 'codex' ? 'codex' : 'claude'
+      : composeProvider;
+    const envName = workspaceMode === 'history' && selectedSession
+      ? historyEnv
+      : currentEnv;
+    const permMode = workspaceMode === 'history' && selectedSession
+      ? historyPermMode
+      : permissionMode;
+    const effort = workspaceMode === 'history' && selectedSession
+      ? historyEffort
+      : composeEffort;
+
+    return {
+      runtime_id: workspaceMode === 'history' && selectedSession
+        ? `history:${selectedSession.source}:${selectedSession.id}`
+        : 'compose',
+      provider,
+      transport: 'native_sdk',
+      provider_session_id: workspaceMode === 'history' && selectedSession ? selectedSession.id : null,
+      project_dir: workspaceReviewWorkingDir || '',
+      env_name: envName || '—',
+      perm_mode: permMode,
+      runtime_perm_mode: null,
+      effort,
+      status: workspaceMode === 'history' && selectedSession ? 'history' : 'ready',
+      created_at: '',
+      updated_at: '',
+      is_active: false,
+      last_event_seq: null,
+      can_handoff_to_terminal: false,
+      last_error: null,
+    };
+  }, [
+    composeEffort,
+    composeProvider,
+    currentEnv,
+    historyEffort,
+    historyEnv,
+    historyPermMode,
+    permissionMode,
+    selectedSession,
+    workspaceMode,
+    workspaceReviewWorkingDir,
+  ]);
+  const workspaceReviewModel = useMemo(
+    () => buildWorkspaceReviewModel({
+      session: workspaceReviewSession,
+      events: [],
+      messages: workspaceMode === 'history' ? messages : [],
+      gitSnapshot: workspaceGitSnapshot,
+    }),
+    [messages, workspaceGitSnapshot, workspaceMode, workspaceReviewSession],
+  );
+
+  // Publish review summary to the status-strip entry pill while compose/history owns the view.
+  useEffect(() => {
+    if (!shouldRenderWorkspaceReview) {
+      return;
+    }
+    setReviewEntry({
+      envName: workspaceReviewSession.env_name,
+      failedTools: workspaceReviewModel.failedTools.length,
+      changedFiles: workspaceReviewModel.changedFiles.length,
+      artifacts: workspaceReviewModel.artifacts.length,
+    });
+  }, [
+    shouldRenderWorkspaceReview,
+    workspaceReviewSession.env_name,
+    workspaceReviewModel.failedTools.length,
+    workspaceReviewModel.changedFiles.length,
+    workspaceReviewModel.artifacts.length,
+    setReviewEntry,
+  ]);
+
+  const refreshWorkspaceGitSnapshot = useCallback(async () => {
+    const requestSeq = workspaceGitSnapshotRequestSeqRef.current + 1;
+    workspaceGitSnapshotRequestSeqRef.current = requestSeq;
+    const workingDir = workspaceReviewWorkingDir;
+
+    if (!workingDir) {
+      setWorkspaceGitSnapshot(null);
+      return;
+    }
+
+    setIsRefreshingWorkspaceGitSnapshot(true);
+    try {
+      const snapshot = await getWorkspaceGitSnapshot(workingDir);
+      if (workspaceGitSnapshotRequestSeqRef.current === requestSeq) {
+        setWorkspaceGitSnapshot(snapshot);
+      }
+    } catch (error) {
+      if (workspaceGitSnapshotRequestSeqRef.current === requestSeq) {
+        setWorkspaceGitSnapshot({
+          is_repo: false,
+          root: null,
+          branch: null,
+          sha: null,
+          upstream: null,
+          dirty_count: 0,
+          files: [],
+          error: String(error),
+        });
+      }
+    } finally {
+      if (workspaceGitSnapshotRequestSeqRef.current === requestSeq) {
+        setIsRefreshingWorkspaceGitSnapshot(false);
+      }
+    }
+  }, [getWorkspaceGitSnapshot, workspaceReviewWorkingDir]);
+
+  useEffect(() => {
+    workspaceGitSnapshotRequestSeqRef.current += 1;
+    setWorkspaceGitSnapshot(null);
+    setIsRefreshingWorkspaceGitSnapshot(false);
+  }, [workspaceReviewWorkingDir]);
+
+  useEffect(() => {
+    if (!isActive || !shouldRenderWorkspaceReview) {
+      return;
+    }
+    const delay = workspaceReviewOpen ? 250 : 1200;
+    const timeoutId = window.setTimeout(() => {
+      void refreshWorkspaceGitSnapshot();
+    }, delay);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    isActive,
+    refreshWorkspaceGitSnapshot,
+    shouldRenderWorkspaceReview,
+    workspaceReviewOpen,
+    workspaceReviewWorkingDir,
+    workspaceMode,
+  ]);
+
   const skillsContext = useMemo(() => {
     if (workspaceMode === 'history' && selectedSession) {
       return {
@@ -1687,7 +1852,20 @@ export function Workspace({
           onCreateForProject={handleCreateForProject}
         />
 
-        <div className="workspace-reading-surface flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="workspace-reading-surface relative flex min-w-0 flex-1 flex-col overflow-hidden">
+          {shouldRenderWorkspaceReview ? (
+            <WorkspaceReviewDrawer
+              session={workspaceReviewSession}
+              model={workspaceReviewModel}
+              gitSnapshot={workspaceGitSnapshot}
+              isOpen={workspaceReviewOpen}
+              isRefreshingGit={isRefreshingWorkspaceGitSnapshot}
+              onOpenChange={setWorkspaceReviewOpen}
+              onRefreshGit={() => void refreshWorkspaceGitSnapshot()}
+              onLoadDiff={(filePath) => getWorkspaceFileDiff(workspaceReviewWorkingDir || '', filePath)}
+            />
+          ) : null}
+
           {workspaceMode === 'history' && selectedSession
             ? renderHistoryView()
             : workspaceMode === 'compose' || (workspaceMode === 'live' && !activeLiveEntry)

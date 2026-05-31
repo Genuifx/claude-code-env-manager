@@ -1,4 +1,4 @@
-import { Radio, Circle, Flame, Clock, Check, Settings2 } from 'lucide-react';
+import { Radio, Circle, Flame, Clock, Check, Settings2, ClipboardCheck } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { useLocale } from '@/locales';
 import { getEnvColorVar, cn } from '@/lib/utils';
@@ -74,6 +74,14 @@ export function WorkspaceStatusStrip({ onNavigate }: WorkspaceStatusStripProps) 
       environments: state.environments,
       continuousUsageDays: state.continuousUsageDays,
       cronTasks: state.cronTasks,
+    }),
+    shallow
+  );
+  const { reviewEntry, reviewPanelOpen, setReviewPanelOpen } = useAppStore(
+    (state) => ({
+      reviewEntry: state.reviewEntry,
+      reviewPanelOpen: state.reviewPanelOpen,
+      setReviewPanelOpen: state.setReviewPanelOpen,
     }),
     shallow
   );
@@ -168,6 +176,44 @@ export function WorkspaceStatusStrip({ onNavigate }: WorkspaceStatusStripProps) 
           onClick={() => onNavigate('cron')}
         />
       )}
+
+      {/* Review audit entry — always visible, far-right, context-aware */}
+      <button
+        type="button"
+        aria-pressed={reviewPanelOpen}
+        title={t('workspace.reviewEntry')}
+        onClick={() => setReviewPanelOpen(!reviewPanelOpen)}
+        className={cn(
+          'group relative ml-auto inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full cursor-pointer',
+          'status-chip-glass',
+          'hover:scale-[1.02] active:scale-[0.98]',
+          reviewPanelOpen && 'ring-1 ring-inset ring-primary/40'
+        )}
+      >
+        <span className="relative flex items-center justify-center w-3.5 h-3.5">
+          <ClipboardCheck
+            className={cn(
+              'w-3.5 h-3.5 transition-transform duration-200 group-hover:scale-110',
+              !reviewEntry && 'text-muted-foreground'
+            )}
+            style={reviewEntry ? { color: `hsl(${getEnvColorVar(reviewEntry.envName)})` } : undefined}
+          />
+          {reviewEntry ? (
+            <span
+              className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full ring-1 ring-background"
+              style={{ backgroundColor: `hsl(${getEnvColorVar(reviewEntry.envName)})` }}
+            />
+          ) : null}
+        </span>
+        <span className="text-[13px] font-medium text-foreground transition-colors">
+          {t('workspace.reviewEntry')}
+        </span>
+        {reviewEntry && reviewEntry.failedTools > 0 ? (
+          <span className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-none text-destructive-foreground">
+            {reviewEntry.failedTools}
+          </span>
+        ) : null}
+      </button>
     </div>
   );
 }

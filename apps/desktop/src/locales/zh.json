@@ -112,6 +112,7 @@
     "statusEnv": "当前环境",
     "statusStreak": "天",
     "statusCronActive": "个定时任务",
+    "reviewEntry": "审查",
     "resumeSession": "续作此会话",
     "resumed": "已恢复 ✓",
     "selectToResume": "选择会话以续作",

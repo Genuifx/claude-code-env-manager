@@ -21,6 +21,7 @@ import type {
   InteractiveToolPrompt,
   NativeSessionSummary,
   SessionEventRecord,
+  WorkspaceGitSnapshot,
   ToolQuestionPrompt,
 } from '@/lib/tauri-ipc';
 import { cn } from '@/lib/utils';
@@ -74,6 +75,8 @@ import {
 } from './workspaceEventTranscript';
 import { ContextWindowIndicator } from './ContextWindowIndicator';
 import { computeSessionUsage } from './workspaceUsage';
+import { WorkspaceReviewDrawer } from './WorkspaceReviewDrawer';
+import { buildWorkspaceReviewModel } from './workspaceReview';
 
 function ProcessingActionIcon({ stopping = false }: { stopping?: boolean }) {
   return (
@@ -946,6 +949,8 @@ export function WorkspaceNativeSessionView({
     updateNativeSessionSettings,
     setNativeSessionRuntimePermMode,
     handoffNativeSessionToTerminal,
+    getWorkspaceGitSnapshot,
+    getWorkspaceFileDiff,
     listNativeSessions,
     searchWorkspaceFiles,
   } = useTauriCommands();
@@ -980,6 +985,12 @@ export function WorkspaceNativeSessionView({
   const [isSending, setIsSending] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [isHandingOff, setIsHandingOff] = useState(false);
+  const reviewPanelOpen = useAppStore((state) => state.reviewPanelOpen);
+  const setReviewPanelOpen = useAppStore((state) => state.setReviewPanelOpen);
+  const setReviewEntry = useAppStore((state) => state.setReviewEntry);
+  const isReviewDrawerOpen = isVisible && reviewPanelOpen;
+  const [gitSnapshot, setGitSnapshot] = useState<WorkspaceGitSnapshot | null>(null);
+  const [isRefreshingGitSnapshot, setIsRefreshingGitSnapshot] = useState(false);
   const [respondingRequestId, setRespondingRequestId] = useState<string | null>(null);
   const [locallyDismissedPromptIds, setLocallyDismissedPromptIds] = useState<Set<string>>(
     () => new Set(),
@@ -1004,8 +1015,45 @@ export function WorkspaceNativeSessionView({
   const scrollSettleTimeoutRef = useRef<number | null>(null);
   const prevEventCountRef = useRef(0);
   const tickInFlightRef = useRef(false);
+  const gitSnapshotRequestSeqRef = useRef(0);
 
   const sessionUsage = useMemo(() => computeSessionUsage(events), [events]);
+
+  const refreshGitSnapshot = useCallback(async () => {
+    const requestSeq = gitSnapshotRequestSeqRef.current + 1;
+    gitSnapshotRequestSeqRef.current = requestSeq;
+    const projectDir = session.project_dir;
+
+    if (!projectDir) {
+      setGitSnapshot(null);
+      return;
+    }
+
+    setIsRefreshingGitSnapshot(true);
+    try {
+      const snapshot = await getWorkspaceGitSnapshot(projectDir);
+      if (gitSnapshotRequestSeqRef.current === requestSeq) {
+        setGitSnapshot(snapshot);
+      }
+    } catch (error) {
+      if (gitSnapshotRequestSeqRef.current === requestSeq) {
+        setGitSnapshot({
+          is_repo: false,
+          root: null,
+          branch: null,
+          sha: null,
+          upstream: null,
+          dirty_count: 0,
+          files: [],
+          error: String(error),
+        });
+      }
+    } finally {
+      if (gitSnapshotRequestSeqRef.current === requestSeq) {
+        setIsRefreshingGitSnapshot(false);
+      }
+    }
+  }, [getWorkspaceGitSnapshot, session.project_dir]);
 
   useEffect(() => {
     const cachedEvents = readCachedNativeEvents(session.runtime_id);
@@ -1024,7 +1072,17 @@ export function WorkspaceNativeSessionView({
     setQueuedMessages([]);
     setLocalUserPrompts(initialPrompts);
     setLocallyDismissedPromptIds(new Set());
+    setReviewPanelOpen(false);
+    gitSnapshotRequestSeqRef.current += 1;
+    setGitSnapshot(null);
+    setIsRefreshingGitSnapshot(false);
   }, [session.runtime_id]);
+
+  useEffect(() => {
+    gitSnapshotRequestSeqRef.current += 1;
+    setGitSnapshot(null);
+    setIsRefreshingGitSnapshot(false);
+  }, [session.project_dir]);
 
   useEffect(() => {
     setSessionEnv(session.env_name);
@@ -1065,6 +1123,36 @@ export function WorkspaceNativeSessionView({
     () => stabilizeMessageRefs(rawMessages, previousMessagesRef.current),
     [rawMessages],
   );
+
+  const reviewModel = useMemo(
+    () => buildWorkspaceReviewModel({
+      session,
+      events,
+      messages,
+      gitSnapshot,
+    }),
+    [events, gitSnapshot, messages, session],
+  );
+
+  // Publish review summary to the status-strip entry pill while this live session owns the view.
+  useEffect(() => {
+    if (!isVisible) {
+      return;
+    }
+    setReviewEntry({
+      envName: session.env_name,
+      failedTools: reviewModel.failedTools.length,
+      changedFiles: reviewModel.changedFiles.length,
+      artifacts: reviewModel.artifacts.length,
+    });
+  }, [
+    isVisible,
+    session.env_name,
+    reviewModel.failedTools.length,
+    reviewModel.changedFiles.length,
+    reviewModel.artifacts.length,
+    setReviewEntry,
+  ]);
 
   useEffect(() => {
     previousMessagesRef.current = messages;
@@ -1111,6 +1199,27 @@ export function WorkspaceNativeSessionView({
       flushCachedEvents();
     }
   }, [flushCachedEvents, session.status]);
+
+  useEffect(() => {
+    if (!isVisible) {
+      return;
+    }
+
+    const delay = isReviewDrawerOpen ? 250 : 1200;
+    const timeoutId = window.setTimeout(() => {
+      void refreshGitSnapshot();
+    }, delay);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    events.length,
+    isReviewDrawerOpen,
+    isVisible,
+    refreshGitSnapshot,
+    session.status,
+  ]);
 
   const refreshSummary = useCallback(async (options: { force?: boolean } = {}) => {
     const now = Date.now();
@@ -1895,7 +2004,18 @@ export function WorkspaceNativeSessionView({
   ]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col">
+      <WorkspaceReviewDrawer
+        session={session}
+        model={reviewModel}
+        gitSnapshot={gitSnapshot}
+        isOpen={isReviewDrawerOpen}
+        isRefreshingGit={isRefreshingGitSnapshot}
+        onOpenChange={setReviewPanelOpen}
+        onRefreshGit={() => void refreshGitSnapshot()}
+        onLoadDiff={(filePath) => getWorkspaceFileDiff(session.project_dir, filePath)}
+      />
+
       <ScrollArea viewportRef={containerRef} className="workspace-transcript-scroll flex-1 bg-background/30">
         <div className="mx-auto max-w-[960px] px-8 py-8">
           {messages.length === 0 ? (

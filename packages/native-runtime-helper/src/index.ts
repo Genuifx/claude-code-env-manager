@@ -1548,6 +1548,18 @@ function codexCategoryForItem(item: Record<string, unknown>) {
 }
 
 function summarizeCodexItem(item: Record<string, unknown>) {
+  if (item.type === 'file_change' && Array.isArray(item.changes)) {
+    return compactJson({
+      type: 'file_change',
+      changes: item.changes,
+    });
+  }
+  if (item.type === 'todo_list' && Array.isArray(item.items)) {
+    return compactJson({
+      type: 'todo_list',
+      items: item.items,
+    });
+  }
   if (typeof item.text === 'string') {
     return item.text;
   }

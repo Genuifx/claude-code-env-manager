@@ -659,6 +659,13 @@ impl NativeRuntimeManager {
                 continue;
             }
 
+            if record.status == "idle" {
+                record.is_active = false;
+                record.updated_at = now;
+                changed += 1;
+                continue;
+            }
+
             record.status = "interrupted".to_string();
             record.is_active = false;
             record.updated_at = now;
@@ -2092,6 +2099,7 @@ mod tests {
             vec![
                 native_record("native-reconcile-active", "processing", true),
                 native_record("native-reconcile-stopped", "stopped", false),
+                native_record("native-reconcile-idle", "idle", true),
             ],
         );
 
@@ -2099,18 +2107,23 @@ mod tests {
             .reconcile_stale_records()
             .expect("reconcile stale records");
 
-        assert_eq!(reconciled, 1);
+        assert_eq!(reconciled, 2);
         let active = manager
             .summary_for("native-reconcile-active")
             .expect("active summary");
         let stopped = manager
             .summary_for("native-reconcile-stopped")
             .expect("stopped summary");
+        let idle = manager
+            .summary_for("native-reconcile-idle")
+            .expect("idle summary");
 
         assert_eq!(active.status, "interrupted");
         assert!(!active.is_active);
         assert_eq!(stopped.status, "stopped");
         assert!(!stopped.is_active);
+        assert_eq!(idle.status, "idle");
+        assert!(!idle.is_active);
     }
 
     #[test]

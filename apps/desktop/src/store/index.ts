@@ -28,6 +28,18 @@ export interface Environment {
 export type ArrangeLayout = 'horizontal2' | 'vertical2' | 'grid4' | 'left_main3';
 export type LaunchClient = 'claude' | 'codex' | 'opencode';
 
+/**
+ * Lightweight summary published by whichever workspace context (live session,
+ * compose, or history) currently owns the review panel. The status-strip entry
+ * pill renders from this so a single always-visible trigger stays context-aware.
+ */
+export interface ReviewEntrySummary {
+  envName: string;
+  failedTools: number;
+  changedFiles: number;
+  artifacts: number;
+}
+
 export interface Session {
   id: string;
   client: LaunchClient;
@@ -239,6 +251,13 @@ interface AppState {
   error: string | null;
   setError: (error: string | null) => void;
 
+  // Workspace review panel (audit drawer entry lives in the status strip,
+  // panel is hosted by whichever context — live / compose / history — is active)
+  reviewPanelOpen: boolean;
+  setReviewPanelOpen: (open: boolean) => void;
+  reviewEntry: ReviewEntrySummary | null;
+  setReviewEntry: (entry: ReviewEntrySummary | null) => void;
+
   // Per-domain loading flags (skeleton screens, never spinners)
   isLoadingEnvs: boolean;
   isLoadingSessions: boolean;
@@ -253,6 +272,19 @@ interface AppState {
   // Companion (pet)
   companion: Companion | null;
   setCompanion: (c: Companion | null) => void;
+}
+
+function areReviewEntriesEqual(left: ReviewEntrySummary | null, right: ReviewEntrySummary | null) {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+  return left.envName === right.envName
+    && left.failedTools === right.failedTools
+    && left.changedFiles === right.changedFiles
+    && left.artifacts === right.artifacts;
 }
 
 function areEnvironmentsEqual(left: Environment[], right: Environment[]) {
@@ -393,6 +425,13 @@ export const useAppStore = create<AppState>((set) => ({
   setLoading: (loading) => set({ isLoading: loading }),
   error: null,
   setError: (error) => set({ error }),
+
+  // Workspace review panel
+  reviewPanelOpen: false,
+  setReviewPanelOpen: (open) => set({ reviewPanelOpen: open }),
+  reviewEntry: null,
+  setReviewEntry: (entry) =>
+    set((state) => (areReviewEntriesEqual(state.reviewEntry, entry) ? state : { reviewEntry: entry })),
 
   // Per-domain loading flags (skeleton screens, never spinners)
   isLoadingEnvs: false,
