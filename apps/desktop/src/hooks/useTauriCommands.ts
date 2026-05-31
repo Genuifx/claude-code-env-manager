@@ -19,6 +19,8 @@ import type {
   TelegramForumTopic,
   TelegramSettings,
   TelegramTopicBinding,
+  WecomBridgeStatus,
+  WecomSettings,
   WeixinBridgeStatus,
   WeixinLoginSession,
   WeixinSettings,
@@ -1101,6 +1103,26 @@ export function useTauriCommands() {
     return invoke<TelegramBridgeStatus>('stop_telegram_bridge');
   }, []);
 
+  const getWecomSettings = useCallback(async (): Promise<WecomSettings> => {
+    return invoke<WecomSettings>('get_wecom_settings');
+  }, []);
+
+  const saveWecomSettings = useCallback(async (settings: WecomSettings): Promise<void> => {
+    await invoke('save_wecom_settings', { settings });
+  }, []);
+
+  const getWecomBridgeStatus = useCallback(async (): Promise<WecomBridgeStatus> => {
+    return invoke<WecomBridgeStatus>('get_wecom_bridge_status');
+  }, []);
+
+  const startWecomBridge = useCallback(async (): Promise<WecomBridgeStatus> => {
+    return invoke<WecomBridgeStatus>('start_wecom_bridge');
+  }, []);
+
+  const stopWecomBridge = useCallback(async (): Promise<WecomBridgeStatus> => {
+    return invoke<WecomBridgeStatus>('stop_wecom_bridge');
+  }, []);
+
   const getTelegramForumTopics = useCallback(async (): Promise<TelegramForumTopic[]> => {
     return invoke<TelegramForumTopic[]>('get_telegram_forum_topics');
   }, []);
@@ -1307,6 +1329,11 @@ export function useTauriCommands() {
     stopTelegramBridge,
     getTelegramForumTopics,
     bindTelegramTopic,
+    getWecomSettings,
+    saveWecomSettings,
+    getWecomBridgeStatus,
+    startWecomBridge,
+    stopWecomBridge,
     getWeixinSettings,
     saveWeixinSettings,
     getWeixinBridgeStatus,

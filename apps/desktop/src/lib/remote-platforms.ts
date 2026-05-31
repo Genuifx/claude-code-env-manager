@@ -1,7 +1,7 @@
-import { MessageCircle, Send, type LucideIcon } from 'lucide-react';
+import { Building2, MessageCircle, Send, type LucideIcon } from 'lucide-react';
 import type { ChannelKind, ManagedSessionSource } from '@/lib/tauri-ipc';
 
-export type RemotePlatformId = 'telegram' | 'weixin';
+export type RemotePlatformId = 'telegram' | 'weixin' | 'wecom';
 
 interface RemotePlatformMeta {
   id: RemotePlatformId;
@@ -29,9 +29,17 @@ const REMOTE_PLATFORM_META: Record<RemotePlatformId, RemotePlatformMeta> = {
     channelLabelKey: 'sessions.channel_weixin',
     icon: MessageCircle,
   },
+  wecom: {
+    id: 'wecom',
+    displayName: 'WeCom',
+    labelKey: 'chatApp.wecom',
+    sourceLabelKey: 'sessions.source_wecom',
+    channelLabelKey: 'sessions.channel_wecom',
+    icon: Building2,
+  },
 };
 
-export const REMOTE_PLATFORM_ORDER: RemotePlatformId[] = ['telegram', 'weixin'];
+export const REMOTE_PLATFORM_ORDER: RemotePlatformId[] = ['telegram', 'weixin', 'wecom'];
 
 export function getRemotePlatformMeta(platform: RemotePlatformId): RemotePlatformMeta {
   return REMOTE_PLATFORM_META[platform];
@@ -43,6 +51,8 @@ export function getRemotePlatformFromSource(source: ManagedSessionSource): Remot
       return 'telegram';
     case 'weixin':
       return 'weixin';
+    case 'wecom':
+      return 'wecom';
     default:
       return null;
   }
@@ -55,6 +65,8 @@ export function getRemotePlatformFromChannel(kind: ChannelKind | string): Remote
       return 'telegram';
     case 'weixin':
       return 'weixin';
+    case 'wecom':
+      return 'wecom';
     default:
       return null;
   }
@@ -66,6 +78,8 @@ export function formatRemoteSourceHint(source: ManagedSessionSource): string | n
       return `${source.chat_id}/${source.thread_id}`;
     case 'weixin':
       return source.peer_id;
+    case 'wecom':
+      return `${source.bot_id}/${source.peer_id}`;
     default:
       return null;
   }

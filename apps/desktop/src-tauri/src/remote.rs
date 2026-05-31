@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub enum RemotePlatform {
     Telegram,
     Weixin,
+    Wecom,
 }
 
 impl RemotePlatform {
@@ -12,6 +13,7 @@ impl RemotePlatform {
         match self {
             Self::Telegram => "Telegram",
             Self::Weixin => "Weixin",
+            Self::Wecom => "WeCom",
         }
     }
 }
@@ -38,6 +40,14 @@ impl RemotePeerRef {
             platform: RemotePlatform::Weixin,
             peer_id: peer_id.into(),
             thread_id: None,
+        }
+    }
+
+    pub fn wecom(bot_id: impl Into<String>, peer_id: impl Into<String>) -> Self {
+        Self {
+            platform: RemotePlatform::Wecom,
+            peer_id: peer_id.into(),
+            thread_id: Some(bot_id.into()),
         }
     }
 }

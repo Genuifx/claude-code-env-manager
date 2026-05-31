@@ -21,6 +21,10 @@ pub enum ChannelKind {
     Weixin {
         peer_id: String,
     },
+    Wecom {
+        bot_id: String,
+        peer_id: String,
+    },
 }
 
 impl ChannelKind {
@@ -31,6 +35,9 @@ impl ChannelKind {
                 Some(RemotePeerRef::telegram(*chat_id, *thread_id))
             }
             Self::Weixin { peer_id } => Some(RemotePeerRef::weixin(peer_id.clone())),
+            Self::Wecom { bot_id, peer_id } => {
+                Some(RemotePeerRef::wecom(bot_id.clone(), peer_id.clone()))
+            }
         }
     }
 

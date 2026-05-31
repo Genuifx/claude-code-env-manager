@@ -65,6 +65,11 @@ export interface TauriCommands {
   get_telegram_bridge_status: [void, TelegramBridgeStatus];
   start_telegram_bridge: [void, TelegramBridgeStatus];
   stop_telegram_bridge: [void, TelegramBridgeStatus];
+  get_wecom_settings: [void, WecomSettings];
+  save_wecom_settings: [{ settings: WecomSettings }, void];
+  get_wecom_bridge_status: [void, WecomBridgeStatus];
+  start_wecom_bridge: [void, WecomBridgeStatus];
+  stop_wecom_bridge: [void, WecomBridgeStatus];
   get_weixin_settings: [void, WeixinSettings];
   save_weixin_settings: [{ settings: WeixinSettings }, void];
   get_weixin_bridge_status: [void, WeixinBridgeStatus];
@@ -594,6 +599,48 @@ export interface WeixinLoginSession {
   expiresAt?: string | null;
 }
 
+export interface WecomSettings {
+  enabled: boolean;
+  bots: WecomBotConfig[];
+}
+
+export interface WecomBotConfig {
+  id: string;
+  name?: string;
+  botId: string;
+  secret?: string | null;
+  enabled: boolean;
+  workspaceDir: string;
+  adminUserIds: string[];
+  allowedUserIds: string[];
+  allowedGroupChatIds: string[];
+  allowedIntents: string[];
+  requireMention: boolean;
+  mentionPatterns: string[];
+  adminPermMode: string;
+  userPermMode: string;
+  defaultEnvName?: string | null;
+  wsUrl: string;
+}
+
+export interface WecomBridgeStatus {
+  configured: boolean;
+  running: boolean;
+  activeBotCount: number;
+  lastError?: string | null;
+  bots: WecomBotStatus[];
+}
+
+export interface WecomBotStatus {
+  id: string;
+  botId: string;
+  name: string;
+  configured: boolean;
+  running: boolean;
+  lastError?: string | null;
+  connectedAt?: string | null;
+}
+
 export interface ProxyDebugState {
   enabled: boolean;
   running: boolean;
@@ -662,6 +709,7 @@ export type ManagedSessionSource =
   | { type: 'desktop' }
   | { type: 'telegram'; chat_id: number; thread_id: number }
   | { type: 'weixin'; peer_id: string }
+  | { type: 'wecom'; bot_id: string; peer_id: string }
   | { type: 'cron'; task_id: string };
 
 export interface RuntimeRecoveryCandidate {
@@ -694,7 +742,8 @@ export type HeadlessSessionSummary = ManagedSessionSummary;
 export type ChannelKind =
   | { kind: 'desktop_ui' }
   | { kind: 'telegram'; chat_id: number; thread_id?: number | null }
-  | { kind: 'weixin'; peer_id: string };
+  | { kind: 'weixin'; peer_id: string }
+  | { kind: 'wecom'; bot_id: string; peer_id: string };
 
 export interface AttachedChannelInfo {
   kind: ChannelKind;

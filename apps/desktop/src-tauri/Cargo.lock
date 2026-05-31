@@ -512,6 +512,7 @@ dependencies = [
  "tauri-plugin-shell",
  "tauri-plugin-updater",
  "toml 0.9.11+spec-1.1.0",
+ "tungstenite",
  "urlencoding",
  "window-vibrancy 0.7.1",
 ]
@@ -5644,6 +5645,7 @@ dependencies = [
  "http",
  "httparse",
  "log",
+ "native-tls",
  "rand 0.9.2",
  "sha1",
  "thiserror 2.0.18",
