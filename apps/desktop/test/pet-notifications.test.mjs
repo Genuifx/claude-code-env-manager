@@ -79,20 +79,6 @@ function tauriInteractiveSession(overrides = {}) {
   };
 }
 
-function codexHistorySession(overrides = {}) {
-  return {
-    id: 'codex-thread-1',
-    client: 'codex',
-    workingDir: '/tmp/codex-project',
-    startedAt: '2026-05-01T08:00:00.000Z',
-    updatedAt: '2026-05-01T08:06:00.000Z',
-    status: 'stopped',
-    title: 'Codex 桌面会话',
-    latestModelOutput: '已经读取 Codex 的会话记录。',
-    ...overrides,
-  };
-}
-
 test('shows running sessions and unread terminal sessions, but hides read terminal sessions', async () => {
   const { buildPetNotifications } = await importPetNotifications();
   const notifications = buildPetNotifications(
@@ -102,6 +88,7 @@ test('shows running sessions and unread terminal sessions, but hides read termin
       session({ runtime_id: 'done-2', status: 'error', updated_at: '2026-05-01T08:01:00.000Z' }),
     ],
     new Set(['pet:codex:done-2:error']),
+    Date.parse('2026-05-01T08:04:00.000Z'),
   );
 
   assert.deepEqual(
@@ -228,54 +215,126 @@ test('extracts title and latest assistant turn from native session events', asyn
   assert.equal(display.latestModelOutput, '我会先看现有通知逻辑，再把文案改成最新输出。');
 });
 
-test('extracts latest visible assistant output from Codex history messages', async () => {
-  const { buildPetDisplayFromConversationMessages } = await importPetNotifications();
-  const display = buildPetDisplayFromConversationMessages([
-    {
-      msgType: 'user',
-      content: [{ type: 'text', text: '我也要看到 codex 的' }],
-    },
-    {
-      msgType: 'assistant',
-      content: [{ type: 'thinking', thinking: '内部推理不该出现在气泡里' }],
-    },
-    {
-      msgType: 'assistant',
-      content: [
-        { type: 'tool_use', name: 'rg', input: { query: 'codex history' } },
-      ],
-    },
-    {
-      msgType: 'assistant',
-      content: [
-        { type: 'text', text: '我会把 Codex 历史会话接到桌面猫通知里。' },
-      ],
-    },
-  ]);
-
-  assert.equal(display.title, '我也要看到 codex 的');
-  assert.equal(display.latestModelOutput, '我会把 Codex 历史会话接到桌面猫通知里。');
-});
-
-test('includes external Codex history sessions with their latest output', async () => {
+test('hides stale completed sessions while keeping active and newly completed sessions', async () => {
   const { buildPetNotifications } = await importPetNotifications();
   const notifications = buildPetNotifications(
     [
-      codexHistorySession(),
       session({
-        runtime_id: 'older-native',
+        runtime_id: 'stale-done-1',
+        status: 'stopped',
+        updated_at: '2026-05-01T07:00:00.000Z',
+        latestModelOutput: '历史会话不应该挤进状态栏。',
+      }),
+      session({
+        runtime_id: 'fresh-done-1',
+        status: 'stopped',
+        updated_at: '2026-05-01T08:05:30.000Z',
+      }),
+      session({
+        runtime_id: 'running-1',
+        status: 'running',
+        updated_at: '2026-05-01T07:00:00.000Z',
+      }),
+    ],
+    new Set(),
+    Date.parse('2026-05-01T08:06:00.000Z'),
+  );
+
+  assert.deepEqual(
+    notifications.map((item) => item.runtimeId),
+    ['fresh-done-1', 'running-1'],
+  );
+  assert.equal(notifications[0].tone, 'done');
+  assert.equal(notifications[1].tone, 'running');
+});
+
+test('keeps completed sessions only through the exact new-completion window', async () => {
+  const { buildPetNotifications } = await importPetNotifications();
+  const notifications = buildPetNotifications(
+    [
+      session({
+        runtime_id: 'boundary-done-1',
+        status: 'stopped',
+        updated_at: '2026-05-01T07:56:00.000Z',
+      }),
+      session({
+        runtime_id: 'too-old-done-1',
+        status: 'stopped',
+        updated_at: '2026-05-01T07:55:59.999Z',
+      }),
+    ],
+    new Set(),
+    Date.parse('2026-05-01T08:06:00.000Z'),
+  );
+
+  assert.deepEqual(
+    notifications.map((item) => item.runtimeId),
+    ['boundary-done-1'],
+  );
+});
+
+test('hides inactive and idle sessions from the active status stack', async () => {
+  const { buildPetNotifications } = await importPetNotifications();
+  const notifications = buildPetNotifications(
+    [
+      session({
+        runtime_id: 'inactive-running-1',
+        status: 'running',
+        is_active: false,
+        updated_at: '2026-05-01T08:05:00.000Z',
+      }),
+      session({
+        runtime_id: 'inactive-attention-1',
+        status: 'waiting_for_approval',
+        is_active: false,
+        updated_at: '2026-05-01T08:05:00.000Z',
+      }),
+      session({
+        runtime_id: 'idle-1',
+        status: 'idle',
+        is_active: true,
+        updated_at: '2026-05-01T08:05:00.000Z',
+      }),
+      session({
+        runtime_id: 'active-running-1',
+        status: 'running',
+        is_active: true,
+        updated_at: '2026-05-01T08:04:00.000Z',
+      }),
+    ],
+    new Set(),
+    Date.parse('2026-05-01T08:06:00.000Z'),
+  );
+
+  assert.deepEqual(
+    notifications.map((item) => item.runtimeId),
+    ['active-running-1'],
+  );
+});
+
+test('hides completed sessions whose timestamps are in the future', async () => {
+  const { buildPetNotifications } = await importPetNotifications();
+  const notifications = buildPetNotifications(
+    [
+      session({
+        runtime_id: 'future-done-1',
+        status: 'stopped',
+        updated_at: '2026-05-01T08:07:00.000Z',
+      }),
+      session({
+        runtime_id: 'fresh-done-1',
+        status: 'stopped',
         updated_at: '2026-05-01T08:05:00.000Z',
       }),
     ],
     new Set(),
+    Date.parse('2026-05-01T08:06:00.000Z'),
   );
 
-  assert.equal(notifications[0].runtimeId, 'codex-thread-1');
-  assert.equal(notifications[0].provider, 'codex');
-  assert.equal(notifications[0].title, 'Codex 桌面会话');
-  assert.equal(notifications[0].message, '已经读取 Codex 的会话记录。');
-  assert.equal(notifications[0].updatedAt, '2026-05-01T08:06:00.000Z');
-  assert.equal(notifications[0].markReadOnOpen, true);
+  assert.deepEqual(
+    notifications.map((item) => item.runtimeId),
+    ['fresh-done-1'],
+  );
 });
 
 test('hides opened running notifications while allowing later status updates to surface', async () => {
@@ -302,6 +361,7 @@ test('hides opened running notifications while allowing later status updates to 
       }),
     ],
     new Set([runningReadId]),
+    Date.parse('2026-05-01T08:06:00.000Z'),
   );
 
   assert.equal(stoppedNotifications.length, 1);
@@ -384,6 +444,7 @@ test('uses concise Chinese status labels for different session states', async ()
       session({ runtime_id: 'interrupted-1', status: 'interrupted' }),
     ],
     new Set(),
+    Date.parse('2026-05-01T08:02:00.000Z'),
   );
 
   assert.deepEqual(

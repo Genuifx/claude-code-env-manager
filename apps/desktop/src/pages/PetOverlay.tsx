@@ -4,16 +4,10 @@ import { listen } from '@tauri-apps/api/event';
 import { PetBubble } from '@/components/pet-overlay/PetBubble';
 import { PetOverlayCat } from '@/components/pet-overlay/PetOverlayCat';
 import {
-  buildPetDisplayFromConversationMessages,
   buildPetDisplayFromEvents,
   buildPetNotifications,
   type PetNotificationSourceSession,
 } from '@/lib/petNotifications';
-import type {
-  ConversationMessageData,
-  HistorySessionItem,
-} from '@/features/conversations/types';
-import { fetchHistorySessions } from '@/features/conversations/historyData';
 import type {
   NativeSessionSummary,
   PetNotificationReadState,
@@ -24,8 +18,6 @@ import type { PetNotificationItem, PetOpenSessionRequest } from '@/types/pet';
 const REFRESH_INTERVAL_MS = 10000;
 const PET_EVENT_PREVIEW_LIMIT = 120;
 const PET_OVERLAY_WINDOW_PADDING = 10;
-const CODEX_HISTORY_RECENCY_MS = 60 * 60 * 1000;
-const CODEX_HISTORY_SCAN_LIMIT = 8;
 
 interface PetDisplayCacheEntry {
   signature: string;
@@ -53,21 +45,6 @@ function revertOptimisticNotificationRead(
   const next = new Set(current);
   next.delete(notificationId);
   return next;
-}
-
-function timestampToIso(timestamp: number): string {
-  const parsed = Number(timestamp);
-  return Number.isFinite(parsed) && parsed > 0
-    ? new Date(parsed).toISOString()
-    : new Date().toISOString();
-}
-
-function isRecentCodexHistorySession(session: HistorySessionItem): boolean {
-  const parsed = Number(session.timestamp);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return false;
-  }
-  return Date.now() - parsed <= CODEX_HISTORY_RECENCY_MS;
 }
 
 async function hydrateNativeSessionDisplay(
@@ -108,78 +85,6 @@ async function hydrateNativeSessionDisplay(
   }
 }
 
-async function hydrateCodexHistorySession(
-  session: HistorySessionItem,
-  displayCache: Map<string, PetDisplayCacheEntry>,
-): Promise<PetNotificationSourceSession> {
-  const updatedAt = timestampToIso(session.timestamp);
-  const cacheKey = `codex-history:${session.id}`;
-  const signature = `${session.timestamp}:${session.display || ''}`;
-  const cached = displayCache.get(cacheKey);
-  if (cached?.signature === signature) {
-    return {
-      id: session.id,
-      client: 'codex',
-      workingDir: session.project || session.projectName || '',
-      startedAt: updatedAt,
-      updatedAt,
-      status: cached.latestModelOutput ? 'stopped' : 'running',
-      title: session.display || cached.title,
-      latestModelOutput: cached.latestModelOutput,
-    };
-  }
-
-  try {
-    const messages = await invoke<ConversationMessageData[]>('get_conversation_messages', {
-      sessionId: session.id,
-      source: 'codex',
-    });
-    const display = buildPetDisplayFromConversationMessages(messages);
-    displayCache.set(cacheKey, {
-      signature,
-      title: display.title,
-      latestModelOutput: display.latestModelOutput,
-    });
-    return {
-      id: session.id,
-      client: 'codex',
-      workingDir: session.project || session.projectName || '',
-      startedAt: updatedAt,
-      updatedAt,
-      status: display.latestModelOutput ? 'stopped' : 'running',
-      title: session.display || display.title,
-      latestModelOutput: display.latestModelOutput,
-    };
-  } catch (error) {
-    console.debug('Desktop pet Codex history preview skipped:', error);
-    return {
-      id: session.id,
-      client: 'codex',
-      workingDir: session.project || session.projectName || '',
-      startedAt: updatedAt,
-      updatedAt,
-      status: 'running',
-      title: session.display,
-      latestModelOutput: null,
-    };
-  }
-}
-
-async function hydrateCodexHistorySessions(
-  sessions: HistorySessionItem[],
-  nativeCodexProviderSessionIds: ReadonlySet<string>,
-  displayCache: Map<string, PetDisplayCacheEntry>,
-): Promise<PetNotificationSourceSession[]> {
-  const recentSessions = sessions
-    .filter((session) => session.source === 'codex')
-    .filter(isRecentCodexHistorySession)
-    .filter((session) => !nativeCodexProviderSessionIds.has(session.id))
-    .sort((left, right) => right.timestamp - left.timestamp)
-    .slice(0, CODEX_HISTORY_SCAN_LIMIT);
-
-  return Promise.all(recentSessions.map((session) => hydrateCodexHistorySession(session, displayCache)));
-}
-
 export function PetOverlay() {
   const [sessions, setSessions] = useState<PetNotificationSourceSession[]>([]);
   const [readIds, setReadIds] = useState<Set<string>>(() => new Set());
@@ -207,25 +112,10 @@ export function PetOverlay() {
             invoke<PetNotificationSourceSession[]>('list_interactive_sessions'),
             invoke<PetNotificationReadState>('get_pet_notification_read_state'),
           ]);
-          const codexHistory = await fetchHistorySessions('codex').catch((error) => {
-            console.debug('Desktop pet Codex history skipped:', error);
-            return [];
-          });
           const hydratedNativeSessions = await Promise.all(
             nativeSessions.map((session) => hydrateNativeSessionDisplay(session, displayCacheRef.current)),
           );
-          const nativeCodexProviderSessionIds = new Set(
-            nativeSessions
-              .filter((session) => session.provider === 'codex')
-              .map((session) => session.provider_session_id)
-              .filter((id): id is string => !!id),
-          );
-          const hydratedCodexHistorySessions = await hydrateCodexHistorySessions(
-            codexHistory,
-            nativeCodexProviderSessionIds,
-            displayCacheRef.current,
-          );
-          setSessions([...hydratedNativeSessions, ...interactiveSessions, ...hydratedCodexHistorySessions]);
+          setSessions([...hydratedNativeSessions, ...interactiveSessions]);
           setReadIds(readIdsFromState(readState));
         } catch (error) {
           console.debug('Desktop pet refresh skipped:', error);
@@ -290,6 +180,9 @@ export function PetOverlay() {
   const hasNotifications = notifications.length > 0;
 
   useEffect(() => {
+    if (!hasNotifications) {
+      lastPetWindowSizeRef.current = null;
+    }
     void invoke('set_pet_window_content_visible', { visible: hasNotifications }).catch((error) => {
       console.debug('Desktop pet visibility skipped:', error);
     });

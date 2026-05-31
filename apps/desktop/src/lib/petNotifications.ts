@@ -4,6 +4,7 @@ import type { PetNotificationItem, PetNotificationTone } from '@/types/pet';
 
 export const PET_NOTIFICATION_LIMIT = 3;
 const PET_MESSAGE_PREVIEW_LIMIT = 96;
+const PET_COMPLETED_NOTIFICATION_RECENCY_MS = 10 * 60 * 1000;
 const THINKING_MESSAGE = '正在思考';
 
 const TERMINAL_STATUSES = new Set(['stopped', 'error', 'failed', 'interrupted', 'handoff']);
@@ -33,21 +34,11 @@ interface TauriInteractiveSession {
   status: string;
 }
 
-interface CodexHistoryPetSession {
-  id: string;
-  client: 'codex';
-  workingDir: string;
-  startedAt: string | Date;
-  updatedAt?: string | Date;
-  status: string;
-}
-
 export type PetNotificationSourceSession =
   (
     | NativeSessionSummary
     | InteractiveSession
     | TauriInteractiveSession
-    | CodexHistoryPetSession
   ) & {
     title?: string | null;
     displayTitle?: string | null;
@@ -175,68 +166,6 @@ export function buildPetDisplayFromEvents(
   };
 }
 
-interface PetConversationMessage {
-  msgType?: string;
-  msg_type?: string;
-  content?: unknown;
-}
-
-function textFromConversationContent(value: unknown): string | null {
-  if (typeof value === 'string') {
-    return nonEmptyText(value);
-  }
-
-  if (Array.isArray(value)) {
-    const parts = value
-      .map((item) => textFromConversationContent(item))
-      .filter((item): item is string => !!item);
-    return parts.length > 0 ? normalizeInlineText(parts.join(' ')) : null;
-  }
-
-  if (!value || typeof value !== 'object') {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  const blockType = typeof record.type === 'string' ? record.type : '';
-  if (blockType === 'thinking' || blockType === 'tool_use' || blockType === 'tool_result') {
-    return null;
-  }
-
-  return nonEmptyText(record.text)
-    ?? nonEmptyText(record.output_text)
-    ?? nonEmptyText(record.outputText)
-    ?? textFromConversationContent(record.content);
-}
-
-function conversationMessageType(message: PetConversationMessage): string {
-  return message.msgType ?? message.msg_type ?? '';
-}
-
-export function buildPetDisplayFromConversationMessages(
-  messages: PetConversationMessage[],
-): { title: string | null; latestModelOutput: string | null } {
-  const firstUserMessage = messages.find((message) => conversationMessageType(message) === 'user');
-  let latestAssistantOutput: string | null = null;
-
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (!message || conversationMessageType(message) !== 'assistant') {
-      continue;
-    }
-
-    latestAssistantOutput = textFromConversationContent(message.content);
-    if (latestAssistantOutput) {
-      break;
-    }
-  }
-
-  return {
-    title: firstUserMessage ? textFromConversationContent(firstUserMessage.content) : null,
-    latestModelOutput: latestAssistantOutput,
-  };
-}
-
 export function buildPetNotificationId(
   provider: 'claude' | 'codex',
   runtimeId: string,
@@ -273,6 +202,36 @@ function labelForTone(tone: PetNotificationTone): string {
   }
 }
 
+function sessionExplicitlyInactive(session: PetNotificationSourceSession): boolean {
+  const record = session as unknown as Record<string, unknown>;
+  return record.is_active === false || record.isActive === false;
+}
+
+function shouldShowNotification(
+  session: PetNotificationSourceSession,
+  tone: PetNotificationTone,
+  readNotificationIds: ReadonlySet<string>,
+  nowMs: number,
+): boolean {
+  const id = notificationId(session);
+  if (readNotificationIds.has(id)) {
+    return false;
+  }
+
+  if (session.status === 'idle') {
+    return false;
+  }
+
+  if (tone === 'running' || tone === 'attention') {
+    return !sessionExplicitlyInactive(session);
+  }
+
+  const updatedAtMs = timestamp(sessionUpdatedAt(session));
+  return updatedAtMs > 0
+    && updatedAtMs <= nowMs
+    && nowMs - updatedAtMs <= PET_COMPLETED_NOTIFICATION_RECENCY_MS;
+}
+
 function defaultMessage(session: PetNotificationSourceSession, tone: PetNotificationTone): string {
   void tone;
   const latestOutput = sessionLatestModelOutput(session);
@@ -282,12 +241,13 @@ function defaultMessage(session: PetNotificationSourceSession, tone: PetNotifica
 export function buildPetNotifications(
   sessions: PetNotificationSourceSession[],
   readNotificationIds: ReadonlySet<string>,
+  nowMs = Date.now(),
 ): PetNotificationItem[] {
   return sessions
     .map((session) => {
       const tone = toneForStatus(session.status);
       const id = notificationId(session);
-      const shouldShow = !readNotificationIds.has(id);
+      const shouldShow = shouldShowNotification(session, tone, readNotificationIds, nowMs);
 
       if (!shouldShow) {
         return null;

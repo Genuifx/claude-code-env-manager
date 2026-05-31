@@ -21,7 +21,9 @@ interface PetOverlayCatProps {
   notification?: PetNotificationItem | null;
 }
 
-const CAT_CANVAS_SIZE = 320;
+const CAT_CANVAS_CSS_SIZE = 256;
+const CAT_CANVAS_MAX_PIXEL_RATIO = 3;
+const CAT_SOURCE_FRAME_CSS_SIZE = 256;
 const CAT_SPRITE_COLUMNS = 3;
 const CAT_SPRITE_ROWS = 2;
 const CAT_HOVER_POLL_INTERVAL_MS = 200;
@@ -264,17 +266,44 @@ function getCatFrames(): Promise<CatFrame[]> {
   return catFrameCache;
 }
 
+function catCanvasPixelRatio(): number {
+  return clamp(window.devicePixelRatio || 1, 1, CAT_CANVAS_MAX_PIXEL_RATIO);
+}
+
+function resizeCatCanvasForPixelRatio(canvas: HTMLCanvasElement): number {
+  const pixelRatio = catCanvasPixelRatio();
+  const width = Math.round(CAT_CANVAS_CSS_SIZE * pixelRatio);
+  const height = Math.round(CAT_CANVAS_CSS_SIZE * pixelRatio);
+
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+
+  return pixelRatio;
+}
+
 function drawCatFrame(canvas: HTMLCanvasElement, frame: CatFrame) {
   const context = canvas.getContext('2d');
   if (!context) return;
 
+  const pixelRatio = resizeCatCanvasForPixelRatio(canvas);
+  const logicalWidth = canvas.width / pixelRatio;
+  const logicalHeight = canvas.height / pixelRatio;
+
   context.clearRect(0, 0, canvas.width, canvas.height);
-  const scale = 0.66 * frame.normalizeScale;
+  context.save();
+  context.scale(pixelRatio, pixelRatio);
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
+  const sourcePixelRatio = frame.canvas.width / CAT_SOURCE_FRAME_CSS_SIZE;
+  const scale = (0.66 / sourcePixelRatio) * frame.normalizeScale;
   const width = frame.canvas.width * scale;
   const height = frame.canvas.height * scale;
-  const x = canvas.width * 0.5 - frame.anchorX * scale;
-  const y = canvas.height - 24 - frame.anchorY * scale;
+  const x = logicalWidth * 0.5 - frame.anchorX * scale;
+  const y = logicalHeight - 24 - frame.anchorY * scale;
   context.drawImage(frame.canvas, x, y, width, height);
+  context.restore();
 }
 
 export function PetOverlayCat({ className, notification, onDragStart }: PetOverlayCatProps) {
@@ -441,8 +470,8 @@ export function PetOverlayCat({ className, notification, onDragStart }: PetOverl
       <div className="pet-overlay-cat__base">
         <canvas
           ref={canvasRef}
-          width={CAT_CANVAS_SIZE}
-          height={CAT_CANVAS_SIZE}
+          width={CAT_CANVAS_CSS_SIZE}
+          height={CAT_CANVAS_CSS_SIZE}
           className="h-full w-full select-none"
           aria-hidden="true"
         />

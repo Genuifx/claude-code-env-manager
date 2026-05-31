@@ -2,10 +2,10 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder}
 
 pub const PET_WINDOW_LABEL: &str = "desktop-pet";
 
-const PET_WINDOW_INITIAL_WIDTH: f64 = 144.0;
-const PET_WINDOW_INITIAL_HEIGHT: f64 = 144.0;
-const PET_WINDOW_MAX_WIDTH: f64 = 560.0;
-const PET_WINDOW_MAX_HEIGHT: f64 = 420.0;
+const PET_WINDOW_INITIAL_WIDTH: f64 = 72.0;
+const PET_WINDOW_INITIAL_HEIGHT: f64 = 72.0;
+const PET_WINDOW_MAX_WIDTH: f64 = 520.0;
+const PET_WINDOW_MAX_HEIGHT: f64 = 360.0;
 const PET_WINDOW_MARGIN: f64 = 28.0;
 
 pub fn sync_pet_window_visibility(app: &AppHandle, enabled: bool) -> Result<(), String> {

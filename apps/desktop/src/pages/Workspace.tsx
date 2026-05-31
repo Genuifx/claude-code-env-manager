@@ -885,16 +885,6 @@ export function Workspace({
     if (!runtimeId || !provider || !status) {
       const decoration = decorationsBySessionKey[toSessionKey(session)];
       if (!decoration?.runtimeId || !decoration.client || !decoration.status) {
-        if (session.source === 'codex') {
-          await Promise.allSettled([
-            invoke('mark_pet_notification_read', {
-              notificationId: buildPetNotificationId('codex', session.id, 'running'),
-            }),
-            invoke('mark_pet_notification_read', {
-              notificationId: buildPetNotificationId('codex', session.id, 'stopped'),
-            }),
-          ]);
-        }
         return;
       }
       if (decoration.client === 'opencode') {

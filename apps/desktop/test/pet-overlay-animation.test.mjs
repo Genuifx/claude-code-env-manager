@@ -6,6 +6,15 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.resolve(__dirname, '..');
+const petAssetDir = path.join(desktopDir, 'src', 'assets', 'pet');
+
+async function readPngDimensions(filePath) {
+  const bytes = await fs.readFile(filePath);
+  return {
+    width: bytes.readUInt32BE(16),
+    height: bytes.readUInt32BE(20),
+  };
+}
 
 test('desktop pet cat uses the image generated state sprite', async () => {
   const [overlaySource, catSource, cssSource] = await Promise.all([
@@ -21,6 +30,11 @@ test('desktop pet cat uses the image generated state sprite', async () => {
   assert.match(catSource, /golden-cat-hover-puffed\.png/);
   assert.match(catSource, /cursorPosition/);
   assert.match(catSource, /CAT_HOVER_POLL_INTERVAL_MS/);
+  assert.match(catSource, /CAT_CANVAS_CSS_SIZE = 256/);
+  assert.match(catSource, /resizeCatCanvasForPixelRatio/);
+  assert.match(catSource, /window\.devicePixelRatio/);
+  assert.match(catSource, /CAT_SOURCE_FRAME_CSS_SIZE = 256/);
+  assert.match(catSource, /frame\.canvas\.width \/ CAT_SOURCE_FRAME_CSS_SIZE/);
   assert.match(catSource, /h-\[256px\] w-\[256px\]/);
   assert.match(catSource, /-ml-\[72px\]/);
   assert.match(catSource, /pointer-events-none/);
@@ -64,6 +78,15 @@ test('desktop pet cat uses the image generated state sprite', async () => {
   assert.match(cssSource, /@keyframes pet-cat-hover-fur-rise/);
   assert.match(cssSource, /@keyframes pet-cat-hover-fur-puffed/);
   assert.match(cssSource, /@keyframes pet-cat-hover-base-out/);
+
+  const [stateSprite, hoverRise, hoverPuffed] = await Promise.all([
+    readPngDimensions(path.join(petAssetDir, 'golden-cat-imagegen-states.png')),
+    readPngDimensions(path.join(petAssetDir, 'golden-cat-hover-rise.png')),
+    readPngDimensions(path.join(petAssetDir, 'golden-cat-hover-puffed.png')),
+  ]);
+  assert.deepEqual(stateSprite, { width: 1536, height: 1024 });
+  assert.deepEqual(hoverRise, { width: 512, height: 512 });
+  assert.deepEqual(hoverPuffed, { width: 512, height: 512 });
 });
 
 test('desktop pet overlay resizes its native window to visible content', async () => {
@@ -76,36 +99,36 @@ test('desktop pet overlay resizes its native window to visible content', async (
   assert.match(overlaySource, /resize_pet_window/);
   assert.match(overlaySource, /preservePosition/);
   assert.match(overlaySource, /petOverlayContentRef/);
+  assert.match(overlaySource, /lastPetWindowSizeRef\.current = null/);
   assert.match(overlaySource, /mark_pet_notification_read/);
   assert.match(overlaySource, /onDismiss=\{dismissNotification\}/);
   assert.match(overlaySource, /optimisticallyMarkNotificationRead/);
 });
 
-test('desktop pet refreshes recent external Codex history sessions', async () => {
+test('desktop pet status ignores provider history sessions', async () => {
   const overlaySource = await fs.readFile(
     path.join(desktopDir, 'src', 'pages', 'PetOverlay.tsx'),
     'utf8',
   );
 
-  assert.match(overlaySource, /fetchHistorySessions\('codex'\)/);
-  assert.match(overlaySource, /get_conversation_messages/);
-  assert.match(overlaySource, /hydrateCodexHistorySession/);
-  assert.match(overlaySource, /provider_session_id/);
-  assert.match(overlaySource, /CODEX_HISTORY_RECENCY_MS/);
+  assert.doesNotMatch(overlaySource, /fetchHistorySessions\('codex'\)/);
+  assert.doesNotMatch(overlaySource, /get_conversation_messages/);
+  assert.doesNotMatch(overlaySource, /hydrateCodexHistorySession/);
+  assert.doesNotMatch(overlaySource, /CODEX_HISTORY_RECENCY_MS/);
   assert.match(overlaySource, /displayCacheRef/);
   assert.match(overlaySource, /refreshInFlightRef/);
   assert.match(overlaySource, /refreshQueuedRef/);
 });
 
-test('workspace selection marks external Codex pet bubbles as read', async () => {
+test('workspace selection marks live pet bubbles as read without external Codex history fallbacks', async () => {
   const workspaceSource = await fs.readFile(
     path.join(desktopDir, 'src', 'pages', 'Workspace.tsx'),
     'utf8',
   );
 
-  assert.match(workspaceSource, /session\.source === 'codex'/);
-  assert.match(workspaceSource, /buildPetNotificationId\('codex', session\.id, 'running'\)/);
-  assert.match(workspaceSource, /buildPetNotificationId\('codex', session\.id, 'stopped'\)/);
+  assert.match(workspaceSource, /buildPetNotificationId\(provider, runtimeId, status\)/);
+  assert.doesNotMatch(workspaceSource, /buildPetNotificationId\('codex', session\.id, 'running'\)/);
+  assert.doesNotMatch(workspaceSource, /buildPetNotificationId\('codex', session\.id, 'stopped'\)/);
   assert.match(workspaceSource, /const refreshedSessions = await refreshWorkspaceData/);
   assert.match(workspaceSource, /const refreshedMatchingSession = refreshedSessions\?\.find/);
   assert.match(workspaceSource, /await handleSelect\(refreshedMatchingSession\)/);
@@ -139,8 +162,10 @@ test('desktop pet keeps the three-bubble stack close to the cat without clipping
   assert.doesNotMatch(bubbleSource, /shadow-\[|shadow-|backdrop-blur/);
   assert.doesNotMatch(bubbleSource, /bg-\[rgba/);
 
-  assert.match(petWindowSource, /PET_WINDOW_MAX_WIDTH: f64 = 560\.0/);
-  assert.match(petWindowSource, /PET_WINDOW_MAX_HEIGHT: f64 = 420\.0/);
+  assert.match(petWindowSource, /PET_WINDOW_INITIAL_WIDTH: f64 = 72\.0/);
+  assert.match(petWindowSource, /PET_WINDOW_INITIAL_HEIGHT: f64 = 72\.0/);
+  assert.match(petWindowSource, /PET_WINDOW_MAX_WIDTH: f64 = 520\.0/);
+  assert.match(petWindowSource, /PET_WINDOW_MAX_HEIGHT: f64 = 360\.0/);
   assert.doesNotMatch(petWindowSource, /set_activation_policy|ActivationPolicy::Accessory/);
 });
 
