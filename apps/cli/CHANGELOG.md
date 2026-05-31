@@ -1,5 +1,11 @@
 # ccem
 
+## 2.13.0
+
+### Minor Changes
+
+- Add the live session review drawer, workspace audit evidence, and WeCom bot bridge updates.
+
 ## 2.12.0
 
 ### Minor Changes
