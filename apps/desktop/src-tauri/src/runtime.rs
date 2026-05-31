@@ -90,6 +90,7 @@ pub enum ManagedSessionSource {
     Desktop,
     Telegram { chat_id: i64, thread_id: i64 },
     Weixin { peer_id: String },
+    Wecom { bot_id: String, peer_id: String },
     Cron { task_id: String },
 }
 
@@ -101,6 +102,9 @@ impl ManagedSessionSource {
                 Some(RemotePeerRef::telegram(*chat_id, Some(*thread_id)))
             }
             Self::Weixin { peer_id } => Some(RemotePeerRef::weixin(peer_id.clone())),
+            Self::Wecom { bot_id, peer_id } => {
+                Some(RemotePeerRef::wecom(bot_id.clone(), peer_id.clone()))
+            }
         }
     }
 
@@ -2254,6 +2258,10 @@ mod tests {
         let weixin = ManagedSessionSource::Weixin {
             peer_id: "wx-peer-1".to_string(),
         };
+        let wecom = ManagedSessionSource::Wecom {
+            bot_id: "aibot-1".to_string(),
+            peer_id: "chat-1".to_string(),
+        };
 
         let telegram_remote = telegram.remote_peer_ref().expect("telegram remote ref");
         assert_eq!(telegram_remote.platform, RemotePlatform::Telegram);
@@ -2268,6 +2276,12 @@ mod tests {
         assert_eq!(weixin_remote.thread_id, None);
         assert!(weixin.matches_remote_peer(RemotePlatform::Weixin, "wx-peer-1", None));
         assert!(!weixin.matches_remote_peer(RemotePlatform::Telegram, "wx-peer-1", None));
+
+        let wecom_remote = wecom.remote_peer_ref().expect("wecom remote ref");
+        assert_eq!(wecom_remote.platform, RemotePlatform::Wecom);
+        assert_eq!(wecom_remote.peer_id, "chat-1");
+        assert_eq!(wecom_remote.thread_id.as_deref(), Some("aibot-1"));
+        assert!(wecom.matches_remote_peer(RemotePlatform::Wecom, "chat-1", Some("aibot-1")));
     }
 
     #[test]

@@ -40,6 +40,7 @@ mod tmux;
 mod tray;
 mod unified_runtime;
 mod unified_session;
+mod wecom;
 mod weixin;
 mod workspace_search;
 
@@ -94,6 +95,7 @@ use telegram::{
 use tmux::ClaudeTerminalState;
 use unified_runtime::UnifiedSessionManager;
 use unified_session::{RuntimeInput, UnifiedSessionDebugComparison, UnifiedSessionInfo};
+use wecom::{WecomBridgeManager, WecomBridgeStatus, WecomSettings};
 use weixin::{WeixinBridgeManager, WeixinBridgeStatus, WeixinLoginSession, WeixinSettings};
 use workspace_search::search_workspace_files;
 
@@ -2563,6 +2565,11 @@ fn get_weixin_settings() -> Result<WeixinSettings, String> {
 }
 
 #[tauri::command]
+fn get_wecom_settings() -> Result<WecomSettings, String> {
+    wecom::read_wecom_settings()
+}
+
+#[tauri::command]
 async fn save_telegram_settings(
     telegram_state: State<'_, Arc<TelegramBridgeManager>>,
     settings: TelegramSettings,
@@ -2598,6 +2605,21 @@ async fn save_weixin_settings(
 }
 
 #[tauri::command]
+async fn save_wecom_settings(
+    wecom_state: State<'_, Arc<WecomBridgeManager>>,
+    settings: WecomSettings,
+) -> Result<(), String> {
+    let manager = wecom_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        wecom::write_wecom_settings(&settings)?;
+        manager.sync_settings(&settings);
+        Ok(())
+    })
+    .await
+    .map_err(|error| format!("Failed to join save_wecom_settings task: {}", error))?
+}
+
+#[tauri::command]
 fn get_telegram_bridge_status(
     telegram_state: State<'_, Arc<TelegramBridgeManager>>,
 ) -> TelegramBridgeStatus {
@@ -2609,6 +2631,11 @@ fn get_weixin_bridge_status(
     weixin_state: State<'_, Arc<WeixinBridgeManager>>,
 ) -> WeixinBridgeStatus {
     weixin_state.status()
+}
+
+#[tauri::command]
+fn get_wecom_bridge_status(wecom_state: State<'_, Arc<WecomBridgeManager>>) -> WecomBridgeStatus {
+    wecom_state.status()
 }
 
 #[tauri::command]
@@ -2629,6 +2656,19 @@ async fn start_telegram_bridge(
 }
 
 #[tauri::command]
+async fn start_wecom_bridge(
+    app: tauri::AppHandle,
+    wecom_state: State<'_, Arc<WecomBridgeManager>>,
+    runtime_state: State<'_, Arc<HeadlessRuntimeManager>>,
+) -> Result<WecomBridgeStatus, String> {
+    let manager = wecom_state.inner().clone();
+    let runtime_manager = runtime_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.start(app, runtime_manager))
+        .await
+        .map_err(|error| format!("Failed to join start_wecom_bridge task: {}", error))?
+}
+
+#[tauri::command]
 async fn start_weixin_bridge(
     app: tauri::AppHandle,
     weixin_state: State<'_, Arc<WeixinBridgeManager>>,
@@ -2639,6 +2679,16 @@ async fn start_weixin_bridge(
     tauri::async_runtime::spawn_blocking(move || manager.start(app, runtime_manager))
         .await
         .map_err(|error| format!("Failed to join start_weixin_bridge task: {}", error))?
+}
+
+#[tauri::command]
+async fn stop_wecom_bridge(
+    wecom_state: State<'_, Arc<WecomBridgeManager>>,
+) -> Result<WecomBridgeStatus, String> {
+    let manager = wecom_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.stop())
+        .await
+        .map_err(|error| format!("Failed to join stop_wecom_bridge task: {}", error))
 }
 
 #[tauri::command]
@@ -2974,6 +3024,7 @@ fn main() {
     let proxy_debug_manager = ProxyDebugManager::new(session_manager.clone())
         .expect("failed to initialize proxy debug manager");
     let telegram_bridge_manager = Arc::new(TelegramBridgeManager::default());
+    let wecom_bridge_manager = Arc::new(WecomBridgeManager::default());
     let weixin_bridge_manager = Arc::new(WeixinBridgeManager::default());
     let session_manager_for_setup = session_manager.clone();
     let proxy_manager_for_setup = proxy_debug_manager.clone();
@@ -2983,6 +3034,8 @@ fn main() {
     let headless_manager_for_run = headless_runtime_manager.clone();
     let telegram_manager_for_setup = telegram_bridge_manager.clone();
     let telegram_manager_for_run = telegram_bridge_manager.clone();
+    let wecom_manager_for_setup = wecom_bridge_manager.clone();
+    let wecom_manager_for_run = wecom_bridge_manager.clone();
     let weixin_manager_for_setup = weixin_bridge_manager.clone();
     let weixin_manager_for_run = weixin_bridge_manager.clone();
     let notification_prefs_state = notifications::NotificationPrefsState::new();
@@ -3011,6 +3064,7 @@ fn main() {
         .manage(event_dispatcher.clone())
         .manage(unified_session_manager.clone())
         .manage(telegram_bridge_manager.clone())
+        .manage(wecom_bridge_manager.clone())
         .manage(weixin_bridge_manager.clone())
         .manage(proxy_debug_manager.clone())
         .manage(app_updates::PendingUpdate::default())
@@ -3166,14 +3220,19 @@ fn main() {
             save_settings,
             send_test_notification,
             get_telegram_settings,
+            get_wecom_settings,
             get_weixin_settings,
             save_telegram_settings,
+            save_wecom_settings,
             save_weixin_settings,
             get_telegram_bridge_status,
+            get_wecom_bridge_status,
             get_weixin_bridge_status,
             start_telegram_bridge,
+            start_wecom_bridge,
             start_weixin_bridge,
             stop_telegram_bridge,
+            stop_wecom_bridge,
             stop_weixin_bridge,
             start_weixin_login,
             poll_weixin_login,
@@ -3369,6 +3428,27 @@ fn main() {
                 }
             }
 
+            if let Ok(settings) = wecom::read_wecom_settings() {
+                wecom_manager_for_setup.sync_settings(&settings);
+                if settings.enabled
+                    && settings.bots.iter().any(|bot| {
+                        bot.enabled
+                            && !bot.bot_id.trim().is_empty()
+                            && bot
+                                .secret
+                                .as_ref()
+                                .is_some_and(|value| !value.trim().is_empty())
+                    })
+                {
+                    if let Err(error) = wecom_manager_for_setup
+                        .clone()
+                        .start(app.handle().clone(), headless_runtime_manager.clone())
+                    {
+                        eprintln!("WeCom bridge auto-start warning: {}", error);
+                    }
+                }
+            }
+
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -3384,6 +3464,7 @@ fn main() {
                 }
             } else if let RunEvent::Exit = event {
                 telegram_manager_for_run.stop();
+                wecom_manager_for_run.stop();
                 weixin_manager_for_run.stop();
                 interactive_manager_for_run.shutdown_all();
                 headless_manager_for_run.shutdown_all();

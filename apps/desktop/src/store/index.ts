@@ -137,7 +137,7 @@ export interface CronTemplate {
 }
 
 export interface ChannelInfo {
-  kind: string; // 'desktop_ui' | 'telegram' | 'weixin'
+  kind: string; // 'desktop_ui' | 'telegram' | 'weixin' | 'wecom'
   connectedAt: string;
   label?: string;
   /** Raw backend ChannelKind for detach operations */
@@ -147,7 +147,7 @@ export interface ChannelInfo {
 export interface UnifiedSession {
   id: string;
   runtimeKind: 'interactive' | 'headless';
-  source: 'desktop' | 'telegram' | 'weixin' | 'cron' | 'cli';
+  source: 'desktop' | 'telegram' | 'weixin' | 'wecom' | 'cron' | 'cli';
   status: string;
   projectDir: string;
   envName: string;

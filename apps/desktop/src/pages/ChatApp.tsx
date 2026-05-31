@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { useLocale } from '@/locales';
 import { TelegramPanel } from '@/components/chat-app/telegram/TelegramPanel';
+import { WecomPanel } from '@/components/chat-app/wecom/WecomPanel';
 import { WeixinPanel } from '@/components/chat-app/weixin/WeixinPanel';
 import { getRemotePlatformMeta, REMOTE_PLATFORM_ORDER, type RemotePlatformId } from '@/lib/remote-platforms';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
@@ -15,6 +16,7 @@ interface TabDef {
 const panelByPlatform: Record<RemotePlatformId, () => JSX.Element> = {
   telegram: () => <TelegramPanel />,
   weixin: () => <WeixinPanel />,
+  wecom: () => <WecomPanel />,
 };
 
 const tabs: TabDef[] = REMOTE_PLATFORM_ORDER.map((id) => ({
