@@ -1,13 +1,13 @@
 import { memo, useMemo, useState, useDeferredValue, useCallback, useRef, useEffect } from 'react';
-import { Check, ChevronRight, FolderOpen, FolderClosed, MessageSquare, RefreshCw, Search, SquarePen, X } from 'lucide-react';
+import { Check, ChevronRight, FolderOpen, FolderClosed, MessageSquare, Pin, RefreshCw, Search, SquarePen, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { getHistorySessionDisplay } from '@/components/history/historySession';
 import { useLocale } from '@/locales';
-import type { Environment, LaunchClient } from '@/store';
+import type { Environment } from '@/store';
 import type { HistorySessionItem, SessionStickerId, SessionTaskStage } from '@/features/conversations/types';
-import { AgentLaunchSplitButton } from './AgentLaunchSplitButton';
 import { SessionTreeItemIcon, resolveSessionClient } from './sessionTreeIcons';
 import type { WorkspaceSessionDecoration } from './useWorkspaceSessionDecorations';
 import {
@@ -25,10 +25,7 @@ interface ProjectTreeProps {
   isRefreshing?: boolean;
   selectedKey: string | null;
   onSelect: (session: HistorySessionItem) => void;
-  onNewSession: (client?: LaunchClient) => void;
   onRefresh: () => void;
-  codexInstalled?: boolean;
-  opencodeInstalled?: boolean;
   /** Save a title override. Returns a promise so callers can await it. */
   onSaveTitle?: (session: HistorySessionItem, title: string) => Promise<void>;
   onSaveAnnotation?: (
@@ -94,6 +91,48 @@ function ProjectTreeSkeleton() {
 
 const PAGE_SIZE = 10;
 const MAX_LABEL_LENGTH = 24;
+const PINNED_SESSION_KEYS_STORAGE_KEY = 'ccem-workspace-pinned-sessions';
+
+function readPinnedSessionKeys(): string[] {
+  try {
+    const rawValue = localStorage.getItem(PINNED_SESSION_KEYS_STORAGE_KEY);
+    if (!rawValue) {
+      return [];
+    }
+
+    const parsed = JSON.parse(rawValue);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    const seen = new Set<string>();
+    const keys: string[] = [];
+    for (const value of parsed) {
+      if (typeof value !== 'string' || seen.has(value)) {
+        continue;
+      }
+      seen.add(value);
+      keys.push(value);
+    }
+    return keys;
+  } catch {
+    return [];
+  }
+}
+
+function sessionMatchesSearch(session: HistorySessionItem, query: string): boolean {
+  if (!query) {
+    return true;
+  }
+
+  const haystack = [
+    getHistorySessionDisplay(session, ''),
+    session.projectName,
+    session.project,
+  ].join(' ').toLowerCase();
+
+  return haystack.includes(query);
+}
 
 function hasSessionAnnotation(session: HistorySessionItem) {
   return !!(session.taskStage || session.taskSticker || session.taskLabel?.trim());
@@ -228,11 +267,11 @@ function SessionAnnotationPopover({
             )
           : cn(
               'absolute -bottom-0.5 -right-0.5 z-10 inline-flex h-3.5 w-3.5 items-center justify-center rounded-[5px]',
-              'bg-surface-raised/95 shadow-sm ring-1 ring-border/70 transition-all duration-150',
-              'hover:scale-110 hover:ring-primary/35',
+              'bg-surface-raised/95 shadow-sm ring-1 ring-border/70 transition-opacity duration-150',
+              'hover:ring-primary/35',
               session.taskSticker
                 ? 'opacity-100'
-                : 'opacity-0 group-hover/session:opacity-100 group-focus-within/session:opacity-100 data-[state=open]:opacity-100'
+                : 'pointer-events-none opacity-0 focus:pointer-events-auto focus:opacity-100 group-hover/session:pointer-events-auto group-hover/session:opacity-100 data-[state=open]:pointer-events-auto data-[state=open]:opacity-100'
             )
       )}
     >
@@ -400,10 +439,7 @@ export const ProjectTree = memo(function ProjectTree({
   isRefreshing = false,
   selectedKey,
   onSelect,
-  onNewSession,
   onRefresh,
-  codexInstalled = false,
-  opencodeInstalled = false,
   onSaveTitle,
   onSaveAnnotation,
   onSessionsChanged,
@@ -413,9 +449,14 @@ export const ProjectTree = memo(function ProjectTree({
   const [search, setSearch] = useState('');
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [pinnedSessionKeys, setPinnedSessionKeys] = useState(readPinnedSessionKeys);
 
   const processingKeysRef = useRef<Set<string>>(new Set());
   const [freshDotKeys, setFreshDotKeys] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    localStorage.setItem(PINNED_SESSION_KEYS_STORAGE_KEY, JSON.stringify(pinnedSessionKeys));
+  }, [pinnedSessionKeys]);
 
   // Track which sessions just finished processing
   useEffect(() => {
@@ -461,11 +502,52 @@ export const ProjectTree = memo(function ProjectTree({
   const deferredSearch = useDeferredValue(search);
   const [expandedProjects, setExpandedProjects] = useState<Set<string> | null>(null);
   const [projectVisibleCount, setProjectVisibleCount] = useState<Record<string, number>>({});
+  const normalizedSearch = deferredSearch.trim().toLowerCase();
+
+  const pinnedSessionKeySet = useMemo(
+    () => new Set(pinnedSessionKeys),
+    [pinnedSessionKeys]
+  );
+
+  const sessionByKey = useMemo(() => {
+    const map = new Map<string, HistorySessionItem>();
+    for (const session of sessions) {
+      map.set(toKey(session), session);
+    }
+    return map;
+  }, [sessions]);
+
+  const pinnedSessions = useMemo(
+    () => pinnedSessionKeys
+      .map((key) => sessionByKey.get(key))
+      .filter((session): session is HistorySessionItem => !!session),
+    [pinnedSessionKeys, sessionByKey]
+  );
+
+  const visiblePinnedSessions = useMemo(
+    () => pinnedSessions.filter((session) => sessionMatchesSearch(session, normalizedSearch)),
+    [normalizedSearch, pinnedSessions]
+  );
+
+  const unpinnedSessions = useMemo(
+    () => sessions.filter((session) => !pinnedSessionKeySet.has(toKey(session))),
+    [pinnedSessionKeySet, sessions]
+  );
+
+  const togglePinnedSession = useCallback((session: HistorySessionItem) => {
+    const key = toKey(session);
+    setPinnedSessionKeys((previous) => {
+      if (previous.includes(key)) {
+        return previous.filter((pinnedKey) => pinnedKey !== key);
+      }
+      return [key, ...previous.filter((pinnedKey) => pinnedKey !== key)];
+    });
+  }, []);
 
   // Build project nodes from sessions
   const projectNodes = useMemo(() => {
     const map = new Map<string, ProjectNode>();
-    for (const session of sessions) {
+    for (const session of unpinnedSessions) {
       let node = map.get(session.project);
       if (!node) {
         node = {
@@ -489,7 +571,7 @@ export const ProjectTree = memo(function ProjectTree({
       node.sessions.sort((a, b) => b.timestamp - a.timestamp);
     }
     return nodes;
-  }, [sessions]);
+  }, [unpinnedSessions]);
 
   // Auto-expand top 3 projects on first load
   const effectiveExpanded = useMemo(() => {
@@ -499,19 +581,18 @@ export const ProjectTree = memo(function ProjectTree({
 
   // Filter by search
   const filteredNodes = useMemo(() => {
-    if (!deferredSearch.trim()) return projectNodes;
-    const q = deferredSearch.toLowerCase();
+    if (!normalizedSearch) return projectNodes;
     return projectNodes
       .map((node) => {
-        const nameMatch = node.projectName.toLowerCase().includes(q);
+        const nameMatch = node.projectName.toLowerCase().includes(normalizedSearch);
         const filteredSessions = node.sessions.filter(
-          (s) => getHistorySessionDisplay(s, '').toLowerCase().includes(q) || nameMatch
+          (s) => sessionMatchesSearch(s, normalizedSearch) || nameMatch
         );
         if (filteredSessions.length === 0) return null;
         return { ...node, sessions: nameMatch ? node.sessions : filteredSessions };
       })
       .filter(Boolean) as ProjectNode[];
-  }, [projectNodes, deferredSearch]);
+  }, [projectNodes, normalizedSearch]);
 
   // Per-project visible count helper
   const getVisibleCount = useCallback(
@@ -578,22 +659,160 @@ export const ProjectTree = memo(function ProjectTree({
     return environment?.name || clientLabel;
   }, [decorationsBySessionKey, resolveEnvironment, t]);
 
+  const renderSessionRow = (session: HistorySessionItem, options: { pinnedSection?: boolean } = {}) => {
+    const key = toKey(session);
+    const isSelected = key === selectedKey;
+    const isEditing = editingKey === key;
+    const isPinned = pinnedSessionKeySet.has(key);
+    const pinLabel = isPinned ? t('workspace.unpinSession') : t('workspace.pinSession');
+    const rowChrome = options.pinnedSection ? 'mx-0' : 'mx-1';
+    const rowPadding = options.pinnedSection ? 'pl-2 pr-2' : 'pl-9 pr-2';
+    const editPadding = options.pinnedSection ? 'pl-2 pr-2' : 'pl-9 pr-3';
+
+    if (isEditing) {
+      return (
+        <div
+          key={key}
+          className={cn(
+            'w-full flex items-center gap-2 py-1.5 rounded-md bg-surface-raised',
+            rowChrome,
+            editPadding
+          )}
+        >
+          <span
+            className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center"
+            title={getIconTitle(session)}
+          >
+            <SessionTreeItemIcon
+              session={session}
+              environment={resolveEnvironment(session)}
+              decoration={decorationsBySessionKey[key]}
+              isSelected
+            />
+          </span>
+          <input
+            autoFocus
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                setEditingKey(null);
+                void saveEdit(session, editValue);
+              }
+              if (e.key === 'Escape') setEditingKey(null);
+            }}
+            onBlur={() => setEditingKey(null)}
+            className="h-5 text-[12px] bg-transparent outline-none border-b border-primary/40 flex-1 min-w-0"
+          />
+        </div>
+      );
+    }
+
+    return (
+      <div
+        key={key}
+        role="button"
+        tabIndex={0}
+        onClick={() => onSelect(session)}
+        onDoubleClick={() => {
+          setEditingKey(key);
+          setEditValue(getHistorySessionDisplay(session, ''));
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onSelect(session);
+          }
+        }}
+        className={cn(
+          'group/session relative w-full rounded-lg py-1.5 text-left transition-colors duration-150 outline-none',
+          rowChrome,
+          rowPadding,
+          'focus-visible:ring-1 focus-visible:ring-primary/30',
+          isSelected
+            ? 'bg-primary/[0.08] text-primary'
+            : 'hover:bg-muted/50 text-muted-foreground hover:text-foreground',
+          options.pinnedSection && 'hover:bg-primary/[0.07]'
+        )}
+      >
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span
+            className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center"
+            title={getIconTitle(session)}
+          >
+            {session.taskSticker ? (
+              <SessionAnnotationPopover
+                session={session}
+                t={t}
+                onSaveAnnotation={onSaveAnnotation}
+                variant="inline"
+              />
+            ) : (
+              <>
+                <SessionTreeItemIcon
+                  session={session}
+                  environment={resolveEnvironment(session)}
+                  decoration={decorationsBySessionKey[key]}
+                  isSelected={isSelected}
+                />
+                <SessionAnnotationPopover
+                  session={session}
+                  t={t}
+                  onSaveAnnotation={onSaveAnnotation}
+                  variant="badge"
+                />
+              </>
+            )}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-[13px] leading-tight font-medium">
+            {getHistorySessionDisplay(session, t('history.untitledSession'))}
+          </span>
+          <span className="inline-flex w-10 shrink-0 items-center justify-end gap-1.5 text-[10px] tabular-nums transition-opacity duration-150 group-hover/session:opacity-0">
+            {freshDotKeys.has(key) ? (
+              <span className="relative inline-flex h-3.5 w-5 shrink-0 items-center justify-center">
+                <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-amber-500/25 opacity-75" />
+                <span className="relative h-1.5 w-1.5 rounded-full bg-amber-500" />
+              </span>
+            ) : (
+              <span className="text-muted-foreground/60">
+                {formatRelativeTime(session.timestamp)}
+              </span>
+            )}
+          </span>
+        </div>
+        <Tooltip delayDuration={1000}>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                togglePinnedSession(session);
+              }}
+              onDoubleClick={(event) => event.stopPropagation()}
+              aria-label={pinLabel}
+              className={cn(
+                'absolute right-2 top-1/2 z-10 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md',
+                'pointer-events-none text-foreground/70 opacity-0 transition-opacity duration-150',
+                'hover:text-foreground focus:text-foreground',
+                'focus:pointer-events-auto focus:opacity-100 focus-visible:ring-1 focus-visible:ring-foreground/25',
+                'group-hover/session:pointer-events-auto group-hover/session:opacity-100'
+              )}
+            >
+              <Pin className="h-3.5 w-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right" sideOffset={6} className="whitespace-nowrap">
+            {pinLabel}
+          </TooltipContent>
+        </Tooltip>
+      </div>
+    );
+  };
+
   return (
     <div className="flex w-[clamp(220px,30vw,280px)] shrink-0 flex-col bg-sidebar backdrop-blur-xl">
-      {/* Header: Dual Launch Button + Search */}
-      <div className="shrink-0 p-3 flex flex-col gap-2">
-        <AgentLaunchSplitButton
-          newSessionLabel={t('workspace.newSession')}
-          claudeLabel={t('workspace.newSessionClaude')}
-          codexLabel={t('workspace.newSessionCodex')}
-          opencodeLabel={t('workspace.newSessionOpenCode')}
-          codexUnavailableLabel={t('settings.cliNotInstalled')}
-          codexInstalled={codexInstalled}
-          opencodeInstalled={opencodeInstalled}
-          onLaunchClaude={() => onNewSession('claude')}
-          onLaunchCodex={() => onNewSession('codex')}
-          onLaunchOpenCode={() => onNewSession('opencode')}
-        />
+      {/* Header: Search + pinned conversations */}
+      <div className="shrink-0 p-2 flex flex-col gap-2">
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
@@ -602,7 +821,7 @@ export const ProjectTree = memo(function ProjectTree({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={t('workspace.searchProjects')}
-              className="w-full h-8 pl-8 pr-3 rounded-md text-xs bg-surface-raised border border-border text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+              className="w-full h-8 pl-8 pr-3 rounded-md text-xs bg-surface-raised/75 text-foreground placeholder:text-muted-foreground outline-none focus:bg-surface-raised focus:ring-1 focus:ring-primary/20 transition-all"
             />
           </div>
           <button
@@ -612,14 +831,36 @@ export const ProjectTree = memo(function ProjectTree({
             aria-label={isRefreshing ? t('workspace.refreshing') : t('workspace.refresh')}
             title={isRefreshing ? t('workspace.refreshing') : t('workspace.refresh')}
             className={cn(
-              'h-8 w-8 shrink-0 rounded-md border border-border bg-surface-raised',
+              'h-8 w-8 shrink-0 rounded-md bg-surface-raised/75',
               'flex items-center justify-center text-muted-foreground transition-colors',
-              'hover:text-foreground hover:border-primary/40 hover:bg-primary/5',
+              'hover:text-foreground hover:bg-primary/5',
               'disabled:cursor-default disabled:opacity-70'
             )}
           >
             <RefreshCw className={cn('w-3.5 h-3.5', isRefreshing && 'animate-spin')} />
           </button>
+        </div>
+
+        <div className="px-0.5 pt-1">
+          <div className="flex h-5 items-center justify-between px-2">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              {t('workspace.pinnedSessions')}
+            </span>
+            {pinnedSessions.length > 0 ? (
+              <span className="rounded-full bg-muted/70 px-1.5 py-0.5 text-[9px] font-medium tabular-nums text-muted-foreground">
+                {pinnedSessions.length}
+              </span>
+            ) : null}
+          </div>
+          {visiblePinnedSessions.length > 0 ? (
+            <div className="mt-1 max-h-[148px] overflow-y-auto pr-0.5">
+              {visiblePinnedSessions.map((session) => renderSessionRow(session, { pinnedSection: true }))}
+            </div>
+          ) : (
+            <div className="mt-1 px-2 py-2 text-[11px] text-muted-foreground/60">
+              {pinnedSessions.length > 0 ? t('workspace.noPinnedMatches') : t('workspace.noPinnedSessions')}
+            </div>
+          )}
         </div>
       </div>
 
@@ -628,11 +869,13 @@ export const ProjectTree = memo(function ProjectTree({
         {isLoading ? (
           <ProjectTreeSkeleton />
         ) : filteredNodes.length === 0 ? (
+          visiblePinnedSessions.length > 0 ? null : (
           <div className="flex flex-col items-center justify-center py-12 text-center px-4">
             <MessageSquare className="w-8 h-8 text-muted-foreground/40 mb-3" />
             <p className="text-xs text-muted-foreground mb-1">{t('workspace.noHistory')}</p>
             <p className="text-xs text-muted-foreground/70">{t('workspace.noHistoryHint')}</p>
           </div>
+          )
         ) : (
           filteredNodes.map((node) => {
             const isExpanded = effectiveExpanded.has(node.project);
@@ -643,7 +886,7 @@ export const ProjectTree = memo(function ProjectTree({
                 {/* Project header */}
                 <div
                   className={cn(
-                    'group mx-1 flex items-center gap-2 rounded-md px-3 py-2 transition-colors',
+                    'group/project relative mx-1 flex items-center gap-2 rounded-md px-3 py-2 transition-colors duration-150',
                     'hover:bg-muted/60',
                     isExpanded && 'bg-muted/40'
                   )}
@@ -668,140 +911,41 @@ export const ProjectTree = memo(function ProjectTree({
                       {node.projectName}
                     </span>
                   </button>
-                  {onCreateForProject && (
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onCreateForProject(node.project);
-                      }}
-                      aria-label={t('workspace.createInProject')}
-                      title={t('workspace.createInProject')}
-                      className={cn(
-                        'flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent',
-                        'text-muted-foreground opacity-0 transition-all',
-                        'group-hover:opacity-100 hover:border-primary/30 hover:bg-primary/8 hover:text-primary'
-                      )}
-                    >
-                      <SquarePen className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                  <span className="text-[10px] text-muted-foreground shrink-0 font-medium px-1.5 py-0.5 rounded-full bg-muted/60">
+                  <span className="inline-flex min-w-8 shrink-0 justify-center rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-opacity duration-150 group-hover/project:opacity-0">
                     {node.sessions.length}
                   </span>
+                  {onCreateForProject && (
+                    <Tooltip delayDuration={1000}>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onCreateForProject(node.project);
+                          }}
+                          aria-label={t('workspace.createInProject')}
+                          className={cn(
+                            'absolute right-2 top-1/2 z-10 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md',
+                            'pointer-events-none text-foreground/70 opacity-0 transition-opacity duration-150',
+                            'hover:text-foreground focus:text-foreground',
+                            'focus:pointer-events-auto focus:opacity-100 focus-visible:ring-1 focus-visible:ring-foreground/25',
+                            'group-hover/project:pointer-events-auto group-hover/project:opacity-100'
+                          )}
+                        >
+                          <SquarePen className="h-3.5 w-3.5" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" sideOffset={6} className="whitespace-nowrap">
+                        {t('workspace.createInProject')}
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
                 </div>
 
                 {/* Session list */}
                 {isExpanded && (
                   <div className="pb-1">
-                    {visible.map((session) => {
-                      const key = toKey(session);
-                      const isSelected = key === selectedKey;
-                      const isEditing = editingKey === key;
-                      return isEditing ? (
-                        <div
-                          key={key}
-                          className="w-full flex items-center gap-2 pl-9 pr-3 py-1.5 mx-1 rounded-md bg-surface-raised"
-                        >
-                          <span
-                            className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center"
-                            title={getIconTitle(session)}
-                          >
-                            <SessionTreeItemIcon
-                              session={session}
-                              environment={resolveEnvironment(session)}
-                              decoration={decorationsBySessionKey[key]}
-                              isSelected
-                            />
-                          </span>
-                          <input
-                            autoFocus
-                            value={editValue}
-                            onChange={(e) => setEditValue(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                setEditingKey(null);
-                                void saveEdit(session, editValue);
-                              }
-                              if (e.key === 'Escape') setEditingKey(null);
-                            }}
-                            onBlur={() => setEditingKey(null)}
-                            className="h-5 text-[12px] bg-transparent outline-none border-b border-primary/40 flex-1 min-w-0"
-                          />
-                        </div>
-                      ) : (
-                        <div
-                          key={key}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => onSelect(session)}
-                          onDoubleClick={() => {
-                            setEditingKey(key);
-                            setEditValue(getHistorySessionDisplay(session, ''));
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter' || event.key === ' ') {
-                              event.preventDefault();
-                              onSelect(session);
-                            }
-                          }}
-                          className={cn(
-                            'group/session relative mx-1 w-full rounded-lg py-1.5 pl-9 pr-3 text-left transition-all outline-none',
-                            'focus-visible:ring-1 focus-visible:ring-primary/30',
-                            isSelected
-                              ? 'bg-primary/[0.08] text-primary'
-                              : 'hover:bg-muted/50 text-muted-foreground hover:text-foreground'
-                          )}
-                        >
-                          <div className="flex min-w-0 items-center gap-1.5">
-                            <span
-                              className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center"
-                              title={getIconTitle(session)}
-                            >
-                              {session.taskSticker ? (
-                                <SessionAnnotationPopover
-                                  session={session}
-                                  t={t}
-                                  onSaveAnnotation={onSaveAnnotation}
-                                  variant="inline"
-                                />
-                              ) : (
-                                <>
-                                  <SessionTreeItemIcon
-                                    session={session}
-                                    environment={resolveEnvironment(session)}
-                                    decoration={decorationsBySessionKey[key]}
-                                    isSelected={isSelected}
-                                  />
-                                  <SessionAnnotationPopover
-                                    session={session}
-                                    t={t}
-                                    onSaveAnnotation={onSaveAnnotation}
-                                    variant="badge"
-                                  />
-                                </>
-                              )}
-                            </span>
-                            <span className="min-w-0 flex-1 truncate text-[13px] leading-tight font-medium">
-                              {getHistorySessionDisplay(session, t('history.untitledSession'))}
-                            </span>
-                            <span className="shrink-0 text-[10px] tabular-nums inline-flex items-center gap-1.5">
-                              {/* Default: show timestamp or fresh dot */}
-                              {freshDotKeys.has(key) ? (
-                                <span className="relative inline-flex h-3.5 w-5 shrink-0 items-center justify-center group-hover/session:hidden">
-                                  <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-amber-500/25 opacity-75" />
-                                  <span className="relative h-1.5 w-1.5 rounded-full bg-amber-500" />
-                                </span>
-                              ) : (
-                                <span className="text-muted-foreground/60 group-hover/session:hidden">
-                                  {formatRelativeTime(session.timestamp)}
-                                </span>
-                              )}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
+                    {visible.map((session) => renderSessionRow(session))}
                     {hasMore && (
                       <button
                         type="button"
@@ -821,7 +965,7 @@ export const ProjectTree = memo(function ProjectTree({
 
       {/* Footer stats */}
       {totalSessions > 0 && (
-        <div className="shrink-0 px-3 py-2 border-t border-border/60 text-2xs text-muted-foreground">
+        <div className="shrink-0 px-3 py-2 text-2xs text-muted-foreground">
           {totalProjects} {t('history.allProjects').toLowerCase()} · {totalSessions}{' '}
           {t('workspace.projectSessions')}
         </div>

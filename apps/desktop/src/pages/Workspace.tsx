@@ -1815,7 +1815,6 @@ export function Workspace({
           isRefreshing={isRefreshing}
           selectedKey={selectedKey}
           onSelect={handleSelect}
-          onNewSession={handleNewSession}
           onRefresh={() => {
             void refreshWorkspaceData({
               force: true,
@@ -1823,8 +1822,6 @@ export function Workspace({
               includeSelectedConversation: true,
             });
           }}
-          codexInstalled={codexInstalled}
-          opencodeInstalled={opencodeInstalled}
           onSaveTitle={async (session, title) => {
             await setSessionTitle(session.source, session.id, title);
           }}
