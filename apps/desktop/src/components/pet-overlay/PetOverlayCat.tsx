@@ -24,6 +24,10 @@ interface PetOverlayCatProps {
 const CAT_CANVAS_CSS_SIZE = 256;
 const CAT_CANVAS_MAX_PIXEL_RATIO = 3;
 const CAT_SOURCE_FRAME_CSS_SIZE = 256;
+const CAT_LEGACY_CANVAS_SIZE = 320;
+const CAT_LEGACY_VISUAL_SCALE = CAT_CANVAS_CSS_SIZE / CAT_LEGACY_CANVAS_SIZE;
+const CAT_FRAME_DRAW_SCALE = 0.66 * CAT_LEGACY_VISUAL_SCALE;
+const CAT_BASELINE_INSET = 24 * CAT_LEGACY_VISUAL_SCALE;
 const CAT_SPRITE_COLUMNS = 3;
 const CAT_SPRITE_ROWS = 2;
 const CAT_HOVER_POLL_INTERVAL_MS = 200;
@@ -297,11 +301,11 @@ function drawCatFrame(canvas: HTMLCanvasElement, frame: CatFrame) {
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = 'high';
   const sourcePixelRatio = frame.canvas.width / CAT_SOURCE_FRAME_CSS_SIZE;
-  const scale = (0.66 / sourcePixelRatio) * frame.normalizeScale;
+  const scale = (CAT_FRAME_DRAW_SCALE / sourcePixelRatio) * frame.normalizeScale;
   const width = frame.canvas.width * scale;
   const height = frame.canvas.height * scale;
   const x = logicalWidth * 0.5 - frame.anchorX * scale;
-  const y = logicalHeight - 24 - frame.anchorY * scale;
+  const y = logicalHeight - CAT_BASELINE_INSET - frame.anchorY * scale;
   context.drawImage(frame.canvas, x, y, width, height);
   context.restore();
 }

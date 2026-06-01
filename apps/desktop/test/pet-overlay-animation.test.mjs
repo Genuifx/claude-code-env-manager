@@ -34,7 +34,11 @@ test('desktop pet cat uses the image generated state sprite', async () => {
   assert.match(catSource, /resizeCatCanvasForPixelRatio/);
   assert.match(catSource, /window\.devicePixelRatio/);
   assert.match(catSource, /CAT_SOURCE_FRAME_CSS_SIZE = 256/);
+  assert.match(catSource, /CAT_LEGACY_CANVAS_SIZE = 320/);
+  assert.match(catSource, /CAT_LEGACY_VISUAL_SCALE = CAT_CANVAS_CSS_SIZE \/ CAT_LEGACY_CANVAS_SIZE/);
   assert.match(catSource, /frame\.canvas\.width \/ CAT_SOURCE_FRAME_CSS_SIZE/);
+  assert.match(catSource, /0\.66 \* CAT_LEGACY_VISUAL_SCALE/);
+  assert.match(catSource, /24 \* CAT_LEGACY_VISUAL_SCALE/);
   assert.match(catSource, /h-\[256px\] w-\[256px\]/);
   assert.match(catSource, /-ml-\[72px\]/);
   assert.match(catSource, /pointer-events-none/);
