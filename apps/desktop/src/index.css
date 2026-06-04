@@ -2497,6 +2497,13 @@
   contain: layout paint;
 }
 
+.workspace-msg-virtualized,
+.workspace-tool-row-virtualized,
+.workspace-tool-digest-virtualized {
+  margin-inline: -2px;
+  padding-inline: 2px;
+}
+
 /* === Reduced Performance Mode === */
 :root[data-performance-mode='reduced'] {
   --glass-blur: 18px;

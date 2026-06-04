@@ -34,6 +34,19 @@ test('radix inner wrapper override stays scoped to ccem scroll areas', async () 
   );
 });
 
+test('workspace virtualized transcript rows keep paint slop for left-edge glyphs', async () => {
+  const styles = await fs.readFile(path.join(desktopDir, 'src', 'index.css'), 'utf8');
+
+  assert.match(
+    styles,
+    /\.workspace-msg-virtualized,\s*\.workspace-tool-payload-virtualized,\s*\.workspace-tool-row-virtualized,\s*\.workspace-tool-digest-virtualized\s*\{[\s\S]*contain:\s*layout paint;/,
+  );
+  assert.match(
+    styles,
+    /\.workspace-msg-virtualized,\s*\.workspace-tool-row-virtualized,\s*\.workspace-tool-digest-virtualized\s*\{[\s\S]*margin-inline:\s*-2px;[\s\S]*padding-inline:\s*2px;/,
+  );
+});
+
 test('fullscreen mac window controls stay centered in the titlebar row', async () => {
   const styles = await fs.readFile(path.join(desktopDir, 'src', 'index.css'), 'utf8');
 
