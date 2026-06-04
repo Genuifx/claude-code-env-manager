@@ -136,7 +136,34 @@ enum WindowControlAction {
 const MACOS_TRAFFIC_LIGHT_INSET_X: f32 = 24.0;
 
 #[cfg(target_os = "macos")]
-const MACOS_TRAFFIC_LIGHT_INSET_Y: f32 = 24.0;
+const MACOS_TITLEBAR_HEIGHT: f32 = 48.0;
+
+#[cfg(target_os = "macos")]
+const MACOS_TITLEBAR_CONTROL_CENTER_Y: f32 = MACOS_TITLEBAR_HEIGHT / 2.0;
+
+#[cfg(target_os = "macos")]
+const MACOS_TRAFFIC_LIGHT_HEIGHT: f32 = 12.0;
+
+#[cfg(target_os = "macos")]
+const MACOS_DECORUM_TRAFFIC_LIGHT_VERTICAL_OFFSET: f32 = 4.0;
+
+#[cfg(target_os = "macos")]
+const MACOS_TRAFFIC_LIGHT_INSET_Y: f32 = macos_traffic_light_inset_y_for_centered_top(
+    MACOS_TITLEBAR_CONTROL_CENTER_Y - (MACOS_TRAFFIC_LIGHT_HEIGHT / 2.0),
+);
+
+#[cfg(target_os = "macos")]
+const MACOS_TRAFFIC_LIGHT_SYNC_DELAYS: [u64; 3] = [0, 120, 320];
+
+#[cfg(all(target_os = "macos", test))]
+const fn decorum_traffic_light_top_from_inset(inset_y: f32) -> f32 {
+    (inset_y / 2.0) + MACOS_DECORUM_TRAFFIC_LIGHT_VERTICAL_OFFSET
+}
+
+#[cfg(target_os = "macos")]
+const fn macos_traffic_light_inset_y_for_centered_top(control_top: f32) -> f32 {
+    (control_top - MACOS_DECORUM_TRAFFIC_LIGHT_VERTICAL_OFFSET) * 2.0
+}
 
 #[cfg(target_os = "macos")]
 fn should_use_reduced_window_effects(settings: &DesktopSettings) -> bool {
@@ -200,18 +227,23 @@ fn sync_macos_window_chrome(
 }
 
 #[cfg(target_os = "macos")]
-fn schedule_macos_traffic_light_sync(
+fn schedule_macos_traffic_light_sync_series(
     main_window: tauri::WebviewWindow,
-    delay_ms: u64,
     reason: &'static str,
 ) {
     tauri::async_runtime::spawn_blocking(move || {
-        if delay_ms > 0 {
-            std::thread::sleep(Duration::from_millis(delay_ms));
-        }
+        let mut previous_delay_ms = 0;
 
-        if let Err(error) = sync_macos_traffic_lights(&main_window) {
-            eprintln!("Traffic lights {} sync warning: {}", reason, error);
+        for delay_ms in MACOS_TRAFFIC_LIGHT_SYNC_DELAYS {
+            if delay_ms > previous_delay_ms {
+                std::thread::sleep(Duration::from_millis(delay_ms - previous_delay_ms));
+            }
+
+            if let Err(error) = sync_macos_traffic_lights(&main_window) {
+                eprintln!("Traffic lights {} sync warning: {}", reason, error);
+            }
+
+            previous_delay_ms = delay_ms;
         }
     });
 }
@@ -3652,9 +3684,19 @@ fn main() {
                 #[cfg(target_os = "macos")]
                 WindowEvent::Resized(_) => {
                     if let Some(main_window) = window.app_handle().get_webview_window("main") {
-                        if let Err(error) = sync_macos_traffic_lights(&main_window) {
-                            eprintln!("Traffic lights resize sync warning: {}", error);
-                        }
+                        schedule_macos_traffic_light_sync_series(main_window, "resize");
+                    }
+                }
+                #[cfg(target_os = "macos")]
+                WindowEvent::ScaleFactorChanged { .. } => {
+                    if let Some(main_window) = window.app_handle().get_webview_window("main") {
+                        schedule_macos_traffic_light_sync_series(main_window, "scale factor");
+                    }
+                }
+                #[cfg(target_os = "macos")]
+                WindowEvent::Focused(true) => {
+                    if let Some(main_window) = window.app_handle().get_webview_window("main") {
+                        schedule_macos_traffic_light_sync_series(main_window, "focus");
                     }
                 }
                 _ => {}
@@ -3724,17 +3766,20 @@ fn main() {
                 if let Err(error) = sync_macos_window_chrome(&main_window, &startup_settings) {
                     eprintln!("Window appearance warning: {}", error);
                 }
+                schedule_macos_traffic_light_sync_series(main_window.clone(), "startup");
 
                 let fullscreen_window = main_window.clone();
                 main_window.listen("did-enter-fullscreen", move |_| {
-                    schedule_macos_traffic_light_sync(fullscreen_window.clone(), 240, "fullscreen");
+                    schedule_macos_traffic_light_sync_series(
+                        fullscreen_window.clone(),
+                        "fullscreen",
+                    );
                 });
 
                 let fullscreen_exit_window = main_window.clone();
                 main_window.listen("did-exit-fullscreen", move |_| {
-                    schedule_macos_traffic_light_sync(
+                    schedule_macos_traffic_light_sync_series(
                         fullscreen_exit_window.clone(),
-                        320,
                         "fullscreen exit",
                     );
                 });
@@ -3841,7 +3886,7 @@ fn main() {
                     let _ = window.show();
                     let _ = window.set_focus();
                     #[cfg(target_os = "macos")]
-                    schedule_macos_traffic_light_sync(window, 0, "reopen");
+                    schedule_macos_traffic_light_sync_series(window, "reopen");
                 }
             } else if let RunEvent::Exit = event {
                 telegram_manager_for_run.stop();
@@ -3859,6 +3904,12 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    use super::{
+        decorum_traffic_light_top_from_inset, macos_traffic_light_inset_y_for_centered_top,
+        MACOS_TITLEBAR_CONTROL_CENTER_Y, MACOS_TRAFFIC_LIGHT_HEIGHT,
+        MACOS_TRAFFIC_LIGHT_SYNC_DELAYS,
+    };
     use super::{
         merge_git_numstat, normalize_git_changed_path, parse_git_status_line,
         WorkspaceGitChangedFile,
@@ -3922,5 +3973,22 @@ mod tests {
         let logo = files.get("assets/logo.png").unwrap();
         assert_eq!(logo.additions, Some(0));
         assert_eq!(logo.deletions, Some(0));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_traffic_light_inset_centers_on_titlebar_control_line() {
+        let expected_top = MACOS_TITLEBAR_CONTROL_CENTER_Y - (MACOS_TRAFFIC_LIGHT_HEIGHT / 2.0);
+        let inset_y = macos_traffic_light_inset_y_for_centered_top(expected_top);
+
+        assert_eq!(expected_top, 18.0);
+        assert_eq!(inset_y, 28.0);
+        assert_eq!(decorum_traffic_light_top_from_inset(inset_y), expected_top);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_traffic_light_sync_retries_after_state_transitions() {
+        assert_eq!(MACOS_TRAFFIC_LIGHT_SYNC_DELAYS, [0, 120, 320]);
     }
 }

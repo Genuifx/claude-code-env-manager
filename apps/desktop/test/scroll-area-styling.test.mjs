@@ -57,10 +57,37 @@ test('fullscreen mac window controls stay centered in the titlebar row', async (
   };
 
   const titlebarHeight = readPixelVar('--ccem-titlebar-height');
+  const controlCenter = readPixelVar('--ccem-titlebar-control-center-y');
   const controlSize = readPixelVar('--ccem-window-controls-size');
-  const controlTop = readPixelVar('--ccem-window-controls-top');
+  const controlHalfSize = readPixelVar('--ccem-window-controls-half-size');
+  const actionHalfSize = readPixelVar('--ccem-titlebar-action-half-size');
+  const sidebarToggleSize = readPixelVar('--ccem-sidebar-toggle-size');
+  const updateIndicatorSize = readPixelVar('--ccem-update-indicator-size');
 
-  assert.equal(controlTop, (titlebarHeight - controlSize) / 2);
+  assert.equal(controlCenter, titlebarHeight / 2);
+  assert.equal(controlHalfSize, controlSize / 2);
+  assert.equal(actionHalfSize, sidebarToggleSize / 2);
+  assert.equal(actionHalfSize, updateIndicatorSize / 2);
+  assert.match(
+    styles,
+    /--ccem-window-controls-top:\s*calc\(\s*var\(--ccem-titlebar-control-center-y\)\s*-\s*var\(--ccem-window-controls-half-size\)\s*\);/,
+  );
+  assert.match(
+    styles,
+    /--ccem-titlebar-action-top:\s*calc\(\s*var\(--ccem-titlebar-control-center-y\)\s*-\s*var\(--ccem-titlebar-action-half-size\)\s*\);/,
+  );
+  assert.match(
+    styles,
+    /\.app-sidebar-toggle-anchor\s*\{[\s\S]*top:\s*var\(--ccem-titlebar-action-top\);/,
+  );
+  assert.match(
+    styles,
+    /\.app-update-indicator-anchor\s*\{[\s\S]*top:\s*var\(--ccem-titlebar-action-top\);/,
+  );
+  assert.match(
+    styles,
+    /\.app-titlebar-row\s*\{[\s\S]*padding-top:\s*0;/,
+  );
   assert.match(
     styles,
     /\.mac-window-controls-button\s*\{[\s\S]*width:\s*var\(--ccem-window-controls-size\);[\s\S]*height:\s*var\(--ccem-window-controls-size\);/,
