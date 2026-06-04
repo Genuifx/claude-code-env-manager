@@ -406,7 +406,7 @@ export function selectedSkillFilesFromComposerText(
 ): string[] {
   const files = new Set<string>();
   for (const token of parseComposerTokens(text, provider, installedSkills)) {
-    if (token.kind === 'skill' && token.path) {
+    if (token.kind === 'skill' && token.path && token.display.startsWith('$')) {
       files.add(token.path);
     }
   }
@@ -417,6 +417,13 @@ function escapeSelectedSkillAttribute(value: string): string {
   return value
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function escapeSelectedSkillText(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 }
@@ -437,7 +444,7 @@ export function buildComposerPromptWithSelectedSkills(
   text: string,
   selectedSkills: SelectedSkillContent[],
 ): string {
-  const validSkills = selectedSkills.filter((skill) => skill.content.trim().length > 0);
+  const validSkills = selectedSkills.filter((skill) => skill.skillFile.trim().length > 0);
   if (validSkills.length === 0) {
     return text.trim();
   }
@@ -447,16 +454,14 @@ export function buildComposerPromptWithSelectedSkills(
     const name = skill.name ?? pathParts[pathParts.length - 2] ?? 'skill';
     const description = skill.description ?? '';
     const resources = skill.resourceHints.length > 0
-      ? `\n<resource_hints>\n${skill.resourceHints.map((hint) => `- ${hint}`).join('\n')}\n</resource_hints>`
+      ? `\n<resource_hints>\n${skill.resourceHints.map((hint) => `- ${escapeSelectedSkillText(hint)}`).join('\n')}\n</resource_hints>`
       : '';
 
     return [
       `<skill name="${escapeSelectedSkillAttribute(name)}" path="${escapeSelectedSkillAttribute(skill.skillFile)}" directory="${escapeSelectedSkillAttribute(skill.directory)}">`,
-      description ? `<description>${description}</description>` : '',
+      description ? `<description>${escapeSelectedSkillText(description)}</description>` : '',
       resources,
-      '<content>',
-      skill.content.trim(),
-      '</content>',
+      '<instruction>Use this selected skill for the user request. Follow normal skill progressive disclosure: inspect the SKILL.md path only when details are needed, then load only the relevant referenced resources.</instruction>',
       '</skill>',
     ].filter(Boolean).join('\n');
   });

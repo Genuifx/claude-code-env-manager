@@ -123,13 +123,17 @@ test('dollar query is skill-only and structured tokens parse by exact SKILL.md p
   assert.deepEqual(selectedSkillFilesFromComposerText(text, 'codex', skills), [
     '/tmp/global/duplicate/SKILL.md',
   ]);
+  assert.deepEqual(
+    selectedSkillFilesFromComposerText('use [/duplicate](/tmp/global/duplicate/SKILL.md) now', 'codex', skills),
+    [],
+  );
 });
 
-test('selected skill content expands into compact prompt block', async () => {
+test('selected skill references expand into lightweight prompt block', async () => {
   const { buildComposerDisplayText, buildComposerPromptWithSelectedSkills } = await importComposerModel();
 
   const prompt = buildComposerPromptWithSelectedSkills(
-    'please use /duplicate now',
+    'please use $duplicate now',
     [{
       skillFile: '/tmp/project/duplicate/SKILL.md',
       directory: '/tmp/project/duplicate',
@@ -144,7 +148,10 @@ test('selected skill content expands into compact prompt block', async () => {
   assert.match(prompt, /<selected_skills>/);
   assert.match(prompt, /path="\/tmp\/project\/duplicate\/SKILL\.md"/);
   assert.match(prompt, /<resource_hints>\n- \/tmp\/project\/duplicate\/scripts/);
-  assert.match(prompt, /<user_request>\nplease use \/duplicate now\n<\/user_request>/);
+  assert.match(prompt, /progressive disclosure/);
+  assert.doesNotMatch(prompt, /<content>/);
+  assert.doesNotMatch(prompt, /# Skill body/);
+  assert.match(prompt, /<user_request>\nplease use \$duplicate now\n<\/user_request>/);
 
   assert.equal(
     buildComposerDisplayText('please use [/duplicate](/tmp/project/duplicate/SKILL.md) now'),

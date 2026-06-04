@@ -256,7 +256,7 @@ function composerSuggestionToTriggerSuggestion(suggestion: ComposerSuggestion): 
 
 function selectedTokenFromPromptChip(chip: ChipSegment): ComposerToken | null {
   const data = readComposerPromptChipData(chip.data);
-  if (data?.kind !== 'skill' || !data.suggestion?.path) {
+  if (data?.kind !== 'skill' || !data.suggestion?.path || chip.trigger !== '$') {
     return null;
   }
 
