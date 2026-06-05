@@ -88,6 +88,7 @@ use std::fs;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+#[cfg(target_os = "macos")]
 use std::time::Duration;
 use telegram::{
     TelegramBridgeManager, TelegramBridgeStatus, TelegramForumTopic, TelegramSettings,
@@ -102,9 +103,9 @@ use workspace_search::search_workspace_files;
 
 /// Global flag: when true, CloseRequested should NOT be intercepted.
 static FORCE_QUIT: AtomicBool = AtomicBool::new(false);
-use tauri::{
-    webview::PageLoadEvent, window::Color, Listener, Manager, RunEvent, State, WindowEvent,
-};
+use tauri::{webview::PageLoadEvent, Manager, RunEvent, State, WindowEvent};
+#[cfg(target_os = "macos")]
+use tauri::{window::Color, Listener};
 use terminal::{
     ArrangeLayout, ArrangeSessionInfo, TerminalInfo, TerminalType, TmuxAttachTerminalInfo,
     TmuxAttachTerminalType,
@@ -3975,15 +3976,18 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(move |app_handle, event| {
-            // macOS Dock icon click should reopen/show the main window.
-            if let RunEvent::Reopen { .. } = event {
+            #[cfg(target_os = "macos")]
+            if let RunEvent::Reopen { .. } = &event {
+                // macOS Dock icon click should reopen/show the main window.
                 if let Some(window) = app_handle.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.set_focus();
-                    #[cfg(target_os = "macos")]
                     schedule_macos_traffic_light_sync_series(window, "reopen");
                 }
-            } else if let RunEvent::Exit = event {
+                return;
+            }
+
+            if let RunEvent::Exit = event {
                 telegram_manager_for_run.stop();
                 wecom_manager_for_run.stop();
                 weixin_manager_for_run.stop();
