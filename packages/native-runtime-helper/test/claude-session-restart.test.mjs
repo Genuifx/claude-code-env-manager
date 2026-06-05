@@ -18,6 +18,8 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
   const interruptible = options.interruptible ?? false;
   const logClose = options.logClose ?? false;
   const logInterrupt = options.logInterrupt ?? false;
+  const expectedQueryModel = options.expectedQueryModel ?? null;
+  const reportModelState = options.reportModelState ?? false;
 
   await build({
     entryPoints: [path.join(packageDir, 'src', 'index.ts')],
@@ -42,8 +44,14 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
             const interruptible = ${JSON.stringify(interruptible)};
             const logClose = ${JSON.stringify(logClose)};
             const logInterrupt = ${JSON.stringify(logInterrupt)};
+            const expectedQueryModel = ${JSON.stringify(expectedQueryModel)};
+            const reportModelState = ${JSON.stringify(reportModelState)};
             let queryCount = 0;
-            export function query({ prompt }) {
+            let setModelCalled = false;
+            export function query({ prompt, options }) {
+              if (expectedQueryModel !== null && options.model !== expectedQueryModel) {
+                throw new Error('expected query model ' + expectedQueryModel + ', got ' + options.model);
+              }
               const turn = ++queryCount;
               let closed = false;
               let interruptResolver = null;
@@ -64,6 +72,9 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
                   }
                   interruptResolver?.();
                 },
+                async setModel() {
+                  setModelCalled = true;
+                },
                 async *[Symbol.asyncIterator]() {
                   const iterator = prompt[Symbol.asyncIterator]();
                   const session_id = 'mock-session';
@@ -73,11 +84,14 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
                     if (closed || next.done) return;
                     localTurn += 1;
                     const responseNumber = interruptible ? localTurn : turn;
+                    const text = reportModelState
+                      ? 'model=' + (options.model ?? '<none>') + ';setModel=' + setModelCalled
+                      : 'mock response ' + responseNumber;
                     yield { type: 'system', subtype: 'session_state_changed', state: 'running', session_id };
                     yield {
                       type: 'assistant',
                       session_id,
-                      message: { content: [{ type: 'text', text: 'mock response ' + responseNumber }] },
+                      message: { content: [{ type: 'text', text }] },
                     };
                     if (interruptible && localTurn === 1) {
                       await waitForInterrupt();
@@ -223,6 +237,65 @@ test('restarts Claude query after a completed turn so later prompts are consumed
     .map((output) => output.payload.text);
 
   assert.deepEqual(chunks, ['mock response 1', 'mock response 2']);
+});
+
+test('passes Claude runtime model at query startup without setModel control request', async (t) => {
+  const helperPath = await buildHelperWithMockClaudeSdk({
+    expectedQueryModel: 'opus',
+    reportModelState: true,
+  });
+  const helper = spawn(process.execPath, [helperPath], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  t.after(() => {
+    helper.kill('SIGTERM');
+  });
+
+  const outputs = [];
+  const stderrRef = { value: '' };
+  let stdoutBuffer = '';
+
+  helper.stdout.setEncoding('utf8');
+  helper.stdout.on('data', (chunk) => {
+    stdoutBuffer += chunk;
+    let newlineIndex = stdoutBuffer.indexOf('\n');
+    while (newlineIndex >= 0) {
+      const line = stdoutBuffer.slice(0, newlineIndex).trim();
+      stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+      if (line) {
+        outputs.push(JSON.parse(line));
+      }
+      newlineIndex = stdoutBuffer.indexOf('\n');
+    }
+  });
+
+  helper.stderr.setEncoding('utf8');
+  helper.stderr.on('data', (chunk) => {
+    stderrRef.value += chunk;
+  });
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'init',
+    provider: 'claude',
+    env_name: 'default',
+    perm_mode: 'dev',
+    working_dir: os.tmpdir(),
+    env_vars: {
+      ANTHROPIC_MODEL: ' opus ',
+      ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-test',
+    },
+    initial_prompt: 'first',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'event'
+      && output.payload?.type === 'assistant_chunk'
+      && output.payload.text === 'model=opus;setModel=false',
+    stderrRef,
+    'Claude query model without setModel',
+  );
 });
 
 test('marks Claude helper ready after a non-success result so the workspace can continue', async (t) => {

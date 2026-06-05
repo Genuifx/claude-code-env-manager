@@ -323,6 +323,19 @@ function extractClaudeAssistantText(message: unknown): string {
   return extractClaudeAssistantContent(message).text;
 }
 
+function nonEmptyEnvValue(envVars: Record<string, string> | undefined, key: string) {
+  const value = envVars?.[key]?.trim();
+  return value ? value : undefined;
+}
+
+function resolveClaudeRuntimeModel(envVars?: Record<string, string>) {
+  return nonEmptyEnvValue(envVars, 'ANTHROPIC_MODEL')
+    || nonEmptyEnvValue(envVars, 'ANTHROPIC_DEFAULT_OPUS_MODEL')
+    || nonEmptyEnvValue(envVars, 'ANTHROPIC_DEFAULT_SONNET_MODEL')
+    || nonEmptyEnvValue(envVars, 'ANTHROPIC_DEFAULT_HAIKU_MODEL')
+    || nonEmptyEnvValue(envVars, 'ANTHROPIC_SMALL_FAST_MODEL');
+}
+
 async function runWorkspaceTitleQuery(command: TitleQueryCommand) {
   const titleInput = command.title_input.trim();
   if (!titleInput) {
@@ -1229,6 +1242,7 @@ async function consumeClaudeMessages() {
     envVars: initCommand.env_vars,
     effort: initCommand.effort,
   });
+  const model = resolveClaudeRuntimeModel(initCommand.env_vars);
 
   const inputQueue = new AsyncMessageQueue<SDKUserMessage>();
   claudeInputQueue = inputQueue;
@@ -1245,6 +1259,7 @@ async function consumeClaudeMessages() {
       settingSources: [...CLAUDE_SKILL_SETTING_SOURCES],
       allowedTools: ensureClaudeSkillToolAllowed(initCommand.allowed_tools),
       disallowedTools: initCommand.disallowed_tools ?? undefined,
+      ...(model ? { model } : {}),
       hooks: buildClaudePlanModeHooks(
         () => initCommand?.provider === 'claude' && initCommand.perm_mode === 'plan',
       ),
@@ -1264,13 +1279,6 @@ async function consumeClaudeMessages() {
     },
   });
   currentClaudeQuery = claudeQuery;
-
-  // Ensure the CLI's internal mainLoopModel state is initialized.
-  // Without this, getContextUsage() fails with "q.match is not a function"
-  // because the CLI's model getter returns null when set_model was never called.
-  try {
-    await claudeQuery.setModel();
-  } catch { /* non-fatal — context usage will degrade gracefully */ }
 
   try {
     for await (const message of claudeQuery) {

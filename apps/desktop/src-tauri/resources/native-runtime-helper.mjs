@@ -16653,6 +16653,13 @@ function extractClaudeAssistantContent(message) {
 function extractClaudeAssistantText(message) {
   return extractClaudeAssistantContent(message).text;
 }
+function nonEmptyEnvValue(envVars, key) {
+  const value = envVars?.[key]?.trim();
+  return value ? value : void 0;
+}
+function resolveClaudeRuntimeModel(envVars) {
+  return nonEmptyEnvValue(envVars, "ANTHROPIC_MODEL") || nonEmptyEnvValue(envVars, "ANTHROPIC_DEFAULT_OPUS_MODEL") || nonEmptyEnvValue(envVars, "ANTHROPIC_DEFAULT_SONNET_MODEL") || nonEmptyEnvValue(envVars, "ANTHROPIC_DEFAULT_HAIKU_MODEL") || nonEmptyEnvValue(envVars, "ANTHROPIC_SMALL_FAST_MODEL");
+}
 async function runWorkspaceTitleQuery(command) {
   const titleInput = command.title_input.trim();
   if (!titleInput) {
@@ -17308,6 +17315,7 @@ async function consumeClaudeMessages() {
     envVars: initCommand.env_vars,
     effort: initCommand.effort
   });
+  const model = resolveClaudeRuntimeModel(initCommand.env_vars);
   const inputQueue = new AsyncMessageQueue();
   claudeInputQueue = inputQueue;
   const claudeQuery = E$$({
@@ -17323,6 +17331,7 @@ async function consumeClaudeMessages() {
       settingSources: [...CLAUDE_SKILL_SETTING_SOURCES],
       allowedTools: ensureClaudeSkillToolAllowed(initCommand.allowed_tools),
       disallowedTools: initCommand.disallowed_tools ?? void 0,
+      ...model ? { model } : {},
       hooks: buildClaudePlanModeHooks(
         () => initCommand?.provider === "claude" && initCommand.perm_mode === "plan"
       ),
@@ -17342,10 +17351,6 @@ async function consumeClaudeMessages() {
     }
   });
   currentClaudeQuery = claudeQuery;
-  try {
-    await claudeQuery.setModel();
-  } catch {
-  }
   try {
     for await (const message of claudeQuery) {
       const sessionId = message?.session_id;
