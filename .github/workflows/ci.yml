@@ -44,8 +44,7 @@ jobs:
         run: pnpm exec tsc --noEmit
 
       - name: Rust clippy
-        working-directory: apps/desktop/src-tauri
-        run: cargo clippy -- -D warnings
+        run: node scripts/ci/run-rust-clippy.mjs apps/desktop/src-tauri
 
       - name: Run Rust tests
         working-directory: apps/desktop/src-tauri
