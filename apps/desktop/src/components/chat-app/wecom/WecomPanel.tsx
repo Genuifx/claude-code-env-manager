@@ -23,9 +23,9 @@ import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 
 const INPUT_CLS =
-  'w-full px-3.5 py-2.5 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 transition-all';
+  'w-full px-3 py-1.5 rounded-lg bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 transition-all';
 
-const TEXTAREA_CLS = `${INPUT_CLS} min-h-[74px] resize-y`;
+const TEXTAREA_CLS = `${INPUT_CLS} min-h-[52px] resize-y leading-snug`;
 const INTENT_WEEKLY = 'weekly_report';
 
 const MODE_DISPLAY_NAMES: Record<PermissionModeName, string> = {
