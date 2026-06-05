@@ -192,7 +192,10 @@ test('session summary refresh treats runtime error events as boundary events', a
     event(3, { type: 'lifecycle', stage: 'error', detail: 'Native runtime failed' }),
   ]), true);
   assert.equal(sessionEventsNeedSummaryRefresh([
-    event(4, {
+    event(4, { type: 'lifecycle', stage: 'turn_interrupted', detail: 'Turn interrupted.' }),
+  ]), true);
+  assert.equal(sessionEventsNeedSummaryRefresh([
+    event(5, {
       type: 'tool_use_completed',
       tool_use_id: 'missing-skill',
       raw_name: 'Skill',
@@ -249,6 +252,32 @@ test('appends monotonic live events without reallocating on duplicate-only batch
     event(10, { type: 'assistant_chunk', text: 'reset' }),
   ], true);
   assert.deepEqual(reset.map((item) => item.seq), [10]);
+});
+
+test('turn_interrupted flushes the active assistant turn before later prompts', async () => {
+  const { buildMessagesFromEvents } = await importWorkspaceEventTranscript();
+
+  const messages = buildMessagesFromEvents(
+    [],
+    [],
+    [
+      event(1, { type: 'user_prompt', text: 'first prompt', image_count: 0 }),
+      event(2, { type: 'assistant_chunk', text: 'partial reply' }),
+      event(3, { type: 'lifecycle', stage: 'turn_interrupted', detail: 'Turn interrupted.' }),
+      event(4, { type: 'user_prompt', text: 'second prompt', image_count: 0 }),
+      event(5, { type: 'assistant_chunk', text: 'second reply' }),
+    ],
+  );
+
+  assert.deepEqual(
+    messages.map((message) => [message.msgType, message.content]),
+    [
+      ['user', 'first prompt'],
+      ['assistant', 'partial reply'],
+      ['user', 'second prompt'],
+      ['assistant', 'second reply'],
+    ],
+  );
 });
 
 test('renders persisted native user prompts as turn boundaries without lifecycle markers', async () => {

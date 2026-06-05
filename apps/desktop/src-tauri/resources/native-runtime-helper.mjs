@@ -1,4 +1,4 @@
-// ../../node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.112_zod@4.3.6/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
+// ../../../../node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.112_zod@4.3.6/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
 import { execFile as $y } from "child_process";
 import { randomUUID as GH } from "crypto";
 import { copyFile as Xy, mkdir as YH, readFile as Jy, rm as Yy, writeFile as $j } from "fs/promises";
@@ -55,8 +55,8 @@ function vj($, X) {
 var H1 = ($, X) => {
   for (var J in X) M5($, J, { get: X[J], enumerable: true, configurable: true, set: vj.bind(X, J) });
 };
-var Cj = Symbol.dispose || Symbol.for("Symbol.dispose");
-var kj = Symbol.asyncDispose || Symbol.for("Symbol.asyncDispose");
+var Cj = Symbol.dispose || /* @__PURE__ */ Symbol.for("Symbol.dispose");
+var kj = Symbol.asyncDispose || /* @__PURE__ */ Symbol.for("Symbol.asyncDispose");
 var w$ = ($, X, J) => {
   if (X != null) {
     if (typeof X !== "object" && typeof X !== "function") throw TypeError('Object expected to be assigned to "using" declaration');
@@ -4778,7 +4778,7 @@ var b$ = class {
     this._client = $;
   }
 };
-var qK = Symbol.for("brand.privateNullableHeaders");
+var qK = /* @__PURE__ */ Symbol.for("brand.privateNullableHeaders");
 function* DM($) {
   if (!$) return;
   if (qK in $) {
@@ -4815,7 +4815,7 @@ var i = ($) => {
   }
   return { [qK]: true, values: X, nulls: J };
 };
-var C8 = Symbol("anthropic.sdk.stainlessHelper");
+var C8 = /* @__PURE__ */ Symbol("anthropic.sdk.stainlessHelper");
 function FJ($) {
   return typeof $ === "object" && $ !== null && C8 in $;
 }
@@ -9675,7 +9675,6 @@ var QY = class extends e {
 QY.create = ($) => {
   return new QY({ typeName: Z.ZodNaN, ...o($) });
 };
-var Yd = Symbol("zod_brand");
 var RW = class extends e {
   _parse($) {
     let { ctx: X } = this._processInputParams($), J = X.data;
@@ -9785,7 +9784,7 @@ function q($, X, J) {
     return G?._zod?.traits?.has($);
   } }), Object.defineProperty(z, "name", { value: $ }), z;
 }
-var GY = Symbol("zod_brand");
+var GY = /* @__PURE__ */ Symbol("zod_brand");
 var L4 = class extends Error {
   constructor() {
     super("Encountered Promise during synchronous parse. Use .parseAsync() instead.");
@@ -13796,8 +13795,8 @@ var Db = () => {
 function M3() {
   return { localeError: Db() };
 }
-var L7 = Symbol("ZodOutput");
-var D7 = Symbol("ZodInput");
+var L7 = /* @__PURE__ */ Symbol("ZodOutput");
+var D7 = /* @__PURE__ */ Symbol("ZodInput");
 var fX = class {
   constructor() {
     this._map = /* @__PURE__ */ new WeakMap(), this._idmap = /* @__PURE__ */ new Map();
@@ -15424,11 +15423,9 @@ var Ar = K$([NQ, x9, yG, n0, fG, LQ, FQ, p0]);
 var Ir = K$([wQ, sP, wR, AR, qQ, DQ, jQ, MQ]);
 var br = K$([OQ, BQ, pP, PP, FP, mP, yP, C9, qR]);
 var Zr = K$([NQ, HP, FR, TP, SP, qP, LP, jP, EQ, hP, LQ, FQ, p0]);
-var MO = Symbol("Let zodToJsonSchema decide on which parser to use");
 var PR = new Set("ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvxyz0123456789");
 var yD = qH(hU(), 1);
 var fD = qH(TD(), 1);
-var mD = Symbol.for("mcp.completable");
 var uD;
 (function($) {
   $.Completable = "McpCompletable";
@@ -15613,7 +15610,7 @@ function eD($, X) {
   return null;
 }
 
-// ../../node_modules/.pnpm/@openai+codex-sdk@0.121.0/node_modules/@openai/codex-sdk/dist/index.js
+// ../../../../node_modules/.pnpm/@openai+codex-sdk@0.121.0/node_modules/@openai/codex-sdk/dist/index.js
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
@@ -16508,6 +16505,8 @@ var currentClaudeQuery = null;
 var claudeInputQueue = null;
 var claudeConsumeLoop = null;
 var claudeLastSessionState = null;
+var claudeInterruptRequested = false;
+var claudeInterruptCompletionEmitted = false;
 var claudeSawPartialText = false;
 var claudeSawPartialThinking = false;
 var claudeTurnCompletionEmitted = false;
@@ -16735,6 +16734,20 @@ function emitClaudeTurnCompleted(detail) {
   });
   emitStatus("ready", "Ready for the next prompt.");
   return true;
+}
+function emitClaudeTurnInterrupted(detail = "Claude turn interrupted by desktop workspace.") {
+  claudeLastSessionState = "idle";
+  resetClaudeTurnTracking();
+  claudeTurnCompletionEmitted = true;
+  if (!claudeInterruptCompletionEmitted) {
+    claudeInterruptCompletionEmitted = true;
+    emitEvent({
+      type: "lifecycle",
+      stage: "turn_interrupted",
+      detail
+    });
+  }
+  emitStatus("ready", "Turn interrupted. Ready for the next prompt.");
 }
 function categorizeClaudeTool(name) {
   if (name.includes("AskUser") || name.includes("Question")) {
@@ -17254,6 +17267,22 @@ function canApplySettingsImmediately() {
   }
   return claudeLastSessionState === "idle" || !claudeConsumeLoop;
 }
+function denyPendingPermissions() {
+  for (const pending of pendingPermissions.values()) {
+    pending.resolve(false);
+  }
+  pendingPermissions.clear();
+}
+function denyPendingClaudeInteractivePrompts(message) {
+  for (const [toolUseId, pending] of pendingClaudeInteractivePrompts.entries()) {
+    pending.resolve({
+      behavior: "deny",
+      message,
+      toolUseID: toolUseId
+    });
+  }
+  pendingClaudeInteractivePrompts.clear();
+}
 function teardownClaudeSession() {
   claudeInputQueue?.close();
   currentClaudeQuery?.close();
@@ -17439,7 +17468,11 @@ async function consumeClaudeMessages() {
             emitStatus("processing", "Claude is processing a turn.");
           }
           if (message.state === "idle") {
-            emitClaudeTurnCompleted("Claude turn completed.");
+            if (claudeInterruptRequested) {
+              emitClaudeTurnInterrupted();
+            } else {
+              emitClaudeTurnCompleted("Claude turn completed.");
+            }
           }
         }
         claudeLastSessionState = message.state;
@@ -17452,6 +17485,11 @@ async function consumeClaudeMessages() {
         continue;
       }
       if (message.type === "result") {
+        if (claudeInterruptRequested) {
+          emitClaudeTurnInterrupted();
+          claudeInterruptRequested = false;
+          continue;
+        }
         const resultUsage = message.usage;
         const totalCostUsd = message.total_cost_usd;
         if (resultUsage) {
@@ -17507,6 +17545,11 @@ async function ensureClaudeSession() {
     let loop;
     loop = consumeClaudeMessages().catch((error) => {
       const isAbort = error instanceof Error && error.name === "AbortError";
+      if (claudeInterruptRequested) {
+        emitClaudeTurnInterrupted();
+        claudeInterruptRequested = false;
+        return;
+      }
       if (stopped || isAbort) {
         return;
       }
@@ -17545,6 +17588,8 @@ function enqueueClaudePrompt(text, images) {
   if (!claudeInputQueue) {
     throw new Error("Claude streaming input queue is not ready");
   }
+  claudeInterruptRequested = false;
+  claudeInterruptCompletionEmitted = false;
   const parts = buildPromptContentParts(text, images);
   const hasImages = parts.some((part) => part.type === "image");
   const content = hasImages ? parts.map((part) => {
@@ -17964,18 +18009,32 @@ async function handleCommand(command) {
   }
   if (command.type === "stop") {
     stopped = true;
-    currentAbortController?.abort();
-    for (const [toolUseId, pending] of pendingClaudeInteractivePrompts.entries()) {
-      pending.resolve({
-        behavior: "deny",
-        message: "Native runtime helper stopped before user responded.",
-        toolUseID: toolUseId
-      });
+    denyPendingPermissions();
+    denyPendingClaudeInteractivePrompts("Native runtime turn was interrupted before user responded.");
+    if (initCommand?.provider === "claude") {
+      claudeInterruptRequested = true;
+      claudeInterruptCompletionEmitted = false;
+      try {
+        if (currentClaudeQuery) {
+          await currentClaudeQuery.interrupt();
+        }
+        emitClaudeTurnInterrupted();
+      } catch (error) {
+        claudeInterruptRequested = false;
+        const message = error instanceof Error ? error.message : String(error);
+        emitEvent({
+          type: "stderr_line",
+          line: `Failed to interrupt Claude turn: ${message}`
+        });
+        emitStatus("error", message);
+      } finally {
+        activeTurn = false;
+        currentAbortController = null;
+        stopped = false;
+      }
+      return;
     }
-    pendingClaudeInteractivePrompts.clear();
-    claudeInputQueue?.close();
-    currentClaudeQuery?.close();
-    teardownClaudeSession();
+    currentAbortController?.abort();
     teardownCodexSession(false);
     activeTurn = false;
     currentAbortController = null;

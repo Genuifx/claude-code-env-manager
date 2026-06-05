@@ -380,6 +380,7 @@ export function sessionEventsNeedSummaryRefresh(events: SessionEventRecord[]) {
           'ready',
           'runtime_resume',
           'turn_completed',
+          'turn_interrupted',
         ].includes(event.payload.stage);
       default:
         return false;
@@ -875,10 +876,17 @@ export function buildMessagesFromEvents(
           ));
           break;
         }
-        if (event.payload.stage === 'turn_started' || event.payload.stage === 'turn_completed') {
+        if (
+          event.payload.stage === 'turn_started'
+          || event.payload.stage === 'turn_completed'
+          || event.payload.stage === 'turn_interrupted'
+        ) {
           flushPendingTurn();
         }
-        if (event.payload.stage === 'turn_completed' && promptQueue.length > 0) {
+        if (
+          (event.payload.stage === 'turn_completed' || event.payload.stage === 'turn_interrupted')
+          && promptQueue.length > 0
+        ) {
           flushFirstUnanchoredPrompt();
         }
         break;
