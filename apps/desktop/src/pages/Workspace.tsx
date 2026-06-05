@@ -49,7 +49,7 @@ import type {
 } from '@/features/conversations/types';
 import { toSessionKey } from '@/features/conversations/types';
 import { useWorkspaceSessionDecorations } from '@/components/workspace/useWorkspaceSessionDecorations';
-import type { NativeSessionSummary, WorkspaceGitSnapshot } from '@/lib/tauri-ipc';
+import type { NativeSessionSummary, WorkspaceCommand, WorkspaceGitSnapshot } from '@/lib/tauri-ipc';
 import {
   buildWorkspaceSidebarSessions,
   findLiveEntryForSidebarSession,
@@ -192,6 +192,7 @@ export function Workspace({
     loadCronTasks,
     loadInstalledSkills,
     loadWorkspaceSkills,
+    loadWorkspaceCommands,
     checkCodexInstalled,
     checkOpenCodeInstalled,
     setSessionTitle,
@@ -233,6 +234,7 @@ export function Workspace({
   const [historySessionPreferences, setHistorySessionPreferences] = useState<WorkspaceHistorySessionPreferences>({});
   const [composeDir, setComposeDir] = useState<string | null>(selectedWorkingDir || defaultWorkingDir || null);
   const [workspaceInstalledSkills, setWorkspaceInstalledSkills] = useState<InstalledSkill[]>([]);
+  const [workspaceCommands, setWorkspaceCommands] = useState<WorkspaceCommand[]>([]);
   const [liveSessionsByRuntimeId, setLiveSessionsByRuntimeId] = useState<WorkspaceLiveSessionsByRuntimeId>({});
   const liveSessionsByRuntimeIdRef = useRef<WorkspaceLiveSessionsByRuntimeId>(liveSessionsByRuntimeId);
   const [activeLiveRuntimeId, setActiveLiveRuntimeId] = useState<string | null>(null);
@@ -1132,6 +1134,28 @@ export function Workspace({
     };
   }, [installedSkills, loadWorkspaceSkills, skillsContext]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void loadWorkspaceCommands({
+      workingDir: skillsContext.workingDir,
+      provider: skillsContext.provider,
+    })
+      .then((commands) => {
+        if (!cancelled) {
+          setWorkspaceCommands(commands);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setWorkspaceCommands([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadWorkspaceCommands, skillsContext]);
+
   const handleSelect = useCallback(
     async (session: HistorySessionItem) => {
       const key = toSessionKey(session);
@@ -1653,6 +1677,7 @@ export function Workspace({
           loadingLabel={t('common.loading')}
           provider={composeProvider}
           installedSkills={workspaceInstalledSkills}
+          workspaceCommands={workspaceCommands}
           workingDir={effectiveComposeDir}
           searchWorkspaceFiles={searchWorkspaceFiles}
           planModeEnabled={composePlanModeEnabled}
@@ -1742,6 +1767,7 @@ export function Workspace({
           loadingLabel={t('common.loading')}
           provider={historyProvider}
           installedSkills={workspaceInstalledSkills}
+          workspaceCommands={workspaceCommands}
           workingDir={selectedSession.project || null}
           searchWorkspaceFiles={searchWorkspaceFiles}
           planModeEnabled={historyPlanModeEnabled}
@@ -1892,6 +1918,7 @@ export function Workspace({
                       initialPrompt={entry.initialPrompt}
                       seedMessages={entry.seedMessages}
                       installedSkills={workspaceInstalledSkills}
+                      workspaceCommands={workspaceCommands}
                       isVisible={isActiveLiveEntry}
                       onSessionUpdate={handleLiveSessionUpdate}
                       codexInstalled={codexInstalled}

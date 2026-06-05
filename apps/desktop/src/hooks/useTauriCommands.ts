@@ -31,6 +31,7 @@ import type {
   WorkspaceFileSuggestion,
   WorkspaceGitSnapshot,
   WorkspaceFileDiff,
+  WorkspaceCommand,
 } from '@/lib/tauri-ipc';
 
 interface TauriEnvConfig {
@@ -987,6 +988,21 @@ export function useTauriCommands() {
     }
   }, []);
 
+  const loadWorkspaceCommands = useCallback(async (options: {
+    workingDir?: string | null;
+    provider?: string | null;
+  } = {}): Promise<WorkspaceCommand[]> => {
+    try {
+      return await invoke<WorkspaceCommand[]>('list_workspace_commands', {
+        workingDir: options.workingDir ?? null,
+        provider: options.provider ?? null,
+      });
+    } catch (err) {
+      console.error('Failed to load workspace commands:', err);
+      return [];
+    }
+  }, []);
+
   // Cron commands
   const loadCronTasks = useCallback(async () => {
     setLoadingCron(true);
@@ -1327,6 +1343,7 @@ export function useTauriCommands() {
     checkTmuxInstalled,
     loadInstalledSkills,
     loadWorkspaceSkills,
+    loadWorkspaceCommands,
     loadCronTasks,
     addCronTask,
     updateCronTask,

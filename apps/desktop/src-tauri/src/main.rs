@@ -31,6 +31,7 @@ mod session_annotations;
 mod session_provenance;
 mod session_titles;
 mod skills;
+mod slash_commands;
 mod system_proxy;
 mod telegram;
 mod terminal;
@@ -3606,6 +3607,7 @@ fn main() {
             session_titles::generate_workspace_session_title,
             session_annotations::set_session_annotation,
             session_annotations::clear_session_annotation,
+            slash_commands::list_workspace_commands,
             skills::search_skills_stream,
             skills::list_installed_skills,
             skills::list_workspace_skills,

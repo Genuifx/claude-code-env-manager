@@ -2,7 +2,12 @@ export type WorkspaceComposerProvider = 'claude' | 'codex';
 
 export interface ComposerCommandDefinition {
   token: string;
-  description?: string;
+  description?: string | null;
+  source?: string;
+  scope?: string;
+  namespace?: string | null;
+  path?: string;
+  provider?: string;
 }
 
 export interface WorkspaceComposerCapabilities {
@@ -85,4 +90,3 @@ const CAPABILITIES: Record<WorkspaceComposerProvider, WorkspaceComposerCapabilit
 export function getComposerCapabilities(provider: WorkspaceComposerProvider): WorkspaceComposerCapabilities {
   return CAPABILITIES[provider];
 }
-

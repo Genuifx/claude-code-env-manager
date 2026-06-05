@@ -375,6 +375,10 @@ export interface TauriCommands {
     { workingDir?: string | null; provider?: string | null },
     InstalledSkill[]
   ];
+  list_workspace_commands: [
+    { workingDir?: string | null; provider?: string | null },
+    WorkspaceCommand[]
+  ];
   read_skill_files: [{ skillFiles: string[] }, SelectedSkillContent[]];
   install_skill: [{ packageId: string; global: boolean }, void];  // 修正：后端参数是 package_id + global
   uninstall_skill: [{ name: string }, void];
@@ -1043,6 +1047,17 @@ export interface InstalledSkill {
     defaultPrompt?: string;
   } | null;
   diagnostics?: string[];
+}
+
+export interface WorkspaceCommand {
+  token: string;
+  name: string;
+  description?: string | null;
+  path: string;
+  scope: string;
+  source: string;
+  namespace?: string | null;
+  provider: string;
 }
 
 export interface SelectedSkillContent {

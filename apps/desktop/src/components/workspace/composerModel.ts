@@ -302,24 +302,40 @@ export function findActiveComposerQuery(
 function commandSuggestions(
   query: string,
   provider: WorkspaceComposerProvider,
+  workspaceCommands: ComposerCommandDefinition[] = [],
 ): ComposerSuggestion[] {
   const normalizedQuery = query.trim().toLowerCase();
-  return getComposerCapabilities(provider).commands
+  return [
+    ...workspaceCommands,
+    ...getComposerCapabilities(provider).commands,
+  ]
+    .filter((command) => command.token.trim().length > 0)
     .filter((command) => {
+      const token = command.token.startsWith('/') ? command.token : `/${command.token}`;
       if (!normalizedQuery) {
         return true;
       }
-      return command.token.toLowerCase().startsWith(`/${normalizedQuery}`)
-        || command.token.toLowerCase().includes(normalizedQuery);
+      return token.toLowerCase().startsWith(`/${normalizedQuery}`)
+        || token.toLowerCase().includes(normalizedQuery);
     })
     .slice(0, 8)
-    .map((command: ComposerCommandDefinition) => ({
-      id: `command-${command.token}`,
-      kind: 'command',
-      label: command.token,
-      replacement: `${command.token} `,
-      subtitle: command.description,
-    }));
+    .map((command: ComposerCommandDefinition) => {
+      const token = command.token.startsWith('/') ? command.token : `/${command.token}`;
+      const badges = [
+        command.scope,
+        command.namespace,
+        command.source,
+      ].filter(Boolean) as string[];
+      return {
+        id: `command-${command.path ?? command.source ?? 'builtin'}-${token}`,
+        kind: 'command',
+        label: token,
+        replacement: `${token} `,
+        subtitle: command.description ?? undefined,
+        path: command.path,
+        badges: badges.slice(0, 3),
+      };
+    });
 }
 
 function skillSuggestions(
@@ -367,9 +383,16 @@ export function buildComposerSuggestions(options: {
   activeQuery: ActiveComposerQuery | null;
   provider: WorkspaceComposerProvider;
   installedSkills: InstalledSkill[];
+  workspaceCommands?: ComposerCommandDefinition[];
   fileSuggestions: WorkspaceFileSuggestion[];
 }): ComposerSuggestion[] {
-  const { activeQuery, provider, installedSkills, fileSuggestions: matchedFiles } = options;
+  const {
+    activeQuery,
+    provider,
+    installedSkills,
+    workspaceCommands = [],
+    fileSuggestions: matchedFiles,
+  } = options;
   if (!activeQuery) {
     return [];
   }
@@ -377,11 +400,11 @@ export function buildComposerSuggestions(options: {
   if (activeQuery.kind === 'command') {
     if (activeQuery.trigger === '/') {
       return [
-        ...commandSuggestions(activeQuery.query, provider),
+        ...commandSuggestions(activeQuery.query, provider, workspaceCommands),
         ...skillSuggestions(activeQuery.query, installedSkills, '/'),
       ].slice(0, 12);
     }
-    return commandSuggestions(activeQuery.query, provider);
+    return commandSuggestions(activeQuery.query, provider, workspaceCommands);
   }
   if (activeQuery.kind === 'skill') {
     return skillSuggestions(activeQuery.query, installedSkills, '$');
