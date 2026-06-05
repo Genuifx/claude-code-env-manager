@@ -1,5 +1,11 @@
 # ccem
 
+## 2.14.0
+
+### Minor Changes
+
+- Release workspace runtime interruption, session history cleanup, and desktop workflow fixes.
+
 ## 2.13.0
 
 ### Minor Changes
