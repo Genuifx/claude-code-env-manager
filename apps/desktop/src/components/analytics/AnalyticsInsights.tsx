@@ -3,6 +3,7 @@ import { Suspense, lazy, memo, useDeferredValue, useEffect, useMemo, useRef, use
 import { BarChart3, DollarSign, Flame, RefreshCw } from 'lucide-react';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { cn } from '@/lib/utils';
+import { buildWeekBucketKey } from '@/lib/analyticsTimeBuckets';
 import { useLocale } from '@/locales';
 import { getPerformanceMode } from '@/lib/performance';
 import type {
@@ -74,13 +75,6 @@ function addUsage(target: TokenUsageWithCost, usage: TokenUsageWithCost) {
   target.cacheReadTokens += usage.cacheReadTokens;
   target.cacheCreationTokens += usage.cacheCreationTokens;
   target.cost += usage.cost;
-}
-
-function buildWeekBucketKey(dateStr: string): string {
-  const date = new Date(dateStr);
-  const jan1 = new Date(date.getFullYear(), 0, 1);
-  const weekNum = Math.ceil(((date.getTime() - jan1.getTime()) / 86400000 + jan1.getDay() + 1) / 7);
-  return `${date.getFullYear()}-W${String(weekNum).padStart(2, '0')}`;
 }
 
 function toBreakdown(modelUsage: Record<string, TokenUsageWithCost> | undefined): Record<string, number> {

@@ -49,9 +49,10 @@ function TokenTooltipContent({ active, label, payload }: TokenTooltipContentProp
     return null;
   }
 
-  const totalUsage = breakdownRows.length > 0
-    ? breakdownRows.reduce((sum, [, value]) => sum + value, 0)
-    : seriesRows.reduce((sum, item) => sum + item.value, 0);
+  const chartTotalUsage = seriesRows.reduce((sum, item) => sum + item.value, 0);
+  const totalUsage = seriesRows.length > 0
+    ? chartTotalUsage
+    : breakdownRows.reduce((sum, [, value]) => sum + value, 0);
 
   const resolveSeriesLabel = (item: TokenTooltipPayloadItem) => {
     const rawLabel = typeof item.name === 'string' && item.name.length > 0
