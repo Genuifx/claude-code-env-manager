@@ -387,7 +387,7 @@ fn login_shell_paths() -> &'static [PathBuf] {
     LOGIN_SHELL_PATHS.get_or_init(|| {
         #[cfg(windows)]
         {
-            return Vec::new();
+            Vec::new()
         }
 
         #[cfg(not(windows))]
@@ -466,7 +466,7 @@ fn common_user_path_candidates() -> Vec<PathBuf> {
             paths.push(home.join("AppData").join("Roaming").join("npm"));
             paths.push(home.join("AppData").join("Local").join("pnpm"));
         }
-        return paths;
+        paths
     }
 
     #[cfg(not(windows))]
