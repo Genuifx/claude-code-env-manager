@@ -3976,6 +3976,9 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(move |app_handle, event| {
+            #[cfg(not(target_os = "macos"))]
+            let _ = &app_handle;
+
             #[cfg(target_os = "macos")]
             if let RunEvent::Reopen { .. } = &event {
                 // macOS Dock icon click should reopen/show the main window.
