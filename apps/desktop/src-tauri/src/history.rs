@@ -1186,9 +1186,7 @@ fn extract_plain_text_content(content: &serde_json::Value) -> Option<String> {
         serde_json::Value::Array(blocks) => {
             let mut parts = Vec::new();
             for block in blocks {
-                let Some(block_type) = block.get("type").and_then(|value| value.as_str()) else {
-                    return None;
-                };
+                let block_type = block.get("type").and_then(|value| value.as_str())?;
                 if block_type != "text" {
                     return None;
                 }

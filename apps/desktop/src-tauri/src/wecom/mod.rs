@@ -551,7 +551,7 @@ fn handle_message(
         UserRole::Admin => normalized.to_prompt(),
         UserRole::User => {
             let intent = user_intent.as_deref().unwrap_or("restricted");
-            build_restricted_prompt(&intent, &normalized)
+            build_restricted_prompt(intent, &normalized)
         }
     };
     let stream_id = generate_req_id("stream");
