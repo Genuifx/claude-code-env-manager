@@ -93,6 +93,45 @@ test('slash query returns mixed command and skill suggestions without deduping C
   );
 });
 
+test('slash query includes workspace custom commands before skill aliases', async () => {
+  const {
+    buildComposerSuggestions,
+    findActiveComposerQuery,
+  } = await importComposerModel();
+
+  const activeQuery = findActiveComposerQuery('/ver', 4, 'claude');
+  const suggestions = buildComposerSuggestions({
+    activeQuery,
+    provider: 'claude',
+    installedSkills: [
+      skill({
+        name: 'verify',
+        displayName: 'verify',
+        invocationLabel: 'verify',
+        path: '/tmp/project/verify',
+        skillFile: '/tmp/project/verify/SKILL.md',
+        provider: 'claude',
+      }),
+    ],
+    workspaceCommands: [{
+      token: '/verify',
+      description: 'Run the local verification gate',
+      source: '.claude/commands',
+      scope: 'project',
+      namespace: null,
+      path: '/tmp/project/.claude/commands/verify.md',
+      provider: 'claude',
+    }],
+    fileSuggestions: [],
+  });
+
+  assert.equal(activeQuery.kind, 'command');
+  assert.equal(suggestions[0].kind, 'command');
+  assert.equal(suggestions[0].label, '/verify');
+  assert.equal(suggestions[0].subtitle, 'Run the local verification gate');
+  assert.deepEqual(suggestions.map((item) => item.label), ['/verify', '/verify']);
+});
+
 test('dollar query is skill-only and structured tokens parse by exact SKILL.md path', async () => {
   const {
     buildComposerSuggestions,

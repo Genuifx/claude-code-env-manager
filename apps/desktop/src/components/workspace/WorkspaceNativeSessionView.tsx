@@ -21,6 +21,7 @@ import type {
   InteractiveToolPrompt,
   NativeSessionSummary,
   SessionEventRecord,
+  WorkspaceCommand,
   WorkspaceGitSnapshot,
   ToolQuestionPrompt,
 } from '@/lib/tauri-ipc';
@@ -129,6 +130,7 @@ interface WorkspaceNativeSessionViewProps {
   initialPrompt?: string | null;
   seedMessages?: ConversationMessageData[];
   installedSkills?: InstalledSkill[];
+  workspaceCommands?: WorkspaceCommand[];
   isVisible?: boolean;
   onSessionUpdate: (session: NativeSessionSummary) => void;
   onStartNew: () => void;
@@ -930,6 +932,7 @@ export function WorkspaceNativeSessionView({
   initialPrompt,
   seedMessages = [],
   installedSkills = [],
+  workspaceCommands = [],
   isVisible = true,
   onSessionUpdate,
   onStartNew,
@@ -2091,6 +2094,7 @@ export function WorkspaceNativeSessionView({
         }
         provider={session.provider}
         installedSkills={installedSkills}
+        workspaceCommands={workspaceCommands}
         workingDir={session.project_dir}
         searchWorkspaceFiles={searchWorkspaceFiles}
         planModeEnabled={composerPlanModeEnabled}

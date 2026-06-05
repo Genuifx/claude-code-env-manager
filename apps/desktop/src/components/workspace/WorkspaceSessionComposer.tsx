@@ -53,6 +53,7 @@ import { useLocale } from '@/locales';
 import type { InstalledSkill, LaunchClient } from '@/store';
 import {
   getComposerCapabilities,
+  type ComposerCommandDefinition,
   type WorkspaceComposerProvider,
 } from './composerCapabilities';
 import {
@@ -115,6 +116,7 @@ interface WorkspaceSessionComposerProps {
   textareaProps?: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'value' | 'onChange' | 'placeholder' | 'disabled'>;
   provider?: WorkspaceComposerProvider;
   installedSkills?: InstalledSkill[];
+  workspaceCommands?: ComposerCommandDefinition[];
   workingDir?: string | null;
   searchWorkspaceFiles?: (
     workingDir: string,
@@ -717,6 +719,7 @@ export function WorkspaceSessionComposer({
   textareaProps,
   provider = 'claude',
   installedSkills = [],
+  workspaceCommands = [],
   workingDir,
   searchWorkspaceFiles,
   planModeEnabled = false,
@@ -943,6 +946,7 @@ export function WorkspaceSessionComposer({
         },
         provider,
         installedSkills,
+        workspaceCommands,
         fileSuggestions: files,
       }).map(composerSuggestionToTriggerSuggestion)
     );
@@ -1000,7 +1004,7 @@ export function WorkspaceSessionComposer({
         },
       },
     ];
-  }, [attachments.length, installedSkills, provider, recentFileSuggestions, searchWorkspaceFiles, workingDir]);
+  }, [attachments.length, installedSkills, provider, recentFileSuggestions, searchWorkspaceFiles, workingDir, workspaceCommands]);
 
   const handlePromptChipAdd = useCallback((chip: ChipSegment) => {
     const data = readComposerPromptChipData(chip.data);
