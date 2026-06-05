@@ -280,15 +280,18 @@ Skips onboarding + disables telemetry + installs chrome-devtools MCP.
 
 # Desktop App
 
-A native desktop app built with Tauri 2.0. Real macOS vibrancy and glassmorphism — not an Electron wrapper.
+A native desktop app built with Tauri 2.0. Native Windows and macOS builds, not an Electron wrapper.
 
 On top of everything the CLI offers, Desktop brings several exclusive capabilities: dual engine support, remote control via Telegram, cron tasks, conversation history, and API traffic debugging.
 
 ## Install
 
-Download `.dmg` from [GitHub Releases](https://github.com/genuifx/claude-code-env-manager/releases) and drag to Applications.
+Download the installer for your platform from [GitHub Releases](https://github.com/genuifx/claude-code-env-manager/releases):
 
-> Requires macOS 10.15 Catalina or later.
+- **Windows x64**: download `CCEM Desktop_*_x64-setup.exe` and run the installer.
+- **macOS Apple Silicon / Intel**: download the matching `.dmg` and drag to Applications.
+
+> macOS builds require macOS 10.15 Catalina or later.
 
 ## Claude Code + Codex Dual Engine
 
