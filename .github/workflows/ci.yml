@@ -73,6 +73,7 @@ jobs:
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
+        continue-on-error: true
         with:
           workspaces: 'apps/desktop/src-tauri -> target'
           key: windows-installer-smoke
