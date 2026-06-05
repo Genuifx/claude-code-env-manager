@@ -1095,6 +1095,10 @@ fn parse_claude_conversation_file(
             continue;
         }
 
+        if should_skip_claude_conversation_message(&msg_type, &content, model.as_deref()) {
+            continue;
+        }
+
         let ts = parse_timestamp_value(&parsed.timestamp);
 
         if let Some(seg) = segments.get_mut(current_segment) {
@@ -1119,6 +1123,88 @@ fn parse_claude_conversation_file(
     }
 
     Ok((messages, segments))
+}
+
+fn should_skip_claude_conversation_message(
+    msg_type: &str,
+    content: &serde_json::Value,
+    model: Option<&str>,
+) -> bool {
+    match msg_type {
+        "user" => is_claude_control_artifact_content(content),
+        "assistant" => is_synthetic_no_response_content(content, model),
+        _ => false,
+    }
+}
+
+fn is_claude_control_artifact_content(content: &serde_json::Value) -> bool {
+    let Some(text) = extract_plain_text_content(content) else {
+        return false;
+    };
+    is_claude_control_artifact_text(&text)
+}
+
+fn is_claude_control_artifact_text(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+
+    let lowered = trimmed.to_lowercase();
+    if lowered.starts_with("<local-command-caveat>")
+        || lowered.starts_with("<local-command-stdout>")
+        || lowered.starts_with("<command-name>")
+        || lowered.starts_with("<command-message>")
+        || lowered.starts_with("<synthetic>")
+    {
+        return true;
+    }
+
+    if let Some((command, args)) = parse_slash_command(trimmed) {
+        return is_noise_slash_command(command, args);
+    }
+
+    false
+}
+
+fn is_synthetic_no_response_content(content: &serde_json::Value, model: Option<&str>) -> bool {
+    if model != Some("<synthetic>") {
+        return false;
+    }
+
+    extract_plain_text_content(content)
+        .map(|text| text.trim() == "No response requested.")
+        .unwrap_or(false)
+}
+
+fn extract_plain_text_content(content: &serde_json::Value) -> Option<String> {
+    match content {
+        serde_json::Value::String(text) => {
+            let trimmed = text.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        }
+        serde_json::Value::Array(blocks) => {
+            let mut parts = Vec::new();
+            for block in blocks {
+                let Some(block_type) = block.get("type").and_then(|value| value.as_str()) else {
+                    return None;
+                };
+                if block_type != "text" {
+                    return None;
+                }
+                if let Some(text) = block
+                    .get("text")
+                    .and_then(|value| value.as_str())
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    parts.push(text.to_string());
+                }
+            }
+            (!parts.is_empty()).then(|| parts.join("\n"))
+        }
+        _ => None,
+    }
 }
 
 // ============================================================================
@@ -3062,7 +3148,7 @@ fn is_noise_slash_command(command: &str, args: &str) -> bool {
         "clear", "compact", "help", "quit", "exit", "new", "resume", "status", "stats", "config",
         "mcp", "plugin", "skills",
         // System/display-only commands — never meaningful as conversation titles
-        "buddy", "doctor", "cost", "memory", "login",
+        "buddy", "doctor", "cost", "memory", "login", "model",
     ];
     if ALWAYS_NOISE.contains(&cmd.as_str()) {
         return true;
@@ -3552,6 +3638,38 @@ mod tests {
         assert!(
             matches!(&messages[1].content, serde_json::Value::Array(blocks) if blocks.len() == 1)
         );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_claude_conversation_file_filters_command_artifacts() {
+        let root = temp_history_dir("command-artifacts");
+        let session_path = root.join("session-command-noise.jsonl");
+        fs::write(
+            &session_path,
+            concat!(
+                "{\"type\":\"user\",\"uuid\":\"model-command\",\"timestamp\":\"2026-03-11T15:43:34.817Z\",\"message\":{\"content\":\"<command-name>/model</command-name>\\n            <command-message>model</command-message>\\n            <command-args>default</command-args>\"}}\n",
+                "{\"type\":\"user\",\"uuid\":\"model-stdout\",\"timestamp\":\"2026-03-11T15:43:34.818Z\",\"message\":{\"content\":\"<local-command-stdout>Set model to glm-4.7</local-command-stdout>\"}}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"no-response\",\"timestamp\":\"2026-03-11T15:43:34.819Z\",\"message\":{\"model\":\"<synthetic>\",\"content\":[{\"type\":\"text\",\"text\":\"No response requested.\"}]}}\n",
+                "{\"type\":\"user\",\"uuid\":\"real-user\",\"timestamp\":\"2026-03-11T15:43:34.820Z\",\"message\":{\"content\":\"真正的问题\"}}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"real-assistant\",\"timestamp\":\"2026-03-11T15:43:40.817Z\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"真正的回答\"}],\"model\":\"claude-test\"}}\n"
+            ),
+        )
+        .expect("write command-noise session file");
+
+        let (messages, segments) =
+            parse_claude_conversation_file(&session_path).expect("parse conversation");
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(segments[0].message_count, 2);
+        assert_eq!(messages[0].msg_type, "user");
+        assert_eq!(
+            messages[0].content,
+            serde_json::Value::String("真正的问题".to_string())
+        );
+        assert_eq!(messages[1].msg_type, "assistant");
+        assert_eq!(messages[1].model.as_deref(), Some("claude-test"));
 
         let _ = fs::remove_dir_all(root);
     }

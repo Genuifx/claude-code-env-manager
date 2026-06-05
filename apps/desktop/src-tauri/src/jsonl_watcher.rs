@@ -204,6 +204,10 @@ fn parse_assistant_line(
         return Vec::new();
     };
 
+    if is_synthetic_no_response_message(message) {
+        return Vec::new();
+    }
+
     let mut events = vec![SessionEventPayload::ClaudeJson {
         message_type: Some("assistant".to_string()),
         raw_json: value.to_string(),
@@ -274,6 +278,43 @@ fn parse_assistant_line(
     }
 
     events
+}
+
+fn is_synthetic_no_response_message(message: &Value) -> bool {
+    if message.get("model").and_then(Value::as_str) != Some("<synthetic>") {
+        return false;
+    }
+
+    extract_message_text(message)
+        .map(|text| text.trim() == "No response requested.")
+        .unwrap_or(false)
+}
+
+fn extract_message_text(message: &Value) -> Option<String> {
+    match message.get("content")? {
+        Value::String(text) => {
+            let trimmed = text.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        }
+        Value::Array(blocks) => {
+            let mut parts = Vec::new();
+            for block in blocks {
+                if block.get("type").and_then(Value::as_str) != Some("text") {
+                    return None;
+                }
+                if let Some(text) = block
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    parts.push(text.to_string());
+                }
+            }
+            (!parts.is_empty()).then(|| parts.join("\n"))
+        }
+        _ => None,
+    }
 }
 
 fn parse_user_line(
@@ -680,6 +721,26 @@ mod tests {
             event,
             SessionEventPayload::AssistantChunk { text } if text == "plain sdk output"
         )));
+    }
+
+    #[test]
+    fn assistant_jsonl_line_skips_synthetic_no_response() {
+        let mut pending = HashMap::new();
+        let value = json!({
+            "type": "assistant",
+            "message": {
+                "id": "synthetic-no-response",
+                "type": "message",
+                "role": "assistant",
+                "model": "<synthetic>",
+                "content": [{ "type": "text", "text": "No response requested." }]
+            }
+        });
+
+        let events = parse_jsonl_line(&value, &mut pending);
+
+        assert!(events.is_empty());
+        assert!(pending.is_empty());
     }
 
     #[test]

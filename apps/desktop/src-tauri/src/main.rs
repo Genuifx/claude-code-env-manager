@@ -2923,10 +2923,7 @@ fn parse_numstat_value(value: &str) -> Option<u64> {
     value.parse::<u64>().ok()
 }
 
-fn merge_git_numstat(
-    files: &mut HashMap<String, WorkspaceGitChangedFile>,
-    output: &str,
-) {
+fn merge_git_numstat(files: &mut HashMap<String, WorkspaceGitChangedFile>, output: &str) {
     for line in output.lines() {
         let mut parts = line.splitn(3, '\t');
         let additions = parts.next().and_then(parse_numstat_value);
@@ -3062,7 +3059,10 @@ struct WorkspaceFileDiff {
 
 const MAX_DIFF_LINES: usize = 2000;
 
-fn parse_unified_diff(raw: &str, untracked: bool) -> (Vec<WorkspaceDiffLine>, u64, u64, bool, bool) {
+fn parse_unified_diff(
+    raw: &str,
+    untracked: bool,
+) -> (Vec<WorkspaceDiffLine>, u64, u64, bool, bool) {
     let mut lines = Vec::new();
     let mut additions = 0u64;
     let mut deletions = 0u64;
@@ -3103,9 +3103,17 @@ fn parse_unified_diff(raw: &str, untracked: bool) -> (Vec<WorkspaceDiffLine>, u6
                 let spec = &rest[..end];
                 for token in spec.split_whitespace() {
                     if let Some(value) = token.strip_prefix('-') {
-                        old_line = value.split(',').next().and_then(|v| v.parse().ok()).unwrap_or(0);
+                        old_line = value
+                            .split(',')
+                            .next()
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(0);
                     } else if let Some(value) = token.strip_prefix('+') {
-                        new_line = value.split(',').next().and_then(|v| v.parse().ok()).unwrap_or(0);
+                        new_line = value
+                            .split(',')
+                            .next()
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(0);
                     }
                 }
             }
@@ -3164,7 +3172,10 @@ fn parse_unified_diff(raw: &str, untracked: bool) -> (Vec<WorkspaceDiffLine>, u6
 }
 
 #[tauri::command]
-fn get_workspace_file_diff(working_dir: String, file_path: String) -> Result<WorkspaceFileDiff, String> {
+fn get_workspace_file_diff(
+    working_dir: String,
+    file_path: String,
+) -> Result<WorkspaceFileDiff, String> {
     let not_repo = |error: Option<String>| WorkspaceFileDiff {
         path: file_path.clone(),
         is_repo: false,
@@ -3184,8 +3195,11 @@ fn get_workspace_file_diff(working_dir: String, file_path: String) -> Result<Wor
     }
 
     // Detect untracked files — they have no HEAD/index entry, so use --no-index against /dev/null.
-    let status = run_git_command(&working_dir, &["status", "--porcelain=v1", "--", &file_path])
-        .unwrap_or_default();
+    let status = run_git_command(
+        &working_dir,
+        &["status", "--porcelain=v1", "--", &file_path],
+    )
+    .unwrap_or_default();
     let is_untracked = status.lines().any(|line| line.starts_with("??"));
 
     let raw = if is_untracked {
@@ -3193,7 +3207,14 @@ fn get_workspace_file_diff(working_dir: String, file_path: String) -> Result<Wor
         let output = Command::new("git")
             .arg("-C")
             .arg(&working_dir)
-            .args(["diff", "--no-color", "--no-index", "--", "/dev/null", &file_path])
+            .args([
+                "diff",
+                "--no-color",
+                "--no-index",
+                "--",
+                "/dev/null",
+                &file_path,
+            ])
             .output()
             .map_err(|error| format!("Failed to run git: {}", error))?;
         String::from_utf8_lossy(&output.stdout).to_string()
@@ -3206,7 +3227,8 @@ fn get_workspace_file_diff(working_dir: String, file_path: String) -> Result<Wor
         .unwrap_or_default()
     };
 
-    let (lines, additions, deletions, is_binary, truncated) = parse_unified_diff(&raw, is_untracked);
+    let (lines, additions, deletions, is_binary, truncated) =
+        parse_unified_diff(&raw, is_untracked);
 
     Ok(WorkspaceFileDiff {
         path: file_path,
@@ -3966,7 +3988,10 @@ mod tests {
             },
         )]);
 
-        merge_git_numstat(&mut files, "2\t1\tsrc/app.ts\n-\t-\tassets/{old.png => logo.png}");
+        merge_git_numstat(
+            &mut files,
+            "2\t1\tsrc/app.ts\n-\t-\tassets/{old.png => logo.png}",
+        );
         merge_git_numstat(&mut files, "3\t4\tsrc/app.ts");
 
         let app = files.get("src/app.ts").unwrap();
