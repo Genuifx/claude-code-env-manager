@@ -8,8 +8,12 @@ on:
 
 jobs:
   test:
-    name: Test & Build
-    runs-on: macos-latest
+    name: Test & Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
 
     steps:
       - uses: actions/checkout@v6
@@ -36,13 +40,16 @@ jobs:
         run: pnpm -r build
 
       - name: TypeScript type check
-        run: cd apps/desktop && pnpm exec tsc --noEmit
+        working-directory: apps/desktop
+        run: pnpm exec tsc --noEmit
 
       - name: Rust clippy
-        run: cd apps/desktop/src-tauri && cargo clippy -- -D warnings
+        working-directory: apps/desktop/src-tauri
+        run: cargo clippy -- -D warnings
 
       - name: Run Rust tests
-        run: cd apps/desktop/src-tauri && cargo test
+        working-directory: apps/desktop/src-tauri
+        run: cargo test
 
   i18n-check:
     name: i18n Key Consistency

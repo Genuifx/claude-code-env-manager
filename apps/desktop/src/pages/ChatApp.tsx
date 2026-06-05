@@ -6,6 +6,7 @@ import { WecomPanel } from '@/components/chat-app/wecom/WecomPanel';
 import { WeixinPanel } from '@/components/chat-app/weixin/WeixinPanel';
 import { getRemotePlatformMeta, REMOTE_PLATFORM_ORDER, type RemotePlatformId } from '@/lib/remote-platforms';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
+import type { PlatformCapabilities } from '@/lib/tauri-ipc';
 
 interface TabDef {
   id: RemotePlatformId;
@@ -28,27 +29,31 @@ const tabs: TabDef[] = REMOTE_PLATFORM_ORDER.map((id) => ({
 export function ChatApp() {
   const { t } = useLocale();
   const [activeTab, setActiveTab] = useState(tabs[0].id);
-  const [tmuxInstalled, setTmuxInstalled] = useState(true);
-  const { checkTmuxInstalled } = useTauriCommands();
+  const [platformCapabilities, setPlatformCapabilities] = useState<PlatformCapabilities | null>(null);
+  const { getPlatformCapabilities } = useTauriCommands();
   const currentTab = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
+  const showTmuxNotice = platformCapabilities?.tmuxSupported === true && !platformCapabilities.tmuxInstalled;
+  const tmuxInstallCommand = platformCapabilities?.tmuxInstallCommand ?? null;
 
   useEffect(() => {
-    checkTmuxInstalled()
-      .then(setTmuxInstalled)
-      .catch(() => setTmuxInstalled(false));
-  }, [checkTmuxInstalled]);
+    getPlatformCapabilities()
+      .then(setPlatformCapabilities)
+      .catch(() => setPlatformCapabilities(null));
+  }, [getPlatformCapabilities]);
 
   return (
     <div className="page-transition-enter space-y-6">
       {/* tmux warning */}
-      {!tmuxInstalled && (
+      {showTmuxNotice && (
         <div className="rounded-2xl border border-warning/20 bg-warning/5 px-5 py-4">
           <div className="flex items-start gap-3">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
             <div>
               <p className="text-sm font-semibold text-foreground">{t('chatApp.tmuxOptionalTitle')}</p>
               <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{t('chatApp.tmuxOptionalNotice')}</p>
-              <p className="mt-2 font-mono text-xs text-muted-foreground/70">{t('settings.tmuxInstallCmd')}</p>
+              {tmuxInstallCommand && (
+                <p className="mt-2 font-mono text-xs text-muted-foreground/70">{tmuxInstallCommand}</p>
+              )}
             </div>
           </div>
         </div>

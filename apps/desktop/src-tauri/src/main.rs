@@ -500,6 +500,10 @@ fn detect_terminals() -> Vec<TerminalInfo> {
 
 #[tauri::command]
 fn list_tmux_attach_terminals() -> Vec<TmuxAttachTerminalInfo> {
+    if !terminal::tmux_supported_on_current_platform() {
+        return Vec::new();
+    }
+
     terminal::detect_tmux_attach_terminals()
 }
 
@@ -2315,7 +2319,73 @@ fn check_opencode_installed() -> bool {
 
 #[tauri::command]
 fn check_tmux_installed() -> bool {
+    if !terminal::tmux_supported_on_current_platform() {
+        return false;
+    }
+
     tmux::TmuxManager::check_tmux_installed().is_ok()
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlatformCapabilities {
+    os: &'static str,
+    is_windows: bool,
+    is_macos: bool,
+    is_linux: bool,
+    tmux_supported: bool,
+    tmux_installed: bool,
+    interactive_tmux_supported: bool,
+    external_terminal_launch_supported: bool,
+    native_runtime_supported: bool,
+    headless_runtime_supported: bool,
+    tmux_install_command: Option<&'static str>,
+}
+
+fn current_os_label() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else {
+        "unknown"
+    }
+}
+
+fn tmux_install_command_for_current_platform() -> Option<&'static str> {
+    if cfg!(target_os = "macos") {
+        Some("brew install tmux")
+    } else if cfg!(target_os = "linux") {
+        Some("sudo apt install tmux")
+    } else {
+        None
+    }
+}
+
+#[tauri::command]
+fn get_platform_capabilities() -> PlatformCapabilities {
+    let tmux_supported = terminal::tmux_supported_on_current_platform();
+    let tmux_installed = if tmux_supported {
+        tmux::TmuxManager::check_tmux_installed().is_ok()
+    } else {
+        false
+    };
+
+    PlatformCapabilities {
+        os: current_os_label(),
+        is_windows: cfg!(target_os = "windows"),
+        is_macos: cfg!(target_os = "macos"),
+        is_linux: cfg!(target_os = "linux"),
+        tmux_supported,
+        tmux_installed,
+        interactive_tmux_supported: tmux_supported && tmux_installed,
+        external_terminal_launch_supported: terminal::external_terminal_launch_supported(),
+        native_runtime_supported: true,
+        headless_runtime_supported: true,
+        tmux_install_command: tmux_install_command_for_current_platform(),
+    }
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -3619,6 +3689,7 @@ fn main() {
             check_codex_installed,
             check_opencode_installed,
             check_tmux_installed,
+            get_platform_capabilities,
             load_from_remote,
             arrange_sessions,
             check_arrange_support,

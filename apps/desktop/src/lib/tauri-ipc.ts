@@ -359,6 +359,7 @@ export interface TauriCommands {
   check_codex_installed: [void, boolean];
   check_opencode_installed: [void, boolean];
   check_tmux_installed: [void, boolean];
+  get_platform_capabilities: [void, PlatformCapabilities];
 
   // 历史记录
   get_conversation_history: [void, ConversationHistoryEntry[]];
@@ -683,6 +684,20 @@ export interface ManagedSessionSummary {
 }
 
 export type NativeProvider = 'claude' | 'codex';
+
+export interface PlatformCapabilities {
+  os: 'windows' | 'macos' | 'linux' | 'unknown';
+  isWindows: boolean;
+  isMacos: boolean;
+  isLinux: boolean;
+  tmuxSupported: boolean;
+  tmuxInstalled: boolean;
+  interactiveTmuxSupported: boolean;
+  externalTerminalLaunchSupported: boolean;
+  nativeRuntimeSupported: boolean;
+  headlessRuntimeSupported: boolean;
+  tmuxInstallCommand?: string | null;
+}
 
 export type NativeTransport =
   | 'native_sdk'
