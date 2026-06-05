@@ -5813,6 +5813,7 @@ mod tests {
     use crate::event_bus::{ToolQuestionOption, ToolQuestionPrompt};
     use chrono::Utc;
     use std::collections::BTreeSet;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn normalize_command_text_strips_bot_username() {
@@ -5868,7 +5869,7 @@ mod tests {
         let parsed =
             parse_new_topic_command("/new ~/Github/home glm perm=dev check the repo status")
                 .expect("parse new topic");
-        assert!(parsed.project_dir.ends_with("/Github/home"));
+        assert!(PathBuf::from(&parsed.project_dir).ends_with(Path::new("Github").join("home")));
         assert_eq!(parsed.preferred_env.as_deref(), Some("glm"));
         assert_eq!(parsed.preferred_perm_mode.as_deref(), Some("dev"));
         assert_eq!(

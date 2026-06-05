@@ -1853,17 +1853,30 @@ mod tests {
         ))
     }
 
+    fn fake_binary_path(root: &std::path::Path, name: &str) -> PathBuf {
+        let file_name = if cfg!(windows) {
+            format!("{name}.cmd")
+        } else {
+            name.to_string()
+        };
+        root.join(file_name)
+    }
+
     fn write_fake_binary(path: &std::path::Path, version: &str) {
         fs::create_dir_all(path.parent().expect("fake binary should have a parent"))
             .expect("create fake binary directory");
-        fs::write(
-            path,
+        let script = if cfg!(windows) {
+            format!(
+                "@echo off\r\nif \"%1\"==\"--version\" echo {} (Claude Code)\r\n",
+                version
+            )
+        } else {
             format!(
                 "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo \"{} (Claude Code)\"; fi\n",
                 version
-            ),
-        )
-        .expect("write fake binary");
+            )
+        };
+        fs::write(path, script).expect("write fake binary");
         #[cfg(unix)]
         {
             let mut permissions = fs::metadata(path)
@@ -1890,8 +1903,8 @@ mod tests {
     #[test]
     fn highest_versioned_binary_wins_over_path_order() {
         let root = temp_test_root("highest-version");
-        let older = root.join("nvm").join("claude");
-        let newer = root.join("pnpm").join("claude");
+        let older = fake_binary_path(&root.join("nvm"), "claude");
+        let newer = fake_binary_path(&root.join("pnpm"), "claude");
         write_fake_binary(&older, "2.1.37");
         write_fake_binary(&newer, "2.1.100");
 
@@ -1909,8 +1922,8 @@ mod tests {
     #[test]
     fn highest_versioned_binary_falls_back_to_first_candidate_without_versions() {
         let root = temp_test_root("fallback");
-        let first = root.join("first").join("claude");
-        let second = root.join("second").join("claude");
+        let first = fake_binary_path(&root.join("first"), "claude");
+        let second = fake_binary_path(&root.join("second"), "claude");
         write_fake_binary(&first, "not-a-semver");
         write_fake_binary(&second, "also-not-a-semver");
 
@@ -1947,21 +1960,29 @@ mod tests {
     #[test]
     fn user_path_prefers_login_shell_and_keeps_fallbacks_deduped() {
         let login_paths = vec![PathBuf::from("/Users/test/.nvm/versions/node/v22.18.0/bin")];
+        let current_path = std::env::join_paths([PathBuf::from("/usr/bin"), PathBuf::from("/bin")])
+            .expect("join current path");
         let fallback_paths = vec![
             PathBuf::from("/Users/test/Library/pnpm"),
             PathBuf::from("/usr/bin"),
         ];
 
         let user_path = build_user_path_from_sources(
-            Some(OsStr::new("/usr/bin:/bin")),
+            Some(current_path.as_os_str()),
             &login_paths,
             &fallback_paths,
         );
+        let expected = std::env::join_paths([
+            PathBuf::from("/Users/test/.nvm/versions/node/v22.18.0/bin"),
+            PathBuf::from("/usr/bin"),
+            PathBuf::from("/bin"),
+            PathBuf::from("/Users/test/Library/pnpm"),
+        ])
+        .expect("join expected path")
+        .into_string()
+        .expect("expected path should be utf-8");
 
-        assert_eq!(
-            user_path,
-            "/Users/test/.nvm/versions/node/v22.18.0/bin:/usr/bin:/bin:/Users/test/Library/pnpm"
-        );
+        assert_eq!(user_path, expected);
     }
 
     #[test]

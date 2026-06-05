@@ -930,6 +930,7 @@ mod tests {
         assert_eq!(diff_capture_snapshot(previous, current), "line-3\n");
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn project_dirs_match_normalizes_private_tmp_alias() {
         let tmp = std::env::temp_dir();
