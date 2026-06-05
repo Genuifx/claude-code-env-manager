@@ -15,6 +15,9 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
   const outfile = path.join(tempDir, 'native-runtime-helper.mjs');
   const firstResultSubtype = options.firstResultSubtype ?? 'success';
   const settleDelayMsAfterResult = options.settleDelayMsAfterResult ?? 0;
+  const interruptible = options.interruptible ?? false;
+  const logClose = options.logClose ?? false;
+  const logInterrupt = options.logInterrupt ?? false;
 
   await build({
     entryPoints: [path.join(packageDir, 'src', 'index.ts')],
@@ -36,32 +39,62 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
           contents: `
             const firstResultSubtype = ${JSON.stringify(firstResultSubtype)};
             const settleDelayMsAfterResult = ${JSON.stringify(settleDelayMsAfterResult)};
+            const interruptible = ${JSON.stringify(interruptible)};
+            const logClose = ${JSON.stringify(logClose)};
+            const logInterrupt = ${JSON.stringify(logInterrupt)};
             let queryCount = 0;
             export function query({ prompt }) {
               const turn = ++queryCount;
               let closed = false;
+              let interruptResolver = null;
+              const waitForInterrupt = () => new Promise((resolve) => {
+                interruptResolver = resolve;
+              });
               return {
                 close() {
                   closed = true;
+                  if (logClose) {
+                    process.stderr.write('__MOCK_CLAUDE_CLOSE__\\n');
+                  }
+                  interruptResolver?.();
+                },
+                async interrupt() {
+                  if (logInterrupt) {
+                    process.stderr.write('__MOCK_CLAUDE_INTERRUPT__\\n');
+                  }
+                  interruptResolver?.();
                 },
                 async *[Symbol.asyncIterator]() {
                   const iterator = prompt[Symbol.asyncIterator]();
-                  const next = await iterator.next();
-                  if (closed || next.done) return;
                   const session_id = 'mock-session';
-                  yield { type: 'system', subtype: 'session_state_changed', state: 'running', session_id };
-                  yield {
-                    type: 'assistant',
-                    session_id,
-                    message: { content: [{ type: 'text', text: 'mock response ' + turn }] },
-                  };
-                  if (turn === 1 && firstResultSubtype !== 'success') {
-                    yield { type: 'result', subtype: firstResultSubtype, errors: ['hit turn limit'], session_id };
-                  } else {
-                    yield { type: 'result', subtype: 'success', result: 'done ' + turn, session_id };
-                  }
-                  if (settleDelayMsAfterResult > 0) {
-                    await new Promise((resolve) => setTimeout(resolve, settleDelayMsAfterResult));
+                  let localTurn = 0;
+                  while (!closed) {
+                    const next = await iterator.next();
+                    if (closed || next.done) return;
+                    localTurn += 1;
+                    const responseNumber = interruptible ? localTurn : turn;
+                    yield { type: 'system', subtype: 'session_state_changed', state: 'running', session_id };
+                    yield {
+                      type: 'assistant',
+                      session_id,
+                      message: { content: [{ type: 'text', text: 'mock response ' + responseNumber }] },
+                    };
+                    if (interruptible && localTurn === 1) {
+                      await waitForInterrupt();
+                      if (closed) return;
+                      yield { type: 'system', subtype: 'session_state_changed', state: 'idle', session_id };
+                      yield { type: 'result', subtype: 'error_during_execution', errors: ['interrupted'], session_id };
+                      continue;
+                    }
+                    if (!interruptible && turn === 1 && firstResultSubtype !== 'success') {
+                      yield { type: 'result', subtype: firstResultSubtype, errors: ['hit turn limit'], session_id };
+                    } else {
+                      yield { type: 'result', subtype: 'success', result: 'done ' + responseNumber, session_id };
+                    }
+                    if (settleDelayMsAfterResult > 0) {
+                      await new Promise((resolve) => setTimeout(resolve, settleDelayMsAfterResult));
+                    }
+                    if (!interruptible) return;
                   }
                 },
               };
@@ -266,6 +299,103 @@ test('marks Claude helper ready after a non-success result so the workspace can 
       && output.payload.text === 'mock response 2',
     stderrRef,
     'second Claude response',
+  );
+});
+
+test('interrupts an active Claude turn without closing the query process', async (t) => {
+  const helperPath = await buildHelperWithMockClaudeSdk({
+    interruptible: true,
+    logClose: true,
+    logInterrupt: true,
+  });
+  const helper = spawn(process.execPath, [helperPath], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  t.after(() => {
+    helper.kill('SIGTERM');
+  });
+
+  const outputs = [];
+  const stderrRef = { value: '' };
+  let stdoutBuffer = '';
+
+  helper.stdout.setEncoding('utf8');
+  helper.stdout.on('data', (chunk) => {
+    stdoutBuffer += chunk;
+    let newlineIndex = stdoutBuffer.indexOf('\n');
+    while (newlineIndex >= 0) {
+      const line = stdoutBuffer.slice(0, newlineIndex).trim();
+      stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+      if (line) {
+        outputs.push(JSON.parse(line));
+      }
+      newlineIndex = stdoutBuffer.indexOf('\n');
+    }
+  });
+
+  helper.stderr.setEncoding('utf8');
+  helper.stderr.on('data', (chunk) => {
+    stderrRef.value += chunk;
+  });
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'init',
+    provider: 'claude',
+    env_name: 'default',
+    perm_mode: 'dev',
+    working_dir: os.tmpdir(),
+    initial_prompt: 'first',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'event'
+      && output.payload?.type === 'assistant_chunk'
+      && output.payload.text === 'mock response 1',
+    stderrRef,
+    'first Claude response before interrupt',
+  );
+
+  helper.stdin.write(`${JSON.stringify({ type: 'stop' })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'event'
+      && output.payload?.type === 'lifecycle'
+      && output.payload.stage === 'turn_interrupted',
+    stderrRef,
+    'turn_interrupted lifecycle event',
+  );
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'status'
+      && output.status === 'ready'
+      && output.detail === 'Turn interrupted. Ready for the next prompt.',
+    stderrRef,
+    'ready status after interrupt',
+  );
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'prompt',
+    text: 'second',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'event'
+      && output.payload?.type === 'assistant_chunk'
+      && output.payload.text === 'mock response 2',
+    stderrRef,
+    'second Claude response after interrupt',
+  );
+
+  assert.match(stderrRef.value, /__MOCK_CLAUDE_INTERRUPT__/);
+  assert.doesNotMatch(stderrRef.value, /__MOCK_CLAUDE_CLOSE__/);
+  assert.equal(
+    outputs.some((output) => output.type === 'event' && output.payload?.type === 'session_completed'),
+    false,
   );
 });
 

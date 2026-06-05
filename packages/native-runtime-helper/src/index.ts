@@ -148,6 +148,8 @@ let currentClaudeQuery: ReturnType<typeof query> | null = null;
 let claudeInputQueue: AsyncMessageQueue<SDKUserMessage> | null = null;
 let claudeConsumeLoop: Promise<void> | null = null;
 let claudeLastSessionState: 'idle' | 'running' | 'requires_action' | null = null;
+let claudeInterruptRequested = false;
+let claudeInterruptCompletionEmitted = false;
 let claudeSawPartialText = false;
 let claudeSawPartialThinking = false;
 let claudeTurnCompletionEmitted = false;
@@ -436,6 +438,21 @@ function emitClaudeTurnCompleted(detail: string) {
   });
   emitStatus('ready', 'Ready for the next prompt.');
   return true;
+}
+
+function emitClaudeTurnInterrupted(detail = 'Claude turn interrupted by desktop workspace.') {
+  claudeLastSessionState = 'idle';
+  resetClaudeTurnTracking();
+  claudeTurnCompletionEmitted = true;
+  if (!claudeInterruptCompletionEmitted) {
+    claudeInterruptCompletionEmitted = true;
+    emitEvent({
+      type: 'lifecycle',
+      stage: 'turn_interrupted',
+      detail,
+    });
+  }
+  emitStatus('ready', 'Turn interrupted. Ready for the next prompt.');
 }
 
 function categorizeClaudeTool(name: string) {
@@ -1166,6 +1183,24 @@ function canApplySettingsImmediately() {
   return claudeLastSessionState === 'idle' || !claudeConsumeLoop;
 }
 
+function denyPendingPermissions() {
+  for (const pending of pendingPermissions.values()) {
+    pending.resolve(false);
+  }
+  pendingPermissions.clear();
+}
+
+function denyPendingClaudeInteractivePrompts(message: string) {
+  for (const [toolUseId, pending] of pendingClaudeInteractivePrompts.entries()) {
+    pending.resolve({
+      behavior: 'deny',
+      message,
+      toolUseID: toolUseId,
+    });
+  }
+  pendingClaudeInteractivePrompts.clear();
+}
+
 function teardownClaudeSession() {
   claudeInputQueue?.close();
   currentClaudeQuery?.close();
@@ -1380,7 +1415,11 @@ async function consumeClaudeMessages() {
           }
 
           if (message.state === 'idle') {
-            emitClaudeTurnCompleted('Claude turn completed.');
+            if (claudeInterruptRequested) {
+              emitClaudeTurnInterrupted();
+            } else {
+              emitClaudeTurnCompleted('Claude turn completed.');
+            }
           }
         }
 
@@ -1396,6 +1435,12 @@ async function consumeClaudeMessages() {
       }
 
       if (message.type === 'result') {
+        if (claudeInterruptRequested) {
+          emitClaudeTurnInterrupted();
+          claudeInterruptRequested = false;
+          continue;
+        }
+
         // Emit turn-total token_usage with cost estimate
         const resultUsage = (message as { usage?: Record<string, unknown> }).usage;
         const totalCostUsd = (message as { total_cost_usd?: number }).total_cost_usd;
@@ -1459,6 +1504,11 @@ async function ensureClaudeSession() {
     let loop: Promise<void>;
     loop = consumeClaudeMessages().catch((error) => {
       const isAbort = error instanceof Error && error.name === 'AbortError';
+      if (claudeInterruptRequested) {
+        emitClaudeTurnInterrupted();
+        claudeInterruptRequested = false;
+        return;
+      }
       if (stopped || isAbort) {
         return;
       }
@@ -1502,6 +1552,8 @@ function enqueueClaudePrompt(text: string, images?: PromptImage[] | null) {
     throw new Error('Claude streaming input queue is not ready');
   }
 
+  claudeInterruptRequested = false;
+  claudeInterruptCompletionEmitted = false;
   const parts = buildPromptContentParts(text, images);
   const hasImages = parts.some((part) => part.type === 'image');
   const content = hasImages
@@ -1972,20 +2024,36 @@ async function handleCommand(command: InputCommand) {
 
   if (command.type === 'stop') {
     stopped = true;
-    currentAbortController?.abort();
-    for (const [toolUseId, pending] of pendingClaudeInteractivePrompts.entries()) {
-      pending.resolve({
-        behavior: 'deny',
-        message: 'Native runtime helper stopped before user responded.',
-        toolUseID: toolUseId,
-      });
+    denyPendingPermissions();
+    denyPendingClaudeInteractivePrompts('Native runtime turn was interrupted before user responded.');
+
+    if (initCommand?.provider === 'claude') {
+      claudeInterruptRequested = true;
+      claudeInterruptCompletionEmitted = false;
+      try {
+        if (currentClaudeQuery) {
+          await currentClaudeQuery.interrupt();
+        }
+        emitClaudeTurnInterrupted();
+      } catch (error) {
+        claudeInterruptRequested = false;
+        const message = error instanceof Error ? error.message : String(error);
+        emitEvent({
+          type: 'stderr_line',
+          line: `Failed to interrupt Claude turn: ${message}`,
+        });
+        emitStatus('error', message);
+      } finally {
+        activeTurn = false;
+        currentAbortController = null;
+        stopped = false;
+      }
+      return;
     }
-    pendingClaudeInteractivePrompts.clear();
-    claudeInputQueue?.close();
-    currentClaudeQuery?.close();
+
+    currentAbortController?.abort();
 
     // Tear down sessions so the next prompt starts a fresh turn.
-    teardownClaudeSession();
     teardownCodexSession(false);
     activeTurn = false;
     currentAbortController = null;
