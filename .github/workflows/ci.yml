@@ -47,8 +47,7 @@ jobs:
         run: node scripts/ci/run-rust-clippy.mjs apps/desktop/src-tauri
 
       - name: Run Rust tests
-        working-directory: apps/desktop/src-tauri
-        run: cargo test
+        run: node scripts/ci/run-rust-tests.mjs apps/desktop/src-tauri
 
   i18n-check:
     name: i18n Key Consistency
