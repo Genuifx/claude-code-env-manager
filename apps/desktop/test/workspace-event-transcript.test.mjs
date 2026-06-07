@@ -205,6 +205,37 @@ test('session summary refresh treats runtime error events as boundary events', a
   ]), true);
 });
 
+test('native processing state falls back to event boundaries when the summary is stale', async () => {
+  const { shouldTreatNativeSessionAsProcessing } = await importWorkspaceEventTranscript();
+
+  assert.equal(shouldTreatNativeSessionAsProcessing('processing', [
+    event(1, { type: 'user_prompt', text: 'continue', image_count: 0 }),
+    event(2, { type: 'lifecycle', stage: 'processing', detail: 'Claude is processing a turn.' }),
+    event(3, { type: 'assistant_chunk', text: 'done' }),
+    event(4, { type: 'lifecycle', stage: 'turn_completed', detail: 'Claude turn completed.' }),
+    event(5, { type: 'lifecycle', stage: 'ready', detail: 'Ready for the next prompt.' }),
+  ]), false);
+
+  assert.equal(shouldTreatNativeSessionAsProcessing('processing', [
+    event(1, { type: 'user_prompt', text: 'continue', image_count: 0 }),
+    event(2, { type: 'lifecycle', stage: 'turn_started', detail: 'Claude is processing a turn.' }),
+    event(3, { type: 'system_message', message: 'thinking' }),
+  ], Date.parse('2026-05-01T00:00:04.000Z')), true);
+
+  assert.equal(shouldTreatNativeSessionAsProcessing('processing', [
+    event(1, { type: 'lifecycle', stage: 'turn_started', detail: 'Claude is processing a turn.' }),
+  ], Date.parse('2026-05-01T00:11:02.000Z')), false);
+
+  assert.equal(shouldTreatNativeSessionAsProcessing('processing', [
+    event(1, { type: 'lifecycle', stage: 'turn_started', detail: 'Claude is processing a turn.' }),
+  ], Date.parse('2026-05-01T00:02:00.000Z')), true);
+
+  assert.equal(shouldTreatNativeSessionAsProcessing('processing', []), true);
+  assert.equal(shouldTreatNativeSessionAsProcessing('ready', [
+    event(1, { type: 'lifecycle', stage: 'turn_started', detail: 'Claude is processing a turn.' }),
+  ]), false);
+});
+
 test('dedupes live events linearly while preserving first-seen order', async () => {
   const { dedupeEvents } = await importWorkspaceEventTranscript();
 

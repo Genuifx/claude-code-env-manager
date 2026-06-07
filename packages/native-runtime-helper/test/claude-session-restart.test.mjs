@@ -15,6 +15,7 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
   const outfile = path.join(tempDir, 'native-runtime-helper.mjs');
   const firstResultSubtype = options.firstResultSubtype ?? 'success';
   const settleDelayMsAfterResult = options.settleDelayMsAfterResult ?? 0;
+  const yieldIdleBeforeResult = options.yieldIdleBeforeResult ?? false;
   const interruptible = options.interruptible ?? false;
   const logClose = options.logClose ?? false;
   const logInterrupt = options.logInterrupt ?? false;
@@ -41,6 +42,7 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
           contents: `
             const firstResultSubtype = ${JSON.stringify(firstResultSubtype)};
             const settleDelayMsAfterResult = ${JSON.stringify(settleDelayMsAfterResult)};
+            const yieldIdleBeforeResult = ${JSON.stringify(yieldIdleBeforeResult)};
             const interruptible = ${JSON.stringify(interruptible)};
             const logClose = ${JSON.stringify(logClose)};
             const logInterrupt = ${JSON.stringify(logInterrupt)};
@@ -99,6 +101,9 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
                       yield { type: 'system', subtype: 'session_state_changed', state: 'idle', session_id };
                       yield { type: 'result', subtype: 'error_during_execution', errors: ['interrupted'], session_id };
                       continue;
+                    }
+                    if (yieldIdleBeforeResult) {
+                      yield { type: 'system', subtype: 'session_state_changed', state: 'idle', session_id };
                     }
                     if (!interruptible && turn === 1 && firstResultSubtype !== 'success') {
                       yield { type: 'result', subtype: firstResultSubtype, errors: ['hit turn limit'], session_id };
@@ -237,6 +242,75 @@ test('restarts Claude query after a completed turn so later prompts are consumed
     .map((output) => output.payload.text);
 
   assert.deepEqual(chunks, ['mock response 1', 'mock response 2']);
+});
+
+test('restarts Claude query when a prompt arrives after idle but before the old query settles', async (t) => {
+  const helperPath = await buildHelperWithMockClaudeSdk({
+    yieldIdleBeforeResult: true,
+    settleDelayMsAfterResult: 80,
+  });
+  const helper = spawn(process.execPath, [helperPath], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  t.after(() => {
+    helper.kill('SIGTERM');
+  });
+
+  const outputs = [];
+  const stderrRef = { value: '' };
+  let stdoutBuffer = '';
+
+  helper.stdout.setEncoding('utf8');
+  helper.stdout.on('data', (chunk) => {
+    stdoutBuffer += chunk;
+    let newlineIndex = stdoutBuffer.indexOf('\n');
+    while (newlineIndex >= 0) {
+      const line = stdoutBuffer.slice(0, newlineIndex).trim();
+      stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+      if (line) {
+        outputs.push(JSON.parse(line));
+      }
+      newlineIndex = stdoutBuffer.indexOf('\n');
+    }
+  });
+
+  helper.stderr.setEncoding('utf8');
+  helper.stderr.on('data', (chunk) => {
+    stderrRef.value += chunk;
+  });
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'init',
+    provider: 'claude',
+    env_name: 'default',
+    perm_mode: 'dev',
+    working_dir: os.tmpdir(),
+    initial_prompt: 'first',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'status'
+      && output.status === 'ready'
+      && output.detail === 'Ready for the next prompt.',
+    stderrRef,
+    'ready status after the first Claude turn',
+  );
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'prompt',
+    text: 'second',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'event'
+      && output.payload?.type === 'assistant_chunk'
+      && output.payload.text === 'mock response 2',
+    stderrRef,
+    'second Claude response after idle-before-result race',
+  );
 });
 
 test('passes Claude runtime model at query startup without setModel control request', async (t) => {
