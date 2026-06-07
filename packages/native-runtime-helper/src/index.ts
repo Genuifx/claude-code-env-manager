@@ -1541,7 +1541,7 @@ async function ensureClaudeSession() {
 }
 
 async function ensureClaudePromptQueueReady() {
-  if (claudeConsumeLoop && claudeTurnCompletionEmitted && claudeLastSessionState !== 'idle') {
+  if (claudeConsumeLoop && claudeTurnCompletionEmitted && !claudeInterruptCompletionEmitted) {
     const settlingLoop = claudeConsumeLoop;
     claudeInputQueue?.close();
     currentClaudeQuery?.close();

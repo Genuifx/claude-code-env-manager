@@ -388,6 +388,82 @@ export function sessionEventsNeedSummaryRefresh(events: SessionEventRecord[]) {
   });
 }
 
+const ACTIVE_TURN_LIFECYCLE_STAGES = new Set([
+  'compacting',
+  'initializing',
+  'processing',
+  'turn_started',
+]);
+
+const CLOSED_TURN_LIFECYCLE_STAGES = new Set([
+  'error',
+  'handoff',
+  'idle',
+  'interrupted',
+  'ready',
+  'stopped',
+  'turn_completed',
+  'turn_interrupted',
+]);
+
+const STALE_PROCESSING_EVENT_MS = 10 * 60 * 1000;
+
+function latestEventTime(events: SessionEventRecord[]): number | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const occurredAt = parseOccurredAt(events[index]!.occurred_at);
+    if (occurredAt != null) {
+      return occurredAt;
+    }
+  }
+  return null;
+}
+
+function inferProcessingFromLifecycleEvents(events: SessionEventRecord[]): boolean | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const payload = events[index]!.payload;
+    if (payload.type !== 'lifecycle') {
+      continue;
+    }
+
+    if (CLOSED_TURN_LIFECYCLE_STAGES.has(payload.stage)) {
+      return false;
+    }
+    if (ACTIVE_TURN_LIFECYCLE_STAGES.has(payload.stage)) {
+      return true;
+    }
+  }
+
+  return null;
+}
+
+export function shouldTreatNativeSessionAsProcessing(
+  status: string,
+  events: SessionEventRecord[],
+  nowMs = Date.now(),
+) {
+  if (status === 'initializing') {
+    return true;
+  }
+  if (status !== 'processing') {
+    return false;
+  }
+
+  const inferred = inferProcessingFromLifecycleEvents(events);
+  if (inferred === false) {
+    return false;
+  }
+
+  if (inferred === true) {
+    const latestTime = latestEventTime(events);
+    if (latestTime != null && nowMs - latestTime > STALE_PROCESSING_EVENT_MS) {
+      return false;
+    }
+    return true;
+  }
+
+  return true;
+}
+
 function stableUnknownEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (a == null || b == null) return a === b;

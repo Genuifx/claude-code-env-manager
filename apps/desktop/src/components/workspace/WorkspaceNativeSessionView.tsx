@@ -70,6 +70,7 @@ import {
   buildMessagesFromEvents,
   filterConfirmedLocalUserPrompts,
   sessionEventsNeedSummaryRefresh,
+  shouldTreatNativeSessionAsProcessing,
   splitLocalUserPromptsForReplay,
   stabilizeMessageRefs,
   type LocalUserPrompt,
@@ -1449,7 +1450,7 @@ export function WorkspaceNativeSessionView({
     });
   }, [events.length, isVisible, messages.length]);
 
-  const isProcessingTurn = session.status === 'initializing' || session.status === 'processing';
+  const isProcessingTurn = shouldTreatNativeSessionAsProcessing(session.status, events);
   const isAwaitingResponse = isSending || isProcessingTurn;
   const hasAskUserQuestionPrompt = attentionState.prompts.some(
     (entry) => entry.prompt.prompt_type === 'ask_user_question',
