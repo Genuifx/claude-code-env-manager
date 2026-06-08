@@ -1,5 +1,11 @@
 # ccem
 
+## 2.16.0
+
+### Minor Changes
+
+- Release Windows desktop support, including Windows CI coverage and installer packaging.
+
 ## 2.15.0
 
 ### Minor Changes
