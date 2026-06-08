@@ -1,5 +1,11 @@
 # ccem
 
+## 2.15.0
+
+### Minor Changes
+
+- Stabilize native Claude prompt handoff after ready-state restarts so desktop messages are not dropped while a session is thinking.
+
 ## 2.14.0
 
 ### Minor Changes
