@@ -279,15 +279,18 @@ ccem setup init
 
 # Desktop App
 
-Tauri 2.0 构建的原生桌面应用。macOS 毛玻璃效果，不是套壳浏览器。
+Tauri 2.0 构建的原生桌面应用。支持 Windows 和 macOS，不是套壳浏览器。
 
 除了 CLI 有的功能之外，Desktop 还有几个独有能力——双引擎、远程控制、定时任务、对话历史、请求调试。
 
 ## 安装
 
-从 [GitHub Releases](https://github.com/genuifx/claude-code-env-manager/releases) 下载 `.dmg`，拖进 Applications。
+从 [GitHub Releases](https://github.com/genuifx/claude-code-env-manager/releases) 下载对应平台的安装包：
 
-> macOS 10.15 Catalina 及以上。
+- **Windows x64**：下载 `CCEM Desktop_*_x64-setup.exe`，双击安装。
+- **macOS Apple Silicon / Intel**：下载对应 `.dmg`，拖进 Applications。
+
+> macOS 需要 10.15 Catalina 及以上。
 
 ## Claude Code + Codex 双引擎
 

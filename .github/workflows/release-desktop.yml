@@ -66,14 +66,15 @@ jobs:
             echo "### Downloads"
             echo "- **Apple Silicon (M1/M2/M3/M4)**: \`CCEM-Desktop_*_aarch64.dmg\`"
             echo "- **Intel Mac**: \`CCEM-Desktop_*_x64.dmg\`"
+            echo "- **Windows (x64)**: \`CCEM Desktop_*_x64-setup.exe\`"
             echo
             echo "### CLI"
             echo '```bash'
             echo "npm install -g ccem@${version}"
             echo '```'
             echo
-            echo "### Important"
-            echo "run the following instruction to avoid the apple sign check."
+            echo "### macOS Gatekeeper"
+            echo "If you use an unsigned macOS build, clear quarantine after installing:"
             echo
             echo '```bash'
             echo 'xattr -c /Applications/CCEM\ Desktop.app'
@@ -99,9 +100,15 @@ jobs:
           - platform: macos-latest
             target: aarch64-apple-darwin
             args: '--target aarch64-apple-darwin'
+            appleSigning: true
           - platform: macos-15-intel
             target: x86_64-apple-darwin
             args: '--target x86_64-apple-darwin'
+            appleSigning: true
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: '--target x86_64-pc-windows-msvc --config src-tauri/tauri.windows.conf.json --bundles nsis,updater'
+            appleSigning: false
 
     runs-on: ${{ matrix.platform }}
 
@@ -135,6 +142,7 @@ jobs:
         run: pnpm --filter @ccem/core build
 
       - name: Detect Apple signing config
+        if: ${{ matrix.appleSigning }}
         id: apple-signing
         shell: bash
         env:
@@ -162,7 +170,7 @@ jobs:
           fi
 
       - name: Build and release (signed)
-        if: ${{ steps.apple-signing.outputs.enabled == 'true' }}
+        if: ${{ matrix.appleSigning && steps.apple-signing.outputs.enabled == 'true' }}
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -185,7 +193,7 @@ jobs:
           args: ${{ matrix.args }}
 
       - name: Build and release (unsigned)
-        if: ${{ steps.apple-signing.outputs.enabled != 'true' }}
+        if: ${{ !matrix.appleSigning || steps.apple-signing.outputs.enabled != 'true' }}
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -247,12 +255,20 @@ jobs:
             done
           }
 
+          asset_url_regex() {
+            jq -r --arg pattern "$1" \
+              '.assets[] | select(.name | test($pattern)) | .browser_download_url' \
+              "$release_json" | head -n1
+          }
+
           aarch64_bundle_url="$(asset_url_any 'CCEM.Desktop_aarch64.app.tar.gz' 'CCEM Desktop_aarch64.app.tar.gz')"
           aarch64_sig_url="$(asset_url_any 'CCEM.Desktop_aarch64.app.tar.gz.sig' 'CCEM Desktop_aarch64.app.tar.gz.sig')"
           x64_bundle_url="$(asset_url_any 'CCEM.Desktop_x64.app.tar.gz' 'CCEM Desktop_x64.app.tar.gz')"
           x64_sig_url="$(asset_url_any 'CCEM.Desktop_x64.app.tar.gz.sig' 'CCEM Desktop_x64.app.tar.gz.sig')"
+          windows_bundle_url="$(asset_url_regex '(x64|x86_64).*\.(nsis|msi)\.zip$')"
+          windows_sig_url="$(asset_url_regex '(x64|x86_64).*\.(nsis|msi)\.zip\.sig$')"
 
-          for value in "$aarch64_bundle_url" "$aarch64_sig_url" "$x64_bundle_url" "$x64_sig_url"; do
+          for value in "$aarch64_bundle_url" "$aarch64_sig_url" "$x64_bundle_url" "$x64_sig_url" "$windows_bundle_url" "$windows_sig_url"; do
             if [[ -z "$value" || "$value" == "null" ]]; then
               echo "Missing updater bundle or signature asset for ${TAG_NAME}" >&2
               jq -r '.assets[].name' "$release_json" >&2
@@ -262,6 +278,7 @@ jobs:
 
           aarch64_sig="$(curl -fsSL "$aarch64_sig_url" | tr -d '\r\n')"
           x64_sig="$(curl -fsSL "$x64_sig_url" | tr -d '\r\n')"
+          windows_sig="$(curl -fsSL "$windows_sig_url" | tr -d '\r\n')"
           pub_date="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
           notes="See https://github.com/${REPO}/releases/tag/${TAG_NAME}"
 
@@ -273,6 +290,8 @@ jobs:
             --arg aarch64_sig "$aarch64_sig" \
             --arg x64_url "$x64_bundle_url" \
             --arg x64_sig "$x64_sig" \
+            --arg windows_url "$windows_bundle_url" \
+            --arg windows_sig "$windows_sig" \
             '{
               version: $version,
               notes: $notes,
@@ -285,6 +304,10 @@ jobs:
                 "darwin-x86_64": {
                   signature: $x64_sig,
                   url: $x64_url
+                },
+                "windows-x86_64": {
+                  signature: $windows_sig,
+                  url: $windows_url
                 }
               }
             }' > latest.json

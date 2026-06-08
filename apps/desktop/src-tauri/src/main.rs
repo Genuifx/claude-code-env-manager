@@ -88,6 +88,7 @@ use std::fs;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+#[cfg(target_os = "macos")]
 use std::time::Duration;
 use telegram::{
     TelegramBridgeManager, TelegramBridgeStatus, TelegramForumTopic, TelegramSettings,
@@ -102,9 +103,9 @@ use workspace_search::search_workspace_files;
 
 /// Global flag: when true, CloseRequested should NOT be intercepted.
 static FORCE_QUIT: AtomicBool = AtomicBool::new(false);
-use tauri::{
-    webview::PageLoadEvent, window::Color, Listener, Manager, RunEvent, State, WindowEvent,
-};
+use tauri::{webview::PageLoadEvent, Manager, RunEvent, State, WindowEvent};
+#[cfg(target_os = "macos")]
+use tauri::{window::Color, Listener};
 use terminal::{
     ArrangeLayout, ArrangeSessionInfo, TerminalInfo, TerminalType, TmuxAttachTerminalInfo,
     TmuxAttachTerminalType,
@@ -500,6 +501,10 @@ fn detect_terminals() -> Vec<TerminalInfo> {
 
 #[tauri::command]
 fn list_tmux_attach_terminals() -> Vec<TmuxAttachTerminalInfo> {
+    if !terminal::tmux_supported_on_current_platform() {
+        return Vec::new();
+    }
+
     terminal::detect_tmux_attach_terminals()
 }
 
@@ -2315,7 +2320,73 @@ fn check_opencode_installed() -> bool {
 
 #[tauri::command]
 fn check_tmux_installed() -> bool {
+    if !terminal::tmux_supported_on_current_platform() {
+        return false;
+    }
+
     tmux::TmuxManager::check_tmux_installed().is_ok()
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlatformCapabilities {
+    os: &'static str,
+    is_windows: bool,
+    is_macos: bool,
+    is_linux: bool,
+    tmux_supported: bool,
+    tmux_installed: bool,
+    interactive_tmux_supported: bool,
+    external_terminal_launch_supported: bool,
+    native_runtime_supported: bool,
+    headless_runtime_supported: bool,
+    tmux_install_command: Option<&'static str>,
+}
+
+fn current_os_label() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else {
+        "unknown"
+    }
+}
+
+fn tmux_install_command_for_current_platform() -> Option<&'static str> {
+    if cfg!(target_os = "macos") {
+        Some("brew install tmux")
+    } else if cfg!(target_os = "linux") {
+        Some("sudo apt install tmux")
+    } else {
+        None
+    }
+}
+
+#[tauri::command]
+fn get_platform_capabilities() -> PlatformCapabilities {
+    let tmux_supported = terminal::tmux_supported_on_current_platform();
+    let tmux_installed = if tmux_supported {
+        tmux::TmuxManager::check_tmux_installed().is_ok()
+    } else {
+        false
+    };
+
+    PlatformCapabilities {
+        os: current_os_label(),
+        is_windows: cfg!(target_os = "windows"),
+        is_macos: cfg!(target_os = "macos"),
+        is_linux: cfg!(target_os = "linux"),
+        tmux_supported,
+        tmux_installed,
+        interactive_tmux_supported: tmux_supported && tmux_installed,
+        external_terminal_launch_supported: terminal::external_terminal_launch_supported(),
+        native_runtime_supported: true,
+        headless_runtime_supported: true,
+        tmux_install_command: tmux_install_command_for_current_platform(),
+    }
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -3619,6 +3690,7 @@ fn main() {
             check_codex_installed,
             check_opencode_installed,
             check_tmux_installed,
+            get_platform_capabilities,
             load_from_remote,
             arrange_sessions,
             check_arrange_support,
@@ -3904,15 +3976,21 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(move |app_handle, event| {
-            // macOS Dock icon click should reopen/show the main window.
-            if let RunEvent::Reopen { .. } = event {
+            #[cfg(not(target_os = "macos"))]
+            let _ = &app_handle;
+
+            #[cfg(target_os = "macos")]
+            if let RunEvent::Reopen { .. } = &event {
+                // macOS Dock icon click should reopen/show the main window.
                 if let Some(window) = app_handle.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.set_focus();
-                    #[cfg(target_os = "macos")]
                     schedule_macos_traffic_light_sync_series(window, "reopen");
                 }
-            } else if let RunEvent::Exit = event {
+                return;
+            }
+
+            if let RunEvent::Exit = event {
                 telegram_manager_for_run.stop();
                 wecom_manager_for_run.stop();
                 weixin_manager_for_run.stop();

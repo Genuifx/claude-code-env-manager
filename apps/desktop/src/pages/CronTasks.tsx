@@ -16,6 +16,7 @@ import {
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { shallow } from 'zustand/shallow';
+import type { PlatformCapabilities } from '@/lib/tauri-ipc';
 
 // --- Utility functions ---
 
@@ -678,7 +679,7 @@ export function CronTasks() {
   const {
     loadCronTasks, addCronTask, updateCronTask,
     deleteCronTask, toggleCronTask, listCronTemplates,
-    checkTmuxInstalled, getCronNextRuns, retryCronTask,
+    getPlatformCapabilities, getCronNextRuns, retryCronTask,
     getCronRunDetail, loadCronTaskRuns,
   } = useTauriCommands();
 
@@ -688,10 +689,12 @@ export function CronTasks() {
   const [pendingDelete, setPendingDelete] = useState<CronTask | null>(null);
   const [templates, setTemplates] = useState<CronTemplate[]>([]);
   const [showAiPanel, setShowAiPanel] = useState(false);
-  const [tmuxInstalled, setTmuxInstalled] = useState(true);
+  const [platformCapabilities, setPlatformCapabilities] = useState<PlatformCapabilities | null>(null);
   const [nextRunTimes, setNextRunTimes] = useState<Record<string, string>>({});
   const [drawerRun, setDrawerRun] = useState<CronTaskRun | null>(null);
   const [drawerLoading, setDrawerLoading] = useState(false);
+  const showTmuxNotice = platformCapabilities?.tmuxSupported === true && !platformCapabilities.tmuxInstalled;
+  const tmuxInstallCommand = platformCapabilities?.tmuxInstallCommand ?? null;
 
   const openRunDrawer = useCallback(async (taskId: string, runId: string) => {
     setDrawerLoading(true);
@@ -720,12 +723,12 @@ export function CronTasks() {
     }
   }, [cronTasks, loadCronTaskRuns]);
 
-  // Check tmux
+  // Load platform capabilities for optional tmux enhancement messaging.
   useEffect(() => {
-    checkTmuxInstalled()
-      .then(setTmuxInstalled)
-      .catch(() => setTmuxInstalled(false));
-  }, [checkTmuxInstalled]);
+    getPlatformCapabilities()
+      .then(setPlatformCapabilities)
+      .catch(() => setPlatformCapabilities(null));
+  }, [getPlatformCapabilities]);
 
   // Event listeners for cron task lifecycle
   useEffect(() => {
@@ -875,14 +878,16 @@ export function CronTasks() {
   return (
     <div className="space-y-4">
       {/* Tmux warning */}
-      {!tmuxInstalled && (
+      {showTmuxNotice && (
         <div className="rounded-xl border border-warning/25 bg-warning/8 px-4 py-3">
           <div className="flex items-start gap-2.5">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
             <div>
               <p className="text-sm font-medium text-foreground">{t('cron.tmuxOptionalTitle')}</p>
               <p className="mt-1 text-xs text-muted-foreground">{t('cron.tmuxOptionalNotice')}</p>
-              <p className="mt-2 font-mono text-2xs text-muted-foreground">{t('settings.tmuxInstallCmd')}</p>
+              {tmuxInstallCommand && (
+                <p className="mt-2 font-mono text-2xs text-muted-foreground">{tmuxInstallCommand}</p>
+              )}
             </div>
           </div>
         </div>

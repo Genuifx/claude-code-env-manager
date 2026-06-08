@@ -75,6 +75,10 @@ struct TerminalPrefs {
 
 /// Check if an application is installed on macOS
 fn is_app_installed(app_name: &str) -> bool {
+    if !cfg!(target_os = "macos") {
+        return false;
+    }
+
     // Check common locations for applications
     let paths = [
         format!("/Applications/{}.app", app_name),
@@ -116,6 +120,10 @@ fn is_app_installed(app_name: &str) -> bool {
 
 /// Detect which terminals are installed on the system
 pub fn detect_terminals() -> Vec<TerminalInfo> {
+    if !external_terminal_launch_supported() {
+        return Vec::new();
+    }
+
     let mut terminals = Vec::new();
 
     // Terminal.app is always available on macOS
@@ -138,6 +146,10 @@ pub fn detect_terminals() -> Vec<TerminalInfo> {
 
 /// Detect which terminals can open an existing tmux-backed session.
 pub fn detect_tmux_attach_terminals() -> Vec<TmuxAttachTerminalInfo> {
+    if !tmux_supported_on_current_platform() {
+        return Vec::new();
+    }
+
     let preferred = match get_preferred_terminal() {
         TerminalType::TerminalApp => Some(TmuxAttachTerminalType::TerminalApp),
         TerminalType::ITerm2 => Some(TmuxAttachTerminalType::ITerm2),
@@ -323,32 +335,75 @@ fn binary_exists(path: &std::path::Path) -> bool {
 }
 
 fn find_binaries_in_paths(binary: &str, paths: impl IntoIterator<Item = PathBuf>) -> Vec<String> {
+    let lookup_names = binary_lookup_names(binary);
     paths
         .into_iter()
-        .filter_map(|dir| {
-            let path = dir.join(binary);
-            if binary_exists(&path) {
-                Some(path.to_string_lossy().to_string())
-            } else {
-                None
-            }
+        .flat_map(|dir| {
+            lookup_names
+                .iter()
+                .map(move |name| dir.join(name))
+                .collect::<Vec<_>>()
         })
+        .filter_map(|path| binary_exists(&path).then(|| path.to_string_lossy().to_string()))
         .collect()
+}
+
+fn binary_lookup_names(binary: &str) -> Vec<String> {
+    #[cfg(windows)]
+    {
+        let mut names = vec![binary.to_string()];
+        let extensions =
+            std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+
+        for extension in extensions.split(';') {
+            let extension = extension.trim();
+            if extension.is_empty() {
+                continue;
+            }
+            let extension = if extension.starts_with('.') {
+                extension.to_string()
+            } else {
+                format!(".{extension}")
+            };
+            let candidate = format!("{binary}{extension}");
+            if !names
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(&candidate))
+            {
+                names.push(candidate);
+            }
+        }
+
+        names
+    }
+
+    #[cfg(not(windows))]
+    {
+        vec![binary.to_string()]
+    }
 }
 
 fn login_shell_paths() -> &'static [PathBuf] {
     LOGIN_SHELL_PATHS.get_or_init(|| {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-        let output = Command::new(&shell)
-            .args(["-li", "-c", "printf %s \"$PATH\""])
-            .output();
+        #[cfg(windows)]
+        {
+            Vec::new()
+        }
 
-        match output {
-            Ok(out) if out.status.success() => std::env::split_paths(std::ffi::OsStr::new(
-                String::from_utf8_lossy(&out.stdout).trim(),
-            ))
-            .collect(),
-            _ => Vec::new(),
+        #[cfg(not(windows))]
+        {
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+            let output = Command::new(&shell)
+                .args(["-li", "-c", "printf %s \"$PATH\""])
+                .output();
+
+            match output {
+                Ok(out) if out.status.success() => std::env::split_paths(std::ffi::OsStr::new(
+                    String::from_utf8_lossy(&out.stdout).trim(),
+                ))
+                .collect(),
+                _ => Vec::new(),
+            }
         }
     })
 }
@@ -393,23 +448,47 @@ fn nvm_node_bin_version(path: &std::path::Path) -> Option<(u32, u32, u32)> {
 
 fn common_user_path_candidates() -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    if let Some(home) = dirs::home_dir() {
-        paths.push(home.join("Library").join("pnpm"));
-        paths.push(home.join(".local").join("bin"));
-        paths.push(home.join(".npm-global").join("bin"));
-        paths.push(home.join(".cargo").join("bin"));
-        paths.extend(nvm_node_bin_paths(&home));
+
+    #[cfg(windows)]
+    {
+        if let Some(value) = std::env::var_os("APPDATA") {
+            paths.push(PathBuf::from(value).join("npm"));
+        }
+        if let Some(value) = std::env::var_os("LOCALAPPDATA") {
+            paths.push(PathBuf::from(value).join("pnpm"));
+        }
+        if let Some(value) = std::env::var_os("ProgramFiles") {
+            paths.push(PathBuf::from(value).join("nodejs"));
+        }
+        if let Some(home) = dirs::home_dir() {
+            paths.push(home.join(".cargo").join("bin"));
+            paths.push(home.join("scoop").join("shims"));
+            paths.push(home.join("AppData").join("Roaming").join("npm"));
+            paths.push(home.join("AppData").join("Local").join("pnpm"));
+        }
+        paths
     }
-    paths.extend([
-        PathBuf::from("/opt/homebrew/bin"),
-        PathBuf::from("/opt/homebrew/sbin"),
-        PathBuf::from("/usr/local/bin"),
-        PathBuf::from("/usr/bin"),
-        PathBuf::from("/bin"),
-        PathBuf::from("/usr/sbin"),
-        PathBuf::from("/sbin"),
-    ]);
-    paths
+
+    #[cfg(not(windows))]
+    {
+        if let Some(home) = dirs::home_dir() {
+            paths.push(home.join("Library").join("pnpm"));
+            paths.push(home.join(".local").join("bin"));
+            paths.push(home.join(".npm-global").join("bin"));
+            paths.push(home.join(".cargo").join("bin"));
+            paths.extend(nvm_node_bin_paths(&home));
+        }
+        paths.extend([
+            PathBuf::from("/opt/homebrew/bin"),
+            PathBuf::from("/opt/homebrew/sbin"),
+            PathBuf::from("/usr/local/bin"),
+            PathBuf::from("/usr/bin"),
+            PathBuf::from("/bin"),
+            PathBuf::from("/usr/sbin"),
+            PathBuf::from("/sbin"),
+        ]);
+        paths
+    }
 }
 
 fn build_user_path_from_sources(
@@ -550,12 +629,13 @@ pub fn resolve_ccem_path() -> Option<String> {
     let home = dirs::home_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
-    let candidates = vec![
+    let mut candidates = windows_cli_candidates("ccem");
+    candidates.extend([
         format!("{}/.local/bin/ccem", home),
         format!("{}/.npm-global/bin/ccem", home),
         "/usr/local/bin/ccem".to_string(),
         "/opt/homebrew/bin/ccem".to_string(),
-    ];
+    ]);
     resolve_binary_path("ccem", &candidates)
 }
 
@@ -564,13 +644,14 @@ pub fn resolve_claude_path() -> Option<String> {
     let home = dirs::home_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
-    let candidates = vec![
+    let mut candidates = windows_cli_candidates("claude");
+    candidates.extend([
         format!("{}/.local/bin/claude", home),
         format!("{}/.npm-global/bin/claude", home),
         format!("{}/Library/pnpm/claude", home),
         "/usr/local/bin/claude".to_string(),
         "/opt/homebrew/bin/claude".to_string(),
-    ];
+    ]);
     resolve_highest_versioned_binary_path("claude", &candidates)
 }
 
@@ -579,13 +660,14 @@ pub fn resolve_codex_path() -> Option<String> {
     let home = dirs::home_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
-    let candidates = vec![
+    let mut candidates = windows_cli_candidates("codex");
+    candidates.extend([
         format!("{}/.local/bin/codex", home),
         format!("{}/.npm-global/bin/codex", home),
         format!("{}/.cargo/bin/codex", home),
         "/usr/local/bin/codex".to_string(),
         "/opt/homebrew/bin/codex".to_string(),
-    ];
+    ]);
     resolve_binary_path("codex", &candidates)
 }
 
@@ -594,17 +676,22 @@ pub fn resolve_opencode_path() -> Option<String> {
     let home = dirs::home_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
-    let candidates = vec![
+    let mut candidates = windows_cli_candidates("opencode");
+    candidates.extend([
         format!("{}/.local/bin/opencode", home),
         format!("{}/.npm-global/bin/opencode", home),
         "/usr/local/bin/opencode".to_string(),
         "/opt/homebrew/bin/opencode".to_string(),
-    ];
+    ]);
     resolve_binary_path("opencode", &candidates)
 }
 
 /// Resolve the full path to the `tmux` binary.
 pub fn resolve_tmux_path() -> Option<String> {
+    if !tmux_supported_on_current_platform() {
+        return None;
+    }
+
     let home = dirs::home_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
@@ -615,6 +702,45 @@ pub fn resolve_tmux_path() -> Option<String> {
         "/usr/bin/tmux".to_string(),
     ];
     resolve_binary_path("tmux", &candidates)
+}
+
+fn windows_cli_candidates(binary: &str) -> Vec<String> {
+    #[cfg(windows)]
+    {
+        let mut candidates = Vec::new();
+        let mut push_dir = |dir: PathBuf| {
+            for name in binary_lookup_names(binary) {
+                candidates.push(dir.join(name).to_string_lossy().to_string());
+            }
+        };
+
+        if let Some(value) = std::env::var_os("APPDATA") {
+            push_dir(PathBuf::from(value).join("npm"));
+        }
+        if let Some(value) = std::env::var_os("LOCALAPPDATA") {
+            push_dir(PathBuf::from(value).join("pnpm"));
+        }
+        if let Some(home) = dirs::home_dir() {
+            push_dir(home.join(".cargo").join("bin"));
+            push_dir(home.join("scoop").join("shims"));
+        }
+
+        candidates
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = binary;
+        Vec::new()
+    }
+}
+
+pub fn tmux_supported_on_current_platform() -> bool {
+    cfg!(any(target_os = "macos", target_os = "linux"))
+}
+
+pub fn external_terminal_launch_supported() -> bool {
+    cfg!(target_os = "macos")
 }
 
 /// Resolve the full path to the `ghostty` binary or app bundle executable.
@@ -955,6 +1081,12 @@ pub fn launch_in_terminal(
     resume_session_id: Option<&str>,
     client: &str,
 ) -> Result<(Option<String>, Option<String>), String> {
+    if !external_terminal_launch_supported() {
+        return Err(
+            "External terminal launch is not available on this platform; use the native workspace runtime or headless sessions.".to_string(),
+        );
+    }
+
     let shell_command = if client == "codex" {
         build_codex_shell_command(&env_vars, working_dir, session_id, resume_session_id)
     } else if client == "opencode" {
@@ -1721,17 +1853,30 @@ mod tests {
         ))
     }
 
+    fn fake_binary_path(root: &std::path::Path, name: &str) -> PathBuf {
+        let file_name = if cfg!(windows) {
+            format!("{name}.cmd")
+        } else {
+            name.to_string()
+        };
+        root.join(file_name)
+    }
+
     fn write_fake_binary(path: &std::path::Path, version: &str) {
         fs::create_dir_all(path.parent().expect("fake binary should have a parent"))
             .expect("create fake binary directory");
-        fs::write(
-            path,
+        let script = if cfg!(windows) {
+            format!(
+                "@echo off\r\nif \"%1\"==\"--version\" echo {} (Claude Code)\r\n",
+                version
+            )
+        } else {
             format!(
                 "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo \"{} (Claude Code)\"; fi\n",
                 version
-            ),
-        )
-        .expect("write fake binary");
+            )
+        };
+        fs::write(path, script).expect("write fake binary");
         #[cfg(unix)]
         {
             let mut permissions = fs::metadata(path)
@@ -1758,8 +1903,8 @@ mod tests {
     #[test]
     fn highest_versioned_binary_wins_over_path_order() {
         let root = temp_test_root("highest-version");
-        let older = root.join("nvm").join("claude");
-        let newer = root.join("pnpm").join("claude");
+        let older = fake_binary_path(&root.join("nvm"), "claude");
+        let newer = fake_binary_path(&root.join("pnpm"), "claude");
         write_fake_binary(&older, "2.1.37");
         write_fake_binary(&newer, "2.1.100");
 
@@ -1777,8 +1922,8 @@ mod tests {
     #[test]
     fn highest_versioned_binary_falls_back_to_first_candidate_without_versions() {
         let root = temp_test_root("fallback");
-        let first = root.join("first").join("claude");
-        let second = root.join("second").join("claude");
+        let first = fake_binary_path(&root.join("first"), "claude");
+        let second = fake_binary_path(&root.join("second"), "claude");
         write_fake_binary(&first, "not-a-semver");
         write_fake_binary(&second, "also-not-a-semver");
 
@@ -1815,21 +1960,29 @@ mod tests {
     #[test]
     fn user_path_prefers_login_shell_and_keeps_fallbacks_deduped() {
         let login_paths = vec![PathBuf::from("/Users/test/.nvm/versions/node/v22.18.0/bin")];
+        let current_path = std::env::join_paths([PathBuf::from("/usr/bin"), PathBuf::from("/bin")])
+            .expect("join current path");
         let fallback_paths = vec![
             PathBuf::from("/Users/test/Library/pnpm"),
             PathBuf::from("/usr/bin"),
         ];
 
         let user_path = build_user_path_from_sources(
-            Some(OsStr::new("/usr/bin:/bin")),
+            Some(current_path.as_os_str()),
             &login_paths,
             &fallback_paths,
         );
+        let expected = std::env::join_paths([
+            PathBuf::from("/Users/test/.nvm/versions/node/v22.18.0/bin"),
+            PathBuf::from("/usr/bin"),
+            PathBuf::from("/bin"),
+            PathBuf::from("/Users/test/Library/pnpm"),
+        ])
+        .expect("join expected path")
+        .into_string()
+        .expect("expected path should be utf-8");
 
-        assert_eq!(
-            user_path,
-            "/Users/test/.nvm/versions/node/v22.18.0/bin:/usr/bin:/bin:/Users/test/Library/pnpm"
-        );
+        assert_eq!(user_path, expected);
     }
 
     #[test]

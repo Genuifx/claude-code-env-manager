@@ -711,52 +711,51 @@ impl InteractiveRuntimeManager {
     ) {
         let manager = Arc::clone(self);
         let dispatcher = app.state::<Arc<EventDispatcher>>().inner().clone();
-        thread::spawn(move || loop {
-            let Ok(handle) = manager.get_handle(&session_id) else {
-                break;
-            };
-            if !handle.alive.load(Ordering::SeqCst) {
-                break;
-            }
+        thread::spawn(move || {
+            while let Ok(handle) = manager.get_handle(&session_id) {
+                if !handle.alive.load(Ordering::SeqCst) {
+                    break;
+                }
 
-            let has_live_terminal_consumer =
-                dispatcher.has_connected_channel(&session_id, &ChannelKind::DesktopUi);
+                let has_live_terminal_consumer =
+                    dispatcher.has_connected_channel(&session_id, &ChannelKind::DesktopUi);
 
-            let should_poll_jsonl = handle
-                .session
-                .lock()
-                .map(|session| session.client == "claude")
-                .unwrap_or(false);
+                let should_poll_jsonl = handle
+                    .session
+                    .lock()
+                    .map(|session| session.client == "claude")
+                    .unwrap_or(false);
 
-            if should_poll_jsonl {
-                if let Err(error) = manager.sample_jsonl_events(&app, &session_id) {
-                    eprintln!(
-                        "Interactive JSONL poll warning for {}: {}",
-                        session_id, error
+                if should_poll_jsonl {
+                    if let Err(error) = manager.sample_jsonl_events(&app, &session_id) {
+                        eprintln!(
+                            "Interactive JSONL poll warning for {}: {}",
+                            session_id, error
+                        );
+                    }
+                }
+
+                if let Err(error) = manager.sample_tmux_output(&app, &session_id) {
+                    handle.alive.store(false, Ordering::SeqCst);
+                    if let Ok(mut session) = handle.session.lock() {
+                        session.status = "stopped".to_string();
+                    }
+                    session_manager.update_session_status(&session_id, "stopped");
+                    manager.append_output(
+                        &app,
+                        &session_id,
+                        format!("\r\n[ccem] tmux session ended: {}\r\n", error),
                     );
+                    manager.persist_state_best_effort();
+                    break;
                 }
-            }
 
-            if let Err(error) = manager.sample_tmux_output(&app, &session_id) {
-                handle.alive.store(false, Ordering::SeqCst);
-                if let Ok(mut session) = handle.session.lock() {
-                    session.status = "stopped".to_string();
-                }
-                session_manager.update_session_status(&session_id, "stopped");
-                manager.append_output(
-                    &app,
-                    &session_id,
-                    format!("\r\n[ccem] tmux session ended: {}\r\n", error),
-                );
-                manager.persist_state_best_effort();
-                break;
+                thread::sleep(if has_live_terminal_consumer {
+                    CAPTURE_POLL_INTERVAL
+                } else {
+                    BACKGROUND_CAPTURE_POLL_INTERVAL
+                });
             }
-
-            thread::sleep(if has_live_terminal_consumer {
-                CAPTURE_POLL_INTERVAL
-            } else {
-                BACKGROUND_CAPTURE_POLL_INTERVAL
-            });
         });
     }
 
@@ -931,6 +930,7 @@ mod tests {
         assert_eq!(diff_capture_snapshot(previous, current), "line-3\n");
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn project_dirs_match_normalizes_private_tmp_alias() {
         let tmp = std::env::temp_dir();

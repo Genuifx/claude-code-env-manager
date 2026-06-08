@@ -3,9 +3,11 @@ use crate::telegram;
 use crate::terminal::resolve_claude_path;
 use crate::unified_runtime::UnifiedSessionManager;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
 use std::fs;
 use std::io::{BufRead, Read};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -525,6 +527,127 @@ where
     })
 }
 
+fn push_unique_path(paths: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>, path: PathBuf) {
+    if !path.as_os_str().is_empty() && seen.insert(path.clone()) {
+        paths.push(path);
+    }
+}
+
+fn latest_node_version_bin(versions_dir: &Path, fnm_layout: bool) -> Option<PathBuf> {
+    let Ok(entries) = fs::read_dir(versions_dir) else {
+        return None;
+    };
+
+    let mut versions = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect::<Vec<_>>();
+    versions.sort();
+    versions.reverse();
+
+    for version in versions {
+        let bin = if fnm_layout {
+            version.join("installation").join("bin")
+        } else {
+            version.join("bin")
+        };
+        if bin.exists() {
+            return Some(bin);
+        }
+    }
+
+    None
+}
+
+fn cron_path_candidates(home: Option<&Path>) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+
+    if let Some(home) = home {
+        paths.push(home.join(".volta").join("bin"));
+        paths.push(home.join(".npm-global").join("bin"));
+        paths.push(home.join(".local").join("bin"));
+        paths.push(home.join(".cargo").join("bin"));
+
+        if let Some(path) =
+            latest_node_version_bin(&home.join(".nvm").join("versions").join("node"), false)
+        {
+            paths.insert(0, path);
+        }
+        if let Some(path) = latest_node_version_bin(&home.join(".fnm").join("node-versions"), true)
+        {
+            paths.insert(0, path);
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        if let Some(value) = std::env::var_os("APPDATA") {
+            paths.push(PathBuf::from(value).join("npm"));
+        }
+        if let Some(value) = std::env::var_os("LOCALAPPDATA") {
+            paths.push(PathBuf::from(value).join("pnpm"));
+        }
+        if let Some(value) = std::env::var_os("ProgramFiles") {
+            paths.push(PathBuf::from(value).join("nodejs"));
+        }
+        if let Some(home) = home {
+            paths.push(home.join("AppData").join("Roaming").join("npm"));
+            paths.push(home.join("AppData").join("Local").join("pnpm"));
+            paths.push(home.join("scoop").join("shims"));
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        paths.push(PathBuf::from("/usr/local/bin"));
+        paths.push(PathBuf::from("/opt/homebrew/bin"));
+        paths.push(PathBuf::from("/usr/bin"));
+        paths.push(PathBuf::from("/bin"));
+    }
+
+    paths
+}
+
+fn build_cron_user_path(home: Option<&Path>, current_path: Option<OsString>) -> String {
+    let mut paths = Vec::new();
+    let mut seen = HashSet::new();
+
+    for path in cron_path_candidates(home) {
+        push_unique_path(&mut paths, &mut seen, path);
+    }
+
+    if let Some(current_path) = current_path {
+        for path in std::env::split_paths(&current_path) {
+            push_unique_path(&mut paths, &mut seen, path);
+        }
+    }
+
+    std::env::join_paths(paths)
+        .ok()
+        .and_then(|value| value.into_string().ok())
+        .unwrap_or_default()
+}
+
+fn expand_cron_working_dir(working_dir: &str, home: Option<&Path>) -> String {
+    let Some(home) = home else {
+        return working_dir.to_string();
+    };
+
+    if working_dir == "~" {
+        return home.to_string_lossy().to_string();
+    }
+
+    if let Some(relative) = working_dir
+        .strip_prefix("~/")
+        .or_else(|| working_dir.strip_prefix("~\\"))
+    {
+        return home.join(relative).to_string_lossy().to_string();
+    }
+
+    working_dir.to_string()
+}
+
 fn execute_task(
     app: AppHandle,
     _unified_runtime_manager: Arc<UnifiedSessionManager>,
@@ -556,54 +679,12 @@ fn execute_task(
 
     // Expand PATH to include common Node.js/nvm/fnm/volta install locations
     // since Tauri processes don't inherit the user's shell PATH
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/Users/default".to_string());
-    let current_path = std::env::var("PATH").unwrap_or_default();
-    let mut extra_paths: Vec<String> = vec![
-        format!("{home}/.volta/bin"),
-        format!("{home}/.npm-global/bin"),
-        format!("{home}/.local/bin"),
-        "/usr/local/bin".to_string(),
-        "/opt/homebrew/bin".to_string(),
-    ];
-    // Resolve nvm/fnm glob-like paths: pick the latest version directory
-    for pattern_dir in &[
-        format!("{home}/.nvm/versions/node"),
-        format!("{home}/.fnm/node-versions"),
-    ] {
-        if let Ok(entries) = std::fs::read_dir(pattern_dir) {
-            let mut versions: Vec<std::path::PathBuf> = entries
-                .filter_map(|e| e.ok())
-                .map(|e| e.path())
-                .filter(|p| p.is_dir())
-                .collect();
-            versions.sort();
-            if let Some(latest) = versions.last() {
-                // nvm: node/<version>/bin, fnm: <version>/installation/bin
-                let bin = latest.join("bin");
-                let fnm_bin = latest.join("installation/bin");
-                if bin.exists() {
-                    extra_paths.insert(0, bin.to_string_lossy().to_string());
-                } else if fnm_bin.exists() {
-                    extra_paths.insert(0, fnm_bin.to_string_lossy().to_string());
-                }
-            }
-        }
-    }
-    let expanded_path = format!("{}:{}", extra_paths.join(":"), current_path);
+    let home = dirs::home_dir();
+    let expanded_path = build_cron_user_path(home.as_deref(), std::env::var_os("PATH"));
+    let working_dir = expand_cron_working_dir(&task.working_dir, home.as_deref());
 
-    let working_dir = if task.working_dir.starts_with('~') {
-        task.working_dir.replacen('~', &home, 1)
-    } else {
-        task.working_dir.clone()
-    };
-
-    let mut cmd = build_cron_claude_command(
-        &task,
-        &working_dir,
-        &env_vars,
-        expanded_path.as_str(),
-        &tool_policy,
-    );
+    let mut cmd =
+        build_cron_claude_command(&task, &working_dir, &env_vars, &expanded_path, &tool_policy);
 
     let (status_str, exit_code, stdout, stderr) = match cmd.spawn() {
         Ok(mut child) => {
@@ -1123,16 +1204,53 @@ pub fn generate_cron_task_stream(app: AppHandle, query: String) {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_cron_claude_command, normalize_execution_profile, resolve_execution_profile,
-        resolve_task_tool_policy, CronTask, ResolvedToolPolicy,
+        build_cron_claude_command, build_cron_user_path, expand_cron_working_dir,
+        normalize_execution_profile, resolve_execution_profile, resolve_task_tool_policy, CronTask,
+        ResolvedToolPolicy,
     };
     use std::collections::HashMap;
+    use std::ffi::OsStr;
+    use std::path::PathBuf;
 
     #[test]
     fn normalize_execution_profile_defaults_unknown_values() {
         assert_eq!(normalize_execution_profile("standard"), "standard");
         assert_eq!(normalize_execution_profile("autonomous"), "autonomous");
         assert_eq!(normalize_execution_profile("unknown"), "conservative");
+    }
+
+    #[test]
+    fn build_cron_user_path_uses_platform_separator_and_dedupes() {
+        let home = PathBuf::from("/Users/test");
+        let local_bin = home.join(".local").join("bin");
+        let current_path = std::env::join_paths([PathBuf::from("/usr/bin"), local_bin.clone()])
+            .expect("join current path");
+
+        let user_path = build_cron_user_path(Some(&home), Some(current_path));
+        let paths = std::env::split_paths(OsStr::new(&user_path)).collect::<Vec<_>>();
+
+        assert!(user_path.contains(if cfg!(windows) { ';' } else { ':' }));
+        assert!(paths.contains(&home.join(".volta").join("bin")));
+        assert_eq!(paths.iter().filter(|path| **path == local_bin).count(), 1);
+    }
+
+    #[test]
+    fn expand_cron_working_dir_expands_home_only_for_home_prefix() {
+        let home = PathBuf::from("/Users/test");
+
+        assert_eq!(
+            PathBuf::from(expand_cron_working_dir("~/repo", Some(&home))),
+            home.join("repo")
+        );
+        assert_eq!(
+            PathBuf::from(expand_cron_working_dir("~\\repo", Some(&home))),
+            home.join("repo")
+        );
+        assert_eq!(
+            expand_cron_working_dir("~other/repo", Some(&home)),
+            "~other/repo"
+        );
+        assert_eq!(expand_cron_working_dir("~/repo", None), "~/repo");
     }
 
     #[test]

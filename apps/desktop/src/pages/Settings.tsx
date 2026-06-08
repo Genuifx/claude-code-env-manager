@@ -14,6 +14,7 @@ import { setPerformancePreference as applyPerformancePreference, type Performanc
 import { scheduleAfterFirstPaint } from '@/lib/idle';
 import { useAppUpdate } from '@/components/app-update/appUpdateContext';
 import { shallow } from 'zustand/shallow';
+import type { PlatformCapabilities } from '@/lib/tauri-ipc';
 
 const MODE_DISPLAY_NAMES: Record<PermissionModeName, string> = {
   yolo: 'YOLO',
@@ -107,35 +108,42 @@ export function Settings() {
   const [aiEnvName, setAiEnvName] = useState<string | null>(null);
   const [webkitVersion, setWebkitVersion] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [platformCapabilities, setPlatformCapabilities] = useState<PlatformCapabilities | null>(null);
   const [activeSection, setActiveSection] = useState<SectionId>('appearance');
   const loaded = useRef(false);
   const updateStatus = updateState.status;
   const updateInfo = updateState.updateInfo;
   const updateError = updateState.error;
+  const tmuxSupported = platformCapabilities?.tmuxSupported !== false;
+  const tmuxInstallCommand = platformCapabilities?.tmuxInstallCommand ?? null;
 
   // Load CLI install status in parallel so the About card updates once.
   useEffect(() => {
     let cancelled = false;
 
     const loadInstallStatus = async () => {
-      const [ccem, claude, codex, opencode, tmux] = await Promise.allSettled([
+      const [ccem, claude, codex, opencode, platform] = await Promise.allSettled([
         invoke<boolean>('check_ccem_installed'),
         invoke<boolean>('check_claude_installed'),
         invoke<boolean>('check_codex_installed'),
         invoke<boolean>('check_opencode_installed'),
-        invoke<boolean>('check_tmux_installed'),
+        invoke<PlatformCapabilities>('get_platform_capabilities'),
       ]);
+      const nextPlatformCapabilities = platform.status === 'fulfilled' ? platform.value : null;
 
       if (cancelled) {
         return;
       }
 
+      setPlatformCapabilities(nextPlatformCapabilities);
       setInstallStatus({
         ccem: ccem.status === 'fulfilled' ? ccem.value : false,
         claude: claude.status === 'fulfilled' ? claude.value : false,
         codex: codex.status === 'fulfilled' ? codex.value : false,
         opencode: opencode.status === 'fulfilled' ? opencode.value : false,
-        tmux: tmux.status === 'fulfilled' ? tmux.value : false,
+        tmux: nextPlatformCapabilities?.tmuxSupported === false
+          ? null
+          : nextPlatformCapabilities?.tmuxInstalled ?? false,
       });
     };
 
@@ -714,7 +722,10 @@ export function Settings() {
         <span className="text-sm text-muted-foreground">
           {t('settings.tmuxStatus')}
         </span>
-        <InstallStatusBadge status={installStatus.tmux} />
+        <InstallStatusBadge
+          status={installStatus.tmux}
+          unsupported={platformCapabilities?.tmuxSupported === false}
+        />
       </div>
       {installStatus.ccem === false && (
         <>
@@ -737,21 +748,23 @@ export function Settings() {
           </p>
         </>
       )}
-      {installStatus.tmux === false && (
+      {tmuxSupported && installStatus.tmux === false && (
         <>
           <div className="border-t border-border-subtle" />
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(t('settings.tmuxInstallCmd'));
-                toast.success(t('settings.tmuxInstallCmd'));
-              }}
-              className="inline-flex items-center gap-1 text-xs font-mono text-primary hover:text-primary/80 border border-border-subtle px-2 py-1 rounded-md active:scale-[0.97] transition-all"
-            >
-              <Copy className="w-3 h-3" />
-              {t('settings.tmuxInstallCmd')}
-            </button>
-          </div>
+          {tmuxInstallCommand && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(tmuxInstallCommand);
+                  toast.success(tmuxInstallCommand);
+                }}
+                className="inline-flex items-center gap-1 text-xs font-mono text-primary hover:text-primary/80 border border-border-subtle px-2 py-1 rounded-md active:scale-[0.97] transition-all"
+              >
+                <Copy className="w-3 h-3" />
+                {tmuxInstallCommand}
+              </button>
+            </div>
+          )}
           <p className="text-sm text-muted-foreground flex items-center gap-1">
             <Lightbulb className="w-3 h-3 text-primary shrink-0" />
             {t('settings.tmuxInstallHint')}
@@ -873,8 +886,17 @@ export function Settings() {
   );
 }
 
-function InstallStatusBadge({ status }: { status: boolean | null }) {
+function InstallStatusBadge({ status, unsupported = false }: { status: boolean | null; unsupported?: boolean }) {
   const { t } = useLocale();
+
+  if (unsupported) {
+    return (
+      <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+        <Info className="w-3.5 h-3.5" />
+        {t('settings.notAvailable')}
+      </span>
+    );
+  }
 
   if (status === null) {
     return <span className="text-xs text-muted-foreground">...</span>;

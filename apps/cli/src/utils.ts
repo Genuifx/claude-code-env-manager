@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 // Encryption setup
@@ -78,7 +79,7 @@ export const ensureClaudeDir = (): string => {
  * 获取用户主目录
  */
 export const getHomeDir = (): string => {
-  return process.env.HOME || process.env.USERPROFILE || '';
+  return process.env.HOME || process.env.USERPROFILE || os.homedir() || '';
 };
 
 /**

@@ -27,6 +27,7 @@ import {
   PERMISSION_PRESETS,
   getCcemConfigDir,
   ensureCcemDir,
+  getHomeDir,
   getCcemConfigPath,
   getLegacyConfigPath,
 } from '@ccem/core';
@@ -1000,7 +1001,7 @@ setupCmd
   .option('--force', '强制覆盖已有文件')
   .action(async function(this: any) {
     const options = this.opts();
-    const skillDir = path.join(process.env.HOME || '~', '.claude', 'skills');
+    const skillDir = path.join(getHomeDir(), '.claude', 'skills');
     const targetPath = path.join(skillDir, 'ccem-cron.md');
 
     // 确保目录存在

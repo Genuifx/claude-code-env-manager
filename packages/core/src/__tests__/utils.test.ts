@@ -75,6 +75,7 @@ describe('utils', () => {
 
 describe('path utilities', () => {
   const originalHome = process.env.HOME;
+  const originalUserProfile = process.env.USERPROFILE;
   let tempDir: string;
 
   beforeEach(() => {
@@ -82,7 +83,16 @@ describe('path utilities', () => {
   });
 
   afterEach(() => {
-    process.env.HOME = originalHome;
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    if (originalUserProfile === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = originalUserProfile;
+    }
     if (fs.existsSync(tempDir)) {
       fs.rmSync(tempDir, { recursive: true });
     }
@@ -163,22 +173,33 @@ describe('path utilities', () => {
 
   describe('getHomeDir', () => {
     it('should return HOME environment variable', () => {
-      process.env.HOME = '/custom/home';
-      expect(getHomeDir()).toBe('/custom/home');
+      const home = path.join(tempDir, 'custom-home');
+      process.env.HOME = home;
+      process.env.USERPROFILE = path.join(tempDir, 'ignored-userprofile');
+      expect(getHomeDir()).toBe(home);
+    });
+
+    it('should return USERPROFILE when HOME is not set', () => {
+      const userProfile = path.join(tempDir, 'userprofile-home');
+      delete process.env.HOME;
+      process.env.USERPROFILE = userProfile;
+      expect(getHomeDir()).toBe(userProfile);
     });
   });
 
   describe('getGlobalClaudeConfigPath', () => {
     it('should return ~/.claude.json path', () => {
-      process.env.HOME = '/home/user';
-      expect(getGlobalClaudeConfigPath()).toBe('/home/user/.claude.json');
+      const home = path.join(tempDir, 'home');
+      process.env.HOME = home;
+      expect(getGlobalClaudeConfigPath()).toBe(path.join(home, '.claude.json'));
     });
   });
 
   describe('getGlobalClaudeSettingsPath', () => {
     it('should return ~/.claude/settings.json path', () => {
-      process.env.HOME = '/home/user';
-      expect(getGlobalClaudeSettingsPath()).toBe('/home/user/.claude/settings.json');
+      const home = path.join(tempDir, 'home');
+      process.env.HOME = home;
+      expect(getGlobalClaudeSettingsPath()).toBe(path.join(home, '.claude', 'settings.json'));
     });
   });
 });

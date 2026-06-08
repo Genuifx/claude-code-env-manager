@@ -314,7 +314,8 @@ impl NativeRuntimeManager {
             created_at: now,
             updated_at: now,
             is_active: true,
-            can_handoff_to_terminal: options.provider_session_id.is_some(),
+            can_handoff_to_terminal: options.provider_session_id.is_some()
+                && terminal::external_terminal_launch_supported(),
             last_error: None,
         };
 
@@ -689,6 +690,12 @@ impl NativeRuntimeManager {
         runtime_id: &str,
         terminal_type: Option<TerminalType>,
     ) -> Result<(), String> {
+        if !terminal::external_terminal_launch_supported() {
+            return Err(
+                "Terminal handoff is not available on this platform; continue in the native workspace runtime.".to_string(),
+            );
+        }
+
         let handle = self
             .handles
             .lock()
@@ -976,7 +983,7 @@ impl NativeRuntimeManager {
 
                 self.update_record(runtime_id, |record| {
                     record.provider_session_id = Some(provider_session_id.clone());
-                    record.can_handoff_to_terminal = true;
+                    record.can_handoff_to_terminal = terminal::external_terminal_launch_supported();
                     record.updated_at = Utc::now();
                 })?;
 

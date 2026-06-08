@@ -12,6 +12,7 @@ import type {
   ManagedSessionSummary,
   NativeSessionSummary,
   NativeTerminalType,
+  PlatformCapabilities,
   ReplayBatch,
   RuntimeInput,
   RuntimeRecoveryCandidate,
@@ -962,6 +963,10 @@ export function useTauriCommands() {
     }
   }, []);
 
+  const getPlatformCapabilities = useCallback(async (): Promise<PlatformCapabilities> => {
+    return invoke<PlatformCapabilities>('get_platform_capabilities');
+  }, []);
+
   const loadInstalledSkills = useCallback(async (): Promise<InstalledSkill[]> => {
     try {
       const skills = await invoke<InstalledSkill[]>('list_installed_skills');
@@ -1341,6 +1346,7 @@ export function useTauriCommands() {
     checkCodexInstalled,
     checkOpenCodeInstalled,
     checkTmuxInstalled,
+    getPlatformCapabilities,
     loadInstalledSkills,
     loadWorkspaceSkills,
     loadWorkspaceCommands,

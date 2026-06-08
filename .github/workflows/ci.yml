@@ -2,14 +2,18 @@ name: CI
 
 on:
   push:
-    branches: [main, refactor]
+    branches: [main, refactor, 'codex/**']
   pull_request:
     branches: [main]
 
 jobs:
   test:
-    name: Test & Build
-    runs-on: macos-latest
+    name: Test & Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
 
     steps:
       - uses: actions/checkout@v6
@@ -36,13 +40,60 @@ jobs:
         run: pnpm -r build
 
       - name: TypeScript type check
-        run: cd apps/desktop && pnpm exec tsc --noEmit
+        working-directory: apps/desktop
+        run: pnpm exec tsc --noEmit
 
       - name: Rust clippy
-        run: cd apps/desktop/src-tauri && cargo clippy -- -D warnings
+        run: node scripts/ci/run-rust-clippy.mjs apps/desktop/src-tauri
 
       - name: Run Rust tests
-        run: cd apps/desktop/src-tauri && cargo test
+        run: node scripts/ci/run-rust-tests.mjs apps/desktop/src-tauri
+
+  windows-installer-smoke:
+    name: Windows Installer Smoke
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 45
+    if: ${{ needs.test.result == 'success' }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        continue-on-error: true
+        with:
+          workspaces: 'apps/desktop/src-tauri -> target'
+          key: windows-installer-smoke
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build core package
+        run: pnpm --filter @ccem/core build
+
+      - name: Build Windows NSIS installer
+        working-directory: apps/desktop
+        run: pnpm tauri build --ci --config src-tauri/tauri.windows.ci.conf.json --bundles nsis
+
+      - name: Upload Windows installer smoke artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ccem-desktop-windows-installer-smoke
+          path: apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
 
   i18n-check:
     name: i18n Key Consistency

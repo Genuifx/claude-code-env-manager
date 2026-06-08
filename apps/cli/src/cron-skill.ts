@@ -117,10 +117,12 @@ Format the output as a readable table with columns: name, cron expression, enabl
 \\\`\\\`\\\`bash
 python3 -c "
 import json
-with open('\\$HOME/.ccem/cron-tasks.json') as f:
+from pathlib import Path
+tasks_path = Path.home() / '.ccem' / 'cron-tasks.json'
+with tasks_path.open() as f:
     tasks = json.load(f)
 tasks = [t for t in tasks if t['id'] != 'TARGET_ID' and t['name'] != 'TARGET_NAME']
-with open('\\$HOME/.ccem/cron-tasks.json', 'w') as f:
+with tasks_path.open('w') as f:
     json.dump(tasks, f, indent=2, ensure_ascii=False)
 print(json.dumps(tasks, indent=2, ensure_ascii=False))
 "

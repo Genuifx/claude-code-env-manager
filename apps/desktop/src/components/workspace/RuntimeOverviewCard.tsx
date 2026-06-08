@@ -7,6 +7,7 @@ import { useAppStore } from '@/store';
 import { useLocale } from '@/locales';
 import { cn } from '@/lib/utils';
 import { shallow } from 'zustand/shallow';
+import type { PlatformCapabilities } from '@/lib/tauri-ipc';
 
 interface RuntimeOverviewCardProps {
   onNavigate: (tab: string) => void;
@@ -15,7 +16,9 @@ interface RuntimeOverviewCardProps {
 interface RuntimeSnapshot {
   headlessCount: number;
   recoveryCount: number;
+  tmuxSupported: boolean;
   tmuxInstalled: boolean;
+  tmuxInstallCommand?: string | null;
   telegramRunning: boolean;
   telegramConfigured: boolean;
   telegramRestricted: boolean;
@@ -24,7 +27,9 @@ interface RuntimeSnapshot {
 const INITIAL_SNAPSHOT: RuntimeSnapshot = {
   headlessCount: 0,
   recoveryCount: 0,
+  tmuxSupported: true,
   tmuxInstalled: true,
+  tmuxInstallCommand: null,
   telegramRunning: false,
   telegramConfigured: false,
   telegramRestricted: false,
@@ -33,7 +38,9 @@ const INITIAL_SNAPSHOT: RuntimeSnapshot = {
 function snapshotsEqual(left: RuntimeSnapshot, right: RuntimeSnapshot) {
   return left.headlessCount === right.headlessCount
     && left.recoveryCount === right.recoveryCount
+    && left.tmuxSupported === right.tmuxSupported
     && left.tmuxInstalled === right.tmuxInstalled
+    && left.tmuxInstallCommand === right.tmuxInstallCommand
     && left.telegramRunning === right.telegramRunning
     && left.telegramConfigured === right.telegramConfigured
     && left.telegramRestricted === right.telegramRestricted;
@@ -50,10 +57,10 @@ export function RuntimeOverviewCard({ onNavigate }: RuntimeOverviewCardProps) {
     listRuntimeRecoveryCandidates,
     getTelegramBridgeStatus,
     getTelegramSettings,
-    checkTmuxInstalled,
+    getPlatformCapabilities,
   } = useTauriCommands();
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot>(INITIAL_SNAPSHOT);
-  const tmuxInstalledRef = useRef(INITIAL_SNAPSHOT.tmuxInstalled);
+  const platformCapabilitiesRef = useRef<PlatformCapabilities | null>(null);
   const telegramRestrictedRef = useRef(INITIAL_SNAPSHOT.telegramRestricted);
 
   useEffect(() => {
@@ -80,22 +87,26 @@ export function RuntimeOverviewCard({ onNavigate }: RuntimeOverviewCardProps) {
           recoveryCount: recoveryCandidates.length,
           telegramRunning: telegramStatus.running,
           telegramConfigured: telegramStatus.configured,
-          tmuxInstalled: tmuxInstalledRef.current,
+          tmuxSupported: platformCapabilitiesRef.current?.tmuxSupported ?? INITIAL_SNAPSHOT.tmuxSupported,
+          tmuxInstalled: platformCapabilitiesRef.current?.tmuxInstalled ?? INITIAL_SNAPSHOT.tmuxInstalled,
+          tmuxInstallCommand: platformCapabilitiesRef.current?.tmuxInstallCommand ?? null,
           telegramRestricted: telegramRestrictedRef.current,
         };
 
         if (mode === 'full') {
-          const [telegramSettings, tmuxInstalled] = await Promise.all([
+          const [telegramSettings, platformCapabilities] = await Promise.all([
             getTelegramSettings(),
-            checkTmuxInstalled(),
+            getPlatformCapabilities(),
           ]);
           if (cancelled) {
             return;
           }
 
-          tmuxInstalledRef.current = tmuxInstalled;
+          platformCapabilitiesRef.current = platformCapabilities;
           telegramRestrictedRef.current = (telegramSettings.allowedUserIds?.length ?? 0) > 0;
-          nextSnapshot.tmuxInstalled = tmuxInstalledRef.current;
+          nextSnapshot.tmuxSupported = platformCapabilities.tmuxSupported;
+          nextSnapshot.tmuxInstalled = platformCapabilities.tmuxInstalled;
+          nextSnapshot.tmuxInstallCommand = platformCapabilities.tmuxInstallCommand ?? null;
           nextSnapshot.telegramRestricted = telegramRestrictedRef.current;
         }
 
@@ -116,10 +127,11 @@ export function RuntimeOverviewCard({ onNavigate }: RuntimeOverviewCardProps) {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [checkTmuxInstalled, getTelegramBridgeStatus, getTelegramSettings, listHeadlessSessions, listRuntimeRecoveryCandidates]);
+  }, [getPlatformCapabilities, getTelegramBridgeStatus, getTelegramSettings, listHeadlessSessions, listRuntimeRecoveryCandidates]);
 
   const interactiveCount = sessions.filter((session) => session.status === 'running').length;
-  const needsAttention = !snapshot.tmuxInstalled
+  const showTmuxNotice = snapshot.tmuxSupported && !snapshot.tmuxInstalled;
+  const needsAttention = showTmuxNotice
     || snapshot.recoveryCount > 0
     || (snapshot.telegramConfigured && !snapshot.telegramRunning)
     || (snapshot.telegramConfigured && !snapshot.telegramRestricted);
@@ -154,7 +166,7 @@ export function RuntimeOverviewCard({ onNavigate }: RuntimeOverviewCardProps) {
           icon={TerminalSquare}
           label={t('workspace.runtimeInteractive')}
           value={interactiveCount}
-          highlight={!snapshot.tmuxInstalled}
+          highlight={showTmuxNotice}
         />
         <RuntimeStat
           icon={Bot}
@@ -199,11 +211,13 @@ export function RuntimeOverviewCard({ onNavigate }: RuntimeOverviewCardProps) {
         </Button>
       </div>
 
-      {!snapshot.tmuxInstalled && (
+      {showTmuxNotice && (
         <div className="mt-4 rounded-xl border border-warning/25 bg-warning/8 px-3.5 py-3">
           <p className="text-xs font-medium text-foreground">{t('workspace.tmuxOptionalTitle')}</p>
           <p className="mt-1 text-xs text-muted-foreground">{t('workspace.tmuxOptionalNotice')}</p>
-          <p className="mt-2 font-mono text-2xs text-muted-foreground">{t('settings.tmuxInstallCmd')}</p>
+          {snapshot.tmuxInstallCommand && (
+            <p className="mt-2 font-mono text-2xs text-muted-foreground">{snapshot.tmuxInstallCommand}</p>
+          )}
         </div>
       )}
     </Card>
