@@ -314,8 +314,7 @@ impl NativeRuntimeManager {
             created_at: now,
             updated_at: now,
             is_active: true,
-            can_handoff_to_terminal: options.provider_session_id.is_some()
-                && terminal::external_terminal_launch_supported(),
+            can_handoff_to_terminal: terminal::external_terminal_launch_supported(),
             last_error: None,
         };
 
@@ -718,10 +717,11 @@ impl NativeRuntimeManager {
                 .ok_or_else(|| format!("Native runtime {} not found", runtime_id))?
         };
 
-        let provider_session_id = record
-            .provider_session_id
-            .clone()
-            .ok_or_else(|| "Session id is not ready for terminal handoff yet".to_string())?;
+        // New sessions may not have a provider_session_id yet — it only arrives
+        // with the first assistant message. Instead of blocking the handoff, fall
+        // back to launching a fresh terminal session; we only `--resume` when an
+        // id is actually available.
+        let provider_session_id = record.provider_session_id.clone();
         let terminal = terminal_type.unwrap_or_else(terminal::get_preferred_terminal);
 
         let env_vars = match record.provider {
@@ -738,7 +738,7 @@ impl NativeRuntimeManager {
             runtime_id,
             &record.env_name,
             Some(record.perm_mode.as_str()),
-            Some(provider_session_id.as_str()),
+            provider_session_id.as_deref(),
             record.provider.as_str(),
         )?;
 
