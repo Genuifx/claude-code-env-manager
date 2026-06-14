@@ -622,6 +622,7 @@ export interface WecomBotConfig {
   allowedUserIds: string[];
   allowedGroupChatIds: string[];
   allowedIntents: string[];
+  userAccessPolicy: string;
   requireMention: boolean;
   mentionPatterns: string[];
   adminPermMode: string;

@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_WECOM_WS_URL: &str = "wss://openws.work.weixin.qq.com";
-pub const DEFAULT_ALLOWED_INTENT: &str = "weekly_report";
+pub const DEFAULT_USER_ACCESS_POLICY: &str = "允许普通用户提交工作内容、项目进展、下周计划等材料，并请求生成、整理或润色周报。拒绝与该范围无关的任务，包括但不限于执行命令、修改文件、读取敏感信息、操作代码仓库、部署发布或访问外部系统。";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WecomSettings {
@@ -41,6 +41,12 @@ pub struct WecomBotConfig {
         default = "default_allowed_intents"
     )]
     pub allowed_intents: Vec<String>,
+    #[serde(
+        rename = "userAccessPolicy",
+        alias = "user_access_policy",
+        default = "default_user_access_policy"
+    )]
+    pub user_access_policy: String,
     #[serde(rename = "requireMention", alias = "require_mention", default)]
     pub require_mention: bool,
     #[serde(rename = "mentionPatterns", alias = "mention_patterns", default)]
@@ -76,6 +82,7 @@ impl Default for WecomBotConfig {
             allowed_user_ids: Vec::new(),
             allowed_group_chat_ids: Vec::new(),
             allowed_intents: default_allowed_intents(),
+            user_access_policy: default_user_access_policy(),
             require_mention: false,
             mention_patterns: Vec::new(),
             admin_perm_mode: default_admin_perm_mode(),
@@ -113,7 +120,11 @@ pub struct WecomBotStatus {
 }
 
 pub fn default_allowed_intents() -> Vec<String> {
-    vec![DEFAULT_ALLOWED_INTENT.to_string()]
+    Vec::new()
+}
+
+pub fn default_user_access_policy() -> String {
+    DEFAULT_USER_ACCESS_POLICY.to_string()
 }
 
 pub fn default_admin_perm_mode() -> String {

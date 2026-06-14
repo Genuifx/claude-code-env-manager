@@ -26,7 +26,8 @@ const INPUT_CLS =
   'w-full px-3 py-1.5 rounded-lg bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 transition-all';
 
 const TEXTAREA_CLS = `${INPUT_CLS} min-h-[52px] resize-y leading-snug`;
-const INTENT_WEEKLY = 'weekly_report';
+const DEFAULT_USER_ACCESS_POLICY =
+  '允许普通用户提交工作内容、项目进展、下周计划等材料，并请求生成、整理或润色周报。拒绝与该范围无关的任务，包括执行命令、修改文件、读取敏感信息、操作代码仓库、部署发布或访问外部系统。';
 
 const MODE_DISPLAY_NAMES: Record<PermissionModeName, string> = {
   yolo: 'YOLO',
@@ -48,7 +49,8 @@ function blankBot(): WecomBotConfig {
     adminUserIds: [],
     allowedUserIds: [],
     allowedGroupChatIds: [],
-    allowedIntents: [INTENT_WEEKLY],
+    allowedIntents: [],
+    userAccessPolicy: DEFAULT_USER_ACCESS_POLICY,
     requireMention: false,
     mentionPatterns: [],
     adminPermMode: 'dev',
@@ -163,7 +165,8 @@ export function WecomPanel() {
         allowedUserIds: splitLines(joinLines(bot.allowedUserIds)),
         allowedGroupChatIds: splitLines(joinLines(bot.allowedGroupChatIds)),
         mentionPatterns: splitLines(joinLines(bot.mentionPatterns)),
-        allowedIntents: bot.allowedIntents?.length ? bot.allowedIntents : [INTENT_WEEKLY],
+        allowedIntents: bot.allowedIntents ?? [],
+        userAccessPolicy: bot.userAccessPolicy?.trim() || DEFAULT_USER_ACCESS_POLICY,
         wsUrl: bot.wsUrl?.trim() || 'wss://openws.work.weixin.qq.com',
         defaultEnvName: bot.defaultEnvName || null,
       })),
@@ -386,20 +389,25 @@ export function WecomPanel() {
                 </div>
               </div>
 
-              <div className="mt-4 flex flex-wrap items-center gap-4">
-                <ToggleSetting
-                  checked={bot.allowedIntents.includes(INTENT_WEEKLY)}
-                  onChange={(enabled) => updateBot(bot.id, { allowedIntents: enabled ? [INTENT_WEEKLY] : [] })}
-                  title={t('settings.wecomWeeklyIntent')}
-                />
-                <ToggleSetting
-                  checked={bot.requireMention}
-                  onChange={(requireMention) => updateBot(bot.id, { requireMention })}
-                  title={t('settings.wecomRequireMention')}
-                />
-                <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                  <Users className="h-3.5 w-3.5" />
-                  {t('settings.wecomUserBoundary')}
+              <div className="mt-4 grid gap-3">
+                <div className="space-y-1">
+                  <Label>{t('settings.wecomUserAccessPolicy')}</Label>
+                  <textarea
+                    className={`${TEXTAREA_CLS} min-h-[88px]`}
+                    value={bot.userAccessPolicy || DEFAULT_USER_ACCESS_POLICY}
+                    onChange={(e) => updateBot(bot.id, { userAccessPolicy: e.target.value })}
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-4">
+                  <ToggleSetting
+                    checked={bot.requireMention}
+                    onChange={(requireMention) => updateBot(bot.id, { requireMention })}
+                    title={t('settings.wecomRequireMention')}
+                  />
+                  <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                    <Users className="h-3.5 w-3.5" />
+                    {t('settings.wecomUserBoundary')}
+                  </div>
                 </div>
               </div>
             </div>

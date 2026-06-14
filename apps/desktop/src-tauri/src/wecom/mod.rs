@@ -25,8 +25,9 @@ use tungstenite::{connect, Error as WsError, Message, WebSocket};
 use self::channel::WecomChannel;
 use self::media::prepare_message_attachments;
 use self::message::{
-    build_restricted_prompt, contains_mention, detect_intent, is_actor_allowed, is_admin,
-    is_group_allowed, normalize_message, peer_id_for_message, WecomIncomingMessage,
+    build_user_admission_prompt, build_user_policy_prompt, contains_mention, is_actor_allowed,
+    is_admin, is_group_allowed, normalize_message, parse_admission_decision, peer_id_for_message,
+    UserAdmissionDecision, WecomIncomingMessage,
 };
 pub use self::types::{
     default_ws_url, WecomBotConfig, WecomBotStatus, WecomBridgeStatus, WecomSettings,
@@ -37,6 +38,8 @@ const WECOM_HEARTBEAT_MS: u64 = 30_000;
 const WECOM_RECONNECT_BASE_MS: u64 = 1_000;
 const WECOM_RECONNECT_MAX_MS: u64 = 30_000;
 const WECOM_TEXT_LIMIT: usize = 20_000;
+const WECOM_ADMISSION_TIMEOUT_MS: u64 = 30_000;
+const WECOM_ADMISSION_POLL_MS: u64 = 250;
 
 type WecomSocket = WebSocket<MaybeTlsStream<TcpStream>>;
 
@@ -522,39 +525,52 @@ fn handle_message(
     } else {
         UserRole::User
     };
-    let user_intent = match role {
-        UserRole::Admin => None,
+    let peer_id = peer_id_for_message(&message);
+    let stream_id = generate_req_id("stream");
+    let prompt = match role {
+        UserRole::Admin => {
+            prepare_message_attachments(bot, &peer_id, &frame.headers.req_id, &mut normalized);
+            normalized.to_prompt()
+        }
         UserRole::User => {
-            let Some(intent) = detect_intent(&normalized.text) else {
-                reply_text(
-                    connection,
-                    &frame,
-                    "普通用户只能发起已允许的任务，例如“生成本周周报”。",
-                )?;
-                return Ok(());
+            connection.send_stream(
+                &frame.headers.req_id,
+                &stream_id,
+                "收到，正在判断是否符合普通用户范围...",
+                false,
+            )?;
+            let decision = match evaluate_user_admission(
+                manager,
+                app,
+                runtime_manager,
+                bot,
+                &actor,
+                &normalized,
+            ) {
+                Ok(decision) => decision,
+                Err(error) => {
+                    connection.send_stream(
+                        &frame.headers.req_id,
+                        &stream_id,
+                        &format!("普通用户准入判断失败：{}", error),
+                        true,
+                    )?;
+                    return Ok(());
+                }
             };
-            if !bot.allowed_intents.iter().any(|allowed| allowed == &intent) {
-                reply_text(
-                    connection,
-                    &frame,
-                    "该任务不在普通用户允许范围内。请联系管理员执行。",
+            if !decision.allow {
+                connection.send_stream(
+                    &frame.headers.req_id,
+                    &stream_id,
+                    &format!("未通过普通用户权限策略：{}", decision.reason),
+                    true,
                 )?;
                 return Ok(());
             }
-            Some(intent)
+            prepare_message_attachments(bot, &peer_id, &frame.headers.req_id, &mut normalized);
+            build_user_policy_prompt(&bot.user_access_policy, &normalized)
         }
     };
-
-    let peer_id = peer_id_for_message(&message);
-    prepare_message_attachments(bot, &peer_id, &frame.headers.req_id, &mut normalized);
-    let prompt = match role {
-        UserRole::Admin => normalized.to_prompt(),
-        UserRole::User => {
-            let intent = user_intent.as_deref().unwrap_or("restricted");
-            build_restricted_prompt(intent, &normalized)
-        }
-    };
-    let stream_id = generate_req_id("stream");
     connection.send_stream(
         &frame.headers.req_id,
         &stream_id,
@@ -596,6 +612,113 @@ fn handle_message(
         &prompt,
         role,
     )
+}
+
+fn evaluate_user_admission(
+    manager: &Arc<WecomBridgeManager>,
+    app: &AppHandle,
+    runtime_manager: &Arc<HeadlessRuntimeManager>,
+    bot: &WecomBotConfig,
+    actor: &str,
+    normalized: &self::message::NormalizedMessage,
+) -> Result<UserAdmissionDecision, String> {
+    let policy = bot.user_access_policy.trim();
+    if policy.is_empty() {
+        return Ok(UserAdmissionDecision {
+            allow: false,
+            reason: "管理员未配置普通用户允许范围。".to_string(),
+        });
+    }
+
+    let env_name = bot
+        .default_env_name
+        .clone()
+        .or_else(|| config::read_config().ok().and_then(|cfg| cfg.current))
+        .unwrap_or_else(|| "official".to_string());
+    let resolved = config::resolve_claude_env(&env_name)?;
+    let admission_peer_id = format!("admission:{actor}:{}", Utc::now().timestamp_millis());
+    let prompt = build_user_admission_prompt(policy, actor, normalized);
+    let summary = runtime_manager.create_session(
+        app.clone(),
+        HeadlessSessionOptions {
+            env_name: resolved.env_name,
+            perm_mode: "readonly".to_string(),
+            working_dir: bot.workspace_dir.clone(),
+            resume_session_id: None,
+            initial_prompt: Some(prompt),
+            max_budget_usd: Some(0.05),
+            allowed_tools: Vec::new(),
+            disallowed_tools: Vec::new(),
+            env_vars: resolved.env_vars,
+            source: HeadlessSessionSource::Wecom {
+                bot_id: bot.bot_id.clone(),
+                peer_id: admission_peer_id.clone(),
+            },
+        },
+    )?;
+
+    let result = wait_for_admission_decision(runtime_manager, &summary.runtime_id);
+    if runtime_manager
+        .summary(&summary.runtime_id)
+        .is_some_and(|summary| summary.is_active)
+    {
+        let _ = runtime_manager.stop_session(app, &summary.runtime_id);
+    }
+    manager.clear_runtime_for_scope_if_matches(
+        &bot.bot_id,
+        &admission_peer_id,
+        &summary.runtime_id,
+    );
+    result
+}
+
+fn wait_for_admission_decision(
+    runtime_manager: &Arc<HeadlessRuntimeManager>,
+    runtime_id: &str,
+) -> Result<UserAdmissionDecision, String> {
+    let started_at = Instant::now();
+    let mut last_error = None;
+    while started_at.elapsed() < Duration::from_millis(WECOM_ADMISSION_TIMEOUT_MS) {
+        let batch = runtime_manager.replay_events(runtime_id, None)?;
+        for event in batch.events.iter().rev() {
+            if let crate::event_bus::SessionEventPayload::ClaudeJson {
+                message_type,
+                raw_json,
+            } = &event.payload
+            {
+                if message_type.as_deref() == Some("result") {
+                    let text = extract_claude_result_text(raw_json)?;
+                    match parse_admission_decision(&text) {
+                        Ok(decision) => return Ok(decision),
+                        Err(error) => last_error = Some(error),
+                    }
+                }
+            }
+        }
+
+        if runtime_manager
+            .summary(runtime_id)
+            .is_some_and(|summary| !summary.is_active)
+        {
+            break;
+        }
+        thread::sleep(Duration::from_millis(WECOM_ADMISSION_POLL_MS));
+    }
+
+    Err(last_error
+        .unwrap_or_else(|| "普通用户准入判断超时，未能得到模型返回的 JSON 决策。".to_string()))
+}
+
+fn extract_claude_result_text(raw_json: &str) -> Result<String, String> {
+    let value: Value = serde_json::from_str(raw_json)
+        .map_err(|error| format!("Failed to parse admission result event: {}", error))?;
+    value
+        .get("result")
+        .or_else(|| value.get("error"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .filter(|text| !text.trim().is_empty())
+        .ok_or_else(|| "Admission result event did not include result text.".to_string())
 }
 
 #[allow(clippy::too_many_arguments)]

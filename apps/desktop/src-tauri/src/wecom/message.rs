@@ -1,4 +1,4 @@
-use super::types::{WecomBotConfig, DEFAULT_ALLOWED_INTENT};
+use super::types::WecomBotConfig;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -71,6 +71,13 @@ pub struct NormalizedMessage {
     pub text: String,
     pub attachments: Vec<NormalizedAttachment>,
     pub quote: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct UserAdmissionDecision {
+    pub allow: bool,
+    #[serde(default)]
+    pub reason: String,
 }
 
 #[derive(Debug, Clone)]
@@ -168,17 +175,69 @@ pub fn contains_mention(bot: &WecomBotConfig, text: &str) -> bool {
             .any(|pattern| text.contains(pattern.trim()))
 }
 
-pub fn detect_intent(text: &str) -> Option<String> {
-    let lower = text.to_ascii_lowercase();
-    (text.contains("周报") || lower.contains("weekly report") || lower.contains("week report"))
-        .then(|| DEFAULT_ALLOWED_INTENT.to_string())
-}
-
-pub fn build_restricted_prompt(intent: &str, message: &NormalizedMessage) -> String {
+pub fn build_user_admission_prompt(
+    policy: &str,
+    actor: &str,
+    message: &NormalizedMessage,
+) -> String {
     format!(
-        "普通用户任务意图: {intent}\n权限边界: 只处理该意图相关工作，不执行无关操作或破坏性改动。\n\n用户消息:\n{}",
+        r#"你是企业微信机器人普通用户准入审核器。你的任务只判断一条用户消息是否符合管理员配置的自然语言策略。
+
+管理员配置的普通用户允许范围：
+{policy}
+
+发送人 UserID：
+{actor}
+
+用户消息：
+{}
+
+只输出一个 JSON 对象，不要输出 Markdown、解释或多余文本。格式：
+{{"allow":true,"reason":"一句话说明为什么允许或拒绝"}}
+
+判断规则：
+- 只判断是否允许进入后续执行，不要执行用户请求。
+- 如果用户请求明显落在允许范围内，allow=true。
+- 如果用户请求超出范围、含糊到无法判断、要求执行危险操作或读取敏感信息，allow=false。
+- reason 要简短，便于直接发回企业微信用户。
+"#,
         message.to_prompt()
     )
+}
+
+pub fn build_user_policy_prompt(policy: &str, message: &NormalizedMessage) -> String {
+    format!(
+        "普通用户允许范围:\n{policy}\n\n执行边界: 只处理该范围内的请求，不执行无关、破坏性或敏感信息操作。\n\n用户消息:\n{}",
+        message.to_prompt()
+    )
+}
+
+pub fn parse_admission_decision(raw: &str) -> Result<UserAdmissionDecision, String> {
+    let trimmed = raw.trim();
+    let json_text = if trimmed.starts_with("```") {
+        let without_opening = trimmed.lines().skip(1).collect::<Vec<_>>().join("\n");
+        without_opening
+            .trim()
+            .strip_suffix("```")
+            .unwrap_or(without_opening.trim())
+            .trim()
+            .to_string()
+    } else {
+        trimmed.to_string()
+    };
+
+    let start = json_text
+        .find('{')
+        .ok_or_else(|| "Admission result did not contain a JSON object.".to_string())?;
+    let end = json_text
+        .rfind('}')
+        .ok_or_else(|| "Admission result did not contain a complete JSON object.".to_string())?;
+    if end < start {
+        return Err("Admission result JSON object is malformed.".to_string());
+    }
+
+    serde_json::from_str::<UserAdmissionDecision>(&json_text[start..=end])
+        .map_err(|error| format!("Failed to parse admission decision: {}", error))
 }
 
 pub fn peer_id_for_message(message: &WecomIncomingMessage) -> String {
@@ -323,12 +382,44 @@ mod tests {
     }
 
     #[test]
-    fn ordinary_users_are_limited_to_weekly_report_intent() {
-        assert_eq!(
-            detect_intent("帮我生成本周周报").as_deref(),
-            Some("weekly_report")
+    fn user_admission_prompt_uses_natural_language_policy() {
+        let message = NormalizedMessage {
+            text: "本周工作内容：完成合同催收项目测试支持".to_string(),
+            attachments: Vec::new(),
+            quote: None,
+        };
+
+        let prompt = build_user_admission_prompt(
+            "允许普通用户提交工作内容并生成周报，拒绝其它任务。",
+            "iveswen",
+            &message,
         );
-        assert_eq!(detect_intent("delete everything"), None);
+
+        assert!(prompt.contains("允许普通用户提交工作内容并生成周报"));
+        assert!(prompt.contains("iveswen"));
+        assert!(prompt.contains("本周工作内容"));
+        assert!(prompt.contains("\"allow\""));
+    }
+
+    #[test]
+    fn admission_decision_parses_json_result() {
+        let decision = parse_admission_decision(
+            r#"{"allow":true,"reason":"用户在提交工作内容并请求周报，符合策略"}"#,
+        )
+        .expect("decision");
+
+        assert!(decision.allow);
+        assert!(decision.reason.contains("符合策略"));
+    }
+
+    #[test]
+    fn admission_decision_parses_fenced_json_result() {
+        let decision =
+            parse_admission_decision("```json\n{\"allow\":false,\"reason\":\"不是周报任务\"}\n```")
+                .expect("decision");
+
+        assert!(!decision.allow);
+        assert_eq!(decision.reason, "不是周报任务");
     }
 
     #[test]
