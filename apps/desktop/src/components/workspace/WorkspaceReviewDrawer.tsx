@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronRight,
   Circle,
+  CircleAlert,
   ClipboardCheck,
   Compass,
   ExternalLink,
@@ -31,6 +32,7 @@ import type {
   SubagentMeta,
 } from '@/features/conversations/types';
 import type { ReviewChangedFile, WorkspaceReviewModel } from './workspaceReview';
+import { resolveSubagentSelection, shouldShowSubagentEntry } from './workspaceSubagents';
 import { WorkspaceTranscriptList } from './WorkspaceTranscriptList';
 
 interface WorkspaceReviewDrawerProps {
@@ -396,6 +398,19 @@ function formatDurationMs(ms: number): string {
   return rem ? `${minutes}m${rem}s` : `${minutes}m`;
 }
 
+function subagentStatusLabel(status: string): string {
+  switch (status) {
+    case 'running':
+      return '运行中';
+    case 'completed':
+      return '已完成';
+    case 'failed':
+      return '失败';
+    default:
+      return status || '未知';
+  }
+}
+
 function SubagentPanel({
   subagents,
   selectedAgentId,
@@ -421,7 +436,7 @@ function SubagentPanel({
     <div className="flex min-h-0 flex-1">
       <div className="flex w-[clamp(220px,34%,320px)] shrink-0 flex-col border-r border-border-subtle/50">
         <ScrollArea className="min-h-0 flex-1">
-          {agentsError ? (
+          {agentsError && subagents.length === 0 ? (
             <p className="px-4 py-4 text-[12px] text-destructive">{agentsError}</p>
           ) : subagents.length === 0 ? (
             <p className="px-4 py-4 text-[12px] text-muted-foreground">
@@ -457,7 +472,7 @@ function SubagentPanel({
                     {running ? (
                       <LoaderCircle className="mt-0.5 h-3 w-3 shrink-0 animate-spin text-muted-foreground/60" />
                     ) : failed ? (
-                      <Circle className="mt-0.5 h-3 w-3 shrink-0 text-destructive/70" />
+                      <CircleAlert className="mt-0.5 h-3 w-3 shrink-0 text-destructive/70" />
                     ) : (
                       <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-success/70" />
                     )}
@@ -484,7 +499,7 @@ function SubagentPanel({
                     selected.status === 'failed' && 'bg-destructive/12 text-destructive',
                   )}
                 >
-                  {selected.status}
+                  {subagentStatusLabel(selected.status)}
                 </span>
               </div>
               <p className="mt-1 text-[10px] text-muted-foreground">
@@ -505,6 +520,8 @@ function SubagentPanel({
                     messages={agentDetail}
                     isAwaitingResponse={selectedRunning}
                   />
+                ) : agentsError ? (
+                  <p className="py-6 text-center text-[12px] text-destructive">{agentsError}</p>
                 ) : (
                   <p className="py-6 text-center text-[12px] text-muted-foreground">
                     {agentsLoading ? '加载执行过程…' : '暂无执行过程记录。'}
@@ -552,7 +569,7 @@ export function WorkspaceReviewDrawer({
   const [agentsLoading, setAgentsLoading] = useState(false);
   const [agentsError, setAgentsError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const inflightRef = useRef(false);
+  const subagentRequestSeqRef = useRef(0);
 
   const tree = useMemo(() => buildFileTree(model.changedFiles), [model.changedFiles]);
   const todoLabel = model.todoTotal > 0 ? `${model.todoCompleted}/${model.todoTotal}` : '0/0';
@@ -611,6 +628,7 @@ export function WorkspaceReviewDrawer({
     if (!isOpen) {
       setPage('main');
       setSelectedPath(null);
+      setSubagents([]);
       setSelectedAgentId(null);
       setAgentDetail(null);
       setAgentsError(null);
@@ -628,21 +646,29 @@ export function WorkspaceReviewDrawer({
   // Stable identity (empty deps) — reads the callback via ref.
   const loadSubagents = useCallback(async (detailAgentId: string | null) => {
     const fn = onLoadSubagentsRef.current;
-    if (!fn || inflightRef.current) return;
-    inflightRef.current = true;
+    if (!fn) return;
+    const requestSeq = subagentRequestSeqRef.current + 1;
+    subagentRequestSeqRef.current = requestSeq;
     setAgentsLoading(true);
     try {
       const payload = await fn(detailAgentId);
+      if (requestSeq !== subagentRequestSeqRef.current) {
+        return;
+      }
       setSubagents(payload.subagents ?? []);
       setAgentsError(null);
-      if (detailAgentId && payload.detail) {
-        setAgentDetail(payload.detail);
+      if (detailAgentId) {
+        setAgentDetail(payload.detail ?? []);
       }
     } catch (err) {
+      if (requestSeq !== subagentRequestSeqRef.current) {
+        return;
+      }
       setAgentsError(`加载子 Agent 失败：${String(err)}`);
     } finally {
-      setAgentsLoading(false);
-      inflightRef.current = false;
+      if (requestSeq === subagentRequestSeqRef.current) {
+        setAgentsLoading(false);
+      }
     }
   }, []);
 
@@ -683,6 +709,16 @@ export function WorkspaceReviewDrawer({
     [loadSubagents],
   );
 
+  useEffect(() => {
+    if (page !== 'agents' || subagents.length === 0) {
+      return;
+    }
+    const nextSelection = resolveSubagentSelection(subagents, selectedAgentId);
+    if (nextSelection && nextSelection !== selectedAgentId) {
+      selectAgent(nextSelection);
+    }
+  }, [page, selectedAgentId, selectAgent, subagents]);
+
   const openInEditor = async (path: string) => {
     try {
       await open(resolveWorkspacePath(session.project_dir, path));
@@ -699,6 +735,12 @@ export function WorkspaceReviewDrawer({
   const inAgents = page === 'agents';
   const inSecondary = inFiles || inAgents;
   const width = inSecondary ? filesWidth : MAIN_WIDTH;
+  const showSubagentEntry = shouldShowSubagentEntry({
+    canLoad: Boolean(onLoadSubagents),
+    loading: agentsLoading,
+    error: agentsError,
+    count: subagents.length,
+  });
 
   return createPortal(
     <div className="fixed inset-0 z-[60]">
@@ -877,7 +919,7 @@ export function WorkspaceReviewDrawer({
                 </div>
               </Section>
 
-              {onLoadSubagents ? (
+              {showSubagentEntry ? (
                 <button
                   type="button"
                   onClick={() => setPage('agents')}

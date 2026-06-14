@@ -1889,7 +1889,7 @@ export function Workspace({
               onLoadDiff={(filePath) => getWorkspaceFileDiff(workspaceReviewWorkingDir || '', filePath)}
               isLive={workspaceMode !== 'history'}
               onLoadSubagents={
-                workspaceReviewSession.provider_session_id
+                workspaceReviewSession.provider === 'claude' && workspaceReviewSession.provider_session_id
                   ? (detailAgentId) =>
                       getSessionSubagents(
                         workspaceReviewSession.provider_session_id!,

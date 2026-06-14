@@ -2021,7 +2021,7 @@ export function WorkspaceNativeSessionView({
         onLoadDiff={(filePath) => getWorkspaceFileDiff(session.project_dir, filePath)}
         isLive
         onLoadSubagents={
-          session.provider_session_id
+          session.provider === 'claude' && session.provider_session_id
             ? (detailAgentId) =>
                 getSessionSubagents(session.provider_session_id!, session.provider, detailAgentId)
             : undefined
