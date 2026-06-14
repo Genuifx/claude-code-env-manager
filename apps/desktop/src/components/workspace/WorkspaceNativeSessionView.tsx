@@ -14,7 +14,7 @@ import {
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import type {
   InteractivePromptAnnotation,
@@ -2141,31 +2141,28 @@ export function WorkspaceNativeSessionView({
         secondaryActions={(
           <>
             <ContextWindowIndicator usage={sessionUsage} />
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex">
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="h-9 w-9 rounded-full"
-                      aria-label={t('workspace.nativeOpenTerminal')}
-                      title={t('workspace.nativeOpenTerminal')}
-                      disabled={isHandingOff}
-                      onClick={() => void handleHandoff()}
-                    >
-                      {isHandingOff ? (
-                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <TerminalSquare className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="top">{t('workspace.nativeOpenTerminal')}</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-9 w-9 rounded-full"
+                    aria-label={t('workspace.nativeOpenTerminal')}
+                    disabled={isHandingOff}
+                    onClick={() => void handleHandoff()}
+                  >
+                    {isHandingOff ? (
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <TerminalSquare className="h-4 w-4" />
+                    )}
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top">{t('workspace.nativeOpenTerminal')}</TooltipContent>
+            </Tooltip>
           </>
         )}
       />

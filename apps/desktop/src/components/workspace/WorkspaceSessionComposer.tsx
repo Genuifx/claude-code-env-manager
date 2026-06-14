@@ -46,7 +46,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { Switch } from '@/components/ui/switch';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { SelectedSkillContent, WorkspaceFileSuggestion } from '@/lib/tauri-ipc';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
@@ -522,35 +522,33 @@ function ComposerQuickMenu({
         {planButtonVisible ? (
           <>
             <div className="mx-2 my-1.5 h-px border-t border-border/50" />
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div
-                    className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors glass-dropdown-item"
-                  >
-                    <ListChecks className={cn(
-                      'h-4 w-4 shrink-0 text-muted-foreground transition-colors',
-                      planModeEnabled && 'text-foreground',
-                    )} />
-                    <span className={cn(
-                      'flex-1 text-left transition-colors',
-                      planModeEnabled && 'text-foreground',
-                    )}>
-                      {t('workspace.composerPlanModeShort')}
-                    </span>
-                    <Switch
-                      checked={planModeEnabled}
-                      onCheckedChange={(checked) => onPlanModeEnabledChange?.(checked)}
-                      aria-label={t('workspace.composerPlanModeShort')}
-                      className="data-[state=checked]:bg-foreground data-[state=unchecked]:bg-muted/85"
-                    />
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent side="left" className="max-w-[280px] text-[12px] leading-5">
-                  {resolvedPlanHint}
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div
+                  className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors glass-dropdown-item"
+                >
+                  <ListChecks className={cn(
+                    'h-4 w-4 shrink-0 text-muted-foreground transition-colors',
+                    planModeEnabled && 'text-foreground',
+                  )} />
+                  <span className={cn(
+                    'flex-1 text-left transition-colors',
+                    planModeEnabled && 'text-foreground',
+                  )}>
+                    {t('workspace.composerPlanModeShort')}
+                  </span>
+                  <Switch
+                    checked={planModeEnabled}
+                    onCheckedChange={(checked) => onPlanModeEnabledChange?.(checked)}
+                    aria-label={t('workspace.composerPlanModeShort')}
+                    className="data-[state=checked]:bg-foreground data-[state=unchecked]:bg-muted/85"
+                  />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="left" className="max-w-[280px] text-[12px] leading-5">
+                {resolvedPlanHint}
+              </TooltipContent>
+            </Tooltip>
           </>
         ) : null}
       </PopoverContent>

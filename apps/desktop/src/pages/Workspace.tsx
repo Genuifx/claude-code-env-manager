@@ -23,7 +23,7 @@ import {
 } from '@/components/workspace/composerAttachments';
 import { WorkspaceSkeleton } from '@/components/ui/skeleton-states';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAppStore } from '@/store';
 import type { InstalledSkill, LaunchClient } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
@@ -1686,31 +1686,28 @@ export function Workspace({
           opencodeInstalled={opencodeInstalled}
           onLaunchNewSession={handleNewSession}
           secondaryActions={(
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex">
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="h-9 w-9 rounded-full"
-                      aria-label={t('workspace.nativeOpenTerminal')}
-                      title={t('workspace.nativeOpenTerminal')}
-                      disabled={isLaunchingComposeTerminal}
-                      onClick={() => void handleLaunchComposeTerminal()}
-                    >
-                      {isLaunchingComposeTerminal ? (
-                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <TerminalSquare className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="top">{t('workspace.nativeOpenTerminal')}</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-9 w-9 rounded-full"
+                    aria-label={t('workspace.nativeOpenTerminal')}
+                    disabled={isLaunchingComposeTerminal}
+                    onClick={() => void handleLaunchComposeTerminal()}
+                  >
+                    {isLaunchingComposeTerminal ? (
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <TerminalSquare className="h-4 w-4" />
+                    )}
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top">{t('workspace.nativeOpenTerminal')}</TooltipContent>
+            </Tooltip>
           )}
           controls={(
             <ComposerControls
@@ -1789,35 +1786,32 @@ export function Workspace({
             />
           )}
           secondaryActions={selectedHistorySupportsInline ? (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex">
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="h-9 w-9 rounded-full"
-                      aria-label={t('workspace.nativeOpenTerminal')}
-                      title={t('workspace.nativeOpenTerminal')}
-                      onClick={() => {
-                        void launchClaudeCode(
-                          selectedSession.project || undefined,
-                          selectedSession.id,
-                          historyProvider as LaunchClient,
-                          historyEnv,
-                        )
-                          .then(() => toast.success(t('workspace.nativeHandoffDone')))
-                          .catch(() => toast.error(t('workspace.nativeHandoffFailed')));
-                      }}
-                    >
-                      <TerminalSquare className="h-4 w-4" />
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="top">{t('workspace.nativeOpenTerminal')}</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-9 w-9 rounded-full"
+                    aria-label={t('workspace.nativeOpenTerminal')}
+                    onClick={() => {
+                      void launchClaudeCode(
+                        selectedSession.project || undefined,
+                        selectedSession.id,
+                        historyProvider as LaunchClient,
+                        historyEnv,
+                      )
+                        .then(() => toast.success(t('workspace.nativeHandoffDone')))
+                        .catch(() => toast.error(t('workspace.nativeHandoffFailed')));
+                    }}
+                  >
+                    <TerminalSquare className="h-4 w-4" />
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top">{t('workspace.nativeOpenTerminal')}</TooltipContent>
+            </Tooltip>
           ) : null}
         />
       </div>

@@ -780,7 +780,7 @@ export const ProjectTree = memo(function ProjectTree({
             )}
           </span>
         </div>
-        <Tooltip delayDuration={1000}>
+        <Tooltip>
           <TooltipTrigger asChild>
             <button
               type="button"
@@ -915,7 +915,7 @@ export const ProjectTree = memo(function ProjectTree({
                     {node.sessions.length}
                   </span>
                   {onCreateForProject && (
-                    <Tooltip delayDuration={1000}>
+                    <Tooltip>
                       <TooltipTrigger asChild>
                         <button
                           type="button"

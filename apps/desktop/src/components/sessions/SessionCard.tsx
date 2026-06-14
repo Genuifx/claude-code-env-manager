@@ -79,7 +79,7 @@ function SessionActionIconButton({
   className?: string;
 }) {
   return (
-    <Tooltip delayDuration={200}>
+    <Tooltip>
       <TooltipTrigger asChild>
         <button
           type="button"
@@ -291,7 +291,7 @@ export function SessionCard({
           const canDisconnect = !isDesktop && onDisconnectChannel;
 
           return (
-            <Tooltip key={`${ch.kind}-${i}`} delayDuration={200}>
+            <Tooltip key={`${ch.kind}-${i}`}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -493,7 +493,7 @@ export function SessionCard({
   const shouldShowSource = !hasDesktopChannel || unifiedSession?.source !== 'desktop';
 
   return (
-    <TooltipProvider delayDuration={200}>
+    <TooltipProvider>
       <>
         <div
           data-testid="session-card"
@@ -531,7 +531,7 @@ export function SessionCard({
 
               <div className="flex items-center gap-1 shrink-0">
                 {shouldShowSource && (
-                  <Tooltip delayDuration={200}>
+                  <Tooltip>
                     <TooltipTrigger asChild>
                       <div className="inline-flex items-center justify-center w-6 h-6 rounded-full text-muted-foreground/50 hover:text-foreground/70 hover:bg-[hsl(var(--surface-raised))] transition-colors cursor-default">
                         <SourceIcon className="w-3.5 h-3.5" />
@@ -553,7 +553,7 @@ export function SessionCard({
               {showPermMode && (
                 <>
                   <span className="text-muted-foreground/25 select-none">·</span>
-                  <Tooltip delayDuration={200}>
+                  <Tooltip>
                     <TooltipTrigger asChild>
                       <span className="inline-flex items-center gap-1 cursor-default">
                         <Shield className="w-3 h-3 text-muted-foreground/50" />

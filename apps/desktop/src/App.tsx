@@ -636,7 +636,7 @@ function App() {
   return (
     <LocaleProvider>
       <AppUpdateProvider>
-        <TooltipProvider delayDuration={120}>
+        <TooltipProvider>
           {startupReady ? (
             <AppLayout
               activeTab={activeTab}
