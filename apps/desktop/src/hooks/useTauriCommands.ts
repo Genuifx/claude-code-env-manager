@@ -10,6 +10,7 @@ import type {
   InteractivePromptAnnotation,
   InteractiveReplayBatch,
   ManagedSessionSummary,
+  NativeHandoffResult,
   NativeSessionSummary,
   NativeTerminalType,
   PlatformCapabilities,
@@ -813,8 +814,8 @@ export function useTauriCommands() {
   const handoffNativeSessionToTerminal = useCallback(async (
     runtimeId: string,
     terminalType?: NativeTerminalType,
-  ): Promise<void> => {
-    await invoke('handoff_native_session_to_terminal', {
+  ): Promise<NativeHandoffResult> => {
+    return await invoke<NativeHandoffResult>('handoff_native_session_to_terminal', {
       runtimeId,
       terminalType: terminalType ?? null,
     });

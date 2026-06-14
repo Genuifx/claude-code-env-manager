@@ -332,7 +332,7 @@ export interface TauriCommands {
       runtimeId: string;
       terminalType?: NativeTerminalType | null;
     },
-    void
+    NativeHandoffResult
   ];
   launch_opencode_web: [
     {
@@ -725,6 +725,10 @@ export interface NativeSessionSummary {
   last_event_seq?: number | null;
   can_handoff_to_terminal: boolean;
   last_error?: string | null;
+}
+
+export interface NativeHandoffResult {
+  status: 'opened' | 'pending';
 }
 
 export type ManagedSessionSource =

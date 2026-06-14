@@ -61,8 +61,8 @@ use interactive_runtime::{
     InteractiveReplayBatch, InteractiveRuntimeManager, InteractiveSessionOptions,
 };
 use native_runtime::{
-    InteractivePromptAnnotation, NativeProvider, NativeRuntimeManager, NativeSessionOptions,
-    NativeSessionSummary, PromptImage,
+    InteractivePromptAnnotation, NativeHandoffResult, NativeProvider, NativeRuntimeManager,
+    NativeSessionOptions, NativeSessionSummary, PromptImage,
 };
 use opencode::{snapshot_known_session_ids, track_launched_session};
 use proxy_debug::{
@@ -1260,7 +1260,7 @@ fn handoff_native_session_to_terminal(
     native_state: State<'_, Arc<NativeRuntimeManager>>,
     runtime_id: String,
     terminal_type: Option<TerminalType>,
-) -> Result<(), String> {
+) -> Result<NativeHandoffResult, String> {
     native_state.handoff_to_terminal(&runtime_id, terminal_type)
 }
 

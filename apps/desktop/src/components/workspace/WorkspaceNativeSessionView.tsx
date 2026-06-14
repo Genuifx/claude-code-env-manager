@@ -1006,6 +1006,7 @@ export function WorkspaceNativeSessionView({
     planMode: boolean;
     attachments: ComposerAttachment[];
   }>>([]);
+  const isHandoffPending = session.status === 'handoff_pending';
   const lastSeenSeqRef = useRef<number | null>(latestEventSeq(events));
   const latestEventsRef = useRef<SessionEventRecord[]>(events);
   const previousMessagesRef = useRef<ConversationMessageData[]>([]);
@@ -1969,9 +1970,13 @@ export function WorkspaceNativeSessionView({
   const handleHandoff = useCallback(async () => {
     setIsHandingOff(true);
     try {
-      await handoffNativeSessionToTerminal(session.runtime_id);
+      const result = await handoffNativeSessionToTerminal(session.runtime_id);
       await refreshSummary({ force: true });
-      toast.success(t('workspace.nativeHandoffDone'));
+      toast.success(
+        t(result.status === 'pending'
+          ? 'workspace.nativeHandoffPending'
+          : 'workspace.nativeHandoffDone'),
+      );
     } catch (error) {
       console.error('Failed to handoff native session:', error);
       toast.error(t('workspace.nativeHandoffFailed'));
@@ -2150,10 +2155,10 @@ export function WorkspaceNativeSessionView({
                     variant="ghost"
                     className="h-9 w-9 rounded-full"
                     aria-label={t('workspace.nativeOpenTerminal')}
-                    disabled={isHandingOff}
+                    disabled={isHandingOff || isHandoffPending}
                     onClick={() => void handleHandoff()}
                   >
-                    {isHandingOff ? (
+                    {isHandingOff || isHandoffPending ? (
                       <LoaderCircle className="h-4 w-4 animate-spin" />
                     ) : (
                       <TerminalSquare className="h-4 w-4" />

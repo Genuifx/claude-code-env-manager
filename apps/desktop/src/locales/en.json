@@ -198,6 +198,7 @@
     "nativeStopFailed": "Failed to stop native session",
     "nativeOpenTerminal": "Continue in Terminal",
     "nativeHandoffDone": "Opened this session in Terminal",
+    "nativeHandoffPending": "Waiting for the session to be ready, then Terminal will open automatically",
     "nativeHandoffFailed": "Failed to open Terminal handoff",
     "nativeToolRunning": "Tool running",
     "nativeToolDone": "Tool complete",

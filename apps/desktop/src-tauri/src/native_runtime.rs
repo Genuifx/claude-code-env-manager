@@ -14,6 +14,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+#[cfg(test)]
+use std::sync::OnceLock;
 use std::time::Duration;
 use tauri::AppHandle;
 use tauri_plugin_shell::{
@@ -67,6 +69,8 @@ pub struct NativeSessionRecord {
     pub updated_at: DateTime<Utc>,
     pub is_active: bool,
     pub can_handoff_to_terminal: bool,
+    #[serde(default, skip_serializing)]
+    pub pending_handoff_terminal: Option<TerminalType>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
 }
@@ -94,6 +98,18 @@ pub struct NativeSessionSummary {
     pub can_handoff_to_terminal: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeHandoffStatus {
+    Opened,
+    Pending,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NativeHandoffResult {
+    pub status: NativeHandoffStatus,
 }
 
 #[derive(Debug, Clone)]
@@ -260,6 +276,84 @@ impl NativeSessionHandle {
     }
 }
 
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TerminalLaunchInvocation {
+    terminal: TerminalType,
+    working_dir: String,
+    runtime_id: String,
+    env_name: String,
+    perm_mode: Option<String>,
+    resume_session_id: Option<String>,
+    client: String,
+}
+
+#[cfg(test)]
+fn terminal_launches() -> &'static Mutex<Vec<TerminalLaunchInvocation>> {
+    static LAUNCHES: OnceLock<Mutex<Vec<TerminalLaunchInvocation>>> = OnceLock::new();
+    LAUNCHES.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+#[cfg(test)]
+fn clear_terminal_launches() {
+    terminal_launches().lock().expect("terminal launches").clear();
+}
+
+#[cfg(test)]
+fn take_terminal_launches() -> Vec<TerminalLaunchInvocation> {
+    std::mem::take(&mut *terminal_launches().lock().expect("terminal launches"))
+}
+
+#[cfg(not(test))]
+fn launch_terminal_for_native_handoff(
+    terminal: TerminalType,
+    env_vars: HashMap<String, String>,
+    working_dir: &str,
+    runtime_id: &str,
+    env_name: &str,
+    perm_mode: Option<&str>,
+    resume_session_id: Option<&str>,
+    client: &str,
+) -> Result<(), String> {
+    terminal::launch_in_terminal(
+        terminal,
+        env_vars,
+        working_dir,
+        runtime_id,
+        env_name,
+        perm_mode,
+        resume_session_id,
+        client,
+    )
+    .map(|_| ())
+}
+
+#[cfg(test)]
+fn launch_terminal_for_native_handoff(
+    terminal: TerminalType,
+    _env_vars: HashMap<String, String>,
+    working_dir: &str,
+    runtime_id: &str,
+    env_name: &str,
+    perm_mode: Option<&str>,
+    resume_session_id: Option<&str>,
+    client: &str,
+) -> Result<(), String> {
+    terminal_launches()
+        .lock()
+        .expect("terminal launches")
+        .push(TerminalLaunchInvocation {
+            terminal,
+            working_dir: working_dir.to_string(),
+            runtime_id: runtime_id.to_string(),
+            env_name: env_name.to_string(),
+            perm_mode: perm_mode.map(str::to_string),
+            resume_session_id: resume_session_id.map(str::to_string),
+            client: client.to_string(),
+        });
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct NativeRuntimeState {
     sessions: Vec<NativeSessionRecord>,
@@ -315,6 +409,7 @@ impl NativeRuntimeManager {
             updated_at: now,
             is_active: true,
             can_handoff_to_terminal: terminal::external_terminal_launch_supported(),
+            pending_handoff_terminal: None,
             last_error: None,
         };
 
@@ -688,7 +783,7 @@ impl NativeRuntimeManager {
         &self,
         runtime_id: &str,
         terminal_type: Option<TerminalType>,
-    ) -> Result<(), String> {
+    ) -> Result<NativeHandoffResult, String> {
         if !terminal::external_terminal_launch_supported() {
             return Err(
                 "Terminal handoff is not available on this platform; continue in the native workspace runtime.".to_string(),
@@ -717,12 +812,48 @@ impl NativeRuntimeManager {
                 .ok_or_else(|| format!("Native runtime {} not found", runtime_id))?
         };
 
-        // New sessions may not have a provider_session_id yet — it only arrives
-        // with the first assistant message. Instead of blocking the handoff, fall
-        // back to launching a fresh terminal session; we only `--resume` when an
-        // id is actually available.
-        let provider_session_id = record.provider_session_id.clone();
         let terminal = terminal_type.unwrap_or_else(terminal::get_preferred_terminal);
+
+        if record.provider_session_id.is_some() {
+            self.complete_terminal_handoff(record, terminal)?;
+            return Ok(NativeHandoffResult {
+                status: NativeHandoffStatus::Opened,
+            });
+        }
+
+        self.update_record(runtime_id, |entry| {
+            entry.status = "handoff_pending".to_string();
+            entry.is_active = true;
+            entry.updated_at = Utc::now();
+            entry.can_handoff_to_terminal = true;
+            entry.pending_handoff_terminal = Some(terminal);
+            entry.last_error = None;
+        })?;
+        self.append_event(
+            runtime_id,
+            SessionEventPayload::Lifecycle {
+                stage: "handoff_pending".to_string(),
+                detail: format!(
+                    "Terminal handoff will open in {} when the provider session id is ready.",
+                    terminal.display_name()
+                ),
+            },
+        )?;
+        Ok(NativeHandoffResult {
+            status: NativeHandoffStatus::Pending,
+        })
+    }
+
+    fn complete_terminal_handoff(
+        &self,
+        record: NativeSessionRecord,
+        terminal: TerminalType,
+    ) -> Result<(), String> {
+        let runtime_id = record.runtime_id.clone();
+        let provider_session_id = record
+            .provider_session_id
+            .clone()
+            .ok_or_else(|| "Session id is not ready for terminal handoff yet".to_string())?;
 
         let env_vars = match record.provider {
             NativeProvider::Claude => resolve_claude_env(&record.env_name)
@@ -731,25 +862,26 @@ impl NativeRuntimeManager {
             NativeProvider::Codex => resolve_codex_proxy_env(),
         };
 
-        terminal::launch_in_terminal(
+        launch_terminal_for_native_handoff(
             terminal,
             env_vars,
             &record.project_dir,
-            runtime_id,
+            &runtime_id,
             &record.env_name,
             Some(record.perm_mode.as_str()),
-            provider_session_id.as_deref(),
+            Some(provider_session_id.as_str()),
             record.provider.as_str(),
         )?;
 
-        self.update_record(runtime_id, |entry| {
+        self.update_record(&runtime_id, |entry| {
             entry.status = "handoff".to_string();
             entry.is_active = false;
             entry.updated_at = Utc::now();
             entry.can_handoff_to_terminal = true;
+            entry.pending_handoff_terminal = None;
         })?;
         self.append_event(
-            runtime_id,
+            &runtime_id,
             SessionEventPayload::Lifecycle {
                 stage: "handoff".to_string(),
                 detail: format!(
@@ -759,8 +891,8 @@ impl NativeRuntimeManager {
                 ),
             },
         )?;
-        self.kill_child(runtime_id)?;
-        self.remove_handle(runtime_id)?;
+        self.kill_child(&runtime_id)?;
+        self.remove_handle(&runtime_id)?;
         Ok(())
     }
 
@@ -973,6 +1105,7 @@ impl NativeRuntimeManager {
             HelperOutputEvent::SessionMeta {
                 provider_session_id,
             } => {
+                let mut pending_handoff_terminal = None;
                 let provider = self
                     .records
                     .lock()
@@ -984,6 +1117,7 @@ impl NativeRuntimeManager {
                 self.update_record(runtime_id, |record| {
                     record.provider_session_id = Some(provider_session_id.clone());
                     record.can_handoff_to_terminal = terminal::external_terminal_launch_supported();
+                    pending_handoff_terminal = record.pending_handoff_terminal;
                     record.updated_at = Utc::now();
                 })?;
 
@@ -994,6 +1128,31 @@ impl NativeRuntimeManager {
                         "Failed to bind native runtime {} to provider session {}: {}",
                         runtime_id, provider_session_id, error
                     );
+                }
+
+                if let Some(terminal) = pending_handoff_terminal {
+                    let record = self
+                        .records
+                        .lock()
+                        .map_err(|_| "Failed to lock native runtime records".to_string())?
+                        .get(runtime_id)
+                        .cloned()
+                        .ok_or_else(|| format!("Native runtime {} not found", runtime_id))?;
+                    if let Err(error) = self.complete_terminal_handoff(record, terminal) {
+                        self.update_record(runtime_id, |record| {
+                            record.status = "ready".to_string();
+                            record.is_active = true;
+                            record.updated_at = Utc::now();
+                            record.pending_handoff_terminal = None;
+                            record.last_error = Some(error.clone());
+                        })?;
+                        self.append_event(
+                            runtime_id,
+                            SessionEventPayload::StdErrLine {
+                                line: format!("Terminal handoff failed: {}", error),
+                            },
+                        )?;
+                    }
                 }
 
                 Ok(())
@@ -1725,11 +1884,11 @@ fn build_runtime_bootstrap_options(
 #[cfg(test)]
 mod tests {
     use super::{
-        drain_helper_output_lines, is_retryable_native_child_write_error, merge_helper_env_path,
-        native_session_allows_dangerously_skip_permissions, reactivate_record_for_reconnect,
-        read_native_runtime_state_from, HelperInputCommand, NativeProvider, NativeRuntimeManager,
-        NativeSessionHandle, NativeSessionOptions, NativeSessionRecord, NativeTransport,
-        PromptImage,
+        clear_terminal_launches, drain_helper_output_lines, is_retryable_native_child_write_error,
+        merge_helper_env_path, native_session_allows_dangerously_skip_permissions,
+        reactivate_record_for_reconnect, read_native_runtime_state_from, take_terminal_launches,
+        HelperInputCommand, NativeProvider, NativeRuntimeManager, NativeSessionHandle,
+        NativeSessionOptions, NativeSessionRecord, NativeTransport, PromptImage,
     };
     use crate::event_bus::{SessionEventPayload, SessionStore};
     use crate::native_event_log::NativeEventLog;
@@ -1771,6 +1930,7 @@ mod tests {
             updated_at: Utc::now(),
             is_active: true,
             can_handoff_to_terminal: false,
+            pending_handoff_terminal: None,
             last_error: None,
         };
         let handle = native_session_handle(record.clone());
@@ -1823,6 +1983,7 @@ mod tests {
             updated_at: Utc::now(),
             is_active,
             can_handoff_to_terminal: false,
+            pending_handoff_terminal: None,
             last_error: None,
         }
     }
@@ -2232,6 +2393,73 @@ mod tests {
         assert!(!is_retryable_native_child_write_error(
             "Failed to encode helper command: invalid payload"
         ));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn handoff_without_provider_session_waits_for_session_meta() {
+        let runtime_id = "native-fresh-handoff";
+        let manager = manager_with_handle(runtime_id);
+        clear_terminal_launches();
+
+        manager
+            .handoff_to_terminal(
+                runtime_id,
+                Some(crate::terminal::TerminalType::TerminalApp),
+            )
+            .expect("handoff should enter pending state");
+
+        assert!(take_terminal_launches().is_empty());
+
+        let summary = manager.summary_for(runtime_id).expect("summary");
+        assert_eq!(summary.status, "handoff_pending");
+        assert!(summary.is_active);
+        assert_eq!(summary.provider_session_id, None);
+        assert!(manager
+            .handles
+            .lock()
+            .expect("handles")
+            .get(runtime_id)
+            .is_some());
+    }
+
+    #[test]
+    fn session_meta_completes_pending_handoff_with_resume_id() {
+        let runtime_id = "native-pending-handoff";
+        let manager = manager_with_handle(runtime_id);
+        clear_terminal_launches();
+        manager
+            .update_record(runtime_id, |record| {
+                record.status = "handoff_pending".to_string();
+                record.pending_handoff_terminal = Some(crate::terminal::TerminalType::TerminalApp);
+            })
+            .expect("set pending handoff");
+
+        manager
+            .process_helper_stdout(
+                runtime_id,
+                r#"{"type":"session_meta","provider_session_id":"provider-session-1"}"#,
+            )
+            .expect("process session meta");
+
+        let launches = take_terminal_launches();
+        assert_eq!(launches.len(), 1);
+        assert_eq!(launches[0].resume_session_id.as_deref(), Some("provider-session-1"));
+        assert_eq!(launches[0].runtime_id, runtime_id);
+
+        let summary = manager.summary_for(runtime_id).expect("summary");
+        assert_eq!(summary.status, "handoff");
+        assert!(!summary.is_active);
+        assert_eq!(
+            summary.provider_session_id.as_deref(),
+            Some("provider-session-1")
+        );
+        assert!(manager
+            .handles
+            .lock()
+            .expect("handles")
+            .get(runtime_id)
+            .is_none());
     }
 
     #[test]
