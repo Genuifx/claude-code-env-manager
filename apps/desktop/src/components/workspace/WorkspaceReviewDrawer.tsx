@@ -1,26 +1,39 @@
-import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { createPortal } from 'react-dom';
 import { open } from '@tauri-apps/plugin-shell';
 import {
   ArrowLeft,
+  Bot,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   Circle,
+  CircleAlert,
+  ClipboardCheck,
+  Compass,
   ExternalLink,
   FileDiff,
   FileText,
   Folder,
   ListChecks,
+  LoaderCircle,
   PanelRightClose,
   RefreshCw,
+  Users,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { NativeSessionSummary, WorkspaceFileDiff, WorkspaceGitSnapshot } from '@/lib/tauri-ipc';
 import { cn, getEnvColorVar } from '@/lib/utils';
+import type {
+  ConversationMessageData,
+  SessionSubagentsPayload,
+  SubagentMeta,
+} from '@/features/conversations/types';
 import type { ReviewChangedFile, WorkspaceReviewModel } from './workspaceReview';
+import { resolveSubagentSelection, shouldShowSubagentEntry } from './workspaceSubagents';
+import { WorkspaceTranscriptList } from './WorkspaceTranscriptList';
 
 interface WorkspaceReviewDrawerProps {
   session: NativeSessionSummary;
@@ -31,6 +44,10 @@ interface WorkspaceReviewDrawerProps {
   onOpenChange: (open: boolean) => void;
   onRefreshGit: () => void;
   onLoadDiff: (filePath: string) => Promise<WorkspaceFileDiff>;
+  /** Fetch sub-agent list (+ optional detail). When omitted, the 子 Agent entry is hidden. */
+  onLoadSubagents?: (detailAgentId: string | null) => Promise<SessionSubagentsPayload>;
+  /** Whether the session is live (enables auto-polling while agents run). */
+  isLive?: boolean;
 }
 
 const MAIN_WIDTH = 440;
@@ -365,6 +382,165 @@ function DiffView({
   );
 }
 
+function subagentTypeIcon(type?: string): ComponentType<{ className?: string }> {
+  const key = (type || '').toLowerCase();
+  if (key.includes('explore') || key.includes('search')) return Compass;
+  if (key.includes('review')) return ClipboardCheck;
+  return Bot;
+}
+
+function formatDurationMs(ms: number): string {
+  if (!ms || ms <= 0) return '—';
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rem = seconds % 60;
+  return rem ? `${minutes}m${rem}s` : `${minutes}m`;
+}
+
+function subagentStatusLabel(status: string): string {
+  switch (status) {
+    case 'running':
+      return '运行中';
+    case 'completed':
+      return '已完成';
+    case 'failed':
+      return '失败';
+    default:
+      return status || '未知';
+  }
+}
+
+function SubagentPanel({
+  subagents,
+  selectedAgentId,
+  agentDetail,
+  agentsLoading,
+  agentsError,
+  onSelect,
+}: {
+  subagents: SubagentMeta[];
+  selectedAgentId: string | null;
+  agentDetail: ConversationMessageData[] | null;
+  agentsLoading: boolean;
+  agentsError: string | null;
+  onSelect: (agentId: string) => void;
+}) {
+  const selected = useMemo(
+    () => subagents.find((s) => s.agentId === selectedAgentId) ?? null,
+    [subagents, selectedAgentId],
+  );
+  const selectedRunning = selected?.status === 'running';
+
+  return (
+    <div className="flex min-h-0 flex-1">
+      <div className="flex w-[clamp(220px,34%,320px)] shrink-0 flex-col border-r border-border-subtle/50">
+        <ScrollArea className="min-h-0 flex-1">
+          {agentsError && subagents.length === 0 ? (
+            <p className="px-4 py-4 text-[12px] text-destructive">{agentsError}</p>
+          ) : subagents.length === 0 ? (
+            <p className="px-4 py-4 text-[12px] text-muted-foreground">
+              {agentsLoading ? '加载中…' : '本会话未派发子 Agent。'}
+            </p>
+          ) : (
+            <div className="py-1">
+              {subagents.map((agent) => {
+                const Icon = subagentTypeIcon(agent.subagentType);
+                const isActive = agent.agentId === selectedAgentId;
+                const running = agent.status === 'running';
+                const failed = agent.status === 'failed';
+                return (
+                  <button
+                    type="button"
+                    key={agent.agentId}
+                    onClick={() => onSelect(agent.agentId)}
+                    className={cn(
+                      'flex w-full items-start gap-2 px-3 py-2 text-left transition-colors hover:bg-surface-raised/50',
+                      isActive && 'bg-surface-raised/70',
+                    )}
+                  >
+                    <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[12px] font-medium text-foreground">
+                        {agent.description || agent.subagentType || 'sub-agent'}
+                      </p>
+                      <p className="truncate text-[10px] text-muted-foreground">
+                        {agent.subagentType ? `${agent.subagentType} · ` : ''}
+                        {agent.messageCount} 条 · {agent.toolCount} 工具
+                      </p>
+                    </div>
+                    {running ? (
+                      <LoaderCircle className="mt-0.5 h-3 w-3 shrink-0 animate-spin text-muted-foreground/60" />
+                    ) : failed ? (
+                      <CircleAlert className="mt-0.5 h-3 w-3 shrink-0 text-destructive/70" />
+                    ) : (
+                      <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-success/70" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </ScrollArea>
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col">
+        {selected ? (
+          <>
+            <div className="shrink-0 border-b border-border-subtle/40 px-4 py-2.5">
+              <div className="flex items-center gap-2">
+                <p className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">
+                  {selected.description || selected.subagentType || 'sub-agent'}
+                </p>
+                <span
+                  className={cn(
+                    'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium',
+                    selected.status === 'running' && 'bg-muted text-muted-foreground',
+                    selected.status === 'completed' && 'bg-success/12 text-success',
+                    selected.status === 'failed' && 'bg-destructive/12 text-destructive',
+                  )}
+                >
+                  {subagentStatusLabel(selected.status)}
+                </span>
+              </div>
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                {selected.subagentType ? `${selected.subagentType} · ` : ''}
+                {selected.messageCount} 条消息 · {selected.toolCount} 个工具 · 耗时{' '}
+                {formatDurationMs((selected.completedAt ?? Date.now()) - selected.startedAt)}
+              </p>
+              {selected.resultSummary ? (
+                <p className="mt-1.5 line-clamp-2 text-[11px] leading-snug text-muted-foreground/80">
+                  {selected.resultSummary}
+                </p>
+              ) : null}
+            </div>
+            <ScrollArea className="min-h-0 flex-1">
+              <div className="px-4 py-3">
+                {agentDetail && agentDetail.length > 0 ? (
+                  <WorkspaceTranscriptList
+                    messages={agentDetail}
+                    isAwaitingResponse={selectedRunning}
+                  />
+                ) : agentsError ? (
+                  <p className="py-6 text-center text-[12px] text-destructive">{agentsError}</p>
+                ) : (
+                  <p className="py-6 text-center text-[12px] text-muted-foreground">
+                    {agentsLoading ? '加载执行过程…' : '暂无执行过程记录。'}
+                  </p>
+                )}
+              </div>
+            </ScrollArea>
+          </>
+        ) : (
+          <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
+            <Users className="h-6 w-6 text-muted-foreground/40" />
+            <p className="text-[12px] text-muted-foreground">选择左侧子 Agent 查看执行过程</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function WorkspaceReviewDrawer({
   session,
   model,
@@ -374,8 +550,10 @@ export function WorkspaceReviewDrawer({
   onOpenChange,
   onRefreshGit,
   onLoadDiff,
+  onLoadSubagents,
+  isLive = false,
 }: WorkspaceReviewDrawerProps) {
-  const [page, setPage] = useState<'main' | 'files'>('main');
+  const [page, setPage] = useState<'main' | 'files' | 'agents'>('main');
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [diff, setDiff] = useState<WorkspaceFileDiff | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
@@ -383,6 +561,15 @@ export function WorkspaceReviewDrawer({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [filesWidth, setFilesWidth] = useState(DEFAULT_FILES_WIDTH);
   const [resizing, setResizing] = useState(false);
+
+  // Sub-agent (Task/Agent sidechain) state for the 子 Agent panel.
+  const [subagents, setSubagents] = useState<SubagentMeta[]>([]);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [agentDetail, setAgentDetail] = useState<ConversationMessageData[] | null>(null);
+  const [agentsLoading, setAgentsLoading] = useState(false);
+  const [agentsError, setAgentsError] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const subagentRequestSeqRef = useRef(0);
 
   const tree = useMemo(() => buildFileTree(model.changedFiles), [model.changedFiles]);
   const todoLabel = model.todoTotal > 0 ? `${model.todoCompleted}/${model.todoTotal}` : '0/0';
@@ -441,8 +628,96 @@ export function WorkspaceReviewDrawer({
     if (!isOpen) {
       setPage('main');
       setSelectedPath(null);
+      setSubagents([]);
+      setSelectedAgentId(null);
+      setAgentDetail(null);
+      setAgentsError(null);
     }
   }, [isOpen]);
+
+  // Hold the latest onLoadSubagents in a ref so the parent's inline callback
+  // (new identity each render) doesn't recreate loadSubagents and retrigger effects.
+  const onLoadSubagentsRef = useRef(onLoadSubagents);
+  useEffect(() => {
+    onLoadSubagentsRef.current = onLoadSubagents;
+  }, [onLoadSubagents]);
+
+  // Fetch the sub-agent list (+ detail for the selected agent when provided).
+  // Stable identity (empty deps) — reads the callback via ref.
+  const loadSubagents = useCallback(async (detailAgentId: string | null) => {
+    const fn = onLoadSubagentsRef.current;
+    if (!fn) return;
+    const requestSeq = subagentRequestSeqRef.current + 1;
+    subagentRequestSeqRef.current = requestSeq;
+    setAgentsLoading(true);
+    try {
+      const payload = await fn(detailAgentId);
+      if (requestSeq !== subagentRequestSeqRef.current) {
+        return;
+      }
+      setSubagents(payload.subagents ?? []);
+      setAgentsError(null);
+      if (detailAgentId) {
+        setAgentDetail(payload.detail ?? []);
+      }
+    } catch (err) {
+      if (requestSeq !== subagentRequestSeqRef.current) {
+        return;
+      }
+      setAgentsError(`加载子 Agent 失败：${String(err)}`);
+    } finally {
+      if (requestSeq === subagentRequestSeqRef.current) {
+        setAgentsLoading(false);
+      }
+    }
+  }, []);
+
+  // Initial list load when the drawer opens (drives the entry-button count).
+  useEffect(() => {
+    if (isOpen && onLoadSubagentsRef.current) {
+      void loadSubagents(null);
+    }
+  }, [isOpen, loadSubagents]);
+
+  // Auto-poll while on the agents page in a live session with a running agent.
+  const hasRunningAgent = subagents.some((s) => s.status === 'running');
+  useEffect(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    if (!isLive || !isOpen || page !== 'agents' || !hasRunningAgent) {
+      return;
+    }
+    pollRef.current = setInterval(() => {
+      void loadSubagents(selectedAgentId);
+    }, 1500);
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, [isLive, isOpen, page, hasRunningAgent, selectedAgentId, loadSubagents]);
+
+  const selectAgent = useCallback(
+    (agentId: string) => {
+      setSelectedAgentId(agentId);
+      setAgentDetail(null);
+      void loadSubagents(agentId);
+    },
+    [loadSubagents],
+  );
+
+  useEffect(() => {
+    if (page !== 'agents' || subagents.length === 0) {
+      return;
+    }
+    const nextSelection = resolveSubagentSelection(subagents, selectedAgentId);
+    if (nextSelection && nextSelection !== selectedAgentId) {
+      selectAgent(nextSelection);
+    }
+  }, [page, selectedAgentId, selectAgent, subagents]);
 
   const openInEditor = async (path: string) => {
     try {
@@ -457,7 +732,15 @@ export function WorkspaceReviewDrawer({
   }
 
   const inFiles = page === 'files';
-  const width = inFiles ? filesWidth : MAIN_WIDTH;
+  const inAgents = page === 'agents';
+  const inSecondary = inFiles || inAgents;
+  const width = inSecondary ? filesWidth : MAIN_WIDTH;
+  const showSubagentEntry = shouldShowSubagentEntry({
+    canLoad: Boolean(onLoadSubagents),
+    loading: agentsLoading,
+    error: agentsError,
+    count: subagents.length,
+  });
 
   return createPortal(
     <div className="fixed inset-0 z-[60]">
@@ -474,7 +757,7 @@ export function WorkspaceReviewDrawer({
           resizing && 'select-none',
         )}
       >
-        {inFiles ? (
+        {inSecondary ? (
           <div
             onPointerDown={startResize}
             className={cn(
@@ -487,7 +770,7 @@ export function WorkspaceReviewDrawer({
           />
         ) : null}
 
-        {inFiles ? (
+        {inSecondary ? (
           <header className="flex h-12 shrink-0 items-center gap-1.5 border-b border-border-subtle/60 pl-1.5 pr-2.5">
             <Button
               type="button"
@@ -500,8 +783,12 @@ export function WorkspaceReviewDrawer({
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[13px] font-semibold text-foreground">改动文件</p>
-              <p className="truncate text-[11px] text-muted-foreground">{model.changedFiles.length} 个文件</p>
+              <p className="truncate text-[13px] font-semibold text-foreground">
+                {inAgents ? '子 Agent' : '改动文件'}
+              </p>
+              <p className="truncate text-[11px] text-muted-foreground">
+                {inAgents ? `${subagents.length} 个子 Agent` : `${model.changedFiles.length} 个文件`}
+              </p>
             </div>
           </header>
         ) : (
@@ -596,6 +883,15 @@ export function WorkspaceReviewDrawer({
               )}
             </div>
           </div>
+        ) : inAgents ? (
+          <SubagentPanel
+            subagents={subagents}
+            selectedAgentId={selectedAgentId}
+            agentDetail={agentDetail}
+            agentsLoading={agentsLoading}
+            agentsError={agentsError}
+            onSelect={selectAgent}
+          />
         ) : (
           <ScrollArea className="min-h-0 flex-1">
             <div className="space-y-5 px-4 py-4">
@@ -622,6 +918,24 @@ export function WorkspaceReviewDrawer({
                   <MetaRow label="上游" mono value={gitSnapshot?.upstream || '—'} />
                 </div>
               </Section>
+
+              {showSubagentEntry ? (
+                <button
+                  type="button"
+                  onClick={() => setPage('agents')}
+                  className="group flex w-full items-center gap-2 rounded-xl border border-border-subtle/50 bg-surface-raised/30 px-3 py-2.5 text-left transition-colors hover:bg-surface-raised/60"
+                >
+                  <Users className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="text-[13px] font-medium text-foreground">子 Agent</span>
+                  <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+                    {subagents.length}
+                  </span>
+                  {subagents.some((s) => s.status === 'running') ? (
+                    <LoaderCircle className="h-3 w-3 shrink-0 animate-spin text-muted-foreground/60" />
+                  ) : null}
+                  <ChevronRight className="ml-auto h-4 w-4 shrink-0 text-muted-foreground/45 transition-transform group-hover:translate-x-0.5" />
+                </button>
+              ) : null}
 
               {model.todos.length > 0 ? (
                 <Section
