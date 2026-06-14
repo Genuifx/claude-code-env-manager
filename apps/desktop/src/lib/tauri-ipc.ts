@@ -926,6 +926,7 @@ export type SessionEventPayload =
       tool_use_id: string;
       raw_name: string;
       result_summary: string;
+      result_content?: string | null;
       success: boolean;
     }
   | {

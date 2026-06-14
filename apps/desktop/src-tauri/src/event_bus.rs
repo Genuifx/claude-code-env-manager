@@ -120,6 +120,8 @@ pub enum SessionEventPayload {
         tool_use_id: String,
         raw_name: String,
         result_summary: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        result_content: Option<String>,
         success: bool,
     },
     PermissionRequired {

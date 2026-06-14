@@ -4985,6 +4985,7 @@ fn monitor_interactive_session(
                         raw_name,
                         result_summary,
                         success,
+                        ..
                     } => {
                         if let Some(active_prompt) =
                             manager.active_prompt_for_scope(chat_id, thread_id)

@@ -530,6 +530,42 @@ const ToolPayloadPanel = memo(function ToolPayloadPanel({
   );
 }, (prevProps, nextProps) => prevProps.value === nextProps.value);
 
+function isSubagentToolName(name?: string): boolean {
+  return name === 'Agent' || name === 'Task';
+}
+
+function toToolResultMarkdown(value: unknown): string {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+
+  return stringifyUnknown(value).trim();
+}
+
+const SubagentResultPanel = memo(function SubagentResultPanel({
+  value,
+}: {
+  value: unknown;
+}) {
+  const markdown = useMemo(() => toToolResultMarkdown(value), [value]);
+
+  if (!markdown) {
+    return null;
+  }
+
+  return (
+    <div className="workspace-tool-payload-virtualized rounded-md border border-border/35 bg-[hsl(var(--tool-input-bg))] px-3 py-2.5">
+      <ScrollArea className="max-h-[60vh] sm:max-h-[520px]">
+        <MarkdownRenderer
+          content={markdown}
+          className="pr-3 text-[13px] leading-6 text-foreground/82"
+          codeTone="reading"
+        />
+      </ScrollArea>
+    </div>
+  );
+}, (prevProps, nextProps) => prevProps.value === nextProps.value);
+
 const ThinkingEntryPanel = memo(function ThinkingEntryPanel({
   entry,
   index,
@@ -700,6 +736,7 @@ const ToolCallRow = memo(function ToolCallRow({
   const isError = block._resultError === true;
   const detail = useMemo(() => extractToolSummary(block.name, block.input), [block.input, block.name]);
   const isEdit = block.name === 'Edit';
+  const isSubagentTool = isSubagentToolName(block.name);
   const isSearchTool = block.name === 'Grep' || block.name === 'Glob' || block.name === 'Bash' || block.name === 'WebFetch'
     || block.name === 'Read' || block.name === 'Write';
   const editDiff = useMemo(() => {
@@ -774,8 +811,10 @@ const ToolCallRow = memo(function ToolCallRow({
               <EditDiff oldText={editDiff.oldText} newText={editDiff.newText} />
             ) : (
               <>
-                {isSearchTool ? <ToolInputContext block={block} /> : null}
-                <ToolPayloadPanel value={block._result} />
+                {(isSearchTool || isSubagentTool) ? <ToolInputContext block={block} /> : null}
+                {isSubagentTool
+                  ? <SubagentResultPanel value={block._result} />
+                  : <ToolPayloadPanel value={block._result} />}
               </>
             )}
           </div>
