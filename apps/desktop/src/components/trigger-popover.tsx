@@ -29,6 +29,16 @@ function getSuggestionKind(suggestion: TriggerSuggestion): string | null {
   return typeof kind === 'string' ? kind : null
 }
 
+function getSuggestionPath(suggestion: TriggerSuggestion): string | null {
+  const data = suggestion.data
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+    return null
+  }
+
+  const path = (data as { path?: unknown }).path
+  return typeof path === 'string' && path.trim().length > 0 ? path : null
+}
+
 /**
  * Floating popover that displays trigger suggestions.
  * Positioned relative to the trigger character location in the editor.
@@ -117,6 +127,7 @@ export function TriggerPopover({
       ) : (
         suggestions.map((suggestion, index) => {
           const kind = getSuggestionKind(suggestion)
+          const path = kind === 'skill' ? getSuggestionPath(suggestion) : null
 
           return (
             <button
@@ -147,7 +158,14 @@ export function TriggerPopover({
                 </span>
               )}
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[11px] font-medium leading-4 text-foreground">{suggestion.label}</div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="truncate text-[11px] font-medium leading-4 text-foreground">{suggestion.label}</span>
+                  {path ? (
+                    <span className="ml-auto min-w-0 max-w-[55%] truncate font-mono text-[8px] leading-4 text-muted-foreground/65" title={path}>
+                      {path}
+                    </span>
+                  ) : null}
+                </div>
                 {suggestion.description && (
                   <div className="mt-0.5 truncate text-[9px] leading-3.5 text-muted-foreground opacity-80">
                     {suggestion.description}
