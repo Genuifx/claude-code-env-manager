@@ -955,6 +955,7 @@ export function WorkspaceNativeSessionView({
     handoffNativeSessionToTerminal,
     getWorkspaceGitSnapshot,
     getWorkspaceFileDiff,
+    getSessionSubagents,
     listNativeSessions,
     searchWorkspaceFiles,
   } = useTauriCommands();
@@ -2018,6 +2019,13 @@ export function WorkspaceNativeSessionView({
         onOpenChange={setReviewPanelOpen}
         onRefreshGit={() => void refreshGitSnapshot()}
         onLoadDiff={(filePath) => getWorkspaceFileDiff(session.project_dir, filePath)}
+        isLive
+        onLoadSubagents={
+          session.provider_session_id
+            ? (detailAgentId) =>
+                getSessionSubagents(session.provider_session_id!, session.provider, detailAgentId)
+            : undefined
+        }
       />
 
       <ScrollArea viewportRef={containerRef} className="workspace-transcript-scroll flex-1 bg-background/30">

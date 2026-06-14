@@ -71,6 +71,26 @@ export interface HistorySegment {
   messageCount: number;
 }
 
+/** List entry for a Claude Code sub-agent (Task/Agent sidechain). */
+export interface SubagentMeta {
+  agentId: string;
+  subagentType?: string;
+  description?: string;
+  /** `running` | `completed` | `failed` */
+  status: string;
+  messageCount: number;
+  toolCount: number;
+  startedAt: number;
+  completedAt?: number;
+  resultSummary?: string;
+}
+
+export interface SessionSubagentsPayload {
+  subagents: SubagentMeta[];
+  /** Full message transcript for the requested detail agent, if any. */
+  detail?: ConversationMessageData[] | null;
+}
+
 export function toSessionKey(session: Pick<HistorySessionItem, 'id' | 'source'>): string {
   return `${session.source}:${session.id}`;
 }

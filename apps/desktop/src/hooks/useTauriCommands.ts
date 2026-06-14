@@ -3,7 +3,7 @@ import { useAppStore, type Environment, type Session, type ArrangeLayout, type I
 import { useCallback } from 'react';
 import { toast } from 'sonner';
 import { shallow } from 'zustand/shallow';
-import type { SessionStickerId, SessionTaskStage } from '@/features/conversations/types';
+import type { SessionStickerId, SessionTaskStage, SessionSubagentsPayload } from '@/features/conversations/types';
 import type {
   ChannelKind,
   HeadlessSessionSummary,
@@ -833,6 +833,18 @@ export function useTauriCommands() {
     return invoke<WorkspaceFileDiff>('get_workspace_file_diff', { workingDir, filePath });
   }, []);
 
+  const getSessionSubagents = useCallback(async (
+    sessionId: string,
+    source: string,
+    detailAgentId?: string | null,
+  ): Promise<SessionSubagentsPayload> => {
+    return invoke<SessionSubagentsPayload>('get_session_subagents', {
+      sessionId,
+      source,
+      detailAgentId: detailAgentId ?? null,
+    });
+  }, []);
+
   const launchOpenCodeWeb = useCallback(async (
     workingDir?: string | null,
     envName?: string | null,
@@ -1332,6 +1344,7 @@ export function useTauriCommands() {
     handoffNativeSessionToTerminal,
     getWorkspaceGitSnapshot,
     getWorkspaceFileDiff,
+    getSessionSubagents,
     launchOpenCodeWeb,
     loadAppConfig,
     addFavoriteProject,

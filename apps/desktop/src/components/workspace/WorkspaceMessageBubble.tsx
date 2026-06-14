@@ -619,6 +619,23 @@ function ToolInputContext({ block }: { block: ConversationContentBlock }) {
       else if (summaryStr) fields.push({ label: 'url', value: summaryStr });
       break;
     }
+    case 'Agent':
+    case 'Task': {
+      // Sub-agent dispatch: input = { subagent_type, description, prompt }.
+      const st = typeof input.subagent_type === 'string' ? input.subagent_type : '';
+      const desc = typeof input.description === 'string' ? input.description : '';
+      const prompt = typeof input.prompt === 'string' ? input.prompt : '';
+      if (desc) {
+        fields.push({ label: st || 'agent', value: desc });
+      } else if (prompt) {
+        fields.push({ label: st || 'agent', value: prompt.length > 100 ? `${prompt.slice(0, 97)}...` : prompt });
+      } else if (st) {
+        fields.push({ label: 'type', value: st });
+      } else if (summaryStr) {
+        fields.push({ label: 'input', value: summaryStr });
+      }
+      break;
+    }
     default:
       if (summaryStr) fields.push({ label: 'input', value: summaryStr });
       break;

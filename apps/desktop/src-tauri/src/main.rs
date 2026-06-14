@@ -56,7 +56,10 @@ use config::{
 };
 use cron::{start_cron_scheduler, CronScheduler};
 use event_dispatcher::EventDispatcher;
-use history::{get_conversation_history, get_conversation_messages, get_conversation_segments};
+use history::{
+    get_conversation_history, get_conversation_messages, get_conversation_segments,
+    get_session_subagents,
+};
 use interactive_runtime::{
     InteractiveReplayBatch, InteractiveRuntimeManager, InteractiveSessionOptions,
 };
@@ -3697,6 +3700,7 @@ fn main() {
             get_conversation_history,
             get_conversation_messages,
             get_conversation_segments,
+            get_session_subagents,
             title_overrides::set_session_title,
             session_titles::generate_workspace_session_title,
             session_annotations::set_session_annotation,

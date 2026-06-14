@@ -207,6 +207,7 @@ export function Workspace({
     generateWorkspaceSessionTitle,
     getWorkspaceGitSnapshot,
     getWorkspaceFileDiff,
+    getSessionSubagents,
   } = useTauriCommands();
 
   const [sessions, setSessions] = useState<HistorySessionItem[]>([]);
@@ -1886,6 +1887,17 @@ export function Workspace({
               onOpenChange={setWorkspaceReviewOpen}
               onRefreshGit={() => void refreshWorkspaceGitSnapshot()}
               onLoadDiff={(filePath) => getWorkspaceFileDiff(workspaceReviewWorkingDir || '', filePath)}
+              isLive={workspaceMode !== 'history'}
+              onLoadSubagents={
+                workspaceReviewSession.provider_session_id
+                  ? (detailAgentId) =>
+                      getSessionSubagents(
+                        workspaceReviewSession.provider_session_id!,
+                        workspaceReviewSession.provider,
+                        detailAgentId,
+                      )
+                  : undefined
+              }
             />
           ) : null}
 

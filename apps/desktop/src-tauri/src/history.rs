@@ -70,6 +70,40 @@ pub struct CompactSegment {
     pub message_count: usize,
 }
 
+/// Metadata for a single Claude Code sub-agent (Task/Agent sidechain).
+///
+/// Sub-agent conversations live in their own JSONL files at
+/// `<project-dir>/<session_id>/subagents/agent-<agentId>.jsonl`, separate from the
+/// main session transcript. This struct is the list entry shown in the review
+/// drawer's "子 Agent" panel.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SubagentMeta {
+    pub agent_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// `running` | `completed` | `failed`
+    pub status: String,
+    pub message_count: usize,
+    pub tool_count: usize,
+    pub started_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_summary: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSubagentsPayload {
+    pub subagents: Vec<SubagentMeta>,
+    /// Full message transcript for the requested `detail_agent_id`, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<Vec<ConversationMessage>>,
+}
+
 // ============================================================================
 // Claude JSONL line types
 // ============================================================================
@@ -302,6 +336,366 @@ pub async fn get_conversation_messages(
         Ok(messages)
     })
     .await
+}
+
+/// List sub-agents (Task/Agent sidechains) for a Claude session and optionally
+/// return the full message transcript of one of them.
+///
+/// Sub-agent conversations live in `<project-dir>/<session_id>/subagents/agent-<agentId>.jsonl`.
+/// We locate the project dir via `find_claude_session_file` (the subagents dir sits
+/// next to the main transcript), enumerate the files, and enrich each with
+/// `subagent_type`/`description`/`status` correlated from the main transcript's
+/// `Agent` tool_use + its tool_result (matched to the sub-agent by prompt text).
+#[tauri::command]
+pub async fn get_session_subagents(
+    session_id: String,
+    source: Option<String>,
+    detail_agent_id: Option<String>,
+) -> Result<SessionSubagentsPayload, String> {
+    run_blocking(move || {
+        let empty = || SessionSubagentsPayload {
+            subagents: vec![],
+            detail: None,
+        };
+        let source_hint = normalize_history_source(source.as_deref())?;
+        let resolved_source = match resolve_history_source_for_session(&session_id, source_hint) {
+            Some(s) => s,
+            None => return Ok(empty()),
+        };
+        // v1 supports Claude only — Codex/opencode have different sub-agent layouts.
+        if resolved_source != SOURCE_CLAUDE {
+            return Ok(empty());
+        }
+
+        let home = dirs::home_dir().ok_or("Could not find home directory")?;
+        let projects_dir = home.join(".claude").join("projects");
+        if !projects_dir.exists() {
+            return Ok(empty());
+        }
+        let main_path = match find_claude_session_file(&projects_dir, &session_id) {
+            Some(p) => p,
+            None => return Ok(empty()),
+        };
+        let project_dir = match main_path.parent() {
+            Some(p) => p,
+            None => return Ok(empty()),
+        };
+        let subagents_dir = project_dir
+            .join(session_id.as_str())
+            .join("subagents");
+
+        let mut metas = discover_subagent_metas(&subagents_dir);
+        enrich_subagent_metas(&mut metas, &main_path);
+        metas.sort_by_key(|m| m.started_at);
+
+        let detail = match &detail_agent_id {
+            Some(id) if !id.is_empty() => {
+                let target = subagents_dir.join(format!("agent-{}.jsonl", id));
+                if target.exists() {
+                    let (msgs, _) = parse_claude_conversation_file(&target)?;
+                    Some(msgs)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+
+        Ok(SessionSubagentsPayload {
+            subagents: metas,
+            detail,
+        })
+    })
+    .await
+}
+
+/// Enumerate `agent-<agentId>.jsonl` files in `subagents_dir`, returning base
+/// metadata (agent_id, timing, counts). Status starts as `running` and is
+/// refined by `enrich_subagent_metas`.
+fn discover_subagent_metas(subagents_dir: &Path) -> Vec<SubagentMeta> {
+    let mut metas = Vec::new();
+    let Ok(entries) = fs::read_dir(subagents_dir) else {
+        return metas;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let Some(agent_id) = name
+            .strip_prefix("agent-")
+            .and_then(|s| s.strip_suffix(".jsonl"))
+        else {
+            continue;
+        };
+        let Some((started, completed, msg_count, tool_count)) = scan_subagent_file_stats(&path)
+        else {
+            continue;
+        };
+        metas.push(SubagentMeta {
+            agent_id: agent_id.to_string(),
+            subagent_type: None,
+            description: None,
+            status: "running".to_string(),
+            message_count: msg_count,
+            tool_count,
+            started_at: started,
+            completed_at: completed,
+            result_summary: None,
+        });
+    }
+    metas
+}
+
+/// Lightweight scan of a sub-agent JSONL: first/last timestamp, user+assistant
+/// message count, and tool_use block count. Reuses `parse_timestamp_value`.
+fn scan_subagent_file_stats(
+    path: &Path,
+) -> Option<(u64, Option<u64>, usize, usize)> {
+    let file = fs::File::open(path).ok()?;
+    let reader = BufReader::new(file);
+    let mut first_ts: Option<u64> = None;
+    let mut last_ts: u64 = 0;
+    let mut msg_count = 0usize;
+    let mut tool_count = 0usize;
+    for line_res in reader.lines() {
+        let Ok(line) = line_res else { continue };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+            continue;
+        };
+        let ts_val = v.get("timestamp").cloned();
+        let ts = parse_timestamp_value(&ts_val);
+        if first_ts.is_none() {
+            first_ts = Some(ts);
+        }
+        if ts > 0 {
+            last_ts = ts;
+        }
+        let line_type = v.get("type").and_then(|x| x.as_str()).unwrap_or("");
+        if line_type == "user" || line_type == "assistant" {
+            msg_count += 1;
+        }
+        if line_type == "assistant" {
+            if let Some(blocks) = v
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_array())
+            {
+                for block in blocks {
+                    if block.get("type").and_then(|x| x.as_str()) == Some("tool_use") {
+                        tool_count += 1;
+                    }
+                }
+            }
+        }
+    }
+    Some((
+        first_ts.unwrap_or(0),
+        if last_ts > 0 { Some(last_ts) } else { None },
+        msg_count,
+        tool_count,
+    ))
+}
+
+/// Enrich sub-agent metadata from the main session transcript: correlate each
+/// sub-agent (by its first user-message prompt text) to the `Agent` tool_use
+/// that spawned it, pulling in `subagent_type`/`description`, status (from the
+/// matching tool_result), and a result summary.
+fn enrich_subagent_metas(metas: &mut [SubagentMeta], main_path: &Path) {
+    if metas.is_empty() {
+        return;
+    }
+    let Some((agent_calls, prompt_to_index)) = scan_main_transcript_agent_calls(main_path) else {
+        return;
+    };
+    let Some(project_dir) = main_path.parent() else {
+        return;
+    };
+    let subagents_dir = project_dir.join("subagents");
+    for meta in metas.iter_mut() {
+        // Read the sub-agent's first user prompt for correlation by prompt text.
+        let subagent_path = subagents_dir.join(format!("agent-{}.jsonl", meta.agent_id));
+        let Some(prompt) = read_first_user_prompt(&subagent_path) else {
+            continue;
+        };
+        let key = normalize_prompt_key(&prompt);
+        if let Some(&call_index) = prompt_to_index.get(&key) {
+            let call = &agent_calls[call_index];
+            meta.subagent_type = call.subagent_type.clone();
+            meta.description = call.description.clone();
+            match &call.status {
+                AgentCallStatus::Running => meta.status = "running".to_string(),
+                AgentCallStatus::Completed => {
+                    meta.status = "completed".to_string();
+                    meta.result_summary = call.result_text.clone();
+                }
+                AgentCallStatus::Failed => {
+                    meta.status = "failed".to_string();
+                    meta.result_summary = call.result_text.clone();
+                }
+            }
+        }
+    }
+}
+
+/// Read the first `type:user` message content (the dispatch prompt) from a
+/// sub-agent JSONL file. Returns the trimmed text of the first text/content.
+fn read_first_user_prompt(path: &Path) -> Option<String> {
+    let file = fs::File::open(path).ok()?;
+    let reader = BufReader::new(file);
+    for line_res in reader.lines() {
+        let Ok(line) = line_res else { continue };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+            continue;
+        };
+        if v.get("type").and_then(|x| x.as_str()) != Some("user") {
+            continue;
+        }
+        if let Some(text) = extract_plain_text_content(
+            v.get("message")
+                .and_then(|m| m.get("content"))
+                .unwrap_or(&serde_json::Value::Null),
+        ) {
+            return Some(text);
+        }
+    }
+    None
+}
+
+#[derive(Debug, Clone)]
+enum AgentCallStatus {
+    Running,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone)]
+struct MainAgentCall {
+    subagent_type: Option<String>,
+    description: Option<String>,
+    status: AgentCallStatus,
+    result_text: Option<String>,
+}
+
+/// Scan the main transcript for all `Agent`/`Task` tool_use blocks and their
+/// matching tool_results. Returns the calls plus a map from normalized prompt
+/// text → index, used to correlate sub-agent files to their dispatch call.
+fn scan_main_transcript_agent_calls(
+    main_path: &Path,
+) -> Option<(Vec<MainAgentCall>, HashMap<String, usize>)> {
+    let file = fs::File::open(main_path).ok()?;
+    let reader = BufReader::new(file);
+    // tool_use_id → (prompt_key, call_index)
+    let mut pending: HashMap<String, (String, usize)> = HashMap::new();
+    let mut calls: Vec<MainAgentCall> = Vec::new();
+    let mut prompt_to_index: HashMap<String, usize> = HashMap::new();
+
+    for line_res in reader.lines() {
+        let Ok(line) = line_res else { continue };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+            continue;
+        };
+        let Some(blocks) = v
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_array())
+        else {
+            continue;
+        };
+        for block in blocks {
+            let Some(btype) = block.get("type").and_then(|x| x.as_str()) else {
+                continue;
+            };
+            if btype == "tool_use" {
+                let name = block.get("name").and_then(|x| x.as_str()).unwrap_or("");
+                if name != "Agent" && name != "Task" {
+                    continue;
+                }
+                let Some(id) = block.get("id").and_then(|x| x.as_str()) else {
+                    continue;
+                };
+                let input = block.get("input");
+                let subagent_type = input
+                    .and_then(|i| i.get("subagent_type"))
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.to_string());
+                let description = input
+                    .and_then(|i| i.get("description"))
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.to_string());
+                let prompt = input
+                    .and_then(|i| i.get("prompt"))
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("");
+                let key = normalize_prompt_key(prompt);
+                let call_index = calls.len();
+                calls.push(MainAgentCall {
+                    subagent_type,
+                    description,
+                    status: AgentCallStatus::Running,
+                    result_text: None,
+                });
+                prompt_to_index.entry(key).or_insert(call_index);
+                pending.insert(id.to_string(), (normalize_prompt_key(prompt), call_index));
+            } else if btype == "tool_result" {
+                let Some(tuid) = block.get("tool_use_id").and_then(|x| x.as_str()) else {
+                    continue;
+                };
+                let Some((_, call_index)) = pending.remove(tuid) else {
+                    continue;
+                };
+                let is_error = block
+                    .get("is_error")
+                    .and_then(|x| x.as_bool())
+                    .unwrap_or(false);
+                let result_text = extract_plain_text_content(
+                    block
+                        .get("content")
+                        .unwrap_or(&serde_json::Value::Null),
+                );
+                let call = &mut calls[call_index];
+                call.status = if is_error {
+                    AgentCallStatus::Failed
+                } else {
+                    AgentCallStatus::Completed
+                };
+                call.result_text = result_text;
+            }
+        }
+    }
+    Some((calls, prompt_to_index))
+}
+
+/// Normalize a prompt to a stable correlation key (trim + collapse whitespace +
+/// cap length). Prompts are matched between the main transcript's Agent
+/// tool_use input and the sub-agent file's first user message.
+fn normalize_prompt_key(prompt: &str) -> String {
+    let mut out = String::new();
+    let mut prev_space = false;
+    for ch in prompt.trim().chars().take(512) {
+        if ch.is_whitespace() {
+            if !prev_space {
+                out.push(' ');
+                prev_space = true;
+            }
+        } else {
+            out.push(ch);
+            prev_space = false;
+        }
+    }
+    out
 }
 
 /// Return compact segment metadata for a given session/source.
@@ -3198,9 +3592,10 @@ fn extract_usage_fields(
 mod tests {
     use super::{
         dedupe_history_sessions_with_provenance_records, dedupe_near_duplicate_history_sessions,
-        find_codex_session_file_with_config, is_noise_display, load_claude_history_from_paths,
-        load_codex_history_from_config, merge_opencode_history_session, normalize_history_display,
-        normalize_history_source, parse_claude_conversation_file, parse_codex_history_timestamp,
+        discover_subagent_metas, enrich_subagent_metas, find_codex_session_file_with_config,
+        is_noise_display, load_claude_history_from_paths, load_codex_history_from_config,
+        merge_opencode_history_session, normalize_history_display, normalize_history_source,
+        parse_claude_conversation_file, parse_codex_history_timestamp,
         parse_opencode_conversation_export, parse_opencode_history_session,
         resolve_codex_path_config_from, upsert_codex_history_session, CodexHistoryLine,
         CodexPathConfig, HistorySession, SOURCE_CLAUDE,
@@ -3636,6 +4031,59 @@ mod tests {
         assert!(
             matches!(&messages[1].content, serde_json::Value::Array(blocks) if blocks.len() == 1)
         );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_subagent_discovery_and_prompt_correlation() {
+        let root = temp_history_dir("subagents");
+        let main_path = root.join("session-sub.jsonl");
+        // Main transcript: an Agent tool_use (with subagent_type/description/prompt)
+        // followed by its tool_result. The prompt must match the sub-agent file's
+        // first user message so enrichment can correlate them.
+        fs::write(
+            &main_path,
+            concat!(
+                "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-06-14T10:00:00.000Z\",\"message\":{\"content\":\"go\"}}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-06-14T10:00:01.000Z\",\"message\":{\"content\":[",
+                "{\"type\":\"tool_use\",\"id\":\"call_1\",\"name\":\"Agent\",\"input\":{\"subagent_type\":\"Explore\",\"description\":\"Find transcript rendering\",\"prompt\":\"Search the codebase for transcript logic\"}}",
+                "],\"model\":\"claude-test\"}}\n",
+                "{\"type\":\"user\",\"uuid\":\"u2\",\"timestamp\":\"2026-06-14T10:00:05.000Z\",\"message\":{\"content\":[",
+                "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":[{\"type\":\"text\",\"text\":\"Found 3 files\"}]}",
+                "]}}\n"
+            ),
+        )
+        .expect("write main transcript");
+
+        let subagents_dir = root.join("subagents");
+        fs::create_dir_all(&subagents_dir).expect("create subagents dir");
+        // Sub-agent file: first line is the dispatch prompt (must match input.prompt),
+        // then an assistant turn with one tool_use (so tool_count >= 1).
+        fs::write(
+            subagents_dir.join("agent-deadbeef.jsonl"),
+            concat!(
+                "{\"type\":\"user\",\"uuid\":\"s1\",\"timestamp\":\"2026-06-14T10:00:02.000Z\",\"agentId\":\"deadbeef\",\"isSidechain\":true,\"message\":{\"content\":\"Search the codebase for transcript logic\"}}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"s2\",\"timestamp\":\"2026-06-14T10:00:03.000Z\",\"agentId\":\"deadbeef\",\"isSidechain\":true,\"message\":{\"content\":[",
+                "{\"type\":\"text\",\"text\":\"looking...\"},",
+                "{\"type\":\"tool_use\",\"id\":\"call_x\",\"name\":\"Grep\",\"input\":{\"pattern\":\"transcript\"}}",
+                "],\"model\":\"claude-test\"}}\n"
+            ),
+        )
+        .expect("write subagent file");
+
+        let mut metas = discover_subagent_metas(&subagents_dir);
+        assert_eq!(metas.len(), 1, "should discover one sub-agent file");
+        assert_eq!(metas[0].agent_id, "deadbeef");
+        assert!(metas[0].tool_count >= 1, "should count the tool_use");
+        assert_eq!(metas[0].status, "running", "pre-enrich default is running");
+
+        enrich_subagent_metas(&mut metas, &main_path);
+        let meta = &metas[0];
+        assert_eq!(meta.subagent_type.as_deref(), Some("Explore"));
+        assert_eq!(meta.description.as_deref(), Some("Find transcript rendering"));
+        assert_eq!(meta.status, "completed");
+        assert_eq!(meta.result_summary.as_deref(), Some("Found 3 files"));
 
         let _ = fs::remove_dir_all(root);
     }
