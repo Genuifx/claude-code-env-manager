@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Bot,
+  ChevronDown,
   Circle,
   FolderOpen,
   KeyRound,
+  Pencil,
   Play,
   Plus,
   Save,
@@ -23,9 +25,10 @@ import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 
 const INPUT_CLS =
-  'w-full px-3 py-1.5 rounded-lg bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 transition-all';
+  'h-8 w-full rounded-lg bg-black/[0.03] dark:bg-white/[0.05] border border-black/[0.08] dark:border-white/[0.08] px-2.5 py-1 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/40 focus:ring-1 focus:ring-primary/20 transition-all';
 
-const TEXTAREA_CLS = `${INPUT_CLS} min-h-[52px] resize-y leading-snug`;
+const TEXTAREA_CLS = `${INPUT_CLS} min-h-[44px] resize-y leading-snug py-1.5`;
+
 const DEFAULT_USER_ACCESS_POLICY =
   '允许普通用户提交工作内容、项目进展、下周计划等材料，并请求生成、整理或润色周报。拒绝与该范围无关的任务，包括执行命令、修改文件、读取敏感信息、操作代码仓库、部署发布或访问外部系统。';
 
@@ -68,14 +71,16 @@ function joinLines(value: string[] | undefined): string {
   return (value ?? []).join('\n');
 }
 
-function ToggleSetting({ checked, onChange, title, disabled }: {
+interface ToggleSettingProps {
   checked: boolean;
   onChange: (v: boolean) => void;
   title: string;
   disabled?: boolean;
-}) {
+}
+
+function ToggleSetting({ checked, onChange, title, disabled }: ToggleSettingProps) {
   return (
-    <label className="flex items-center gap-3 cursor-pointer group">
+    <label className="inline-flex cursor-pointer items-center gap-2 group">
       <button
         type="button"
         role="switch"
@@ -84,8 +89,44 @@ function ToggleSetting({ checked, onChange, title, disabled }: {
         disabled={disabled}
         className={`glass-toggle ${checked ? 'checked' : ''}`}
       />
-      <span className="text-sm font-medium text-foreground">{title}</span>
+      <span className="text-xs font-medium text-foreground">{title}</span>
     </label>
+  );
+}
+
+interface SectionHeaderProps {
+  title: string;
+}
+
+function SectionHeader({ title }: SectionHeaderProps) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground/70">{title}</span>
+      <div className="h-px flex-1 bg-border/40" />
+    </div>
+  );
+}
+
+interface DisclosureProps {
+  title: string;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}
+
+function Disclosure({ title, open, onToggle, children }: DisclosureProps) {
+  return (
+    <div className="border-t border-border/30 pt-3">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between rounded-md py-1 text-left transition-colors hover:text-foreground/80"
+      >
+        <SectionHeader title={title} />
+        <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground/60 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && <div className="mt-3">{children}</div>}
+    </div>
   );
 }
 
@@ -110,6 +151,7 @@ export function WecomPanel() {
   });
   const [isSaving, setIsSaving] = useState(false);
   const [isToggling, setIsToggling] = useState(false);
+  const [editingIds, setEditingIds] = useState<Set<string>>(new Set());
 
   const envNames = useMemo(() => environments.map((env) => env.name).sort(), [environments]);
 
@@ -134,9 +176,11 @@ export function WecomPanel() {
 
     void load();
     const intervalId = window.setInterval(() => {
-      void getWecomBridgeStatus().then((nextStatus) => {
-        if (!cancelled) setStatus(nextStatus);
-      }).catch(() => {});
+      void getWecomBridgeStatus()
+        .then((nextStatus) => {
+          if (!cancelled) setStatus(nextStatus);
+        })
+        .catch(() => {});
     }, 5000);
 
     return () => {
@@ -217,32 +261,69 @@ export function WecomPanel() {
     ? t('settings.wecomRunning').replace('{count}', String(status.activeBotCount ?? 0))
     : t('settings.wecomStopped');
 
+  const addBot = () => {
+    const newBot = blankBot();
+    setEditingIds((prev) => new Set(prev).add(newBot.id));
+    setSettings((current) => ({ ...current, bots: [...current.bots, newBot] }));
+  };
+
+  const removeBot = (id: string) => {
+    setEditingIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    setSettings((current) => ({ ...current, bots: current.bots.filter((item) => item.id !== id) }));
+  };
+
+  const enterEdit = (id: string) => setEditingIds((prev) => new Set(prev).add(id));
+  const leaveEdit = (id: string) => setEditingIds((prev) => {
+    const next = new Set(prev);
+    next.delete(id);
+    return next;
+  });
+
   return (
-    <div className="space-y-5">
-      <div className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] bg-black/[0.02] dark:bg-white/[0.03] p-5">
+    <div className="space-y-4">
+      {/* Status / control plane */}
+      <div className="glass-card glass-noise rounded-2xl p-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className={`flex h-10 w-10 items-center justify-center rounded-full ${status.running ? 'bg-success/10' : 'bg-muted/10'}`}>
-              <Circle className={`h-3 w-3 ${status.running ? 'fill-success text-success' : 'fill-muted-foreground/40 text-muted-foreground/40'}`} />
-            </div>
+          <div className="flex items-center gap-3">
+            <span className="relative inline-flex h-2.5 w-2.5">
+              {status.running && (
+                <span className="absolute inline-flex h-full w-full rounded-full bg-success/25" />
+              )}
+              <span
+                className={`relative inline-flex h-2.5 w-2.5 rounded-full ${
+                  status.running ? 'bg-success' : 'bg-muted-foreground/35'
+                }`}
+              />
+            </span>
             <div>
               <div className="text-sm font-semibold text-foreground">{runningLabel}</div>
-              {status.lastError && <div className="mt-1 text-xs text-destructive">{status.lastError}</div>}
+              {status.lastError && <div className="mt-0.5 text-xs text-destructive">{status.lastError}</div>}
             </div>
           </div>
-          <div className="flex items-center gap-2">
+
+          <div className="flex flex-wrap items-center gap-2">
+            <ToggleSetting
+              checked={settings.enabled}
+              onChange={(enabled) => setSettings((current) => ({ ...current, enabled }))}
+              title={t('settings.wecomEnable')}
+            />
+            <div className="mx-1 h-4 w-px bg-border/50" />
             <Button variant="secondary" size="sm" onClick={handleSave} disabled={isSaving || isToggling}>
-              <Save className="mr-2 h-4 w-4" />
+              <Save className="mr-1.5 h-3.5 w-3.5" />
               {t('common.save')}
             </Button>
             {status.running ? (
               <Button variant="destructive" size="sm" onClick={handleStop} disabled={isToggling}>
-                <Square className="mr-2 h-4 w-4" />
+                <Square className="mr-1.5 h-3.5 w-3.5" />
                 {t('settings.stopBridge')}
               </Button>
             ) : (
               <Button size="sm" onClick={handleStart} disabled={isToggling || settings.bots.length === 0}>
-                <Play className="mr-2 h-4 w-4" />
+                <Play className="mr-1.5 h-3.5 w-3.5" />
                 {t('settings.startBridge')}
               </Button>
             )}
@@ -250,170 +331,403 @@ export function WecomPanel() {
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-3">
-        <ToggleSetting
-          checked={settings.enabled}
-          onChange={(enabled) => setSettings((current) => ({ ...current, enabled }))}
-          title={t('settings.wecomEnable')}
-        />
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setSettings((current) => ({ ...current, bots: [...current.bots, blankBot()] }))}
-        >
-          <Plus className="mr-2 h-4 w-4" />
-          {t('settings.wecomAddBot')}
-        </Button>
-      </div>
-
-      <div className="space-y-4">
+      {/* Bot list */}
+      <div className="space-y-3">
         {settings.bots.map((bot, index) => {
           const botStatus = status.bots?.find((item) => item.id === bot.id || item.botId === bot.botId);
           return (
-            <div key={bot.id} className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] bg-black/[0.02] dark:bg-white/[0.03] p-4">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <Bot className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm font-semibold text-foreground">
-                    {bot.name || t('settings.wecomBotTitle').replace('{index}', String(index + 1))}
-                  </span>
-                  {botStatus?.running && <span className="rounded-full bg-success/10 px-2 py-0.5 text-xs text-success">{t('settings.running')}</span>}
-                </div>
-                <div className="flex items-center gap-2">
-                  <ToggleSetting
-                    checked={bot.enabled}
-                    onChange={(enabled) => updateBot(bot.id, { enabled })}
-                    title={t('settings.enabled')}
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setSettings((current) => ({ ...current, bots: current.bots.filter((item) => item.id !== bot.id) }))}
-                    aria-label={t('settings.wecomRemoveBot')}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-
-              <div className="grid gap-4 lg:grid-cols-2">
-                <label className="space-y-2">
-                  <Label>{t('settings.wecomBotName')}</Label>
-                  <input className={INPUT_CLS} value={bot.name ?? ''} onChange={(e) => updateBot(bot.id, { name: e.target.value })} />
-                </label>
-                <label className="space-y-2">
-                  <Label>{t('settings.wecomBotId')}</Label>
-                  <input className={INPUT_CLS} value={bot.botId} onChange={(e) => updateBot(bot.id, { botId: e.target.value })} />
-                </label>
-                <label className="space-y-2">
-                  <Label>{t('settings.wecomSecret')}</Label>
-                  <div className="relative">
-                    <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/50" />
-                    <input
-                      type="password"
-                      className={`${INPUT_CLS} pl-9`}
-                      value={bot.secret ?? ''}
-                      onChange={(e) => updateBot(bot.id, { secret: e.target.value })}
-                    />
-                  </div>
-                </label>
-                <label className="space-y-2">
-                  <Label>{t('settings.wecomWorkspace')}</Label>
-                  <div className="flex gap-2">
-                    <input className={INPUT_CLS} value={bot.workspaceDir} onChange={(e) => updateBot(bot.id, { workspaceDir: e.target.value })} />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      onClick={async () => {
-                        const picked = await openDirectoryPicker();
-                        if (picked) updateBot(bot.id, { workspaceDir: picked });
-                      }}
-                      aria-label={t('common.browse')}
-                    >
-                      <FolderOpen className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </label>
-
-                <label className="space-y-2">
-                  <Label>{t('settings.wecomAdminUsers')}</Label>
-                  <textarea className={TEXTAREA_CLS} value={joinLines(bot.adminUserIds)} onChange={(e) => updateBot(bot.id, { adminUserIds: splitLines(e.target.value) })} />
-                </label>
-                <label className="space-y-2">
-                  <Label>{t('settings.wecomAllowedUsers')}</Label>
-                  <textarea className={TEXTAREA_CLS} value={joinLines(bot.allowedUserIds)} onChange={(e) => updateBot(bot.id, { allowedUserIds: splitLines(e.target.value) })} />
-                </label>
-                <label className="space-y-2">
-                  <Label>{t('settings.wecomAllowedGroups')}</Label>
-                  <textarea className={TEXTAREA_CLS} value={joinLines(bot.allowedGroupChatIds)} onChange={(e) => updateBot(bot.id, { allowedGroupChatIds: splitLines(e.target.value) })} />
-                </label>
-                <label className="space-y-2">
-                  <Label>{t('settings.wecomMentionPatterns')}</Label>
-                  <textarea className={TEXTAREA_CLS} value={joinLines(bot.mentionPatterns)} onChange={(e) => updateBot(bot.id, { mentionPatterns: splitLines(e.target.value) })} />
-                </label>
-              </div>
-
-              <div className="mt-4 grid gap-4 lg:grid-cols-3">
-                <div className="space-y-2">
-                  <Label>{t('settings.wecomEnv')}</Label>
-                  <Select value={bot.defaultEnvName ?? '__current__'} onValueChange={(value) => updateBot(bot.id, { defaultEnvName: value === '__current__' ? null : value })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__current__">{t('settings.telegramUseCurrentEnv')}</SelectItem>
-                      {envNames.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>{t('settings.wecomAdminPerm')}</Label>
-                  <Select value={bot.adminPermMode} onValueChange={(value) => updateBot(bot.id, { adminPermMode: value })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {Object.keys(PERMISSION_PRESETS).map((mode) => (
-                        <SelectItem key={mode} value={mode}>{MODE_DISPLAY_NAMES[mode as PermissionModeName] ?? mode}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>{t('settings.wecomUserPerm')}</Label>
-                  <Select value={bot.userPermMode} onValueChange={(value) => updateBot(bot.id, { userPermMode: value })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {Object.keys(PERMISSION_PRESETS).map((mode) => (
-                        <SelectItem key={mode} value={mode}>{MODE_DISPLAY_NAMES[mode as PermissionModeName] ?? mode}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-3">
-                <div className="space-y-1">
-                  <Label>{t('settings.wecomUserAccessPolicy')}</Label>
-                  <textarea
-                    className={`${TEXTAREA_CLS} min-h-[88px]`}
-                    value={bot.userAccessPolicy || DEFAULT_USER_ACCESS_POLICY}
-                    onChange={(e) => updateBot(bot.id, { userAccessPolicy: e.target.value })}
-                  />
-                </div>
-                <div className="flex flex-wrap items-center gap-4">
-                  <ToggleSetting
-                    checked={bot.requireMention}
-                    onChange={(requireMention) => updateBot(bot.id, { requireMention })}
-                    title={t('settings.wecomRequireMention')}
-                  />
-                  <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                    <Users className="h-3.5 w-3.5" />
-                    {t('settings.wecomUserBoundary')}
-                  </div>
-                </div>
-              </div>
-            </div>
+            <BotCard
+              key={bot.id}
+              bot={bot}
+              index={index}
+              botStatus={botStatus}
+              envNames={envNames}
+              isEditing={editingIds.has(bot.id)}
+              onUpdate={(patch) => updateBot(bot.id, patch)}
+              onRemove={() => removeBot(bot.id)}
+              onEnterEdit={() => enterEdit(bot.id)}
+              onLeaveEdit={() => leaveEdit(bot.id)}
+              onPickWorkspace={async () => {
+                const picked = await openDirectoryPicker();
+                if (picked) updateBot(bot.id, { workspaceDir: picked });
+              }}
+            />
           );
         })}
       </div>
+
+      {/* Empty / add */}
+      <div className="flex items-center justify-between gap-3">
+        {settings.bots.length === 0 && (
+          <div className="text-2xs text-muted-foreground">{t('settings.wecomNoBots')}</div>
+        )}
+        <div className="flex-1" />
+        <Button variant="outline" size="sm" onClick={addBot}>
+          <Plus className="mr-1.5 h-3.5 w-3.5" />
+          {t('settings.wecomAddBot')}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+interface BotStatusItem {
+  id?: string;
+  botId?: string;
+  running?: boolean;
+}
+
+interface BotCardProps {
+  bot: WecomBotConfig;
+  index: number;
+  botStatus?: BotStatusItem;
+  envNames: string[];
+  isEditing: boolean;
+  onUpdate: (patch: Partial<WecomBotConfig>) => void;
+  onRemove: () => void;
+  onEnterEdit: () => void;
+  onLeaveEdit: () => void;
+  onPickWorkspace: () => Promise<void>;
+}
+
+function BotCard({
+  bot,
+  index,
+  botStatus,
+  envNames,
+  isEditing,
+  onUpdate,
+  onRemove,
+  onEnterEdit,
+  onLeaveEdit,
+  onPickWorkspace,
+}: BotCardProps) {
+  const { t } = useLocale();
+  const [showPolicy, setShowPolicy] = useState(true);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const displayName = bot.name || t('settings.wecomBotTitle').replace('{index}', String(index + 1));
+
+  return (
+    <div className="glass-card glass-noise rounded-2xl p-4 transition-all duration-150 hover:border-primary/10">
+      {/* Header */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <Bot className="h-4 w-4" />
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-foreground">{displayName}</div>
+            <div className="text-2xs text-muted-foreground/70">{bot.botId || t('settings.wecomBotId')}</div>
+          </div>
+          {botStatus?.running && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 text-2xs font-medium text-success">
+              <Circle className="h-1.5 w-1.5 fill-success" />
+              {t('settings.running')}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <ToggleSetting
+            checked={bot.enabled}
+            onChange={(enabled) => onUpdate({ enabled })}
+            title={t('settings.enabled')}
+          />
+          {isEditing ? (
+            <Button variant="ghost" size="sm" className="h-8 px-2.5" onClick={onLeaveEdit}>
+              {t('settings.wecomDone')}
+            </Button>
+          ) : (
+            <Button variant="ghost" size="sm" className="h-8 px-2.5" onClick={onEnterEdit}>
+              <Pencil className="mr-1.5 h-3.5 w-3.5" />
+              {t('common.edit')}
+            </Button>
+          )}
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onRemove} aria-label={t('settings.wecomRemoveBot')}>
+            <Trash2 className="h-4 w-4 text-muted-foreground" />
+          </Button>
+        </div>
+      </div>
+
+      {isEditing ? (
+        <BotEditView
+          bot={bot}
+          envNames={envNames}
+          onUpdate={onUpdate}
+          onPickWorkspace={onPickWorkspace}
+          showPolicy={showPolicy}
+          setShowPolicy={setShowPolicy}
+          showAdvanced={showAdvanced}
+          setShowAdvanced={setShowAdvanced}
+        />
+      ) : (
+        <BotReadView bot={bot} />
+      )}
+    </div>
+  );
+}
+
+function BotReadView({ bot }: { bot: WecomBotConfig }) {
+  const { t } = useLocale();
+
+  const formatCount = (count: number, label: string) => `${count} ${label}`;
+
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-x-6 gap-y-2 text-sm md:grid-cols-3">
+        <ReadRow label={t('settings.wecomBotId')} value={bot.botId || t('settings.wecomNotSet')} mono />
+        <ReadRow label={t('settings.wecomWorkspace')} value={bot.workspaceDir || t('settings.wecomNotSet')} mono />
+        <ReadRow
+          label={t('settings.wecomEnv')}
+          value={bot.defaultEnvName || t('settings.telegramUseCurrentEnv')}
+        />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-2xs text-muted-foreground">
+        <span>{formatCount(bot.adminUserIds.length, t('settings.wecomAdminUsersCount'))}</span>
+        <span className="text-border/60">·</span>
+        <span>{formatCount(bot.allowedUserIds.length, t('settings.wecomAllowedUsersCount'))}</span>
+        <span className="text-border/60">·</span>
+        <span>{formatCount(bot.allowedGroupChatIds.length, t('settings.wecomAllowedGroupsCount'))}</span>
+        <span className="text-border/60">·</span>
+        <span>{formatCount(bot.mentionPatterns.length, t('settings.wecomMentionPatternsCount'))}</span>
+      </div>
+
+      <div className="grid gap-x-6 gap-y-2 text-sm md:grid-cols-3">
+        <ReadRow label={t('settings.wecomAdminPerm')} value={MODE_DISPLAY_NAMES[bot.adminPermMode as PermissionModeName] ?? bot.adminPermMode} />
+        <ReadRow label={t('settings.wecomUserPerm')} value={MODE_DISPLAY_NAMES[bot.userPermMode as PermissionModeName] ?? bot.userPermMode} />
+        <ReadRow
+          label={t('settings.wecomRequireMention')}
+          value={bot.requireMention ? t('settings.wecomRequired') : t('settings.wecomNotRequired')}
+        />
+      </div>
+    </div>
+  );
+}
+
+interface ReadRowProps {
+  label: string;
+  value: string;
+  mono?: boolean;
+}
+
+function ReadRow({ label, value, mono }: ReadRowProps) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-2xs font-medium uppercase tracking-wider text-muted-foreground/60">{label}</span>
+      <span className={`truncate text-sm text-foreground ${mono ? 'font-mono' : ''}`}>{value}</span>
+    </div>
+  );
+}
+
+interface BotEditViewProps {
+  bot: WecomBotConfig;
+  envNames: string[];
+  onUpdate: (patch: Partial<WecomBotConfig>) => void;
+  onPickWorkspace: () => Promise<void>;
+  showPolicy: boolean;
+  setShowPolicy: (v: boolean) => void;
+  showAdvanced: boolean;
+  setShowAdvanced: (v: boolean) => void;
+}
+
+function BotEditView({
+  bot,
+  envNames,
+  onUpdate,
+  onPickWorkspace,
+  showPolicy,
+  setShowPolicy,
+  showAdvanced,
+  setShowAdvanced,
+}: BotEditViewProps) {
+  const { t } = useLocale();
+
+  return (
+    <div className="space-y-4">
+      {/* Identity */}
+      <div className="space-y-2.5">
+        <SectionHeader title={t('settings.wecomSectionIdentity')} />
+        <div className="grid gap-3 md:grid-cols-3">
+          <Field label={t('settings.wecomBotName')}>
+            <input className={INPUT_CLS} value={bot.name ?? ''} onChange={(e) => onUpdate({ name: e.target.value })} />
+          </Field>
+          <Field label={t('settings.wecomBotId')}>
+            <input className={INPUT_CLS} value={bot.botId} onChange={(e) => onUpdate({ botId: e.target.value })} />
+          </Field>
+          <Field label={t('settings.wecomSecret')}>
+            <div className="relative">
+              <KeyRound className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/40" />
+              <input
+                type="password"
+                className={`${INPUT_CLS} pl-8`}
+                value={bot.secret ?? ''}
+                onChange={(e) => onUpdate({ secret: e.target.value })}
+              />
+            </div>
+          </Field>
+        </div>
+      </div>
+
+      {/* Access */}
+      <div className="space-y-2.5">
+        <SectionHeader title={t('settings.wecomSectionAccess')} />
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+          <Field label={t('settings.wecomWorkspace')}>
+            <div className="flex gap-2">
+              <input
+                className={INPUT_CLS}
+                value={bot.workspaceDir}
+                onChange={(e) => onUpdate({ workspaceDir: e.target.value })}
+              />
+              <Button type="button" variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={onPickWorkspace} aria-label={t('common.browse')}>
+                <FolderOpen className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </Field>
+          <Field label={t('settings.wecomAdminUsers')}>
+            <textarea
+              className={TEXTAREA_CLS}
+              value={joinLines(bot.adminUserIds)}
+              onChange={(e) => onUpdate({ adminUserIds: splitLines(e.target.value) })}
+              rows={1}
+            />
+          </Field>
+          <Field label={t('settings.wecomAllowedUsers')}>
+            <textarea
+              className={TEXTAREA_CLS}
+              value={joinLines(bot.allowedUserIds)}
+              onChange={(e) => onUpdate({ allowedUserIds: splitLines(e.target.value) })}
+              rows={1}
+            />
+          </Field>
+          <Field label={t('settings.wecomAllowedGroups')}>
+            <textarea
+              className={TEXTAREA_CLS}
+              value={joinLines(bot.allowedGroupChatIds)}
+              onChange={(e) => onUpdate({ allowedGroupChatIds: splitLines(e.target.value) })}
+              rows={1}
+            />
+          </Field>
+        </div>
+      </div>
+
+      {/* Runtime */}
+      <div className="space-y-2.5">
+        <SectionHeader title={t('settings.wecomSectionRuntime')} />
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-5">
+          <Field label={t('settings.wecomEnv')}>
+            <Select
+              value={bot.defaultEnvName ?? '__current__'}
+              onValueChange={(value) => onUpdate({ defaultEnvName: value === '__current__' ? null : value })}
+            >
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__current__">{t('settings.telegramUseCurrentEnv')}</SelectItem>
+                {envNames.map((name) => (
+                  <SelectItem key={name} value={name}>
+                    {name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label={t('settings.wecomAdminPerm')}>
+            <Select value={bot.adminPermMode} onValueChange={(value) => onUpdate({ adminPermMode: value as PermissionModeName })}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.keys(PERMISSION_PRESETS).map((mode) => (
+                  <SelectItem key={mode} value={mode}>
+                    {MODE_DISPLAY_NAMES[mode as PermissionModeName] ?? mode}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label={t('settings.wecomUserPerm')}>
+            <Select value={bot.userPermMode} onValueChange={(value) => onUpdate({ userPermMode: value as PermissionModeName })}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.keys(PERMISSION_PRESETS).map((mode) => (
+                  <SelectItem key={mode} value={mode}>
+                    {MODE_DISPLAY_NAMES[mode as PermissionModeName] ?? mode}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label={t('settings.wecomMentionPatterns')}>
+            <textarea
+              className={TEXTAREA_CLS}
+              value={joinLines(bot.mentionPatterns)}
+              onChange={(e) => onUpdate({ mentionPatterns: splitLines(e.target.value) })}
+              rows={1}
+            />
+          </Field>
+          <div className="flex items-end">
+            <ToggleSetting
+              checked={bot.requireMention}
+              onChange={(requireMention) => onUpdate({ requireMention })}
+              title={t('settings.wecomRequireMention')}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Policy */}
+      <Disclosure title={t('settings.wecomSectionPolicy')} open={showPolicy} onToggle={() => setShowPolicy(!showPolicy)}>
+        <div className="space-y-2">
+          <textarea
+            className={`${TEXTAREA_CLS} min-h-[88px]`}
+            value={bot.userAccessPolicy || DEFAULT_USER_ACCESS_POLICY}
+            onChange={(e) => onUpdate({ userAccessPolicy: e.target.value })}
+          />
+          <div className="flex items-center gap-2 text-2xs text-muted-foreground/70">
+            <Users className="h-3 w-3" />
+            {t('settings.wecomUserBoundary')}
+          </div>
+        </div>
+      </Disclosure>
+
+      {/* Advanced */}
+      <Disclosure title={t('settings.wecomAdvanced')} open={showAdvanced} onToggle={() => setShowAdvanced(!showAdvanced)}>
+        <div className="grid gap-3 md:grid-cols-2">
+          <Field label={t('settings.wecomWsUrl')}>
+            <input
+              className={INPUT_CLS}
+              value={bot.wsUrl ?? 'wss://openws.work.weixin.qq.com'}
+              onChange={(e) => onUpdate({ wsUrl: e.target.value })}
+            />
+          </Field>
+          <Field label={t('settings.wecomAllowedIntents')}>
+            <textarea
+              className={TEXTAREA_CLS}
+              value={joinLines(bot.allowedIntents)}
+              onChange={(e) => onUpdate({ allowedIntents: splitLines(e.target.value) })}
+              rows={1}
+            />
+          </Field>
+        </div>
+      </Disclosure>
+    </div>
+  );
+}
+
+interface FieldProps {
+  label: string;
+  children: React.ReactNode;
+}
+
+function Field({ label, children }: FieldProps) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-2xs font-medium uppercase tracking-wider text-muted-foreground/70">{label}</Label>
+      {children}
     </div>
   );
 }
