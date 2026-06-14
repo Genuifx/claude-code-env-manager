@@ -233,7 +233,7 @@ function createCompactBoundaryMessage(
 function createToolResultMessage(
   id: string,
   toolUseId: string,
-  resultSummary: string,
+  resultContent: string,
   success: boolean,
   occurredAt?: number,
 ): ConversationMessageData {
@@ -243,7 +243,7 @@ function createToolResultMessage(
     content: [{
       type: 'tool_result',
       tool_use_id: toolUseId,
-      content: resultSummary,
+      content: resultContent,
       is_error: !success,
     }],
     timestamp: occurredAt,
@@ -630,7 +630,7 @@ function appendThinkingBlock(
 function attachToolResultToBlocks(
   blocks: ConversationContentBlock[],
   toolUseId: string,
-  resultSummary: string,
+  resultContent: string,
   success: boolean,
   occurredAt?: number,
 ) {
@@ -642,7 +642,7 @@ function attachToolResultToBlocks(
     }
     blocks[index] = {
       ...block,
-      _result: resultSummary,
+      _result: resultContent,
       _resultError: !success,
       ...(occurredAt != null ? { _completedAt: occurredAt } : {}),
     };
@@ -700,7 +700,7 @@ export function buildMessagesFromEvents(
 
   const attachToolResultToExistingMessages = (
     toolUseId: string,
-    resultSummary: string,
+    resultContent: string,
     success: boolean,
     occurredAt?: number,
   ) => {
@@ -713,7 +713,7 @@ export function buildMessagesFromEvents(
         continue;
       }
       const blocks = [...message.content];
-      if (!attachToolResultToBlocks(blocks, toolUseId, resultSummary, success, occurredAt)) {
+      if (!attachToolResultToBlocks(blocks, toolUseId, resultContent, success, occurredAt)) {
         continue;
       }
       next[index] = {
@@ -858,13 +858,16 @@ export function buildMessagesFromEvents(
           hiddenInteractiveToolUseIds.delete(event.payload.tool_use_id);
           break;
         }
+        const resultContent = event.payload.result_content?.trim()
+          ? event.payload.result_content
+          : event.payload.result_summary;
         let attachedToPendingTurn = false;
         const currentPendingTurn = pendingTurn as PendingAssistantTurn | null;
         if (currentPendingTurn) {
           attachedToPendingTurn = attachToolResultToBlocks(
             currentPendingTurn.contentBlocks,
             event.payload.tool_use_id,
-            event.payload.result_summary,
+            resultContent,
             event.payload.success,
             occurredAt,
           );
@@ -873,7 +876,7 @@ export function buildMessagesFromEvents(
           attachedToPendingTurn
           || attachToolResultToExistingMessages(
             event.payload.tool_use_id,
-            event.payload.result_summary,
+            resultContent,
             event.payload.success,
             occurredAt,
           )
@@ -892,7 +895,7 @@ export function buildMessagesFromEvents(
         const resultBlock = {
           type: 'tool_result',
           tool_use_id: event.payload.tool_use_id,
-          content: event.payload.result_summary,
+          content: resultContent,
           is_error: !event.payload.success,
         };
         const last = next[next.length - 1];
@@ -912,7 +915,7 @@ export function buildMessagesFromEvents(
             createToolResultMessage(
               `tool-result-${event.seq}`,
               event.payload.tool_use_id,
-              event.payload.result_summary,
+              resultContent,
               event.payload.success,
               occurredAt,
             ),

@@ -350,6 +350,7 @@ fn parse_user_line(
 
             events.push(SessionEventPayload::ToolUseCompleted {
                 tool_use_id: tool_use_id.to_string(),
+                result_content: subagent_tool_result_content(&raw_name, block),
                 raw_name,
                 result_summary: summarize_tool_result(block),
                 success,
@@ -571,6 +572,23 @@ fn summarize_tool_result(block: &Value) -> String {
     }
 
     truncate_summary(&compact_json(block))
+}
+
+fn subagent_tool_result_content(raw_name: &str, block: &Value) -> Option<String> {
+    if !matches!(raw_name, "Agent" | "Task") {
+        return None;
+    }
+
+    extract_tool_result_text(block.get("content")).or_else(|| {
+        block
+            .get("toolUseResult")
+            .and_then(Value::as_object)
+            .and_then(|value| value.get("message"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+    })
 }
 
 fn extract_tool_result_text(value: Option<&Value>) -> Option<String> {
@@ -808,10 +826,46 @@ mod tests {
                 tool_use_id,
                 raw_name,
                 result_summary,
+                result_content: None,
                 success,
             } if tool_use_id == "toolu-plan"
                 && raw_name == "EnterPlanMode"
                 && result_summary == "Entered plan mode."
+                && *success
+        )));
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn subagent_tool_result_includes_full_content() {
+        let mut pending = HashMap::from([("toolu-agent".to_string(), "Agent".to_string())]);
+        let full_output =
+            "# Review\n\n- finding one\n- finding two\n\n```ts\nconst ok = true;\n```";
+        let value = json!({
+            "type": "user",
+            "message": {
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu-agent",
+                    "content": full_output
+                }]
+            }
+        });
+
+        let events = parse_jsonl_line(&value, &mut pending);
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            SessionEventPayload::ToolUseCompleted {
+                tool_use_id,
+                raw_name,
+                result_summary,
+                result_content: Some(result_content),
+                success,
+            } if tool_use_id == "toolu-agent"
+                && raw_name == "Agent"
+                && result_summary == full_output
+                && result_content == full_output
                 && *success
         )));
         assert!(pending.is_empty());

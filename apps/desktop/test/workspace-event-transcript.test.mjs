@@ -73,6 +73,42 @@ test('live transcript preserves thinking, tool, and text event order in assistan
   ]);
 });
 
+test('live transcript attaches full subagent result content when available', async () => {
+  const { buildMessagesFromEvents } = await importWorkspaceEventTranscript();
+  const fullResult = '# Review\n\n- finding one\n- finding two\n\n```ts\nconst ok = true;\n```';
+
+  const messages = buildMessagesFromEvents(
+    [{ msgType: 'user', uuid: 'user-1', content: '审一下', segmentIndex: 0, isCompactBoundary: false }],
+    [],
+    [
+      event(1, { type: 'lifecycle', stage: 'turn_started', detail: '' }),
+      event(2, { type: 'tool_use_started', tool_use_id: 'tool-agent', raw_name: 'Agent', input_summary: 'review drawer', needs_response: false, category: { category: 'task_mgmt', raw_name: 'Agent' } }),
+      event(3, {
+        type: 'tool_use_completed',
+        tool_use_id: 'tool-agent',
+        raw_name: 'Agent',
+        result_summary: '# Review...',
+        result_content: fullResult,
+        success: true,
+      }),
+      event(4, { type: 'lifecycle', stage: 'turn_completed', detail: '' }),
+    ],
+  );
+
+  assert.deepEqual(messages[1].content, [
+    {
+      type: 'tool_use',
+      id: 'tool-agent',
+      name: 'Agent',
+      input: { summary: 'review drawer' },
+      _startedAt: Date.parse('2026-05-01T00:00:02.000Z'),
+      _result: fullResult,
+      _resultError: false,
+      _completedAt: Date.parse('2026-05-01T00:00:03.000Z'),
+    },
+  ]);
+});
+
 test('live transcript appends streaming thinking deltas without inserting paragraph breaks', async () => {
   const { buildMessagesFromEvents } = await importWorkspaceEventTranscript();
 

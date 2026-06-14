@@ -392,6 +392,7 @@ impl TelegramChannel {
                 raw_name,
                 result_summary,
                 success,
+                ..
             } => {
                 if let Some(active_prompt) = self
                     .manager
