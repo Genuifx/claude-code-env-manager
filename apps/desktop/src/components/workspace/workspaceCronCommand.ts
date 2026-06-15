@@ -51,7 +51,10 @@ function taskNameForRequest(request: string): string {
 
 function taskPromptForRequest(request: string): string {
   if (isGithubPullRequest(request)) {
-    return '请在当前工作区主动拉取最新的 GitHub 代码。执行前先检查当前分支和未提交改动；如存在会被覆盖的本地改动或合并冲突风险，请停止并报告，不要强制覆盖。';
+    return [
+      `请在当前工作区按这个定时请求执行：${request}`,
+      '执行前先检查当前分支和未提交改动；如存在会被覆盖的本地改动或合并冲突风险，请停止并报告，不要强制覆盖。',
+    ].join('\n\n');
   }
 
   return `请在当前工作区执行这个定时任务：${request}`;

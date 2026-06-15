@@ -1451,9 +1451,14 @@ export function Workspace({
         toast.error(t('workspace.cronCommandInvalid'));
         return false;
       }
-      return createCronTaskFromWorkspaceCommand(
+      const created = await createCronTaskFromWorkspaceCommand(
         parseWorkspaceCronCommand(rawPrompt, workingDir),
       );
+      if (created) {
+        setComposePrompt('');
+        setComposePlanModeEnabled(false);
+      }
+      return created;
     }
     const prompt = buildComposerPromptText(rawPrompt, attachments);
     const images = extractComposerImagePayloads(attachments);
@@ -1554,9 +1559,14 @@ export function Workspace({
         toast.error(t('workspace.cronCommandInvalid'));
         return false;
       }
-      return createCronTaskFromWorkspaceCommand(
+      const created = await createCronTaskFromWorkspaceCommand(
         parseWorkspaceCronCommand(rawPrompt, selectedSession.project),
       );
+      if (created) {
+        setHistoryComposerText('');
+        setHistoryPlanModeEnabled(false);
+      }
+      return created;
     }
     const prompt = buildComposerPromptText(rawPrompt, attachments);
     const images = extractComposerImagePayloads(attachments);

@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.resolve(__dirname, '..');
+const workspacePagePath = path.join(desktopDir, 'src', 'pages', 'Workspace.tsx');
 
 async function importWorkspaceCronCommand() {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ccem-workspace-cron-command-test-'));
@@ -54,10 +55,39 @@ test('parses /ccem-cron workspace command into a scheduled GitHub pull task', as
   assert.deepEqual(draft, {
     name: '拉取最新 GitHub 代码',
     cronExpression: '0 8,12,18 * * *',
-    prompt: '请在当前工作区主动拉取最新的 GitHub 代码。执行前先检查当前分支和未提交改动；如存在会被覆盖的本地改动或合并冲突风险，请停止并报告，不要强制覆盖。',
+    prompt: [
+      '请在当前工作区按这个定时请求执行：每天早中晚都主动拉取一下最新的github代码',
+      '执行前先检查当前分支和未提交改动；如存在会被覆盖的本地改动或合并冲突风险，请停止并报告，不要强制覆盖。',
+    ].join('\n\n'),
     workingDir: '/Users/wzt/G/Github/claude-code-env-manager',
     executionProfile: 'standard',
   });
+});
+
+test('preserves the full user cron request for GitHub report and review tasks', async () => {
+  const { parseWorkspaceCronCommand } = await importWorkspaceCronCommand();
+  const request = '每天早中晚都主动拉取一下github的分支代码，有新的变更就生成一个变更报告，并主动review代码';
+
+  const draft = parseWorkspaceCronCommand(`/ccem-cron ${request}`, '/tmp/project');
+
+  assert.equal(draft?.cronExpression, '0 8,12,18 * * *');
+  assert.equal(draft?.executionProfile, 'standard');
+  assert.match(draft?.prompt ?? '', /生成一个变更报告/);
+  assert.match(draft?.prompt ?? '', /主动review代码/);
+  assert.match(draft?.prompt ?? '', /不要强制覆盖/);
+});
+
+test('workspace cron submit clears the visible composer after task creation', async () => {
+  const source = await fs.readFile(workspacePagePath, 'utf8');
+
+  assert.match(
+    source,
+    /const created = await createCronTaskFromWorkspaceCommand\(\s*parseWorkspaceCronCommand\(rawPrompt, workingDir\),\s*\);\s*if \(created\) {\s*setComposePrompt\(''\);\s*setComposePlanModeEnabled\(false\);\s*}\s*return created;/s,
+  );
+  assert.match(
+    source,
+    /const created = await createCronTaskFromWorkspaceCommand\(\s*parseWorkspaceCronCommand\(rawPrompt, selectedSession\.project\),\s*\);\s*if \(created\) {\s*setHistoryComposerText\(''\);\s*setHistoryPlanModeEnabled\(false\);\s*}\s*return created;/s,
+  );
 });
 
 test('ignores normal workspace prompts and empty cron commands', async () => {
