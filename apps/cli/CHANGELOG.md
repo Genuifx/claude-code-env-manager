@@ -1,5 +1,11 @@
 # ccem
 
+## 2.17.0
+
+### Minor Changes
+
+- Release desktop updates for sub-agent review output, workspace handoff behavior, and WeCom panel flow improvements.
+
 ## 2.16.0
 
 ### Minor Changes
