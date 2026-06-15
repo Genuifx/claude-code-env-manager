@@ -15,9 +15,11 @@ The file-size CI gate blocks new source files over 1000 lines unless they are do
 - `apps/desktop/src-tauri/src/telegram/mod.rs`: Telegram bot integration is currently a large monolith and needs phased extraction.
 - `apps/desktop/src-tauri/src/terminal.rs`: Terminal management and adapter logic is still bundled together.
 - `apps/desktop/src-tauri/src/tmux.rs`: tmux launch, status parsing, and recovery helpers are still bundled together.
+- `apps/desktop/src-tauri/src/wecom/mod.rs`: WeCom bot bridge integration is currently a large module and needs phased extraction.
 - `apps/desktop/src-tauri/src/weixin/mod.rs`: Weixin bridge integration remains a large monolith and needs phased extraction.
 - `apps/desktop/src/components/analytics/SharePosterDialog.tsx`: Share poster generation UI is still implemented in one large component.
 - `apps/desktop/src/components/use-prompt-area.ts`: Vendored Prompt Area registry hook is kept intact while composer rich-input behavior is validated.
+- `apps/desktop/src/components/workspace/WorkspaceReviewDrawer.tsx`: Workspace review drawer rendering remains concentrated while sub-agent execution details are being iterated.
 - `apps/desktop/src/components/workspace/WorkspaceMessageBubble.tsx`: Workspace transcript rendering is still bundled with attachment, diff, and tool-call presentation during the workspace redesign.
 - `apps/desktop/src/components/workspace/WorkspaceSessionComposer.tsx`: Workspace composer state, image attachment handling, and model/provider controls remain concentrated during the workspace redesign.
 - `apps/desktop/src/components/workspace/WorkspaceNativeSessionView.tsx`: Native workspace transcript, attention handling, and composer orchestration remain concentrated during the workspace redesign.
