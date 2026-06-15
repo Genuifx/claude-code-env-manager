@@ -1,5 +1,11 @@
 # ccem
 
+## 2.18.0
+
+### Minor Changes
+
+- Add workspace cron slash command support and stabilize Codex SDK sessions.
+
 ## 2.17.0
 
 ### Minor Changes
