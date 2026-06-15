@@ -1,91 +1,57 @@
 export const WORKSPACE_CRON_COMMAND = '/ccem-cron';
 
-export interface WorkspaceCronTaskDraft {
-  name: string;
-  cronExpression: string;
+export interface WorkspaceCronAgentPrompt {
   prompt: string;
-  workingDir: string;
-  executionProfile?: 'conservative' | 'standard' | 'autonomous';
+  displayPrompt: string;
 }
-
-const MORNING_NOON_EVENING_CRON = '0 8,12,18 * * *';
 
 export function isWorkspaceCronCommand(value: string): boolean {
   return /^\/ccem-cron(?:\s|$)/i.test(value.trimStart());
 }
 
-function cronExpressionForRequest(request: string): string {
-  if (/早中晚|早、中、晚|早午晚|morning.*noon.*evening/i.test(request)) {
-    return MORNING_NOON_EVENING_CRON;
-  }
-  if (/工作日|weekday/i.test(request)) {
-    return '0 9 * * 1-5';
-  }
-  if (/每小时|hourly/i.test(request)) {
-    return '0 * * * *';
-  }
-  if (/每天|每日|daily|every day/i.test(request)) {
-    return '0 9 * * *';
-  }
-  return '0 9 * * *';
+export function getWorkspaceCronRequest(value: string): string | null {
+  const trimmed = value.trim();
+  const commandPattern = new RegExp(`^${WORKSPACE_CRON_COMMAND}(?:\\s+([\\s\\S]+))?$`, 'i');
+  const match = trimmed.match(commandPattern);
+  const request = match?.[1]?.trim();
+  return request || null;
 }
 
-function isGithubPullRequest(request: string): boolean {
-  return /(github|git\s*hub)/i.test(request)
-    && /(拉取|pull|同步|更新)/i.test(request)
-    && /(最新|latest|代码|code|仓库|repo)/i.test(request);
-}
-
-function taskNameForRequest(request: string): string {
-  if (isGithubPullRequest(request)) {
-    return '拉取最新 GitHub 代码';
-  }
-
-  return request
-    .replace(/^(每天|每日|工作日|每小时)/, '')
-    .replace(/^(早中晚|早、中、晚|早午晚)/, '')
-    .replace(/[。.!！?？]+$/g, '')
-    .trim()
-    .slice(0, 28) || 'Workspace 定时任务';
-}
-
-function taskPromptForRequest(request: string): string {
-  if (isGithubPullRequest(request)) {
-    return [
-      `请在当前工作区按这个定时请求执行：${request}`,
-      '执行前先检查当前分支和未提交改动；如存在会被覆盖的本地改动或合并冲突风险，请停止并报告，不要强制覆盖。',
-    ].join('\n\n');
-  }
-
-  return `请在当前工作区执行这个定时任务：${request}`;
-}
-
-export function parseWorkspaceCronCommand(
+export function buildWorkspaceCronAgentPrompt(
   value: string,
   workingDir?: string | null,
-): WorkspaceCronTaskDraft | null {
-  const trimmed = value.trim();
+): WorkspaceCronAgentPrompt | null {
   const normalizedWorkingDir = workingDir?.trim();
   if (!normalizedWorkingDir) {
     return null;
   }
 
-  const commandPattern = new RegExp(`^${WORKSPACE_CRON_COMMAND}(?:\\s+([\\s\\S]+))?$`, 'i');
-  const match = trimmed.match(commandPattern);
-  if (!match) {
-    return null;
-  }
-
-  const request = match[1]?.trim();
+  const request = getWorkspaceCronRequest(value);
   if (!request) {
     return null;
   }
 
   return {
-    name: taskNameForRequest(request),
-    cronExpression: cronExpressionForRequest(request),
-    prompt: taskPromptForRequest(request),
-    workingDir: normalizedWorkingDir,
-    executionProfile: isGithubPullRequest(request) ? 'standard' : 'conservative',
+    displayPrompt: `${WORKSPACE_CRON_COMMAND} ${request}`,
+    prompt: [
+      `用户在 CCEM workspace 中输入了：${WORKSPACE_CRON_COMMAND} ${request}`,
+      '',
+      '请你作为当前 workspace 的 Claude Code/Codex agent 设置这个 CCEM 定时任务，而不是只给建议或计划。',
+      '',
+      '执行要求：',
+      `- 任务工作目录固定使用：${normalizedWorkingDir}`,
+      '- 理解用户的自然语言时间表达，生成标准 5 字段 cron 表达式：分 时 日 月 周。',
+      '- 生成简短任务名和可直接执行的任务 prompt。',
+      '- 创建前读取现有 `~/.ccem/cron-tasks.json`，保留已有任务；文件不存在时创建 `{ "tasks": [] }`。',
+      '- `~/.ccem/cron-tasks.json` 的真实格式必须是对象：`{ "tasks": [...] }`，不要写成裸数组。',
+      '- 新任务字段需包含：id、name、cronExpression、prompt、workingDir、envName、executionProfile、maxBudgetUsd、allowedTools、disallowedTools、enabled、timeoutSecs、templateId、triggerType、parentTaskId、createdAt、updatedAt。',
+      '- 默认 enabled=true、timeoutSecs=300、triggerType="schedule"；executionProfile 根据任务风险选择 conservative、standard 或 autonomous。',
+      '- 用 JSON parser 修改文件，不要用 echo/cat 手拼 JSON；写入后重新读取文件验证新任务存在。',
+      '- 最后向用户报告创建出的 name、cronExpression、workingDir 和 prompt。',
+      '- 如果时间表达、权限、目录或现有任务冲突不确定，先请用户确认；不要强制覆盖任何现有任务。',
+      '',
+      '用户原始定时需求：',
+      request,
+    ].join('\n'),
   };
 }
