@@ -65,9 +65,8 @@ import {
 import { normalizeEffortForProvider } from './workspaceSessionPreferences';
 import { resolveWorkspaceRuntimePlanMode } from './workspaceRuntimePlanMode';
 import {
+  buildWorkspaceCronAgentPrompt,
   isWorkspaceCronCommand,
-  parseWorkspaceCronCommand,
-  type WorkspaceCronTaskDraft,
 } from './workspaceCronCommand';
 import {
   appendSessionEvents,
@@ -963,8 +962,6 @@ export function WorkspaceNativeSessionView({
     getSessionSubagents,
     listNativeSessions,
     searchWorkspaceFiles,
-    addCronTask,
-    loadCronTasks,
   } = useTauriCommands();
   const [sessionEnv, setSessionEnv] = useState(session.env_name);
   const [sessionRuntimePermMode, setSessionRuntimePermMode] = useState(
@@ -1849,65 +1846,45 @@ export function WorkspaceNativeSessionView({
       });
   }, [refreshSummary, session.provider, session.runtime_id, sessionEffort, t, updateNativeSessionSettings]);
 
-  const createCronTaskFromWorkspaceCommand = useCallback(async (
-    draft: WorkspaceCronTaskDraft | null,
-  ) => {
-    if (!draft) {
-      toast.error(t('workspace.cronCommandInvalid'));
-      return false;
-    }
-
-    try {
-      const task = await addCronTask({
-        ...draft,
-        executionProfile: draft.executionProfile ?? 'conservative',
-        maxBudgetUsd: null,
-        allowedTools: [],
-        disallowedTools: [],
-      });
-      await loadCronTasks();
-      toast.success(t('workspace.cronCommandCreated').replace('{name}', task.name));
-      return true;
-    } catch (error) {
-      console.error('Failed to create workspace cron task from live session:', error);
-      toast.error(t('workspace.cronCommandCreateFailed'));
-      return false;
-    }
-  }, [addCronTask, loadCronTasks, t]);
-
   const handleSend = useCallback(async (payload?: ComposerSubmitPayload) => {
+    if (isSending) {
+      return false;
+    }
+
     const text = payload?.text ?? composerText.trim();
     const displayText = payload?.displayText ?? text;
     const attachments = payload?.attachments ?? [];
     if (!text && attachments.length === 0) {
       return false;
     }
-    if (isWorkspaceCronCommand(text)) {
+    const isCronCommand = isWorkspaceCronCommand(text);
+    const cronAgentPrompt = isCronCommand
+      ? buildWorkspaceCronAgentPrompt(text, session.project_dir)
+      : null;
+    if (isCronCommand) {
       if (attachments.length > 0) {
         toast.error(t('workspace.cronCommandInvalid'));
         return false;
       }
-      const created = await createCronTaskFromWorkspaceCommand(
-        parseWorkspaceCronCommand(text, session.project_dir),
-      );
-      if (created) {
-        setComposerText('');
-        setComposerPlanModeEnabled(sessionRuntimePermMode === 'plan');
+      if (!cronAgentPrompt) {
+        toast.error(t('workspace.cronCommandInvalid'));
+        return false;
       }
-      return created;
     }
+    const promptText = cronAgentPrompt?.prompt ?? text;
+    const promptDisplayText = cronAgentPrompt?.displayPrompt ?? displayText;
 
     const nextPrompt = {
       id: `user-${Date.now()}`,
-      text,
-      displayText,
-      planMode: composerPlanModeEnabled,
-      attachments,
+      text: promptText,
+      displayText: promptDisplayText,
+      planMode: isCronCommand ? false : composerPlanModeEnabled,
+      attachments: isCronCommand ? [] : attachments,
     };
     setComposerText('');
     setComposerPlanModeEnabled(sessionRuntimePermMode === 'plan');
 
-    if (hasQuickReplyPrompt && !isProcessingTurn && !hasHardBlockingAttention) {
+    if (!isCronCommand && hasQuickReplyPrompt && !isProcessingTurn && !hasHardBlockingAttention) {
       const planExitReplies = planExitApprovalPrompt?.prompt.prompt_type === 'plan_exit'
         ? promptQuickReplies(planExitApprovalPrompt.prompt)
         : [];
@@ -1955,10 +1932,10 @@ export function WorkspaceNativeSessionView({
   }, [
     composerPlanModeEnabled,
     composerText,
-    createCronTaskFromWorkspaceCommand,
     hasHardBlockingAttention,
     hasQuickReplyPrompt,
     isProcessingTurn,
+    isSending,
     planExitApprovalPrompt,
     sendPromptBatch,
     sendInteractivePromptReply,

@@ -9,6 +9,13 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.resolve(__dirname, '..');
 const workspacePagePath = path.join(desktopDir, 'src', 'pages', 'Workspace.tsx');
+const workspaceNativeViewPath = path.join(
+  desktopDir,
+  'src',
+  'components',
+  'workspace',
+  'WorkspaceNativeSessionView.tsx',
+);
 
 async function importWorkspaceCronCommand() {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ccem-workspace-cron-command-test-'));
@@ -44,59 +51,66 @@ async function importComposerCapabilities() {
   return import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
 }
 
-test('parses /ccem-cron workspace command into a scheduled GitHub pull task', async () => {
-  const { parseWorkspaceCronCommand } = await importWorkspaceCronCommand();
+test('builds /ccem-cron into an agent prompt instead of a local scheduled task draft', async () => {
+  const { buildWorkspaceCronAgentPrompt } = await importWorkspaceCronCommand();
 
-  const draft = parseWorkspaceCronCommand(
+  const request = buildWorkspaceCronAgentPrompt(
     '/ccem-cron 每天早中晚都主动拉取一下最新的github代码',
     '/Users/wzt/G/Github/claude-code-env-manager',
   );
 
-  assert.deepEqual(draft, {
-    name: '拉取最新 GitHub 代码',
-    cronExpression: '0 8,12,18 * * *',
-    prompt: [
-      '请在当前工作区按这个定时请求执行：每天早中晚都主动拉取一下最新的github代码',
-      '执行前先检查当前分支和未提交改动；如存在会被覆盖的本地改动或合并冲突风险，请停止并报告，不要强制覆盖。',
-    ].join('\n\n'),
-    workingDir: '/Users/wzt/G/Github/claude-code-env-manager',
-    executionProfile: 'standard',
-  });
+  assert.equal(
+    request?.displayPrompt,
+    '/ccem-cron 每天早中晚都主动拉取一下最新的github代码',
+  );
+  assert.match(request?.prompt ?? '', /Claude Code\/Codex agent 设置这个 CCEM 定时任务/);
+  assert.match(request?.prompt ?? '', /任务工作目录固定使用：\/Users\/wzt\/G\/Github\/claude-code-env-manager/);
+  assert.match(request?.prompt ?? '', /理解用户的自然语言时间表达/);
+  assert.match(request?.prompt ?? '', /\{ "tasks": \[\] \}/);
+  assert.match(request?.prompt ?? '', /不要写成裸数组/);
+  assert.match(request?.prompt ?? '', /写入后重新读取文件验证新任务存在/);
 });
 
-test('preserves the full user cron request for GitHub report and review tasks', async () => {
-  const { parseWorkspaceCronCommand } = await importWorkspaceCronCommand();
+test('preserves the full user cron request for the launched agent', async () => {
+  const { buildWorkspaceCronAgentPrompt } = await importWorkspaceCronCommand();
   const request = '每天早中晚都主动拉取一下github的分支代码，有新的变更就生成一个变更报告，并主动review代码';
 
-  const draft = parseWorkspaceCronCommand(`/ccem-cron ${request}`, '/tmp/project');
+  const agentPrompt = buildWorkspaceCronAgentPrompt(`/ccem-cron ${request}`, '/tmp/project');
 
-  assert.equal(draft?.cronExpression, '0 8,12,18 * * *');
-  assert.equal(draft?.executionProfile, 'standard');
-  assert.match(draft?.prompt ?? '', /生成一个变更报告/);
-  assert.match(draft?.prompt ?? '', /主动review代码/);
-  assert.match(draft?.prompt ?? '', /不要强制覆盖/);
+  assert.match(agentPrompt?.prompt ?? '', /生成一个变更报告/);
+  assert.match(agentPrompt?.prompt ?? '', /主动review代码/);
+  assert.match(agentPrompt?.prompt ?? '', /不要强制覆盖任何现有任务/);
 });
 
-test('workspace cron submit clears the visible composer after task creation', async () => {
+test('workspace cron submit launches a native agent session instead of creating a task directly', async () => {
   const source = await fs.readFile(workspacePagePath, 'utf8');
+  const liveSource = await fs.readFile(workspaceNativeViewPath, 'utf8');
 
-  assert.match(
-    source,
-    /const created = await createCronTaskFromWorkspaceCommand\(\s*parseWorkspaceCronCommand\(rawPrompt, workingDir\),\s*\);\s*if \(created\) {\s*setComposePrompt\(''\);\s*setComposePlanModeEnabled\(false\);\s*}\s*return created;/s,
-  );
-  assert.match(
-    source,
-    /const created = await createCronTaskFromWorkspaceCommand\(\s*parseWorkspaceCronCommand\(rawPrompt, selectedSession\.project\),\s*\);\s*if \(created\) {\s*setHistoryComposerText\(''\);\s*setHistoryPlanModeEnabled\(false\);\s*}\s*return created;/s,
-  );
+  assert.doesNotMatch(source, /addCronTask/);
+  assert.doesNotMatch(source, /parseWorkspaceCronCommand/);
+  assert.doesNotMatch(liveSource, /addCronTask/);
+  assert.doesNotMatch(liveSource, /parseWorkspaceCronCommand/);
+  assert.match(source, /buildWorkspaceCronAgentPrompt\(rawPrompt, workingDir\)/);
+  assert.match(source, /buildWorkspaceCronAgentPrompt\(rawPrompt, selectedSession\.project\)/);
+  assert.match(source, /initialPrompt: dispatch\.prompt/);
+  assert.match(source, /planModeEnabled: isCronCommand \? false : composePlanModeEnabled/);
+  assert.match(source, /planModeEnabled: isCronCommand \? false : historyPlanModeEnabled/);
+  assert.match(liveSource, /buildWorkspaceCronAgentPrompt\(text, session\.project_dir\)/);
+  assert.match(liveSource, /planMode: isCronCommand \? false : composerPlanModeEnabled/);
 });
 
 test('ignores normal workspace prompts and empty cron commands', async () => {
-  const { isWorkspaceCronCommand, parseWorkspaceCronCommand } = await importWorkspaceCronCommand();
+  const {
+    buildWorkspaceCronAgentPrompt,
+    getWorkspaceCronRequest,
+    isWorkspaceCronCommand,
+  } = await importWorkspaceCronCommand();
 
-  assert.equal(parseWorkspaceCronCommand('帮我看下状态', '/tmp/project'), null);
-  assert.equal(parseWorkspaceCronCommand('/ccem-cron', '/tmp/project'), null);
-  assert.equal(parseWorkspaceCronCommand('/ccem-cron   ', '/tmp/project'), null);
-  assert.equal(parseWorkspaceCronCommand('/ccem-cron 每天检查一下', null), null);
+  assert.equal(buildWorkspaceCronAgentPrompt('帮我看下状态', '/tmp/project'), null);
+  assert.equal(buildWorkspaceCronAgentPrompt('/ccem-cron', '/tmp/project'), null);
+  assert.equal(buildWorkspaceCronAgentPrompt('/ccem-cron   ', '/tmp/project'), null);
+  assert.equal(buildWorkspaceCronAgentPrompt('/ccem-cron 每天检查一下', null), null);
+  assert.equal(getWorkspaceCronRequest('/ccem-cron 每天检查一下'), '每天检查一下');
   assert.equal(isWorkspaceCronCommand('/ccem-cronology 每天检查一下'), false);
 });
 
