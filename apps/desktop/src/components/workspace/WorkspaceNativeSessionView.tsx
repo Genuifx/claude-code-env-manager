@@ -65,6 +65,11 @@ import {
 import { normalizeEffortForProvider } from './workspaceSessionPreferences';
 import { resolveWorkspaceRuntimePlanMode } from './workspaceRuntimePlanMode';
 import {
+  isWorkspaceCronCommand,
+  parseWorkspaceCronCommand,
+  type WorkspaceCronTaskDraft,
+} from './workspaceCronCommand';
+import {
   appendSessionEvents,
   buildBaseMessages,
   buildMessagesFromEvents,
@@ -958,6 +963,8 @@ export function WorkspaceNativeSessionView({
     getSessionSubagents,
     listNativeSessions,
     searchWorkspaceFiles,
+    addCronTask,
+    loadCronTasks,
   } = useTauriCommands();
   const [sessionEnv, setSessionEnv] = useState(session.env_name);
   const [sessionRuntimePermMode, setSessionRuntimePermMode] = useState(
@@ -1842,12 +1849,52 @@ export function WorkspaceNativeSessionView({
       });
   }, [refreshSummary, session.provider, session.runtime_id, sessionEffort, t, updateNativeSessionSettings]);
 
+  const createCronTaskFromWorkspaceCommand = useCallback(async (
+    draft: WorkspaceCronTaskDraft | null,
+  ) => {
+    if (!draft) {
+      toast.error(t('workspace.cronCommandInvalid'));
+      return false;
+    }
+
+    try {
+      const task = await addCronTask({
+        ...draft,
+        executionProfile: draft.executionProfile ?? 'conservative',
+        maxBudgetUsd: null,
+        allowedTools: [],
+        disallowedTools: [],
+      });
+      await loadCronTasks();
+      toast.success(t('workspace.cronCommandCreated').replace('{name}', task.name));
+      return true;
+    } catch (error) {
+      console.error('Failed to create workspace cron task from live session:', error);
+      toast.error(t('workspace.cronCommandCreateFailed'));
+      return false;
+    }
+  }, [addCronTask, loadCronTasks, t]);
+
   const handleSend = useCallback(async (payload?: ComposerSubmitPayload) => {
     const text = payload?.text ?? composerText.trim();
     const displayText = payload?.displayText ?? text;
     const attachments = payload?.attachments ?? [];
     if (!text && attachments.length === 0) {
       return false;
+    }
+    if (isWorkspaceCronCommand(text)) {
+      if (attachments.length > 0) {
+        toast.error(t('workspace.cronCommandInvalid'));
+        return false;
+      }
+      const created = await createCronTaskFromWorkspaceCommand(
+        parseWorkspaceCronCommand(text, session.project_dir),
+      );
+      if (created) {
+        setComposerText('');
+        setComposerPlanModeEnabled(sessionRuntimePermMode === 'plan');
+      }
+      return created;
     }
 
     const nextPrompt = {
@@ -1908,12 +1955,14 @@ export function WorkspaceNativeSessionView({
   }, [
     composerPlanModeEnabled,
     composerText,
+    createCronTaskFromWorkspaceCommand,
     hasHardBlockingAttention,
     hasQuickReplyPrompt,
     isProcessingTurn,
     planExitApprovalPrompt,
     sendPromptBatch,
     sendInteractivePromptReply,
+    session.project_dir,
     sessionRuntimePermMode,
     t,
   ]);

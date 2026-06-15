@@ -19,7 +19,12 @@ export interface WorkspaceComposerCapabilities {
   supportsImages: boolean;
 }
 
+const CCEM_COMMANDS: ComposerCommandDefinition[] = [
+  { token: '/ccem-cron' },
+];
+
 const CLAUDE_COMMANDS: ComposerCommandDefinition[] = [
+  ...CCEM_COMMANDS,
   { token: '/add-dir' },
   { token: '/agents' },
   { token: '/bug' },
@@ -43,6 +48,7 @@ const CLAUDE_COMMANDS: ComposerCommandDefinition[] = [
 ];
 
 const CODEX_COMMANDS: ComposerCommandDefinition[] = [
+  ...CCEM_COMMANDS,
   { token: '/approval-mode' },
   { token: '/browser' },
   { token: '/cache' },

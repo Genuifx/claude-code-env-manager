@@ -73,6 +73,11 @@ import {
   type WorkspaceHistorySessionPreferences,
 } from '@/components/workspace/workspaceSessionPreferences';
 import { resolveComposerDispatch } from '@/components/workspace/workspaceComposerDispatch';
+import {
+  isWorkspaceCronCommand,
+  parseWorkspaceCronCommand,
+  type WorkspaceCronTaskDraft,
+} from '@/components/workspace/workspaceCronCommand';
 import { trimSeedMessagesBeforeFirstUserPrompt } from '@/components/workspace/workspaceEventTranscript';
 import { buildPetNotificationId } from '@/lib/petNotifications';
 import type { PetOpenSessionRequest } from '@/types/pet';
@@ -190,6 +195,7 @@ export function Workspace({
     switchEnvironment,
     openDirectoryPicker,
     loadCronTasks,
+    addCronTask,
     loadInstalledSkills,
     loadWorkspaceSkills,
     loadWorkspaceCommands,
@@ -1409,13 +1415,48 @@ export function Workspace({
     setSessionTitle,
   ]);
 
+  const createCronTaskFromWorkspaceCommand = useCallback(async (
+    draft: WorkspaceCronTaskDraft | null,
+  ) => {
+    if (!draft) {
+      toast.error(t('workspace.cronCommandInvalid'));
+      return false;
+    }
+
+    try {
+      const task = await addCronTask({
+        ...draft,
+        executionProfile: draft.executionProfile ?? 'conservative',
+        maxBudgetUsd: null,
+        allowedTools: [],
+        disallowedTools: [],
+      });
+      await loadCronTasks();
+      toast.success(t('workspace.cronCommandCreated').replace('{name}', task.name));
+      return true;
+    } catch (error) {
+      console.error('Failed to create workspace cron task:', error);
+      toast.error(t('workspace.cronCommandCreateFailed'));
+      return false;
+    }
+  }, [addCronTask, loadCronTasks, t]);
+
   const handleCreateNativeConversation = useCallback(async (payload?: ComposerSubmitPayload) => {
     const rawPrompt = payload?.text ?? composePrompt;
     const displayPrompt = payload?.displayText ?? rawPrompt;
     const attachments = payload?.attachments ?? [];
+    const workingDir = effectiveComposeDir;
+    if (isWorkspaceCronCommand(rawPrompt)) {
+      if (attachments.length > 0) {
+        toast.error(t('workspace.cronCommandInvalid'));
+        return false;
+      }
+      return createCronTaskFromWorkspaceCommand(
+        parseWorkspaceCronCommand(rawPrompt, workingDir),
+      );
+    }
     const prompt = buildComposerPromptText(rawPrompt, attachments);
     const images = extractComposerImagePayloads(attachments);
-    const workingDir = effectiveComposeDir;
     if ((!prompt && images.length === 0) || !workingDir) {
       return false;
     }
@@ -1479,6 +1520,7 @@ export function Workspace({
     composeProvider,
     composePlanModeEnabled,
     createNativeSession,
+    createCronTaskFromWorkspaceCommand,
     currentEnv,
     effectiveComposeDir,
     permissionMode,
@@ -1507,6 +1549,15 @@ export function Workspace({
     const rawPrompt = payload?.text ?? historyComposerText;
     const displayPrompt = payload?.displayText ?? rawPrompt;
     const attachments = payload?.attachments ?? [];
+    if (isWorkspaceCronCommand(rawPrompt)) {
+      if (attachments.length > 0) {
+        toast.error(t('workspace.cronCommandInvalid'));
+        return false;
+      }
+      return createCronTaskFromWorkspaceCommand(
+        parseWorkspaceCronCommand(rawPrompt, selectedSession.project),
+      );
+    }
     const prompt = buildComposerPromptText(rawPrompt, attachments);
     const images = extractComposerImagePayloads(attachments);
     if ((!prompt && images.length === 0) || !selectedSession.project) {
@@ -1561,6 +1612,7 @@ export function Workspace({
     buildComposerPromptText,
     extractComposerImagePayloads,
     createNativeSession,
+    createCronTaskFromWorkspaceCommand,
     historyEnv,
     historyPermMode,
     historyPlanModeEnabled,
