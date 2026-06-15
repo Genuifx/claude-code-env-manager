@@ -194,6 +194,8 @@
     "effortMax": "极限",
     "effortLabel": "推理深度",
     "environmentLabel": "环境",
+    "codexModelSelectorDisabledBadge": "暂未接入",
+    "codexModelSelectorDisabledHint": "Codex SDK 当前不会读取这里的模型选择，会使用 ~/.codex/config.toml 或当前 Codex profile。",
     "nativeStop": "停止",
     "nativeStopFailed": "停止原生会话失败",
     "nativeOpenTerminal": "切到 Terminal 继续",

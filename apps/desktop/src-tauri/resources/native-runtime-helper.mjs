@@ -15613,11 +15613,12 @@ function eD($, X) {
   return null;
 }
 
-// ../../node_modules/.pnpm/@openai+codex-sdk@0.121.0/node_modules/@openai/codex-sdk/dist/index.js
+// ../../node_modules/.pnpm/@openai+codex-sdk@0.139.0/node_modules/@openai/codex-sdk/dist/index.js
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 import { spawn } from "child_process";
+import { statSync as statSync2 } from "fs";
 import path2 from "path";
 import readline from "readline";
 import { createRequire } from "module";
@@ -15763,10 +15764,18 @@ var PLATFORM_PACKAGE_BY_TARGET = {
 var moduleRequire = createRequire(import.meta.url);
 var CodexExec = class {
   executablePath;
+  pathDirs;
   envOverride;
   configOverrides;
   constructor(executablePath = null, env, configOverrides) {
-    this.executablePath = executablePath || findCodexPath();
+    if (executablePath) {
+      this.executablePath = executablePath;
+      this.pathDirs = [];
+    } else {
+      const resolved = findCodexPath();
+      this.executablePath = resolved.executablePath;
+      this.pathDirs = resolved.pathDirs;
+    }
     this.envOverride = env;
     this.configOverrides = configOverrides;
   }
@@ -15845,6 +15854,9 @@ var CodexExec = class {
     }
     if (args.apiKey) {
       env.CODEX_API_KEY = args.apiKey;
+    }
+    if (this.pathDirs.length > 0) {
+      prependPathDirs(env, this.pathDirs);
     }
     const child = spawn(this.executablePath, commandArgs, {
       env,
@@ -16038,10 +16050,68 @@ function findCodexPath() {
       `Unable to locate Codex CLI binaries. Ensure ${CODEX_NPM_NAME} is installed with optional dependencies.`
     );
   }
-  const archRoot = path2.join(vendorRoot, targetTriple);
   const codexBinaryName = process.platform === "win32" ? "codex.exe" : "codex";
-  const binaryPath = path2.join(archRoot, "codex", codexBinaryName);
-  return binaryPath;
+  const nativePackage = resolveNativePackage(vendorRoot, targetTriple, codexBinaryName);
+  if (!nativePackage) {
+    throw new Error(
+      `Unable to locate Codex CLI binaries for ${targetTriple}. Ensure ${CODEX_NPM_NAME} is installed with optional dependencies.`
+    );
+  }
+  return nativePackage;
+}
+function resolveNativePackage(vendorRoot, targetTriple, codexBinaryName) {
+  const packageRoot = path2.join(vendorRoot, targetTriple);
+  const packageBinaryPath = path2.join(packageRoot, "bin", codexBinaryName);
+  if (isFile(packageBinaryPath) && isFile(path2.join(packageRoot, "codex-package.json"))) {
+    return {
+      executablePath: packageBinaryPath,
+      pathDirs: existingDirs(path2.join(packageRoot, "codex-path"))
+    };
+  }
+  const legacyBinaryPath = path2.join(packageRoot, "codex", codexBinaryName);
+  if (isFile(legacyBinaryPath)) {
+    return {
+      executablePath: legacyBinaryPath,
+      pathDirs: existingDirs(path2.join(packageRoot, "path"))
+    };
+  }
+  return null;
+}
+function existingDirs(...dirs) {
+  return dirs.filter(isDirectory);
+}
+function prependPathDirs(env, pathDirs, platform = process.platform) {
+  const pathKey = pathEnvKey(env, platform);
+  if (platform === "win32") {
+    for (const key of Object.keys(env)) {
+      if (key.toLowerCase() === "path" && key !== pathKey) {
+        delete env[key];
+      }
+    }
+  }
+  const existingEntries = (env[pathKey] ?? "").split(path2.delimiter).filter((entry) => entry.length > 0 && !pathDirs.includes(entry));
+  env[pathKey] = [...pathDirs, ...existingEntries].join(path2.delimiter);
+}
+function pathEnvKey(env, platform) {
+  if (platform !== "win32") {
+    return "PATH";
+  }
+  const matchingKeys = Object.keys(env).filter((key) => key.toLowerCase() === "path");
+  return matchingKeys.includes("Path") ? "Path" : matchingKeys.at(-1) ?? "PATH";
+}
+function isFile(filePath) {
+  try {
+    return statSync2(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+function isDirectory(filePath) {
+  try {
+    return statSync2(filePath).isDirectory();
+  } catch {
+    return false;
+  }
 }
 var Codex = class {
   exec;

@@ -3,6 +3,7 @@ import {
   Check,
   ChevronDown,
   Gauge,
+  Lock,
   Search,
   Shield,
   ShieldAlert,
@@ -22,6 +23,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
@@ -119,12 +121,13 @@ export function ComposerControls({
 
   const currentEnvironment = environments.find((e) => e.name === envName);
   const currentEnvironmentIconHint = resolveEnvironmentIconHint(currentEnvironment);
+  const isCodexProvider = provider === 'codex';
   const permissionPreview = {
     desc: t(`environments.permMode_${permissionPreviewMode}_desc`),
     detail: t(`environments.permMode_${permissionPreviewMode}_detail`),
   };
 
-  const effortLevels = provider === 'codex' ? CODEX_EFFORT_LEVELS : CLAUDE_EFFORT_LEVELS;
+  const effortLevels = isCodexProvider ? CODEX_EFFORT_LEVELS : CLAUDE_EFFORT_LEVELS;
 
   return (
     <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
@@ -138,8 +141,29 @@ export function ComposerControls({
               'hover:bg-white/[0.06] focus:ring-2 focus:ring-primary/30',
             )}
           >
-            <EnvironmentLobeIcon hint={currentEnvironmentIconHint} />
-            <span className="min-w-0 max-w-[120px] truncate">{envName}</span>
+            <span
+              className={cn(
+                'flex min-w-0 items-center gap-2',
+                isCodexProvider && 'text-muted-foreground/65',
+              )}
+            >
+              <span className={cn('flex shrink-0', isCodexProvider && 'opacity-45 grayscale')}>
+                <EnvironmentLobeIcon hint={currentEnvironmentIconHint} />
+              </span>
+              <span className="min-w-0 max-w-[120px] truncate">{envName}</span>
+              {isCodexProvider && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-muted/50 text-muted-foreground">
+                      <Lock className="h-2.5 w-2.5" />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-[260px] text-[12px] leading-5">
+                    {t('workspace.codexModelSelectorDisabledHint')}
+                  </TooltipContent>
+                </Tooltip>
+              )}
+            </span>
             <span className="text-muted-foreground/60 max-[760px]:hidden">·</span>
             <Gauge className="h-3 w-3 shrink-0 text-muted-foreground max-[760px]:hidden" />
             <span className="shrink-0 whitespace-nowrap text-muted-foreground max-[760px]:hidden">{t(EFFORT_I18N_KEYS[effort])}</span>
@@ -176,9 +200,20 @@ export function ComposerControls({
               </button>
             ))}
             <div className="mx-2 my-1.5 h-px border-t border-border/50" />
-            <div className="px-2 py-1.5 text-2xs uppercase tracking-wider font-medium text-muted-foreground/70">
-              {t('workspace.environmentLabel')}
+            <div className="flex items-center justify-between gap-3 px-2 py-1.5 text-2xs uppercase tracking-wider font-medium text-muted-foreground/70">
+              <span>{t('workspace.environmentLabel')}</span>
+              {isCodexProvider && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/35 px-1.5 py-0.5 normal-case tracking-normal text-muted-foreground">
+                  <Lock className="h-2.5 w-2.5" />
+                  {t('workspace.codexModelSelectorDisabledBadge')}
+                </span>
+              )}
             </div>
+            {isCodexProvider && (
+              <p className="mx-2 mb-2 rounded-lg border border-border/60 bg-muted/25 px-2.5 py-2 text-[11px] leading-4 text-muted-foreground">
+                {t('workspace.codexModelSelectorDisabledHint')}
+              </p>
+            )}
           </div>
           <ScrollArea className="min-h-0 max-h-[200px]">
             <div className="p-1.5 pt-0">
@@ -186,13 +221,20 @@ export function ComposerControls({
                 <button
                   key={environment.name}
                   type="button"
+                  disabled={isCodexProvider}
+                  aria-disabled={isCodexProvider}
                   className={cn(
                     'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm outline-none',
-                    'cursor-pointer transition-colors',
-                    'glass-dropdown-item',
-                    environment.name === envName && 'text-primary',
+                    'transition-colors',
+                    isCodexProvider
+                      ? 'cursor-not-allowed text-muted-foreground/45 opacity-55'
+                      : 'cursor-pointer glass-dropdown-item',
+                    !isCodexProvider && environment.name === envName && 'text-primary',
                   )}
                   onClick={() => {
+                    if (isCodexProvider) {
+                      return;
+                    }
                     onEnvChange(environment.name);
                     setEnvEffortOpen(false);
                   }}

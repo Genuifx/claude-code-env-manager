@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.112",
-    "@openai/codex-sdk": "^0.121.0",
+    "@openai/codex-sdk": "^0.139.0",
     "zod": "^4.1.12"
   },
   "devDependencies": {

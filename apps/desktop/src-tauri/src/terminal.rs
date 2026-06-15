@@ -668,7 +668,7 @@ pub fn resolve_codex_path() -> Option<String> {
         "/usr/local/bin/codex".to_string(),
         "/opt/homebrew/bin/codex".to_string(),
     ]);
-    resolve_binary_path("codex", &candidates)
+    resolve_highest_versioned_binary_path("codex", &candidates)
 }
 
 /// Resolve the full path to the `opencode` binary.

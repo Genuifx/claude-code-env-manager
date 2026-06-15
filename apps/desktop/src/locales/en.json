@@ -194,6 +194,8 @@
     "effortMax": "Max",
     "effortLabel": "Effort",
     "environmentLabel": "Environment",
+    "codexModelSelectorDisabledBadge": "Not wired",
+    "codexModelSelectorDisabledHint": "Codex SDK does not read this model selection yet. It uses ~/.codex/config.toml or the active Codex profile.",
     "nativeStop": "Stop",
     "nativeStopFailed": "Failed to stop native session",
     "nativeOpenTerminal": "Continue in Terminal",
