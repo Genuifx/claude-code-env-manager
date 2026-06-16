@@ -262,7 +262,7 @@ export interface TauriCommands {
       workingDir?: string | null;
       initialPrompt: string;
       initialDisplayPrompt?: string | null;
-      initialImages?: Array<{ mediaType: string; base64Data: string; placeholder?: string }> | null;
+      initialImages?: NativePromptImageInput[] | null;
       providerSessionId?: string | null;
       effort?: string | null;
     },
@@ -274,7 +274,7 @@ export interface TauriCommands {
       runtimeId: string;
       text: string;
       displayText?: string | null;
-      images?: Array<{ mediaType: string; base64Data: string; placeholder?: string }> | null;
+      images?: NativePromptImageInput[] | null;
     },
     void
   ];
@@ -304,6 +304,13 @@ export interface TauriCommands {
       limit?: number | null;
     },
     ReplayBatch
+  ];
+  read_prompt_image_attachment: [
+    {
+      storagePath: string;
+      mediaType: string;
+    },
+    string
   ];
   stop_native_session: [
     {
@@ -905,8 +912,23 @@ export type InteractiveToolPrompt =
 
 export type TerminalPromptKind = 'permission';
 
+export interface SessionPromptImage {
+  mediaType: string;
+  base64Data?: string | null;
+  storagePath?: string | null;
+  sha256?: string | null;
+  byteSize?: number | null;
+  placeholder?: string | null;
+}
+
+export interface NativePromptImageInput {
+  mediaType: string;
+  base64Data: string;
+  placeholder?: string;
+}
+
 export type SessionEventPayload =
-  | { type: 'user_prompt'; text: string; image_count: number }
+  | { type: 'user_prompt'; text: string; image_count: number; images?: SessionPromptImage[] | null }
   | { type: 'system_message'; message: string }
   | { type: 'lifecycle'; stage: string; detail: string }
   | { type: 'claude_json'; message_type?: string | null; raw_json: string }

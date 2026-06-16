@@ -1,4 +1,5 @@
 import { memo, startTransition, useEffect, useMemo, useRef, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import {
   AlertCircle,
   Brain,
@@ -1054,6 +1055,122 @@ function renderUserMarkdown(text: string) {
   );
 }
 
+function imageBlockMediaType(block: ConversationContentBlock): string {
+  return typeof block.mediaType === 'string'
+    ? block.mediaType
+    : typeof block.media_type === 'string'
+      ? block.media_type
+      : '';
+}
+
+function imageBlockInlineSrc(block: ConversationContentBlock): string | null {
+  const mediaType = imageBlockMediaType(block);
+  const base64Data = typeof block.base64Data === 'string'
+    ? block.base64Data
+    : typeof block.base64_data === 'string'
+      ? block.base64_data
+      : '';
+
+  if (!mediaType.startsWith('image/') || !base64Data) {
+    return null;
+  }
+
+  return `data:${mediaType};base64,${base64Data}`;
+}
+
+function imageBlockStoragePath(block: ConversationContentBlock): string {
+  return typeof block.storagePath === 'string'
+    ? block.storagePath
+    : typeof block.storage_path === 'string'
+      ? block.storage_path
+      : '';
+}
+
+function imageBlockAlt(block: ConversationContentBlock, index: number): string {
+  return typeof block.placeholder === 'string' && block.placeholder.trim()
+    ? block.placeholder.trim()
+    : `Attached image ${index + 1}`;
+}
+
+function WorkspaceImageBlock({ block, index }: { block: ConversationContentBlock; index: number }) {
+  const inlineSrc = imageBlockInlineSrc(block);
+  const mediaType = imageBlockMediaType(block);
+  const storagePath = imageBlockStoragePath(block);
+  const alt = imageBlockAlt(block, index);
+  const [resolvedSrc, setResolvedSrc] = useState<string | null>(inlineSrc);
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (inlineSrc) {
+      setResolvedSrc(inlineSrc);
+      setLoadFailed(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (!mediaType.startsWith('image/') || !storagePath) {
+      setResolvedSrc(null);
+      setLoadFailed(true);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setResolvedSrc(null);
+    setLoadFailed(false);
+    invoke<string>('read_prompt_image_attachment', {
+      storagePath,
+      mediaType,
+    })
+      .then((src) => {
+        if (!cancelled) {
+          setResolvedSrc(src);
+          setLoadFailed(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLoadFailed(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [inlineSrc, mediaType, storagePath]);
+
+  if (!inlineSrc && !storagePath) {
+    return null;
+  }
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-border/35 bg-background/70 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+      {resolvedSrc ? (
+        <img
+          src={resolvedSrc}
+          alt={alt}
+          loading="lazy"
+          className="block max-h-[320px] w-full max-w-full object-contain"
+        />
+      ) : (
+        <div
+          aria-label={alt}
+          className="flex h-40 items-center justify-center bg-muted/25 text-[12px] text-muted-foreground"
+        >
+          {loadFailed ? alt : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function renderImageBlock(block: ConversationContentBlock, index: number) {
+  return <WorkspaceImageBlock block={block} index={index} />;
+}
+
 function renderTextBlock(text: string, isUser: boolean, t: (key: string) => string) {
   const { cleanText, command } = parseMessageText(text);
   const commandArgs = command?.args?.trim() || '';
@@ -1126,6 +1243,9 @@ function renderContentBlocks(
     switch (block.type) {
       case 'text':
         result.push(<div key={`text-${index}`}>{renderTextBlock(block.text || '', isUser, t)}</div>);
+        break;
+      case 'image':
+        result.push(<div key={`image-${index}`}>{renderImageBlock(block, index)}</div>);
         break;
       case 'thinking':
         result.push(
