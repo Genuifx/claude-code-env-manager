@@ -14,6 +14,7 @@ import {
   ArrangeBanner,
   SessionLauncherPopover,
 } from '@/components/sessions';
+import { resolveSessionCloseAction } from '@/components/sessions/sessionCloseActions';
 import { useAppStore, type ArrangeLayout, type Session, type UnifiedSession } from '@/store';
 import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
@@ -219,6 +220,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
     openDirectoryPicker,
     listUnifiedSessions,
     stopUnifiedSession,
+    closeUnifiedInteractiveSession,
     removeHeadlessSession,
     detachChannel,
     switchEnvironment,
@@ -553,19 +555,30 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   const handleConfirmClose = async (id: string) => {
     try {
       const item = findDisplayItem(id);
-      if (item?.unifiedSession?.runtimeKind === 'headless') {
-        // Headless: stop first if running, then remove
-        if (['ready', 'processing', 'waiting_permission', 'initializing'].includes(item.unifiedSession.status)) {
+      const action = resolveSessionCloseAction({
+        unifiedSession: item?.unifiedSession
+          ? {
+              runtimeKind: item.unifiedSession.runtimeKind,
+              status: item.unifiedSession.status,
+              id: item.unifiedSession.id,
+            }
+          : undefined,
+        hasLegacySession: hasLegacySession(id),
+      });
+      switch (action) {
+        case 'stopThenRemoveHeadless':
           await stopUnifiedSession(id);
-        }
-        await removeHeadlessSession(id);
-      } else if (item?.unifiedSession && !hasLegacySession(id)) {
-        // Unified-only interactive (no legacy match): use unified stop to avoid
-        // legacy SessionManager lookup failure in close_interactive_session
-        await stopUnifiedSession(id);
-      } else {
-        // Legacy interactive (has real SessionManager entry): use legacy close
-        await closeSession(id);
+          await removeHeadlessSession(id);
+          break;
+        case 'removeHeadless':
+          await removeHeadlessSession(id);
+          break;
+        case 'closeUnifiedInteractive':
+          await closeUnifiedInteractiveSession(id);
+          break;
+        case 'closeLegacyInteractive':
+          await closeSession(id);
+          break;
       }
     } catch (err) {
       console.error('Failed to close session:', err);
@@ -623,17 +636,31 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
     // Close all merged sessions (both legacy and unified)
     for (const item of mergedSessions) {
       try {
-        if (item.unifiedSession?.runtimeKind === 'headless') {
-          if (['ready', 'processing', 'waiting_permission', 'initializing'].includes(item.unifiedSession.status)) {
-            await stopUnifiedSession(item.unifiedSession.id);
-          }
-          await removeHeadlessSession(item.unifiedSession.id);
-        } else if (item.unifiedSession && !hasLegacySession(item.session.id)) {
-          // Unified-only interactive: use unified stop
-          await stopUnifiedSession(item.unifiedSession.id);
-        } else {
-          // Legacy interactive
-          await closeSession(item.session.id);
+        const id = item.session.id;
+        const action = resolveSessionCloseAction({
+          unifiedSession: item.unifiedSession
+            ? {
+                runtimeKind: item.unifiedSession.runtimeKind,
+                status: item.unifiedSession.status,
+                id: item.unifiedSession.id,
+              }
+            : undefined,
+          hasLegacySession: hasLegacySession(id),
+        });
+        switch (action) {
+          case 'stopThenRemoveHeadless':
+            await stopUnifiedSession(id);
+            await removeHeadlessSession(id);
+            break;
+          case 'removeHeadless':
+            await removeHeadlessSession(id);
+            break;
+          case 'closeUnifiedInteractive':
+            await closeUnifiedInteractiveSession(id);
+            break;
+          case 'closeLegacyInteractive':
+            await closeSession(id);
+            break;
         }
       } catch (err) {
         console.error('Failed to close session:', item.session.id, err);
