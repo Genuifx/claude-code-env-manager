@@ -262,7 +262,9 @@
     "contextInputTokens": "输入 tokens",
     "contextOutputTokens": "输出 tokens",
     "contextCacheRead": "缓存读取",
-    "contextCost": "预估费用"
+    "contextCost": "预估费用",
+    "copyMessage": "复制内容",
+    "copied": "已复制"
   },
   "sessions": {
     "subtitle": "管理运行中的 Claude Code 会话",

@@ -262,7 +262,9 @@
     "contextInputTokens": "Input tokens",
     "contextOutputTokens": "Output tokens",
     "contextCacheRead": "Cache read",
-    "contextCost": "Estimated cost"
+    "contextCost": "Estimated cost",
+    "copyMessage": "Copy message",
+    "copied": "Copied"
   },
   "sessions": {
     "subtitle": "Manage running Claude Code sessions",
