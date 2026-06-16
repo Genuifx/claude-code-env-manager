@@ -1085,8 +1085,8 @@ const MessageMetaBar = memo(function MessageMetaBar({
             type="button"
             onClick={handleCopy}
             className={cn(
-              'inline-flex h-5 w-5 items-center justify-center rounded transition-all',
-              'opacity-0 group-hover/msg:opacity-60 hover:!opacity-100 focus-visible:!opacity-100',
+              'inline-flex h-4 w-4 items-center justify-center rounded transition-colors',
+              'opacity-40 hover:!opacity-100',
               isUser
                 ? 'text-foreground/50 hover:bg-foreground/10'
                 : 'text-muted-foreground/50 hover:bg-muted/50',
@@ -1313,14 +1313,14 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
     <div className={cn(spacingClass, 'workspace-msg-virtualized group/msg')}>
       {hasMainContent ? (
         isUser ? (
-          <div className="ml-auto max-w-[78%] min-w-[220px] rounded-[24px] border border-border/30 bg-[hsl(var(--chat-assistant-bg)/0.7)] px-5 py-4 text-foreground shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_16px_rgba(0,0,0,0.03)]">
-            {renderedContent}
-            <div className="mt-2">
-              <MessageMetaBar message={message} isUser t={t} />
+          <div className="ml-auto max-w-[78%] min-w-[220px]">
+            <div className="rounded-[24px] border border-border/30 bg-[hsl(var(--chat-assistant-bg)/0.7)] px-5 py-4 text-foreground shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_16px_rgba(0,0,0,0.03)]">
+              {renderedContent}
             </div>
+            <MessageMetaBar message={message} isUser t={t} />
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {renderedContent}
             <MessageMetaBar message={message} isUser={false} t={t} />
           </div>
