@@ -515,6 +515,7 @@ function App() {
       await launchClaudeCode(undefined, undefined, launchClient);
     } catch (err) {
       console.error('Launch failed:', err);
+      throw err;
     }
   }, [launchClaudeCode, launchClient]);
 
@@ -547,6 +548,7 @@ function App() {
       await launchClaudeCode(workingDir, undefined, effectiveClient);
     } catch (err) {
       console.error('Launch failed:', err);
+      throw err;
     }
   }, [launchClaudeCode, launchClient]);
 

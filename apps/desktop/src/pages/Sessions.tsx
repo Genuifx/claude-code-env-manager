@@ -15,6 +15,7 @@ import {
   SessionLauncherPopover,
 } from '@/components/sessions';
 import { resolveSessionCloseAction } from '@/components/sessions/sessionCloseActions';
+import { launchSingleSession } from '@/components/sessions/sessionLaunchAction';
 import { useAppStore, type ArrangeLayout, type Session, type UnifiedSession } from '@/store';
 import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
@@ -158,8 +159,8 @@ function unifiedToLegacySession(u: UnifiedSession): Session {
 }
 
 interface SessionsProps {
-  onLaunch: () => void;
-  onLaunchWithDir: (dir: string) => void;
+  onLaunch: () => Promise<void>;
+  onLaunchWithDir: (dir: string) => Promise<void>;
 }
 
 export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
@@ -172,6 +173,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   const [launcherOpen, setLauncherOpen] = useState(false);
   const [isMultiLaunching, setIsMultiLaunching] = useState(false);
   const [launched, setLaunched] = useState(false);
+  const [isLaunching, setIsLaunching] = useState(false);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [tmuxAttachTerminals, setTmuxAttachTerminals] = useState<TmuxAttachTerminalInfo[]>([]);
   const [showRecoveryCandidates, setShowRecoveryCandidates] = useState(false);
@@ -457,21 +459,33 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   const handleBrowseAndLaunch = useCallback(async () => {
     const path = await openDirectoryPicker();
     if (path) {
-      onLaunchWithDir(path);
+      try {
+        await onLaunchWithDir(path);
+      } catch (err) {
+        console.error('Launch failed:', err);
+      }
     }
   }, [openDirectoryPicker, onLaunchWithDir]);
 
-  // Single launch with success feedback
-  const handleLaunchClick = useCallback(() => {
-    if (selectedWorkingDir) {
-      onLaunchWithDir(selectedWorkingDir);
-    } else {
-      onLaunch();
+  // Single launch with pending/success/failure state
+  const handleLaunchClick = useCallback(async () => {
+    if (isLaunching) return;
+    setIsLaunching(true);
+    try {
+      await launchSingleSession({
+        selectedWorkingDir,
+        onLaunch,
+        onLaunchWithDir,
+      });
+      setLaunched(true);
+      clearTimeout(launchedTimerRef.current);
+      launchedTimerRef.current = setTimeout(() => setLaunched(false), 1200);
+    } catch (err) {
+      console.error('Launch failed:', err);
+    } finally {
+      setIsLaunching(false);
     }
-    setLaunched(true);
-    clearTimeout(launchedTimerRef.current);
-    launchedTimerRef.current = setTimeout(() => setLaunched(false), 1200);
-  }, [selectedWorkingDir, onLaunch, onLaunchWithDir]);
+  }, [isLaunching, selectedWorkingDir, onLaunch, onLaunchWithDir]);
 
   // Select directory for launch
   const handleSelectDirectory = useCallback(async () => {
@@ -753,10 +767,11 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
           <button
             type="button"
             onClick={handleLaunchClick}
-            className={`bg-primary text-white rounded-full px-4 py-2 text-[14px] font-medium hover:bg-primary/90 active:scale-95 transition-all flex items-center gap-1.5${launched ? ' opacity-90' : ''}`}
+            disabled={isLaunching}
+            className={`bg-primary text-white rounded-full px-4 py-2 text-[14px] font-medium hover:bg-primary/90 active:scale-95 transition-all flex items-center gap-1.5${isLaunching ? ' opacity-70 cursor-not-allowed' : launched ? ' opacity-90' : ''}`}
           >
             <Plus className="w-4 h-4" />
-            {t('sessions.newSession')}
+            {isLaunching ? t('sessions.launching') : t('sessions.newSession')}
           </button>
 
           {/* Multi-Launch */}
