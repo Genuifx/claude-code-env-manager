@@ -927,6 +927,7 @@
     "chatApp": "Remote Control",
     "collapse": "Collapse Sidebar",
     "expand": "Expand Sidebar",
+    "backToWorkspace": "Back to Workspace",
     "groupWorkspace": "Workspace",
     "groupInsights": "Insights"
   },

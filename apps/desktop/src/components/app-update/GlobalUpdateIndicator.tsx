@@ -25,6 +25,15 @@ export function GlobalUpdateIndicator() {
   const readyVersionRef = useRef<string | null>(null);
 
   useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.updateIndicatorVisible = model.visible ? 'true' : 'false';
+
+    return () => {
+      root.removeAttribute('data-update-indicator-visible');
+    };
+  }, [model.visible]);
+
+  useEffect(() => {
     if (state.status !== 'ready' || !state.updateInfo) {
       return;
     }
