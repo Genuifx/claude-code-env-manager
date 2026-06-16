@@ -1,11 +1,12 @@
 import type {
   ConversationMessageData,
 } from '@/features/conversations/types';
-import type { NativeSessionSummary } from '@/lib/tauri-ipc';
+import type { NativeSessionSummary, SessionPromptImage } from '@/lib/tauri-ipc';
 
 export interface WorkspaceLiveSessionEntry {
   session: NativeSessionSummary;
   initialPrompt: string | null;
+  initialImages: SessionPromptImage[] | null;
   generatedTitle?: string | null;
   seedMessages: ConversationMessageData[];
 }
@@ -43,18 +44,21 @@ export function upsertWorkspaceLiveSessionEntry(
   session: NativeSessionSummary,
   options: {
     initialPrompt?: string | null;
+    initialImages?: SessionPromptImage[] | null;
     generatedTitle?: string | null;
     seedMessages?: ConversationMessageData[];
   } = {},
 ): WorkspaceLiveSessionsByRuntimeId {
   const existing = previous[session.runtime_id];
   const nextInitialPrompt = options.initialPrompt ?? existing?.initialPrompt ?? null;
+  const nextInitialImages = options.initialImages ?? existing?.initialImages ?? null;
   const nextGeneratedTitle = options.generatedTitle ?? existing?.generatedTitle ?? null;
   const nextSeedMessages = options.seedMessages ?? existing?.seedMessages ?? [];
 
   if (
     existing
     && existing.initialPrompt === nextInitialPrompt
+    && existing.initialImages === nextInitialImages
     && existing.generatedTitle === nextGeneratedTitle
     && existing.seedMessages === nextSeedMessages
     && areNativeSessionSummariesEqual(existing.session, session)
@@ -67,6 +71,7 @@ export function upsertWorkspaceLiveSessionEntry(
     [session.runtime_id]: {
       session,
       initialPrompt: nextInitialPrompt,
+      initialImages: nextInitialImages,
       generatedTitle: nextGeneratedTitle,
       seedMessages: nextSeedMessages,
     },

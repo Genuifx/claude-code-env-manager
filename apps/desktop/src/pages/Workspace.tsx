@@ -49,7 +49,12 @@ import type {
 } from '@/features/conversations/types';
 import { toSessionKey } from '@/features/conversations/types';
 import { useWorkspaceSessionDecorations } from '@/components/workspace/useWorkspaceSessionDecorations';
-import type { NativeSessionSummary, WorkspaceCommand, WorkspaceGitSnapshot } from '@/lib/tauri-ipc';
+import type {
+  NativeSessionSummary,
+  SessionPromptImage,
+  WorkspaceCommand,
+  WorkspaceGitSnapshot,
+} from '@/lib/tauri-ipc';
 import {
   buildWorkspaceSidebarSessions,
   findLiveEntryForSidebarSession,
@@ -302,6 +307,7 @@ export function Workspace({
     session: NativeSessionSummary,
     options: {
       initialPrompt?: string | null;
+      initialImages?: SessionPromptImage[] | null;
       generatedTitle?: string | null;
       seedMessages?: ConversationMessageData[];
     } = {},
@@ -359,6 +365,7 @@ export function Workspace({
             {
               session,
               initialPrompt: null,
+              initialImages: null,
               seedMessages: [],
             } satisfies WorkspaceLiveSessionEntry,
           ]),
@@ -891,6 +898,7 @@ export function Workspace({
     return {
       session: matchingSession,
       initialPrompt: null,
+      initialImages: null,
       seedMessages: hydratedMessages ?? [],
     };
   }, [
@@ -1466,6 +1474,7 @@ export function Workspace({
 
       upsertLiveSessionEntry(summary, {
         initialPrompt: previewPrompt,
+        initialImages: images.length > 0 ? images : null,
         seedMessages: [],
       });
       const liveItem = toLiveHistorySessionItem({
@@ -1581,6 +1590,7 @@ export function Workspace({
       setLaunchClient(provider);
       upsertLiveSessionEntry(summary, {
         initialPrompt: previewPrompt,
+        initialImages: images.length > 0 ? images : null,
         seedMessages: messages,
       });
       setActiveLiveRuntimeId(summary.runtime_id);
@@ -1964,6 +1974,7 @@ export function Workspace({
                     <WorkspaceNativeSessionView
                       session={entry.session}
                       initialPrompt={entry.initialPrompt}
+                      initialImages={entry.initialImages}
                       seedMessages={entry.seedMessages}
                       installedSkills={workspaceInstalledSkills}
                       workspaceCommands={workspaceCommands}

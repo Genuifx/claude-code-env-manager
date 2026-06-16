@@ -21,6 +21,7 @@ import type {
   InteractiveToolPrompt,
   NativeSessionSummary,
   SessionEventRecord,
+  SessionPromptImage,
   WorkspaceCommand,
   WorkspaceGitSnapshot,
   ToolQuestionPrompt,
@@ -133,6 +134,7 @@ type InteractivePromptReplyPayload =
 interface WorkspaceNativeSessionViewProps {
   session: NativeSessionSummary;
   initialPrompt?: string | null;
+  initialImages?: SessionPromptImage[] | null;
   seedMessages?: ConversationMessageData[];
   installedSkills?: InstalledSkill[];
   workspaceCommands?: WorkspaceCommand[];
@@ -935,6 +937,7 @@ function WorkspaceAttentionPanel({
 export function WorkspaceNativeSessionView({
   session,
   initialPrompt,
+  initialImages,
   seedMessages = [],
   installedSkills = [],
   workspaceCommands = [],
@@ -989,6 +992,7 @@ export function WorkspaceNativeSessionView({
     return [{
       id: 'initial-user',
       text: initialPrompt,
+      images: initialImages ?? undefined,
     }];
   });
   const [isSending, setIsSending] = useState(false);
@@ -1068,7 +1072,7 @@ export function WorkspaceNativeSessionView({
   useEffect(() => {
     const cachedEvents = readCachedNativeEvents(session.runtime_id);
     const initialPrompts = initialPrompt
-      ? [{ id: 'initial-user', text: initialPrompt }]
+      ? [{ id: 'initial-user', text: initialPrompt, images: initialImages ?? undefined }]
       : [];
 
     lastSeenSeqRef.current = latestEventSeq(cachedEvents);
@@ -1086,7 +1090,7 @@ export function WorkspaceNativeSessionView({
     gitSnapshotRequestSeqRef.current += 1;
     setGitSnapshot(null);
     setIsRefreshingGitSnapshot(false);
-  }, [session.runtime_id]);
+  }, [initialImages, initialPrompt, session.runtime_id]);
 
   useEffect(() => {
     gitSnapshotRequestSeqRef.current += 1;
@@ -1572,6 +1576,7 @@ export function WorkspaceNativeSessionView({
         ? prompts[0]!.id
         : `queue-batch-${Date.now()}`,
       text: previewText,
+      images: images.length > 0 ? images : undefined,
       timestamp: Date.now(),
       afterEventSeq: latestEventSeq(latestEventsRef.current) ?? undefined,
     };
@@ -1643,19 +1648,8 @@ export function WorkspaceNativeSessionView({
   const sendInteractivePromptReply = useCallback(async (
     payload: InteractivePromptReplyPayload,
   ) => {
-    const promptEntry = {
-      id: `user-${Date.now()}`,
-      text: payload.kind === 'ask_user_question'
-        ? payload.text
-        : payload.kind === 'plan_exit'
-          ? payload.text
-          : buildComposerPromptPreview(payload.displayText ?? payload.text, payload.attachments ?? []),
-      timestamp: Date.now(),
-      afterEventSeq: latestEventSeq(latestEventsRef.current) ?? undefined,
-    };
-
     let requestText = '';
-    let requestImages: Array<{ mediaType: string; base64Data: string }> | undefined;
+    let requestImages: SessionPromptImage[] | undefined;
     if (payload.kind === 'text') {
       requestText = buildComposerPromptText(payload.text, payload.attachments ?? []);
       const images = extractComposerImagePayloads(payload.attachments ?? []);
@@ -1664,6 +1658,18 @@ export function WorkspaceNativeSessionView({
         return false;
       }
     }
+
+    const promptEntry: LocalUserPrompt = {
+      id: `user-${Date.now()}`,
+      text: payload.kind === 'ask_user_question'
+        ? payload.text
+        : payload.kind === 'plan_exit'
+          ? payload.text
+          : buildComposerPromptPreview(payload.displayText ?? payload.text, payload.attachments ?? []),
+      images: payload.kind === 'text' ? requestImages : undefined,
+      timestamp: Date.now(),
+      afterEventSeq: latestEventSeq(latestEventsRef.current) ?? undefined,
+    };
 
     let exitedPlanModeForPrompt = false;
     let dismissedPlanExitPromptIds: string[] = [];

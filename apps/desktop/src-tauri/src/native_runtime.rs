@@ -1,5 +1,5 @@
 use crate::config::{resolve_claude_env, resolve_codex_runtime};
-use crate::event_bus::{ReplayBatch, SessionEventPayload, SessionStore};
+use crate::event_bus::{ReplayBatch, SessionEventPayload, SessionPromptImage, SessionStore};
 use crate::native_event_log::NativeEventLog;
 use crate::native_helper_resource::native_helper_script_path;
 use crate::session_provenance::bind_source_session_id;
@@ -147,6 +147,24 @@ pub struct PromptImage {
     pub base64_data: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placeholder: Option<String>,
+}
+
+fn prompt_images_for_event(images: Option<&Vec<PromptImage>>) -> Option<Vec<SessionPromptImage>> {
+    let images = images?;
+    if images.is_empty() {
+        return None;
+    }
+
+    Some(
+        images
+            .iter()
+            .map(|image| SessionPromptImage {
+                media_type: image.media_type.clone(),
+                base64_data: image.base64_data.clone(),
+                placeholder: image.placeholder.clone(),
+            })
+            .collect(),
+    )
 }
 
 #[derive(Debug, Serialize)]
@@ -1377,6 +1395,7 @@ impl NativeRuntimeManager {
             SessionEventPayload::UserPrompt {
                 text: text.to_string(),
                 image_count: image_count as u64,
+                images: prompt_images_for_event(images),
             },
         )
     }
@@ -1890,7 +1909,7 @@ mod tests {
         HelperInputCommand, NativeProvider, NativeRuntimeManager, NativeSessionHandle,
         NativeSessionOptions, NativeSessionRecord, NativeTransport, PromptImage,
     };
-    use crate::event_bus::{SessionEventPayload, SessionStore};
+    use crate::event_bus::{SessionEventPayload, SessionPromptImage, SessionStore};
     use crate::native_event_log::NativeEventLog;
     use chrono::Utc;
     use std::collections::HashMap;
@@ -2199,8 +2218,11 @@ mod tests {
 
     #[test]
     fn native_user_prompt_events_are_replayable() {
-        let runtime_id = "native-user-prompt";
-        let manager = manager_with_handle(runtime_id);
+        let runtime_id = format!(
+            "native-user-prompt-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        );
+        let manager = manager_with_handle(&runtime_id);
         let images = vec![PromptImage {
             media_type: "image/png".to_string(),
             base64_data: "iVBORw0KGgo=".to_string(),
@@ -2208,11 +2230,11 @@ mod tests {
         }];
 
         manager
-            .append_user_prompt_event(runtime_id, "continue", Some(&images))
+            .append_user_prompt_event(&runtime_id, "continue", Some(&images))
             .expect("append user prompt event");
 
         let batch = manager
-            .replay_events(runtime_id, None)
+            .replay_events(&runtime_id, None)
             .expect("replay events");
 
         assert_eq!(batch.events.len(), 1);
@@ -2221,26 +2243,34 @@ mod tests {
             SessionEventPayload::UserPrompt {
                 text: "continue".to_string(),
                 image_count: 1,
+                images: Some(vec![SessionPromptImage {
+                    media_type: "image/png".to_string(),
+                    base64_data: "iVBORw0KGgo=".to_string(),
+                    placeholder: Some("[Image #1]".to_string()),
+                }]),
             }
         );
     }
 
     #[test]
     fn interactive_prompt_response_is_replayable_as_user_prompt() {
-        let runtime_id = "native-interactive-response";
-        let manager = manager_with_handle(runtime_id);
+        let runtime_id = format!(
+            "native-interactive-response-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        );
+        let manager = manager_with_handle(&runtime_id);
         let answers = HashMap::from([("Pick one".to_string(), "Use the SQLite path".to_string())]);
 
         manager
             .append_interactive_prompt_response_event(
-                runtime_id,
+                &runtime_id,
                 Some("Use the SQLite path"),
                 &answers,
             )
             .expect("append interactive response event");
 
         let batch = manager
-            .replay_events(runtime_id, None)
+            .replay_events(&runtime_id, None)
             .expect("replay events");
 
         assert_eq!(batch.events.len(), 1);
@@ -2249,6 +2279,7 @@ mod tests {
             SessionEventPayload::UserPrompt {
                 text: "Use the SQLite path".to_string(),
                 image_count: 0,
+                images: None,
             }
         );
     }

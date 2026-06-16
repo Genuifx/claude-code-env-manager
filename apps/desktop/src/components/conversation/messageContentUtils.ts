@@ -142,6 +142,11 @@ function blockToCopyText(block: ConversationContentBlock): string {
   if (block.type === 'thinking') {
     return block.thinking || block.text || '';
   }
+  if (block.type === 'image') {
+    return typeof block.placeholder === 'string' && block.placeholder.trim()
+      ? block.placeholder.trim()
+      : '[Image]';
+  }
   if (block.type === 'tool_use') {
     const parts: string[] = [`[Tool] ${block.name || 'Tool'}`];
     const input = stringifyUnknown(block.input);

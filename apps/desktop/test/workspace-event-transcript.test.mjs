@@ -215,6 +215,56 @@ test('renders unmatched failed tool results as visible assistant errors', async 
   );
 });
 
+test('live transcript renders user prompt images from native events', async () => {
+  const { buildMessagesFromEvents } = await importWorkspaceEventTranscript();
+
+  const messages = buildMessagesFromEvents(
+    [],
+    [],
+    [
+      event(1, {
+        type: 'user_prompt',
+        text: '看一下这个时间\n\nImages attached: 1',
+        image_count: 1,
+        images: [{
+          mediaType: 'image/png',
+          base64Data: 'iVBORw0KGgo=',
+          placeholder: '[Image #1]',
+        }],
+      }),
+    ],
+  );
+
+  assert.deepEqual(messages, [{
+    msgType: 'user',
+    uuid: 'user-prompt-1',
+    content: [
+      { type: 'text', text: '看一下这个时间' },
+      {
+        type: 'image',
+        mediaType: 'image/png',
+        base64Data: 'iVBORw0KGgo=',
+        placeholder: '[Image #1]',
+      },
+    ],
+    timestamp: Date.parse('2026-05-01T00:00:01.000Z'),
+    segmentIndex: 0,
+    isCompactBoundary: false,
+  }]);
+});
+
+test('legacy image-only native events keep an attachment count fallback', async () => {
+  const { buildMessagesFromEvents } = await importWorkspaceEventTranscript();
+
+  const messages = buildMessagesFromEvents(
+    [],
+    [],
+    [event(1, { type: 'user_prompt', text: '', image_count: 2 })],
+  );
+
+  assert.equal(messages[0].content, 'Images attached: 2');
+});
+
 test('session summary refresh treats runtime error events as boundary events', async () => {
   const { sessionEventsNeedSummaryRefresh } = await importWorkspaceEventTranscript();
 

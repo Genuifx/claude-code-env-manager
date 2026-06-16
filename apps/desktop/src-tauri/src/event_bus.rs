@@ -82,12 +82,23 @@ pub struct ContextUsageCategory {
     pub tokens: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionPromptImage {
+    pub media_type: String,
+    pub base64_data: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placeholder: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionEventPayload {
     UserPrompt {
         text: String,
         image_count: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        images: Option<Vec<SessionPromptImage>>,
     },
     SystemMessage {
         message: String,

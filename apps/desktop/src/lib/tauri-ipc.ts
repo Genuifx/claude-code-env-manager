@@ -905,8 +905,14 @@ export type InteractiveToolPrompt =
 
 export type TerminalPromptKind = 'permission';
 
+export interface SessionPromptImage {
+  mediaType: string;
+  base64Data: string;
+  placeholder?: string;
+}
+
 export type SessionEventPayload =
-  | { type: 'user_prompt'; text: string; image_count: number }
+  | { type: 'user_prompt'; text: string; image_count: number; images?: SessionPromptImage[] | null }
   | { type: 'system_message'; message: string }
   | { type: 'lifecycle'; stage: string; detail: string }
   | { type: 'claude_json'; message_type?: string | null; raw_json: string }

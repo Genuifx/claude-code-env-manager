@@ -2,7 +2,7 @@ import type {
   ConversationContentBlock,
   ConversationMessageData,
 } from '@/features/conversations/types';
-import type { SessionEventRecord } from '@/lib/tauri-ipc';
+import type { SessionEventRecord, SessionPromptImage } from '@/lib/tauri-ipc';
 
 export const COMPACTING_SUMMARY_TOKEN = '__ccem_context_compacting__';
 export const COMPACT_FAILED_SUMMARY_TOKEN = '__ccem_context_compact_failed__';
@@ -10,6 +10,7 @@ export const COMPACT_FAILED_SUMMARY_TOKEN = '__ccem_context_compact_failed__';
 export interface LocalUserPrompt {
   id: string;
   text: string;
+  images?: SessionPromptImage[];
   timestamp?: number;
   afterEventSeq?: number;
 }
@@ -45,6 +46,25 @@ function cloneMessages(messages: ConversationMessageData[]): ConversationMessage
 }
 
 function createUserMessage(prompt: LocalUserPrompt): ConversationMessageData {
+  const imageBlocks = createPromptImageBlocks(prompt.images);
+  if (imageBlocks.length > 0) {
+    const displayText = removeRenderedImageSummary(prompt.text, imageBlocks.length);
+    const content: ConversationContentBlock[] = [];
+    if (displayText) {
+      content.push({ type: 'text', text: displayText });
+    }
+    content.push(...imageBlocks);
+
+    return {
+      msgType: 'user',
+      uuid: prompt.id,
+      content,
+      timestamp: prompt.timestamp,
+      segmentIndex: 0,
+      isCompactBoundary: false,
+    };
+  }
+
   return {
     msgType: 'user',
     uuid: prompt.id,
@@ -53,6 +73,38 @@ function createUserMessage(prompt: LocalUserPrompt): ConversationMessageData {
     segmentIndex: 0,
     isCompactBoundary: false,
   };
+}
+
+function createPromptImageBlocks(images?: SessionPromptImage[] | null): ConversationContentBlock[] {
+  if (!images?.length) {
+    return [];
+  }
+
+  return images
+    .filter((image) =>
+      typeof image.mediaType === 'string'
+      && image.mediaType.startsWith('image/')
+      && typeof image.base64Data === 'string'
+      && image.base64Data.length > 0,
+    )
+    .map((image, index) => ({
+      type: 'image',
+      mediaType: image.mediaType,
+      base64Data: image.base64Data,
+      placeholder: image.placeholder || `[Image #${index + 1}]`,
+    }));
+}
+
+function removeRenderedImageSummary(text: string, imageCount: number): string {
+  if (imageCount <= 0) {
+    return text.trim();
+  }
+
+  return text
+    .split('\n')
+    .filter((line) => !/^Images attached:\s*\d+\s*$/.test(line.trim()))
+    .join('\n')
+    .trim();
 }
 
 function promptTextKey(text: string | null | undefined): string {
@@ -67,6 +119,9 @@ function messageContentText(content: ConversationMessageData['content']): string
   const blockText = (block: ConversationContentBlock): string => {
     if (typeof block.text === 'string') {
       return block.text;
+    }
+    if (block.type === 'image' && typeof block.placeholder === 'string') {
+      return block.placeholder;
     }
     if (typeof block.thinking === 'string') {
       return block.thinking;
@@ -809,20 +864,24 @@ export function buildMessagesFromEvents(
 
     switch (event.payload.type) {
       case 'user_prompt': {
+        const images = event.payload.images?.filter(Boolean) ?? [];
         const text = event.payload.text?.trim()
-          || (event.payload.image_count > 0
+          || (event.payload.image_count > 0 && images.length === 0
             ? `Images attached: ${event.payload.image_count}`
             : '');
-        if (!text) {
+        if (!text && images.length === 0) {
           break;
         }
         flushPendingTurn();
         next.push(createUserMessage({
           id: `user-prompt-${event.seq}`,
           text,
+          images,
           timestamp: occurredAt,
         }));
-        consumeMatchingPrompt(text);
+        if (text) {
+          consumeMatchingPrompt(text);
+        }
         break;
       }
       case 'system_message': {

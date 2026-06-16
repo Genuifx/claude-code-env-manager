@@ -1054,6 +1054,47 @@ function renderUserMarkdown(text: string) {
   );
 }
 
+function imageBlockSrc(block: ConversationContentBlock): string | null {
+  const mediaType = typeof block.mediaType === 'string'
+    ? block.mediaType
+    : typeof block.media_type === 'string'
+      ? block.media_type
+      : '';
+  const base64Data = typeof block.base64Data === 'string'
+    ? block.base64Data
+    : typeof block.base64_data === 'string'
+      ? block.base64_data
+      : '';
+
+  if (!mediaType.startsWith('image/') || !base64Data) {
+    return null;
+  }
+
+  return `data:${mediaType};base64,${base64Data}`;
+}
+
+function renderImageBlock(block: ConversationContentBlock, index: number) {
+  const src = imageBlockSrc(block);
+  if (!src) {
+    return null;
+  }
+
+  const alt = typeof block.placeholder === 'string' && block.placeholder.trim()
+    ? block.placeholder.trim()
+    : `Attached image ${index + 1}`;
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-border/35 bg-background/70 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+      <img
+        src={src}
+        alt={alt}
+        loading="lazy"
+        className="block max-h-[320px] w-full max-w-full object-contain"
+      />
+    </div>
+  );
+}
+
 function renderTextBlock(text: string, isUser: boolean, t: (key: string) => string) {
   const { cleanText, command } = parseMessageText(text);
   const commandArgs = command?.args?.trim() || '';
@@ -1126,6 +1167,9 @@ function renderContentBlocks(
     switch (block.type) {
       case 'text':
         result.push(<div key={`text-${index}`}>{renderTextBlock(block.text || '', isUser, t)}</div>);
+        break;
+      case 'image':
+        result.push(<div key={`image-${index}`}>{renderImageBlock(block, index)}</div>);
         break;
       case 'thinking':
         result.push(

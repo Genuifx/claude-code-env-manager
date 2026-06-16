@@ -542,6 +542,7 @@ mod tests {
             payload: SessionEventPayload::UserPrompt {
                 text: "start here".to_string(),
                 image_count: 0,
+                images: None,
             },
         })
         .expect("append prompt");
