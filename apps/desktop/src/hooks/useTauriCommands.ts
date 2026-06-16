@@ -60,6 +60,7 @@ interface TauriSession {
   terminal_type?: string;  // "iterm2" | "terminalapp"
   window_id?: string;      // iTerm2 window ID
   iterm_session_id?: string; // iTerm2 session unique ID for arrange
+  tmux_target?: string | null;
 }
 
 interface TauriFavoriteProject {
@@ -175,6 +176,7 @@ function toFrontendSession(tauriSession: TauriSession): Session {
     terminalType: tauriSession.terminal_type,
     windowId: tauriSession.window_id,
     itermSessionId: tauriSession.iterm_session_id,
+    tmuxTarget: tauriSession.tmux_target ?? undefined,
   };
 }
 
@@ -406,6 +408,11 @@ export function useTauriCommands() {
           await syncInteractiveSessions();
         } catch (openErr) {
           console.error('Interactive session created but failed to open terminal:', openErr);
+          try {
+            await syncInteractiveSessions();
+          } catch (syncErr) {
+            console.error('Failed to sync sessions after terminal open failure:', syncErr);
+          }
           toast.error(`Session created, but failed to open terminal: ${openErr}`);
         }
       }
@@ -588,6 +595,11 @@ export function useTauriCommands() {
       });
       await syncInteractiveSessions();
     } catch (err) {
+      try {
+        await syncInteractiveSessions();
+      } catch (syncErr) {
+        console.error('Failed to sync sessions after terminal open failure:', syncErr);
+      }
       toast.error(`Failed to open session in terminal: ${err}`);
       throw err;
     }

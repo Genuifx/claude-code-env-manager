@@ -161,7 +161,7 @@ impl RuntimeBackend for TmuxBackend {
             is_active: summary.is_active,
             pid: session.pid,
             claude_session_id: summary.claude_session_id,
-            tmux_target: session.window_id.clone(),
+            tmux_target: session.resolved_tmux_target().map(str::to_string),
             client: Some(session.client.clone()),
             channels: self.dispatcher.list_channels(&self.runtime_id),
         }
@@ -251,7 +251,7 @@ impl UnifiedSessionManager {
                             is_active: summary.is_active,
                             pid: session.pid,
                             claude_session_id: summary.claude_session_id,
-                            tmux_target: session.window_id.clone(),
+                            tmux_target: session.resolved_tmux_target().map(str::to_string),
                             client: Some(session.client.clone()),
                             channels: self.dispatcher.list_channels(&session.id),
                         }

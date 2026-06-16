@@ -15,6 +15,7 @@ static TMUX_BINARY: OnceLock<String> = OnceLock::new();
 
 const DEFAULT_TMUX_SESSION: &str = "ccem";
 const DEFAULT_TMUX_WINDOW: &str = "main";
+const LAUNCH_TARGET_HEALTHCHECK_DELAY: Duration = Duration::from_millis(350);
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TmuxWindowInfo {
@@ -135,6 +136,8 @@ impl TmuxManager {
                 window.session_name, error
             );
         }
+
+        self.verify_target_survived_launch(&window.target)?;
 
         Ok(window)
     }
@@ -506,6 +509,18 @@ impl TmuxManager {
 
         Ok(parse_target_line(&String::from_utf8_lossy(&output.stdout))
             .is_some_and(|info| info.target == target))
+    }
+
+    fn verify_target_survived_launch(&self, target: &str) -> Result<(), String> {
+        thread::sleep(LAUNCH_TARGET_HEALTHCHECK_DELAY);
+        if self.target_exists(target)? {
+            return Ok(());
+        }
+
+        Err(format!(
+            "tmux target {} exited immediately after launch",
+            target
+        ))
     }
 
     fn kill_window_target(&self, target: &str) -> Result<(), String> {
@@ -1242,6 +1257,55 @@ mod tests {
             .resolve_live_attach_target(&missing_runtime_id, Some("ccem-missing:main"))
             .expect_err("missing target should fail before opening Terminal");
         assert!(missing_error.contains("tmux target not found"));
+    }
+
+    #[test]
+    fn launch_healthcheck_rejects_immediately_exited_tmux_target() {
+        if TmuxManager::check_tmux_installed().is_err() {
+            return;
+        }
+
+        let runtime_id = format!("session-exit-test-{}", std::process::id());
+        let session_prefix = format!("ccem-exit-test-{}", std::process::id());
+        let session_name = session_name_for_runtime(&runtime_id, &session_prefix);
+        let target = format!("{session_name}:main");
+
+        let _ = tmux_command().and_then(|mut command| {
+            command
+                .args(["kill-session", "-t", &session_name])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map(|_| ())
+                .map_err(|error| {
+                    format!(
+                        "Failed to clean stale test tmux session {}: {}",
+                        session_name, error
+                    )
+                })
+        });
+
+        let status = tmux_command()
+            .expect("tmux command should be available")
+            .args([
+                "new-session",
+                "-d",
+                "-s",
+                &session_name,
+                "-n",
+                "main",
+                "false",
+            ])
+            .status()
+            .expect("test tmux session should be created");
+        assert!(status.success());
+
+        let manager = TmuxManager { session_prefix };
+        let error = manager
+            .verify_target_survived_launch(&target)
+            .expect_err("exited tmux target should fail launch healthcheck");
+        assert!(error.contains("exited immediately after launch"));
     }
 
     #[test]

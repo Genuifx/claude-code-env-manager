@@ -53,6 +53,7 @@ export interface Session {
   terminalType?: string;  // "iterm2" | "terminalapp"
   windowId?: string;      // iTerm2 window ID
   itermSessionId?: string; // iTerm2 session unique ID for arrange
+  tmuxTarget?: string;
 }
 
 export interface FavoriteProject {
@@ -324,7 +325,8 @@ function areSessionsEqual(left: Session[], right: Session[]) {
       && candidate.permMode === session.permMode
       && candidate.terminalType === session.terminalType
       && candidate.windowId === session.windowId
-      && candidate.itermSessionId === session.itermSessionId;
+      && candidate.itermSessionId === session.itermSessionId
+      && candidate.tmuxTarget === session.tmuxTarget;
   });
 }
 
