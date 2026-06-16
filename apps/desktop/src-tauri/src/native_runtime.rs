@@ -2,6 +2,7 @@ use crate::config::{resolve_claude_env, resolve_codex_runtime};
 use crate::event_bus::{ReplayBatch, SessionEventPayload, SessionPromptImage, SessionStore};
 use crate::native_event_log::NativeEventLog;
 use crate::native_helper_resource::native_helper_script_path;
+use crate::prompt_image_store::PromptImageStore;
 use crate::session_provenance::bind_source_session_id;
 use crate::system_proxy::resolve_codex_proxy_env;
 use crate::terminal::{self, resolve_claude_path, resolve_codex_path, TerminalType};
@@ -149,22 +150,32 @@ pub struct PromptImage {
     pub placeholder: Option<String>,
 }
 
-fn prompt_images_for_event(images: Option<&Vec<PromptImage>>) -> Option<Vec<SessionPromptImage>> {
-    let images = images?;
+fn prompt_images_for_event(
+    images: Option<&Vec<PromptImage>>,
+    prompt_image_store: &PromptImageStore,
+) -> Result<Option<Vec<SessionPromptImage>>, String> {
+    let Some(images) = images else {
+        return Ok(None);
+    };
     if images.is_empty() {
-        return None;
+        return Ok(None);
     }
 
-    Some(
-        images
-            .iter()
-            .map(|image| SessionPromptImage {
-                media_type: image.media_type.clone(),
-                base64_data: image.base64_data.clone(),
-                placeholder: image.placeholder.clone(),
-            })
-            .collect(),
-    )
+    let mut event_images = Vec::with_capacity(images.len());
+    for image in images {
+        let stored =
+            prompt_image_store.store_base64_image(&image.media_type, &image.base64_data)?;
+        event_images.push(SessionPromptImage {
+            media_type: stored.media_type,
+            base64_data: None,
+            storage_path: Some(stored.storage_path),
+            sha256: Some(stored.sha256),
+            byte_size: Some(stored.byte_size),
+            placeholder: image.placeholder.clone(),
+        });
+    }
+
+    Ok(Some(event_images))
 }
 
 #[derive(Debug, Serialize)]
@@ -382,6 +393,7 @@ pub struct NativeRuntimeManager {
     handles: Mutex<HashMap<String, Arc<NativeSessionHandle>>>,
     state_path: PathBuf,
     event_log: NativeEventLog,
+    prompt_image_store: PromptImageStore,
 }
 
 impl Default for NativeRuntimeManager {
@@ -398,6 +410,7 @@ impl Default for NativeRuntimeManager {
             handles: Mutex::new(HashMap::new()),
             state_path,
             event_log: NativeEventLog::default(),
+            prompt_image_store: PromptImageStore::default(),
         }
     }
 }
@@ -1389,13 +1402,14 @@ impl NativeRuntimeManager {
         if text.is_empty() && image_count == 0 {
             return Ok(());
         }
+        let event_images = prompt_images_for_event(images, &self.prompt_image_store)?;
 
         self.append_event(
             runtime_id,
             SessionEventPayload::UserPrompt {
                 text: text.to_string(),
                 image_count: image_count as u64,
-                images: prompt_images_for_event(images),
+                images: event_images,
             },
         )
     }
@@ -1909,8 +1923,9 @@ mod tests {
         HelperInputCommand, NativeProvider, NativeRuntimeManager, NativeSessionHandle,
         NativeSessionOptions, NativeSessionRecord, NativeTransport, PromptImage,
     };
-    use crate::event_bus::{SessionEventPayload, SessionPromptImage, SessionStore};
+    use crate::event_bus::{SessionEventPayload, SessionStore};
     use crate::native_event_log::NativeEventLog;
+    use crate::prompt_image_store::PromptImageStore;
     use chrono::Utc;
     use std::collections::HashMap;
     use std::fs;
@@ -1961,6 +1976,10 @@ mod tests {
             event_log: NativeEventLog::new(
                 std::env::temp_dir().join(format!("ccem-native-runtime-test-{runtime_id}.sqlite")),
             ),
+            prompt_image_store: PromptImageStore::new(
+                std::env::temp_dir()
+                    .join(format!("ccem-native-runtime-test-{runtime_id}-attachments")),
+            ),
         };
         manager
     }
@@ -1982,6 +2001,9 @@ mod tests {
             )),
             event_log: NativeEventLog::new(std::env::temp_dir().join(format!(
                 "ccem-native-runtime-reconcile-test-{runtime_id}.sqlite"
+            ))),
+            prompt_image_store: PromptImageStore::new(std::env::temp_dir().join(format!(
+                "ccem-native-runtime-reconcile-test-{runtime_id}-attachments"
             ))),
         }
     }
@@ -2238,17 +2260,44 @@ mod tests {
             .expect("replay events");
 
         assert_eq!(batch.events.len(), 1);
+        let SessionEventPayload::UserPrompt {
+            text,
+            image_count,
+            images,
+        } = &batch.events[0].payload
+        else {
+            panic!("expected user prompt event");
+        };
+        assert_eq!(text, "continue");
+        assert_eq!(*image_count, 1);
+        let image = images
+            .as_ref()
+            .and_then(|items| items.first())
+            .expect("stored prompt image");
+        assert_eq!(image.media_type, "image/png");
+        assert_eq!(image.base64_data, None);
+        assert_eq!(image.byte_size, Some(8));
+        assert_eq!(image.placeholder.as_deref(), Some("[Image #1]"));
+        assert_eq!(image.sha256.as_deref().map(str::len), Some(64));
+        let storage_path = image
+            .storage_path
+            .as_deref()
+            .expect("stored prompt image path");
+        assert!(storage_path.ends_with(".png"));
         assert_eq!(
-            batch.events[0].payload,
-            SessionEventPayload::UserPrompt {
-                text: "continue".to_string(),
-                image_count: 1,
-                images: Some(vec![SessionPromptImage {
-                    media_type: "image/png".to_string(),
-                    base64_data: "iVBORw0KGgo=".to_string(),
-                    placeholder: Some("[Image #1]".to_string()),
-                }]),
-            }
+            manager
+                .prompt_image_store
+                .read_data_url(storage_path, &image.media_type)
+                .expect("read stored prompt image"),
+            "data:image/png;base64,iVBORw0KGgo="
+        );
+
+        let persisted_json = serde_json::to_value(&batch.events[0].payload)
+            .expect("serialize persisted user prompt event");
+        assert!(persisted_json["images"][0].get("base64Data").is_none());
+        assert_eq!(
+            persisted_json["images"][0]["storagePath"],
+            serde_json::Value::String(storage_path.to_string())
         );
     }
 

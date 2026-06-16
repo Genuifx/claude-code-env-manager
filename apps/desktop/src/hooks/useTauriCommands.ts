@@ -11,6 +11,7 @@ import type {
   InteractiveReplayBatch,
   ManagedSessionSummary,
   NativeHandoffResult,
+  NativePromptImageInput,
   NativeSessionSummary,
   NativeTerminalType,
   PlatformCapabilities,
@@ -702,7 +703,7 @@ export function useTauriCommands() {
     workingDir?: string | null;
     initialPrompt: string;
     initialDisplayPrompt?: string | null;
-    initialImages?: Array<{ mediaType: string; base64Data: string; placeholder?: string }>;
+    initialImages?: NativePromptImageInput[];
     providerSessionId?: string | null;
     effort?: string | null;
   }): Promise<NativeSessionSummary> => {
@@ -728,7 +729,7 @@ export function useTauriCommands() {
   const sendNativeSessionInput = useCallback(async (
     runtimeId: string,
     text: string,
-    images?: Array<{ mediaType: string; base64Data: string; placeholder?: string }>,
+    images?: NativePromptImageInput[],
     displayText?: string | null,
   ): Promise<void> => {
     await invoke('send_native_session_input', {

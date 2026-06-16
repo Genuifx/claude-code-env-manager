@@ -86,7 +86,14 @@ pub struct ContextUsageCategory {
 #[serde(rename_all = "camelCase")]
 pub struct SessionPromptImage {
     pub media_type: String,
-    pub base64_data: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base64_data: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub byte_size: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placeholder: Option<String>,
 }

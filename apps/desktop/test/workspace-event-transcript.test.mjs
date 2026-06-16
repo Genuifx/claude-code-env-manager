@@ -253,6 +253,41 @@ test('live transcript renders user prompt images from native events', async () =
   }]);
 });
 
+test('live transcript renders stored user prompt image refs from native events', async () => {
+  const { buildMessagesFromEvents } = await importWorkspaceEventTranscript();
+
+  const messages = buildMessagesFromEvents(
+    [],
+    [],
+    [
+      event(1, {
+        type: 'user_prompt',
+        text: '看一下这个时间\n\nImages attached: 1',
+        image_count: 1,
+        images: [{
+          mediaType: 'image/png',
+          storagePath: 'abc123.png',
+          sha256: 'abc123',
+          byteSize: 8,
+          placeholder: '[Image #1]',
+        }],
+      }),
+    ],
+  );
+
+  assert.deepEqual(messages[0].content, [
+    { type: 'text', text: '看一下这个时间' },
+    {
+      type: 'image',
+      mediaType: 'image/png',
+      storagePath: 'abc123.png',
+      sha256: 'abc123',
+      byteSize: 8,
+      placeholder: '[Image #1]',
+    },
+  ]);
+});
+
 test('legacy image-only native events keep an attachment count fallback', async () => {
   const { buildMessagesFromEvents } = await importWorkspaceEventTranscript();
 

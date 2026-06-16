@@ -81,18 +81,37 @@ function createPromptImageBlocks(images?: SessionPromptImage[] | null): Conversa
   }
 
   return images
-    .filter((image) =>
-      typeof image.mediaType === 'string'
-      && image.mediaType.startsWith('image/')
-      && typeof image.base64Data === 'string'
-      && image.base64Data.length > 0,
-    )
-    .map((image, index) => ({
-      type: 'image',
-      mediaType: image.mediaType,
-      base64Data: image.base64Data,
-      placeholder: image.placeholder || `[Image #${index + 1}]`,
-    }));
+    .map((image, index) => {
+      const hasInlineData = typeof image.base64Data === 'string' && image.base64Data.length > 0;
+      const hasStoredData = typeof image.storagePath === 'string' && image.storagePath.length > 0;
+      if (
+        typeof image.mediaType !== 'string'
+        || !image.mediaType.startsWith('image/')
+        || (!hasInlineData && !hasStoredData)
+      ) {
+        return null;
+      }
+
+      const block: ConversationContentBlock = {
+        type: 'image',
+        mediaType: image.mediaType,
+        placeholder: image.placeholder || `[Image #${index + 1}]`,
+      };
+      if (hasInlineData) {
+        block.base64Data = image.base64Data;
+      }
+      if (hasStoredData) {
+        block.storagePath = image.storagePath;
+      }
+      if (image.sha256) {
+        block.sha256 = image.sha256;
+      }
+      if (image.byteSize) {
+        block.byteSize = image.byteSize;
+      }
+      return block;
+    })
+    .filter((block): block is ConversationContentBlock => block != null);
 }
 
 function removeRenderedImageSummary(text: string, imageCount: number): string {

@@ -23,6 +23,7 @@ mod opencode;
 mod permission;
 mod pet_notifications;
 mod pet_window;
+mod prompt_image_store;
 mod proxy_debug;
 mod remote;
 mod runtime;
@@ -68,6 +69,7 @@ use native_runtime::{
     NativeSessionOptions, NativeSessionSummary, PromptImage,
 };
 use opencode::{snapshot_known_session_ids, track_launched_session};
+use prompt_image_store::PromptImageStore;
 use proxy_debug::{
     ProxyDebugManager, ProxyDebugState, ProxyTrafficDetail, ProxyTrafficPage, RegisterRouteRequest,
 };
@@ -1193,6 +1195,14 @@ fn get_native_session_events(
     limit: Option<u64>,
 ) -> Result<event_bus::ReplayBatch, String> {
     native_state.replay_events_limited(&runtime_id, since_seq, limit)
+}
+
+#[tauri::command]
+fn read_prompt_image_attachment(
+    storage_path: String,
+    media_type: String,
+) -> Result<String, String> {
+    PromptImageStore::default().read_data_url(&storage_path, &media_type)
 }
 
 #[tauri::command]
@@ -3663,6 +3673,7 @@ fn main() {
             respond_native_session_permission,
             respond_native_session_prompt,
             get_native_session_events,
+            read_prompt_image_attachment,
             update_native_session_settings,
             set_native_session_runtime_perm_mode,
             stop_native_session,

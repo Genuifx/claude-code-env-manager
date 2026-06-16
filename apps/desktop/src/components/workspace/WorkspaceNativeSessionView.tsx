@@ -19,6 +19,7 @@ import { useTauriCommands } from '@/hooks/useTauriCommands';
 import type {
   InteractivePromptAnnotation,
   InteractiveToolPrompt,
+  NativePromptImageInput,
   NativeSessionSummary,
   SessionEventRecord,
   SessionPromptImage,
@@ -1649,7 +1650,7 @@ export function WorkspaceNativeSessionView({
     payload: InteractivePromptReplyPayload,
   ) => {
     let requestText = '';
-    let requestImages: SessionPromptImage[] | undefined;
+    let requestImages: NativePromptImageInput[] | undefined;
     if (payload.kind === 'text') {
       requestText = buildComposerPromptText(payload.text, payload.attachments ?? []);
       const images = extractComposerImagePayloads(payload.attachments ?? []);
