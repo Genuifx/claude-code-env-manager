@@ -158,7 +158,7 @@ const MACOS_TRAFFIC_LIGHT_INSET_Y: f32 = macos_traffic_light_inset_y_for_centere
 );
 
 #[cfg(target_os = "macos")]
-const MACOS_TRAFFIC_LIGHT_SYNC_DELAYS: [u64; 3] = [0, 120, 320];
+const MACOS_TRAFFIC_LIGHT_SYNC_DELAYS: [u64; 4] = [0, 120, 320, 800];
 
 #[cfg(all(target_os = "macos", test))]
 const fn decorum_traffic_light_top_from_inset(inset_y: f32) -> f32 {
@@ -232,7 +232,7 @@ fn sync_macos_window_chrome(
 }
 
 #[cfg(target_os = "macos")]
-fn schedule_macos_traffic_light_sync_series(
+pub(crate) fn schedule_macos_traffic_light_sync_series(
     main_window: tauri::WebviewWindow,
     reason: &'static str,
 ) {
@@ -3599,6 +3599,10 @@ fn main() {
             if let Err(error) = main_window.set_focus() {
                 eprintln!("Main window boot focus warning: {}", error);
             }
+            #[cfg(target_os = "macos")]
+            if let Some(main_webview_window) = main_window.app_handle().get_webview_window("main") {
+                schedule_macos_traffic_light_sync_series(main_webview_window, "boot show");
+            }
         })
         .invoke_handler(tauri::generate_handler![
             companion::get_companion,
@@ -3988,6 +3992,7 @@ fn main() {
                 // macOS Dock icon click should reopen/show the main window.
                 if let Some(window) = app_handle.get_webview_window("main") {
                     let _ = window.show();
+                    let _ = window.unminimize();
                     let _ = window.set_focus();
                     schedule_macos_traffic_light_sync_series(window, "reopen");
                 }
@@ -4098,6 +4103,6 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_traffic_light_sync_retries_after_state_transitions() {
-        assert_eq!(MACOS_TRAFFIC_LIGHT_SYNC_DELAYS, [0, 120, 320]);
+        assert_eq!(MACOS_TRAFFIC_LIGHT_SYNC_DELAYS, [0, 120, 320, 800]);
     }
 }

@@ -11,6 +11,14 @@ use crate::config;
 use crate::session::SessionManager;
 use crate::terminal;
 
+fn resync_main_window_chrome(window: &tauri::WebviewWindow, reason: &'static str) {
+    #[cfg(target_os = "macos")]
+    crate::schedule_macos_traffic_light_sync_series(window.clone(), reason);
+
+    #[cfg(not(target_os = "macos"))]
+    let _ = (window, reason);
+}
+
 /// Event payload for environment changes
 #[derive(Clone, Serialize)]
 pub struct EnvChangedPayload {
@@ -257,13 +265,17 @@ pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, tauri::Error> {
             "open_window" => {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();
+                    let _ = window.unminimize();
                     let _ = window.set_focus();
+                    resync_main_window_chrome(&window, "tray open");
                 }
             }
             "settings" => {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();
+                    let _ = window.unminimize();
                     let _ = window.set_focus();
+                    resync_main_window_chrome(&window, "tray settings");
                     // Emit event to navigate to settings
                     let _ = app.emit("navigate-to-settings", ());
                 }

@@ -79,6 +79,11 @@ pub fn open_pet_notification(app: AppHandle, request: PetOpenSessionRequest) -> 
         let _ = main_window.show();
         let _ = main_window.unminimize();
         let _ = main_window.set_focus();
+        #[cfg(target_os = "macos")]
+        crate::schedule_macos_traffic_light_sync_series(
+            main_window.clone(),
+            "pet notification restore",
+        );
         main_window
             .emit("pet-open-session", &request)
             .map_err(|e| format!("emit pet open session: {e}"))?;
