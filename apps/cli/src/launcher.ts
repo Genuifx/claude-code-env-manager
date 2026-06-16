@@ -3,7 +3,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import chalk from 'chalk';
 import type { EnvConfig, PermissionModeName } from '@ccem/core';
-import { decrypt, PERMISSION_PRESETS, ensureCcemDir } from '@ccem/core';
+import {
+  decrypt,
+  PERMISSION_PRESETS,
+  ensureCcemDir,
+  normalizePermissionAllowRules,
+} from '@ccem/core';
 import { renderStarting } from './ui.js';
 import { startCliClaudeProvenanceTracking, type CliProvenanceTrackingHandle } from './sessionProvenance.js';
 
@@ -49,20 +54,19 @@ function buildEnvVars(envConfig: EnvConfig): Record<string, string> {
 /**
  * Build Claude CLI args for a permission mode preset.
  */
-function buildPermArgs(modeName: PermissionModeName): string[] {
+export function buildPermArgs(modeName: PermissionModeName): string[] {
   const preset = PERMISSION_PRESETS[modeName];
   if (!preset) return [];
 
   const args: string[] = ['--permission-mode', preset.permissionMode];
+  const allowRules = normalizePermissionAllowRules(preset.permissions.allow);
 
-  if (preset.permissions.allow.length > 0) {
-    const quoted = preset.permissions.allow.map(t => `"${t}"`).join(' ');
-    args.push('--allowedTools', quoted);
+  if (allowRules.length > 0) {
+    args.push('--allowedTools', ...allowRules);
   }
 
   if (preset.permissions.deny.length > 0) {
-    const quoted = preset.permissions.deny.map(t => `"${t}"`).join(' ');
-    args.push('--disallowedTools', quoted);
+    args.push('--disallowedTools', ...preset.permissions.deny);
   }
 
   return args;

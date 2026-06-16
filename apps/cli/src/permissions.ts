@@ -2,7 +2,11 @@ import fs from 'fs';
 import chalk from 'chalk';
 import Table from 'cli-table3';
 import type { PermissionConfig, PermissionModeName, EnvConfig } from '@ccem/core';
-import { PERMISSION_PRESETS, getPermissionModeNames } from '@ccem/core';
+import {
+  PERMISSION_PRESETS,
+  getPermissionModeNames,
+  normalizePermissionAllowRules,
+} from '@ccem/core';
 import { getSettingsPath, ensureClaudeDir } from './utils.js';
 import { launchClaude } from './launcher.js';
 
@@ -40,11 +44,12 @@ export const mergePermissions = (
   existing: PermissionConfig,
   preset: { allow: string[]; deny: string[] }
 ): PermissionConfig => {
-  const existingAllow = existing.permissions?.allow || [];
+  const existingAllow = normalizePermissionAllowRules(existing.permissions?.allow || []);
   const existingDeny = existing.permissions?.deny || [];
+  const presetAllow = normalizePermissionAllowRules(preset.allow);
 
   // 合并并去重
-  const mergedAllow = [...new Set([...preset.allow, ...existingAllow])];
+  const mergedAllow = [...new Set([...presetAllow, ...existingAllow])];
   const mergedDeny = [...new Set([...preset.deny, ...existingDeny])];
 
   return {
