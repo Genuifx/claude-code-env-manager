@@ -624,6 +624,13 @@ fn resolve_highest_versioned_binary_path(binary: &str, candidates: &[String]) ->
     select_highest_versioned_binary_path(collect_binary_candidates(binary, candidates))
 }
 
+fn codex_app_bundle_candidates(home: &str) -> Vec<String> {
+    vec![
+        "/Applications/Codex.app/Contents/Resources/codex".to_string(),
+        format!("{}/Applications/Codex.app/Contents/Resources/codex", home),
+    ]
+}
+
 /// Resolve the full path to the `ccem` binary.
 pub fn resolve_ccem_path() -> Option<String> {
     let home = dirs::home_dir()
@@ -668,6 +675,7 @@ pub fn resolve_codex_path() -> Option<String> {
         "/usr/local/bin/codex".to_string(),
         "/opt/homebrew/bin/codex".to_string(),
     ]);
+    candidates.extend(codex_app_bundle_candidates(&home));
     resolve_highest_versioned_binary_path("codex", &candidates)
 }
 
@@ -1936,6 +1944,17 @@ mod tests {
         );
 
         fs::remove_dir_all(root).expect("remove fake binary directory");
+    }
+
+    #[test]
+    fn codex_app_bundle_candidates_include_system_and_user_apps() {
+        let candidates = codex_app_bundle_candidates("/Users/test");
+
+        assert!(
+            candidates.contains(&"/Applications/Codex.app/Contents/Resources/codex".to_string())
+        );
+        assert!(candidates
+            .contains(&"/Users/test/Applications/Codex.app/Contents/Resources/codex".to_string()));
     }
 
     #[test]
