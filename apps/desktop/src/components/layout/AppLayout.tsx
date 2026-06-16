@@ -1,4 +1,5 @@
 import { ReactNode } from 'react';
+import { Home } from 'lucide-react';
 import { SideRail } from './SideRail';
 import { MacFullscreenWindowControls } from './MacFullscreenWindowControls';
 import { GlobalUpdateIndicator } from '@/components/app-update/GlobalUpdateIndicator';
@@ -29,7 +30,7 @@ export function AppLayout({
   fullBleed = false,
 }: AppLayoutProps) {
   return (
-    <SidebarProvider className="h-screen flex overflow-hidden relative">
+    <SidebarProvider className="h-screen flex overflow-hidden relative" data-active-tab={activeTab}>
       <MacFullscreenWindowControls />
       <AppLayoutBody
         activeTab={activeTab}
@@ -56,6 +57,7 @@ function AppLayoutBody({
   const { open, state } = useSidebar();
   const isWorkspace = activeTab === 'workspace';
   const sidebarToggleLabel = state === 'collapsed' ? t('sideRail.expand') : t('sideRail.collapse');
+  const showWorkspaceShortcut = state === 'collapsed' && !isWorkspace;
   const titleKeyMap: Record<string, string> = {
     'proxy-debug': 'sideRail.proxyDebug',
     'chat-app': 'sideRail.chatApp',
@@ -79,6 +81,13 @@ function AppLayoutBody({
   return (
     <>
       <AppSidebarToggleAnchor label={sidebarToggleLabel} />
+      {showWorkspaceShortcut ? (
+        <CollapsedWorkspaceShortcut
+          label={t('sideRail.backToWorkspace')}
+          onClick={() => onTabChange('workspace')}
+          onPrefetch={() => onTabPrefetch?.('workspace')}
+        />
+      ) : null}
       <GlobalUpdateIndicator />
 
       <Sidebar>
@@ -125,6 +134,34 @@ function AppLayoutBody({
         </main>
       </SidebarInset>
     </>
+  );
+}
+
+function CollapsedWorkspaceShortcut({
+  label,
+  onClick,
+  onPrefetch,
+}: {
+  label: string;
+  onClick: () => void;
+  onPrefetch?: () => void;
+}) {
+  return (
+    <div className="app-workspace-shortcut-anchor absolute z-[122]">
+      <button
+        type="button"
+        data-testid="collapsed-workspace-shortcut"
+        aria-label={label}
+        title={label}
+        onClick={onClick}
+        onMouseEnter={onPrefetch}
+        onFocus={onPrefetch}
+        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border-none bg-transparent p-0 text-muted-foreground/75 shadow-none transition-[background-color,color,transform] duration-150 hover:bg-foreground/[0.06] hover:text-foreground active:scale-[0.96] active:bg-foreground/[0.1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      >
+        <Home className="h-[15px] w-[15px]" />
+        <span className="sr-only">{label}</span>
+      </button>
+    </div>
   );
 }
 
