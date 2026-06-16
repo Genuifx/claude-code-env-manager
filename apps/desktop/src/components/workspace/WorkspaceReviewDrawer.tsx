@@ -3,14 +3,11 @@ import { createPortal } from 'react-dom';
 import { open } from '@tauri-apps/plugin-shell';
 import {
   ArrowLeft,
-  Bot,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   Circle,
   CircleAlert,
-  ClipboardCheck,
-  Compass,
   ExternalLink,
   FileDiff,
   FileText,
@@ -32,7 +29,13 @@ import type {
   SubagentMeta,
 } from '@/features/conversations/types';
 import type { ReviewChangedFile, WorkspaceReviewModel } from './workspaceReview';
-import { resolveSubagentSelection, shouldShowSubagentEntry } from './workspaceSubagents';
+import {
+  getSubagentEntryPreview,
+  getSubagentDisplayMeta,
+  resolveSubagentSelection,
+  shouldShowSubagentEntry,
+  type SubagentPersona,
+} from './workspaceSubagents';
 import { WorkspaceTranscriptList } from './WorkspaceTranscriptList';
 
 interface WorkspaceReviewDrawerProps {
@@ -382,11 +385,61 @@ function DiffView({
   );
 }
 
-function subagentTypeIcon(type?: string): ComponentType<{ className?: string }> {
-  const key = (type || '').toLowerCase();
-  if (key.includes('explore') || key.includes('search')) return Compass;
-  if (key.includes('review')) return ClipboardCheck;
-  return Bot;
+const SUBAGENT_SIGIL_CELLS: Record<SubagentPersona['symbol'], number[]> = {
+  blocks: [0, 1, 3, 4, 6],
+  steps: [0, 3, 4, 6, 7, 8],
+  frame: [0, 1, 2, 3, 5, 6, 7, 8],
+  bridge: [0, 1, 2, 3, 4, 5],
+  spark: [1, 3, 4, 5, 7],
+  axis: [1, 3, 4, 5, 7],
+  orbit: [1, 3, 4, 5, 7],
+};
+
+function SubagentSigil({
+  symbol,
+  accent,
+  active = false,
+  running = false,
+  size = 'sm',
+}: Pick<SubagentPersona, 'symbol' | 'accent'> & {
+  active?: boolean;
+  running?: boolean;
+  size?: 'xs' | 'sm' | 'lg';
+}) {
+  const cells = SUBAGENT_SIGIL_CELLS[symbol];
+  const dimensions =
+    size === 'lg'
+      ? 'h-7 w-7 gap-[3px] p-[5px]'
+      : size === 'xs'
+        ? 'h-4 w-4 gap-[2px] p-[3px]'
+        : 'h-5 w-5 gap-[2px] p-[4px]';
+  const cellSize = size === 'lg' ? 'h-[4px] w-[4px]' : 'h-[3px] w-[3px]';
+
+  return (
+    <span
+      className={cn('relative grid shrink-0 grid-cols-3 rounded-md border transition-colors', dimensions)}
+      style={{
+        borderColor: `hsl(${accent} / ${active ? 0.46 : 0.24})`,
+        backgroundColor: `hsl(${accent} / ${active ? 0.14 : 0.08})`,
+        boxShadow: running ? `0 0 0 3px hsl(${accent} / 0.10)` : undefined,
+      }}
+      aria-hidden="true"
+    >
+      {Array.from({ length: 9 }).map((_, index) => (
+        <span
+          key={index}
+          className={cn('rounded-[1px]', cellSize, cells.includes(index) ? 'opacity-100' : 'opacity-0')}
+          style={{ backgroundColor: `hsl(${accent})` }}
+        />
+      ))}
+      {running ? (
+        <span
+          className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full ring-1 ring-background"
+          style={{ backgroundColor: `hsl(${accent})` }}
+        />
+      ) : null}
+    </span>
+  );
 }
 
 function formatDurationMs(ms: number): string {
@@ -396,19 +449,6 @@ function formatDurationMs(ms: number): string {
   const minutes = Math.floor(seconds / 60);
   const rem = seconds % 60;
   return rem ? `${minutes}m${rem}s` : `${minutes}m`;
-}
-
-function subagentStatusLabel(status: string): string {
-  switch (status) {
-    case 'running':
-      return '运行中';
-    case 'completed':
-      return '已完成';
-    case 'failed':
-      return '失败';
-    default:
-      return status || '未知';
-  }
 }
 
 function SubagentPanel({
@@ -430,6 +470,11 @@ function SubagentPanel({
     () => subagents.find((s) => s.agentId === selectedAgentId) ?? null,
     [subagents, selectedAgentId],
   );
+  const selectedIndex = useMemo(
+    () => subagents.findIndex((s) => s.agentId === selectedAgentId),
+    [subagents, selectedAgentId],
+  );
+  const selectedDisplay = selected ? getSubagentDisplayMeta(selected, Math.max(selectedIndex, 0)) : null;
   const selectedRunning = selected?.status === 'running';
 
   return (
@@ -444,34 +489,48 @@ function SubagentPanel({
             </p>
           ) : (
             <div className="py-1">
-              {subagents.map((agent) => {
-                const Icon = subagentTypeIcon(agent.subagentType);
+              {subagents.map((agent, index) => {
+                const display = getSubagentDisplayMeta(agent, index);
                 const isActive = agent.agentId === selectedAgentId;
-                const running = agent.status === 'running';
-                const failed = agent.status === 'failed';
                 return (
                   <button
                     type="button"
                     key={agent.agentId}
                     onClick={() => onSelect(agent.agentId)}
                     className={cn(
-                      'flex w-full items-start gap-2 px-3 py-2 text-left transition-colors hover:bg-surface-raised/50',
-                      isActive && 'bg-surface-raised/70',
+                      'flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-surface-raised/50',
+                      isActive && 'bg-surface-raised/75',
                     )}
                   >
-                    <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <SubagentSigil
+                      symbol={display.symbol}
+                      accent={display.accent}
+                      active={isActive}
+                      running={display.running}
+                    />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-[12px] font-medium text-foreground">
-                        {agent.description || agent.subagentType || 'sub-agent'}
-                      </p>
-                      <p className="truncate text-[10px] text-muted-foreground">
-                        {agent.subagentType ? `${agent.subagentType} · ` : ''}
-                        {agent.messageCount} 条 · {agent.toolCount} 工具
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <p className="truncate text-[13px] font-medium text-foreground">{display.name}</p>
+                        {display.running || display.failed ? (
+                          <span
+                            className={cn(
+                              'shrink-0 text-[10px] font-medium',
+                              display.running && 'text-muted-foreground',
+                              display.failed && 'text-destructive',
+                            )}
+                          >
+                            {display.statusLabel}
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="truncate text-[11px] text-muted-foreground/85">{display.subtitle}</p>
+                      <p className="truncate font-mono text-[10px] tabular-nums text-muted-foreground/55">
+                        {display.detail}
                       </p>
                     </div>
-                    {running ? (
+                    {display.running ? (
                       <LoaderCircle className="mt-0.5 h-3 w-3 shrink-0 animate-spin text-muted-foreground/60" />
-                    ) : failed ? (
+                    ) : display.failed ? (
                       <CircleAlert className="mt-0.5 h-3 w-3 shrink-0 text-destructive/70" />
                     ) : (
                       <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-success/70" />
@@ -484,27 +543,40 @@ function SubagentPanel({
         </ScrollArea>
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
-        {selected ? (
+        {selected && selectedDisplay ? (
           <>
-            <div className="shrink-0 border-b border-border-subtle/40 px-4 py-2.5">
-              <div className="flex items-center gap-2">
-                <p className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">
-                  {selected.description || selected.subagentType || 'sub-agent'}
-                </p>
-                <span
-                  className={cn(
-                    'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium',
-                    selected.status === 'running' && 'bg-muted text-muted-foreground',
-                    selected.status === 'completed' && 'bg-success/12 text-success',
-                    selected.status === 'failed' && 'bg-destructive/12 text-destructive',
-                  )}
-                >
-                  {subagentStatusLabel(selected.status)}
-                </span>
+            <div className="shrink-0 border-b border-border-subtle/40 px-4 py-3">
+              <div className="flex items-start gap-2.5">
+                <SubagentSigil
+                  symbol={selectedDisplay.symbol}
+                  accent={selectedDisplay.accent}
+                  active
+                  running={selectedDisplay.running}
+                  size="lg"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <p className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
+                      {selectedDisplay.name}
+                    </p>
+                    <span
+                      className={cn(
+                        'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium',
+                        selected.status === 'running' && 'bg-muted text-muted-foreground',
+                        selected.status === 'completed' && 'bg-success/12 text-success',
+                        selected.status === 'failed' && 'bg-destructive/12 text-destructive',
+                      )}
+                    >
+                      {selectedDisplay.statusLabel}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 truncate text-[11px] text-muted-foreground/90">
+                    {selectedDisplay.subtitle}
+                  </p>
+                </div>
               </div>
-              <p className="mt-1 text-[10px] text-muted-foreground">
-                {selected.subagentType ? `${selected.subagentType} · ` : ''}
-                {selected.messageCount} 条消息 · {selected.toolCount} 个工具 · 耗时{' '}
+              <p className="mt-2 text-[10px] text-muted-foreground">
+                {selectedDisplay.detail} · 耗时{' '}
                 {formatDurationMs((selected.completedAt ?? Date.now()) - selected.startedAt)}
               </p>
               {selected.resultSummary ? (
@@ -538,6 +610,38 @@ function SubagentPanel({
         )}
       </div>
     </div>
+  );
+}
+
+function SubagentEntryPreview({ subagents }: { subagents: SubagentMeta[] }) {
+  const preview = getSubagentEntryPreview(subagents);
+
+  if (preview.items.length === 0) {
+    return null;
+  }
+
+  return (
+    <span className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(96px,1fr))] gap-1.5">
+      {preview.items.map((item) => (
+        <span
+          key={item.key}
+          className={cn(
+            'inline-flex h-6 min-w-0 items-center gap-1.5 rounded-md border border-border-subtle/50 bg-surface/55 px-1.5 pr-2',
+            'text-[11px] font-medium leading-none text-foreground/85 transition-colors group-hover:bg-surface-raised/70',
+            item.failed && 'border-destructive/30 bg-destructive/5 text-destructive',
+          )}
+          title={`${item.name} · ${item.statusLabel}`}
+        >
+          <SubagentSigil symbol={item.symbol} accent={item.accent} running={item.running} size="xs" />
+          <span className="min-w-0 truncate">{item.name}</span>
+        </span>
+      ))}
+      {preview.overflowCount > 0 ? (
+        <span className="inline-flex h-6 min-w-0 items-center justify-center rounded-md border border-dashed border-border-subtle/70 px-2 font-mono text-[10px] leading-none text-muted-foreground">
+          +{preview.overflowCount}
+        </span>
+      ) : null}
+    </span>
   );
 }
 
@@ -741,6 +845,7 @@ export function WorkspaceReviewDrawer({
     error: agentsError,
     count: subagents.length,
   });
+  const runningSubagentCount = subagents.filter((s) => s.status === 'running').length;
 
   return createPortal(
     <div className="fixed inset-0 z-[60]">
@@ -923,17 +1028,22 @@ export function WorkspaceReviewDrawer({
                 <button
                   type="button"
                   onClick={() => setPage('agents')}
-                  className="group flex w-full items-center gap-2 rounded-xl border border-border-subtle/50 bg-surface-raised/30 px-3 py-2.5 text-left transition-colors hover:bg-surface-raised/60"
+                  className="group w-full rounded-lg border border-border-subtle/50 bg-surface-raised/25 px-3 py-3 text-left transition-colors hover:bg-surface-raised/55"
                 >
-                  <Users className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <span className="text-[13px] font-medium text-foreground">子 Agent</span>
-                  <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                    {subagents.length}
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="text-[13px] font-semibold text-foreground">子 Agent</span>
+                    <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+                      {subagents.length}
+                    </span>
+                    {runningSubagentCount > 0 ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                        <LoaderCircle className="h-3 w-3 shrink-0 animate-spin" />
+                        {runningSubagentCount} 运行中
+                      </span>
+                    ) : null}
+                    <ChevronRight className="ml-auto h-4 w-4 shrink-0 text-muted-foreground/45 transition-transform group-hover:translate-x-0.5" />
                   </span>
-                  {subagents.some((s) => s.status === 'running') ? (
-                    <LoaderCircle className="h-3 w-3 shrink-0 animate-spin text-muted-foreground/60" />
-                  ) : null}
-                  <ChevronRight className="ml-auto h-4 w-4 shrink-0 text-muted-foreground/45 transition-transform group-hover:translate-x-0.5" />
+                  <SubagentEntryPreview subagents={subagents} />
                 </button>
               ) : null}
 

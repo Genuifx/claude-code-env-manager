@@ -104,6 +104,48 @@ test('deduplicates live native sessions after matching provider history appears'
   assert.equal(sessions[0].display, '历史里的真实标题');
 });
 
+test('resolves review provider session id from a native wrapper history session', async () => {
+  const { resolveWorkspaceReviewProviderSessionId } = await importWorkspaceSidebarSessions();
+
+  const session = {
+    id: 'native-1781454430199',
+    source: 'claude',
+    display: '第一性原理多Agent调研',
+    timestamp: Date.parse('2026-06-15T12:00:00.000Z'),
+    project: '/Users/wzt/G/Github/claude-code-env-manager',
+    projectName: 'claude-code-env-manager',
+    envName: 'glm-official',
+    configSource: 'native',
+  };
+
+  const providerSessionId = resolveWorkspaceReviewProviderSessionId(session, {
+    session: nativeSession({
+      runtime_id: 'native-1781454430199',
+      provider_session_id: 'd4465693-907c-4499-840a-106c33f6a967',
+      status: 'completed',
+    }),
+  });
+
+  assert.equal(providerSessionId, 'd4465693-907c-4499-840a-106c33f6a967');
+});
+
+test('uses the history id itself for provider history sessions', async () => {
+  const { resolveWorkspaceReviewProviderSessionId } = await importWorkspaceSidebarSessions();
+
+  const session = {
+    id: 'd4465693-907c-4499-840a-106c33f6a967',
+    source: 'claude',
+    display: '第一性原理多Agent调研',
+    timestamp: Date.parse('2026-06-15T12:00:00.000Z'),
+    project: '/Users/wzt/G/Github/claude-code-env-manager',
+    projectName: 'claude-code-env-manager',
+    envName: 'glm-official',
+    configSource: 'ccem',
+  };
+
+  assert.equal(resolveWorkspaceReviewProviderSessionId(session, null), session.id);
+});
+
 test('omits terminal native sessions from the workspace sidebar', async () => {
   const { buildWorkspaceSidebarSessions } = await importWorkspaceSidebarSessions();
 
