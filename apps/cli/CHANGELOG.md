@@ -1,5 +1,11 @@
 # ccem
 
+## 2.19.0
+
+### Minor Changes
+
+- Release v2.19.0: subagent personas in review drawer, workspace prompt image rendering, macOS traffic lights alignment fix, workspace cron command fixes.
+
 ## 2.18.0
 
 ### Minor Changes
