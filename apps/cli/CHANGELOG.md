@@ -1,5 +1,13 @@
 # ccem
 
+## 2.20.0
+
+### Minor Changes
+
+- - feat(desktop): add collapsed workspace shortcut
+  - fix(desktop): detect codex app bundle cli
+  - fix(cli): normalize Claude allow tool rules and allowed tools wildcard compatibility
+
 ## 2.19.0
 
 ### Minor Changes
