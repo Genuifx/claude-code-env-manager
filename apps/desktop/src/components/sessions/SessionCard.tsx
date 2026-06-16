@@ -13,6 +13,7 @@ import {
   Shield,
   SquareArrowOutUpRight,
   SquareTerminal,
+  Target,
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -35,6 +36,7 @@ import type { TmuxAttachTerminalInfo, TmuxAttachTerminalType } from '@/lib/tauri
 import { useLocale } from '../../locales';
 import type { Session, UnifiedSession, ChannelInfo } from '@/store';
 import { OpenInTerminalPopoverButton } from './OpenInTerminalPopoverButton';
+import { getSessionTerminalActions } from './sessionTerminalActions';
 import { ModelIcon } from '../history/ModelIcon';
 
 const LazyBindToChatDialog = lazy(async () =>
@@ -168,7 +170,7 @@ export function SessionCard({
   selectedEmbedded,
   onSelectEmbedded,
   onMenuIntent,
-  onFocus: _onFocus,
+  onFocus,
   onOpenInTerminal,
   onMinimize,
   onClose,
@@ -420,18 +422,44 @@ export function SessionCard({
     }
 
     // Interactive sessions (both legacy and unified)
+    const terminalActions = getSessionTerminalActions({
+      session: {
+        status: session.status,
+        terminalType: session.terminalType,
+        windowId: session.windowId,
+        tmuxTarget: session.tmuxTarget,
+      },
+      unifiedSession: unifiedSession
+        ? {
+            runtimeKind: unifiedSession.runtimeKind,
+            status: unifiedSession.status,
+            tmuxTarget: unifiedSession.tmuxTarget,
+          }
+        : undefined,
+    });
+
     return (
       <div className="flex items-center justify-between w-full" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center gap-1.5">
-          <OpenInTerminalPopoverButton
-            sessionId={sessionId}
-            terminals={terminalOptions}
-            disabled={!isRunning}
-            className="h-[30px] px-3 text-[13px] rounded-full border border-[hsl(var(--border-subtle))] hover:bg-[hsl(var(--surface-raised))] transition-all active:scale-95"
-            label={t('sessions.focus')}
-            onMenuIntent={onMenuIntent}
-            onOpenInTerminal={onOpenInTerminal}
-          />
+          {terminalActions.canFocusExistingTerminal && (
+            <SessionActionIconButton
+              icon={Target}
+              onClick={() => onFocus(sessionId)}
+              tooltip={t('sessions.focus')}
+              disabled={!terminalActions.isRunning}
+            />
+          )}
+          {terminalActions.canOpenInTerminal && (
+            <OpenInTerminalPopoverButton
+              sessionId={sessionId}
+              terminals={terminalOptions}
+              disabled={!terminalActions.isRunning}
+              className="h-[30px] px-3 text-[13px] rounded-full border border-[hsl(var(--border-subtle))] hover:bg-[hsl(var(--surface-raised))] transition-all active:scale-95"
+              label={t('sessions.openInTerminal')}
+              onMenuIntent={onMenuIntent}
+              onOpenInTerminal={onOpenInTerminal}
+            />
+          )}
         </div>
         <div className="flex items-center gap-0.5">
           {allowChannelBinding && (
@@ -444,12 +472,14 @@ export function SessionCard({
               onOpenBindDialog={() => setBindDialogOpen(true)}
             />
           )}
-          <SessionActionIconButton
-            icon={Minus}
-            onClick={() => onMinimize(sessionId)}
-            tooltip={t('sessions.minimizeAll')}
-            disabled={!isRunning}
-          />
+          {!isEmbedded && (
+            <SessionActionIconButton
+              icon={Minus}
+              onClick={() => onMinimize(sessionId)}
+              tooltip={t('sessions.minimizeAll')}
+              disabled={!terminalActions.isRunning}
+            />
+          )}
           <SessionActionIconButton icon={X} onClick={() => onClose(sessionId)} tooltip={t('workspace.close')} variant="destructive" />
         </div>
       </div>

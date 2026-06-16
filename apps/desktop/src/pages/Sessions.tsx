@@ -155,6 +155,7 @@ function unifiedToLegacySession(u: UnifiedSession): Session {
     startedAt: new Date(u.createdAt),
     status: statusMap[u.status] ?? 'stopped',
     permMode: u.permMode,
+    tmuxTarget: u.tmuxTarget ?? undefined,
   };
 }
 

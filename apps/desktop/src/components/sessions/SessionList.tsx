@@ -5,6 +5,7 @@ import type { TmuxAttachTerminalInfo, TmuxAttachTerminalType } from '@/lib/tauri
 import { useLocale } from '../../locales';
 import type { Session } from '@/store';
 import { OpenInTerminalPopoverButton } from './OpenInTerminalPopoverButton';
+import { getSessionTerminalActions } from './sessionTerminalActions';
 
 interface SessionListProps {
   sessions: Session[];
@@ -172,26 +173,41 @@ export function SessionList({
               </div>
             ) : (
               <div className="flex gap-2 flex-shrink-0" onClick={(event) => event.stopPropagation()}>
-                {isEmbedded ? (
-                  <OpenInTerminalPopoverButton
-                    sessionId={session.id}
-                    terminals={terminalOptions}
-                    disabled={session.status !== 'running'}
-                    className="glass-btn-outline justify-between"
-                    onMenuIntent={onMenuIntent}
-                    onOpenInTerminal={onOpenInTerminal}
-                  />
-                ) : (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => onFocus(session.id)}
-                    disabled={session.status !== 'running'}
-                    className="glass-btn-outline"
-                  >
-                    {t('sessions.focus')}
-                  </Button>
-                )}
+                {(() => {
+                  const actions = getSessionTerminalActions({
+                    session: {
+                      status: session.status,
+                      terminalType: session.terminalType,
+                      windowId: session.windowId,
+                      tmuxTarget: session.tmuxTarget,
+                    },
+                  });
+                  return (
+                    <>
+                      {actions.canFocusExistingTerminal && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => onFocus(session.id)}
+                          disabled={!actions.isRunning}
+                          className="glass-btn-outline"
+                        >
+                          {t('sessions.focus')}
+                        </Button>
+                      )}
+                      {actions.canOpenInTerminal && (
+                        <OpenInTerminalPopoverButton
+                          sessionId={session.id}
+                          terminals={terminalOptions}
+                          disabled={!actions.isRunning}
+                          className="glass-btn-outline justify-between"
+                          onMenuIntent={onMenuIntent}
+                          onOpenInTerminal={onOpenInTerminal}
+                        />
+                      )}
+                    </>
+                  );
+                })()}
                 {!isEmbedded && (
                   <Button
                     size="sm"
