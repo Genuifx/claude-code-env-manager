@@ -113,3 +113,18 @@ export function findLiveEntryForSidebarSession<T extends WorkspaceSidebarLiveSes
       || entry.session.provider_session_id === session.id;
   });
 }
+
+export function resolveWorkspaceReviewProviderSessionId(
+  session: Pick<HistorySessionItem, 'id' | 'configSource'> | null | undefined,
+  liveEntry?: WorkspaceSidebarLiveSessionEntry | null,
+): string | null {
+  if (!session) {
+    return null;
+  }
+
+  if (session.configSource === 'native') {
+    return liveEntry?.session.provider_session_id?.trim() || null;
+  }
+
+  return session.id;
+}

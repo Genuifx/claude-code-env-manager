@@ -58,6 +58,7 @@ import type {
 import {
   buildWorkspaceSidebarSessions,
   findLiveEntryForSidebarSession,
+  resolveWorkspaceReviewProviderSessionId,
   toLiveHistorySessionItem,
 } from '@/components/workspace/workspaceSidebarSessions';
 import { launchWorkspaceTerminalSession } from '@/components/workspace/workspaceTerminalLaunch';
@@ -956,6 +957,9 @@ export function Workspace({
   const workspaceReviewWorkingDir = workspaceMode === 'history' && selectedSession
     ? selectedSession.project || null
     : effectiveComposeDir;
+  const workspaceReviewProviderSessionId = workspaceMode === 'history' && selectedSession
+    ? resolveWorkspaceReviewProviderSessionId(selectedSession, findLiveEntryForSession(selectedSession))
+    : null;
   const workspaceReviewSession = useMemo<NativeSessionSummary>(() => {
     const provider = workspaceMode === 'history' && selectedSession
       ? selectedSession.source === 'codex' ? 'codex' : 'claude'
@@ -976,7 +980,9 @@ export function Workspace({
         : 'compose',
       provider,
       transport: 'native_sdk',
-      provider_session_id: workspaceMode === 'history' && selectedSession ? selectedSession.id : null,
+      provider_session_id: workspaceMode === 'history' && selectedSession
+        ? workspaceReviewProviderSessionId
+        : null,
       project_dir: workspaceReviewWorkingDir || '',
       env_name: envName || '—',
       perm_mode: permMode,
@@ -1001,6 +1007,7 @@ export function Workspace({
     selectedSession,
     workspaceMode,
     workspaceReviewWorkingDir,
+    workspaceReviewProviderSessionId,
   ]);
   const workspaceReviewModel = useMemo(
     () => buildWorkspaceReviewModel({
