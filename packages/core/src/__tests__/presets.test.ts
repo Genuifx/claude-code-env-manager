@@ -6,6 +6,8 @@ import {
   getPermissionModeNames,
   getModeIcon,
   formatPermissionDescription,
+  normalizePermissionAllowRule,
+  normalizePermissionAllowRules,
 } from '../presets.js';
 import type { PermissionModeName } from '../types.js';
 
@@ -83,6 +85,15 @@ describe('presets', () => {
       }
     });
 
+    it('should use bare tool names for full-tool allow rules', () => {
+      const legacyWildcardAllow = /^[A-Za-z][A-Za-z0-9_]*\(\*\)$/;
+      for (const preset of Object.values(PERMISSION_PRESETS)) {
+        for (const rule of preset.permissions.allow) {
+          expect(rule).not.toMatch(legacyWildcardAllow);
+        }
+      }
+    });
+
     it('should have yolo mode with bypassPermissions', () => {
       expect(PERMISSION_PRESETS.yolo.permissionMode).toBe('bypassPermissions');
       expect(PERMISSION_PRESETS.yolo.permissions.allow.length).toBeGreaterThan(0);
@@ -103,6 +114,28 @@ describe('presets', () => {
     it('should have audit mode that denies modifications', () => {
       expect(PERMISSION_PRESETS.audit.permissionMode).toBe('plan');
       expect(PERMISSION_PRESETS.audit.permissions.deny).toContain('Edit(*)');
+    });
+  });
+
+  describe('normalizePermissionAllowRule', () => {
+    it('should convert legacy wildcard-all allow rules to bare tool names', () => {
+      expect(normalizePermissionAllowRule('Read(*)')).toBe('Read');
+      expect(normalizePermissionAllowRule('Bash(*)')).toBe('Bash');
+      expect(normalizePermissionAllowRule('WebFetch(*)')).toBe('WebFetch');
+    });
+
+    it('should keep scoped allow rules unchanged', () => {
+      expect(normalizePermissionAllowRule('Bash(npm:*)')).toBe('Bash(npm:*)');
+      expect(normalizePermissionAllowRule('WebFetch(domain:example.com)')).toBe(
+        'WebFetch(domain:example.com)',
+      );
+    });
+
+    it('should deduplicate normalized allow rules', () => {
+      expect(normalizePermissionAllowRules(['Read(*)', 'Read', '  ', 'Bash(npm:*)'])).toEqual([
+        'Read',
+        'Bash(npm:*)',
+      ]);
     });
   });
 

@@ -91,7 +91,7 @@ describe('permissions', () => {
   });
 
   describe('mergePermissions', () => {
-    it('should merge preset permissions with existing', () => {
+    it('should merge preset permissions with existing and normalize legacy allow rules', () => {
       const existing: PermissionConfig = {
         permissions: {
           allow: ['Read(*)'],
@@ -106,7 +106,8 @@ describe('permissions', () => {
 
       const result = mergePermissions(existing, preset);
 
-      expect(result.permissions?.allow).toContain('Read(*)');
+      expect(result.permissions?.allow).toContain('Read');
+      expect(result.permissions?.allow).not.toContain('Read(*)');
       expect(result.permissions?.allow).toContain('Bash(npm:*)');
       expect(result.permissions?.deny).toContain('Write(*)');
       expect(result.permissions?.deny).toContain('Bash(sudo:*)');
@@ -121,14 +122,16 @@ describe('permissions', () => {
       };
 
       const preset = {
-        allow: ['Read(*)', 'Bash(npm:*)', 'Write(*)'],
+        allow: ['Read', 'Bash(npm:*)', 'Write(*)'],
         deny: [],
       };
 
       const result = mergePermissions(existing, preset);
 
-      const allowCount = result.permissions?.allow?.filter(p => p === 'Read(*)').length;
+      const allowCount = result.permissions?.allow?.filter(p => p === 'Read').length;
       expect(allowCount).toBe(1);
+      expect(result.permissions?.allow).toContain('Write');
+      expect(result.permissions?.allow).not.toContain('Write(*)');
     });
 
     it('should handle empty existing permissions', () => {
@@ -141,7 +144,7 @@ describe('permissions', () => {
 
       const result = mergePermissions(existing, preset);
 
-      expect(result.permissions?.allow).toContain('Read(*)');
+      expect(result.permissions?.allow).toContain('Read');
       expect(result.permissions?.deny).toContain('Write(*)');
     });
 

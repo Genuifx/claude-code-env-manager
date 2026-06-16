@@ -155,16 +155,16 @@ export const PERMISSION_PRESETS: Record<PermissionModeName, PermissionPreset> = 
     permissionMode: 'bypassPermissions',
     permissions: {
       allow: [
-        'Bash(*)',
-        'Read(*)',
-        'Edit(*)',
-        'Write(*)',
-        'WebFetch(*)',
-        'WebSearch(*)',
-        'Glob(*)',
-        'Grep(*)',
-        'LSP(*)',
-        'NotebookEdit(*)'
+        'Bash',
+        'Read',
+        'Edit',
+        'Write',
+        'WebFetch',
+        'WebSearch',
+        'Glob',
+        'Grep',
+        'LSP',
+        'NotebookEdit'
       ],
       deny: []
     }
@@ -176,13 +176,13 @@ export const PERMISSION_PRESETS: Record<PermissionModeName, PermissionPreset> = 
     permissionMode: 'acceptEdits',
     permissions: {
       allow: [
-        'Read(*)',
-        'Edit(*)',
-        'Write(*)',
-        'Glob(*)',
-        'Grep(*)',
-        'LSP(*)',
-        'NotebookEdit(*)',
+        'Read',
+        'Edit',
+        'Write',
+        'Glob',
+        'Grep',
+        'LSP',
+        'NotebookEdit',
         'Bash(npm:*)',
         'Bash(pnpm:*)',
         'Bash(yarn:*)',
@@ -235,10 +235,10 @@ export const PERMISSION_PRESETS: Record<PermissionModeName, PermissionPreset> = 
     permissionMode: 'plan',
     permissions: {
       allow: [
-        'Read(*)',
-        'Glob(*)',
-        'Grep(*)',
-        'LSP(*)',
+        'Read',
+        'Glob',
+        'Grep',
+        'LSP',
         'Bash(git status:*)',
         'Bash(git log:*)',
         'Bash(git diff:*)',
@@ -280,10 +280,10 @@ export const PERMISSION_PRESETS: Record<PermissionModeName, PermissionPreset> = 
     permissionMode: 'default',
     permissions: {
       allow: [
-        'Read(*)',
-        'Glob(*)',
-        'Grep(*)',
-        'LSP(*)',
+        'Read',
+        'Glob',
+        'Grep',
+        'LSP',
         'Bash(git status:*)',
         'Bash(git log:*)',
         'Bash(git diff:*)',
@@ -322,12 +322,12 @@ export const PERMISSION_PRESETS: Record<PermissionModeName, PermissionPreset> = 
     permissionMode: 'default',
     permissions: {
       allow: [
-        'Read(*)',
-        'Edit(*)',
-        'Write(*)',
-        'Glob(*)',
-        'Grep(*)',
-        'LSP(*)',
+        'Read',
+        'Edit',
+        'Write',
+        'Glob',
+        'Grep',
+        'LSP',
         'Bash(npm:*)',
         'Bash(pnpm:*)',
         'Bash(yarn:*)',
@@ -361,10 +361,10 @@ export const PERMISSION_PRESETS: Record<PermissionModeName, PermissionPreset> = 
     permissionMode: 'plan',
     permissions: {
       allow: [
-        'Read(*)',
-        'Glob(*)',
-        'Grep(*)',
-        'LSP(*)',
+        'Read',
+        'Glob',
+        'Grep',
+        'LSP',
         'Bash(git log:*)',
         'Bash(git blame:*)',
         'Bash(git show:*)',
@@ -389,6 +389,21 @@ export const PERMISSION_PRESETS: Record<PermissionModeName, PermissionPreset> = 
       ]
     }
   }
+};
+
+const LEGACY_ALLOW_ALL_RULE = /^([A-Za-z][A-Za-z0-9_]*?)\(\*\)$/;
+
+export const normalizePermissionAllowRule = (rule: string): string => {
+  const trimmed = rule.trim();
+  const match = trimmed.match(LEGACY_ALLOW_ALL_RULE);
+  return match ? match[1] : trimmed;
+};
+
+export const normalizePermissionAllowRules = (rules: string[]): string[] => {
+  const normalized = rules
+    .map(normalizePermissionAllowRule)
+    .filter((rule) => rule.length > 0);
+  return [...new Set(normalized)];
 };
 
 // 获取所有权限模式名称
@@ -429,7 +444,7 @@ const summarizeTools = (tools: string[], maxLength: number = 50): string => {
     if (bashMatch) {
       bashTools.push(bashMatch[1]);
     } else if (tool.startsWith('Bash(')) {
-      // 处理其他 Bash 格式如 Bash(*)
+      // Keep other scoped Bash rules visible as-is.
       otherTools.push(tool);
     } else {
       otherTools.push(tool);
