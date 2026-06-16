@@ -1,11 +1,13 @@
-import { memo, startTransition, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
   AlertCircle,
   Brain,
+  Check,
   ChevronDown,
   Circle,
   ClipboardList,
+  Copy,
   LoaderCircle,
   Scissors,
   Terminal,
@@ -14,6 +16,7 @@ import {
 import { MarkdownRenderer } from '@/components/history/MarkdownRenderer';
 import {
   extractToolSummary,
+  getMessageCopyText,
   isCommandOnlyText,
   parseMessageText,
   splitThinkBlocks,
@@ -22,6 +25,7 @@ import {
 } from '@/components/conversation/messageContentUtils';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useLocale } from '@/locales';
 import type {
   ConversationContentBlock,
@@ -1035,6 +1039,75 @@ function PlanBlock({ content, label }: { content: string; label: string }) {
   );
 }
 
+function formatMessageTime(ts?: number): string | null {
+  if (!ts || !Number.isFinite(ts) || ts <= 0) return null;
+  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+const MessageMetaBar = memo(function MessageMetaBar({
+  message,
+  isUser,
+  t,
+}: {
+  message: ConversationMessageData;
+  isUser: boolean;
+  t: (key: string) => string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const timeLabel = formatMessageTime(message.timestamp);
+
+  const handleCopy = useCallback(async () => {
+    const text = getMessageCopyText(message, t).trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable */
+    }
+  }, [message, t]);
+
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-1.5 select-none',
+        isUser && 'justify-end',
+      )}
+    >
+      {timeLabel ? (
+        <span className="text-[10px] tabular-nums text-muted-foreground/40">
+          {timeLabel}
+        </span>
+      ) : null}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={handleCopy}
+            className={cn(
+              'inline-flex h-4 w-4 items-center justify-center rounded transition-colors',
+              'opacity-40 hover:!opacity-100',
+              isUser
+                ? 'text-foreground/50 hover:bg-foreground/10'
+                : 'text-muted-foreground/50 hover:bg-muted/50',
+            )}
+          >
+            {copied ? (
+              <Check className="h-3 w-3 text-success" />
+            ) : (
+              <Copy className="h-3 w-3" />
+            )}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>
+          {copied ? t('workspace.copied') : t('workspace.copyMessage')}
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}, (prev, next) => prev.message === next.message && prev.isUser === next.isUser && prev.t === next.t);
+
 function renderAssistantMarkdown(text: string) {
   return (
     <MarkdownRenderer
@@ -1357,14 +1430,20 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
   }
 
   return (
-    <div className={cn(spacingClass, 'workspace-msg-virtualized')}>
+    <div className={cn(spacingClass, 'workspace-msg-virtualized group/msg')}>
       {hasMainContent ? (
         isUser ? (
-          <div className="ml-auto max-w-[78%] min-w-[220px] rounded-[24px] border border-border/30 bg-[hsl(var(--chat-assistant-bg)/0.7)] px-5 py-4 text-foreground shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_16px_rgba(0,0,0,0.03)]">
-            {renderedContent}
+          <div className="ml-auto max-w-[78%] min-w-[220px]">
+            <div className="rounded-[24px] border border-border/30 bg-[hsl(var(--chat-assistant-bg)/0.7)] px-5 py-4 text-foreground shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_16px_rgba(0,0,0,0.03)]">
+              {renderedContent}
+            </div>
+            <MessageMetaBar message={message} isUser t={t} />
           </div>
         ) : (
-          <div className="space-y-3">{renderedContent}</div>
+          <div className="space-y-3">
+            {renderedContent}
+            <MessageMetaBar message={message} isUser={false} t={t} />
+          </div>
         )
       ) : null}
 
