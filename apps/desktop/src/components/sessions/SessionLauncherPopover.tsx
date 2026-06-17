@@ -6,7 +6,7 @@ interface SessionLauncherPopoverProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onLaunchMulti: (dirs: string[], layout: ArrangeLayout) => void;
-  onBrowseAndLaunch: () => void;
+  onBrowseAndLaunch: () => Promise<void>;
   isLaunching: boolean;
   trigger: React.ReactNode;
 }
@@ -25,7 +25,7 @@ export function SessionLauncherPopover({
   };
 
   const handleBrowse = () => {
-    onBrowseAndLaunch();
+    void onBrowseAndLaunch();
     onOpenChange(false);
   };
 

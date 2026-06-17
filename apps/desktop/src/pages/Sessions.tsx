@@ -456,17 +456,33 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
     setIsMultiLaunching(false);
   }, [isMultiLaunching, launchClaudeCode, arrangeSessions, t]);
 
+  const markLaunchSuccess = useCallback(() => {
+    setLaunched(true);
+    clearTimeout(launchedTimerRef.current);
+    launchedTimerRef.current = setTimeout(() => setLaunched(false), 1200);
+  }, []);
+
   // Browse directory and launch single session
   const handleBrowseAndLaunch = useCallback(async () => {
-    const path = await openDirectoryPicker();
-    if (path) {
-      try {
-        await onLaunchWithDir(path);
-      } catch (err) {
-        console.error('Launch failed:', err);
+    if (isLaunching) return;
+    setIsLaunching(true);
+    try {
+      const path = await openDirectoryPicker();
+      if (!path) {
+        return;
       }
+      await launchSingleSession({
+        selectedWorkingDir: path,
+        onLaunch,
+        onLaunchWithDir,
+      });
+      markLaunchSuccess();
+    } catch (err) {
+      console.error('Launch failed:', err);
+    } finally {
+      setIsLaunching(false);
     }
-  }, [openDirectoryPicker, onLaunchWithDir]);
+  }, [isLaunching, openDirectoryPicker, onLaunch, onLaunchWithDir, markLaunchSuccess]);
 
   // Single launch with pending/success/failure state
   const handleLaunchClick = useCallback(async () => {
@@ -478,15 +494,13 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
         onLaunch,
         onLaunchWithDir,
       });
-      setLaunched(true);
-      clearTimeout(launchedTimerRef.current);
-      launchedTimerRef.current = setTimeout(() => setLaunched(false), 1200);
+      markLaunchSuccess();
     } catch (err) {
       console.error('Launch failed:', err);
     } finally {
       setIsLaunching(false);
     }
-  }, [isLaunching, selectedWorkingDir, onLaunch, onLaunchWithDir]);
+  }, [isLaunching, selectedWorkingDir, onLaunch, onLaunchWithDir, markLaunchSuccess]);
 
   // Select directory for launch
   const handleSelectDirectory = useCallback(async () => {
@@ -781,7 +795,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
             onOpenChange={setLauncherOpen}
             onLaunchMulti={handleMultiLaunch}
             onBrowseAndLaunch={handleBrowseAndLaunch}
-            isLaunching={isMultiLaunching}
+            isLaunching={isMultiLaunching || isLaunching}
             trigger={
               <button
                 type="button"

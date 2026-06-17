@@ -86,6 +86,7 @@ function App() {
   const [startupReady, setStartupReady] = useState(false);
   const [petOpenRequest, setPetOpenRequest] = useState<PetOpenSessionRequest | null>(null);
   const lastFocusSyncAtRef = useRef(0);
+  const launchInFlightRef = useRef<Set<string>>(new Set());
   const [, startTransition] = useTransition();
 
   const { setEnvironments, setCurrentEnv, setPermissionMode, setDefaultMode, setUsageStats, setContinuousUsageDays, setCompanion, environments, launchClient, error, setError } = useAppStore(
@@ -217,7 +218,9 @@ function App() {
     const setupListeners = async () => {
       try {
         const listener1 = await listen('tray-launch-claude', () => {
-          handleLaunch();
+          void handleLaunch().catch(() => {
+            // handleLaunch already logs and surfaces the launch error.
+          });
         });
         if (cancelled) {
           listener1();
@@ -509,15 +512,28 @@ function App() {
     };
   }, [activeTab, loadEnvironments, loadCurrentEnv, loadSessions, dialogOpen]);
 
-  // Handle launch
-  const handleLaunch = useCallback(async () => {
+  const runLaunchOnce = useCallback(async (key: string, launch: () => Promise<void>) => {
+    if (launchInFlightRef.current.has(key)) {
+      return;
+    }
+
+    launchInFlightRef.current.add(key);
     try {
-      await launchClaudeCode(undefined, undefined, launchClient);
+      await launch();
     } catch (err) {
       console.error('Launch failed:', err);
       throw err;
+    } finally {
+      launchInFlightRef.current.delete(key);
     }
-  }, [launchClaudeCode, launchClient]);
+  }, []);
+
+  // Handle launch
+  const handleLaunch = useCallback(async () => {
+    await runLaunchOnce(`default:${launchClient}`, async () => {
+      await launchClaudeCode(undefined, undefined, launchClient);
+    });
+  }, [launchClaudeCode, launchClient, runLaunchOnce]);
 
   // Global keyboard shortcuts (Cmd+1..9 for tabs, Cmd+Enter/N for launch, Cmd+, for settings)
   const globalShortcuts = useMemo(() => ({
@@ -544,13 +560,10 @@ function App() {
   // Handle launch with specific directory
   const handleLaunchWithDir = useCallback(async (workingDir: string, client?: LaunchClient) => {
     const effectiveClient = client ?? launchClient;
-    try {
+    await runLaunchOnce(`dir:${effectiveClient}:${workingDir}`, async () => {
       await launchClaudeCode(workingDir, undefined, effectiveClient);
-    } catch (err) {
-      console.error('Launch failed:', err);
-      throw err;
-    }
-  }, [launchClaudeCode, launchClient]);
+    });
+  }, [launchClaudeCode, launchClient, runLaunchOnce]);
 
   // Environment CRUD handlers
   const handleAddEnv = () => {

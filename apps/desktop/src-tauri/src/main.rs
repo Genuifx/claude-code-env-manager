@@ -1749,9 +1749,8 @@ fn close_unified_interactive_session(
     runtime_id: String,
 ) -> Result<(), String> {
     let interactive_exists = interactive_state.summary(&runtime_id).is_some();
-    let legacy_exists = state.get_session(&runtime_id).is_some();
 
-    if !interactive_exists && !legacy_exists {
+    if !interactive_exists {
         return Err(format!(
             "Unified interactive session not found: {}",
             runtime_id
