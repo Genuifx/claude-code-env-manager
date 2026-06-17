@@ -22,12 +22,14 @@ function StatusChip({
   color,
   pulse,
   onClick,
+  className,
 }: {
   icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
   label: string;
   color?: string;
   pulse?: boolean;
   onClick?: () => void;
+  className?: string;
 }) {
   return (
     <button
@@ -37,7 +39,8 @@ function StatusChip({
         'group relative inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full',
         'status-chip-glass',
         'hover:scale-[1.02] active:scale-[0.98]',
-        onClick && 'cursor-pointer'
+        onClick && 'cursor-pointer',
+        className
       )}
     >
       <span className="relative flex items-center justify-center w-3.5 h-3.5">
@@ -91,7 +94,10 @@ export function WorkspaceStatusStrip({ onNavigate }: WorkspaceStatusStripProps) 
   const activeCronTasks = cronTasks.filter((t) => t.enabled !== false);
 
   return (
-    <div data-tauri-drag-region className="workspace-status-strip h-12 flex items-center gap-2.5 shrink-0">
+    <div
+      data-tauri-drag-region
+      className="workspace-status-strip h-12 flex items-center gap-2.5 shrink-0 min-w-0 overflow-x-auto scroll-glass-root [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+    >
       <StatusChip
         icon={Radio}
         label={
@@ -166,6 +172,7 @@ export function WorkspaceStatusStrip({ onNavigate }: WorkspaceStatusStripProps) 
           icon={Flame}
           label={`${continuousUsageDays} ${t('workspace.statusStreak')}`}
           color="hsl(25 95% 53%)"
+          className="hidden md:inline-flex"
         />
       )}
 
@@ -174,6 +181,7 @@ export function WorkspaceStatusStrip({ onNavigate }: WorkspaceStatusStripProps) 
           icon={Clock}
           label={`${activeCronTasks.length} ${t('workspace.statusCronActive')}`}
           onClick={() => onNavigate('cron')}
+          className="hidden lg:inline-flex"
         />
       )}
 
