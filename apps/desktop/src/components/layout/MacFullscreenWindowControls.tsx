@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useLocale } from '@/locales';
@@ -26,35 +25,59 @@ export function MacFullscreenWindowControls() {
 
     let disposed = false;
     const unlisteners: Array<() => void> = [];
+    const currentWindow = getCurrentWindow();
+    let syncTimer: number | null = null;
 
-    const register = async () => {
+    const syncFullscreen = async () => {
       try {
-        const fullscreen = await getCurrentWindow().isFullscreen();
+        const fullscreen = await currentWindow.isFullscreen();
         if (!disposed) {
           setIsFullscreen(fullscreen);
         }
       } catch (error) {
         console.error('Failed to read current fullscreen state:', error);
       }
+    };
 
-      const listeners = await Promise.all([
-        listen('will-enter-fullscreen', () => setIsFullscreen(true)),
-        listen('did-enter-fullscreen', () => setIsFullscreen(true)),
-        listen('did-exit-fullscreen', () => setIsFullscreen(false)),
-      ]);
-
-      if (disposed) {
-        listeners.forEach((unlisten) => unlisten());
-        return;
+    const scheduleSync = () => {
+      if (syncTimer !== null) {
+        window.clearTimeout(syncTimer);
       }
 
-      unlisteners.push(...listeners);
+      syncTimer = window.setTimeout(() => {
+        syncTimer = null;
+        void syncFullscreen();
+      }, 120);
+    };
+
+    const register = async () => {
+      await syncFullscreen();
+
+      try {
+        const listeners = await Promise.all([
+          currentWindow.onResized(scheduleSync),
+          currentWindow.onFocusChanged(scheduleSync),
+          currentWindow.onScaleChanged(scheduleSync),
+        ]);
+
+        if (disposed) {
+          listeners.forEach((unlisten) => unlisten());
+          return;
+        }
+
+        unlisteners.push(...listeners);
+      } catch (error) {
+        console.error('Failed to watch fullscreen state:', error);
+      }
     };
 
     void register();
 
     return () => {
       disposed = true;
+      if (syncTimer !== null) {
+        window.clearTimeout(syncTimer);
+      }
       unlisteners.forEach((unlisten) => unlisten());
     };
   }, [isMacOS]);

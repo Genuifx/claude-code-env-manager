@@ -8,20 +8,60 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.resolve(__dirname, '..');
 const tauriSrcDir = path.join(desktopDir, 'src-tauri', 'src');
 
-test('macOS traffic light sync retries through minimize restore animation', async () => {
-  const mainSource = await fs.readFile(path.join(tauriSrcDir, 'main.rs'), 'utf8');
+test('macOS traffic light position is declared in window config', async () => {
+  const [configSource, styles] = await Promise.all([
+    fs.readFile(path.join(desktopDir, 'src-tauri', 'tauri.conf.json'), 'utf8'),
+    fs.readFile(path.join(desktopDir, 'src', 'index.css'), 'utf8'),
+  ]);
 
+  const config = JSON.parse(configSource);
+  const mainWindow = config.app.windows[0];
+  const readPixelVar = (name) => {
+    const match = styles.match(new RegExp(`${name}:\\s*(\\d+)px`));
+    assert.ok(match, `${name} should be declared as a px variable`);
+    return Number(match[1]);
+  };
+
+  const controlCenter = readPixelVar('--ccem-titlebar-control-center-y');
+  const controlHalfSize = readPixelVar('--ccem-window-controls-half-size');
+
+  assert.equal(mainWindow.decorations, true);
+  assert.equal(mainWindow.titleBarStyle, 'Overlay');
+  assert.equal(mainWindow.hiddenTitle, true);
+  assert.deepEqual(mainWindow.trafficLightPosition, {
+    x: 24,
+    y: controlCenter - controlHalfSize,
+  });
+});
+
+test('macOS chrome avoids runtime traffic light repositioning', async () => {
+  const [mainSource, traySource, petNotificationSource, fullscreenControls] = await Promise.all([
+    fs.readFile(path.join(tauriSrcDir, 'main.rs'), 'utf8'),
+    fs.readFile(path.join(tauriSrcDir, 'tray.rs'), 'utf8'),
+    fs.readFile(path.join(tauriSrcDir, 'pet_notifications.rs'), 'utf8'),
+    fs.readFile(
+      path.join(desktopDir, 'src', 'components', 'layout', 'MacFullscreenWindowControls.tsx'),
+      'utf8',
+    ),
+  ]);
+
+  const combinedBackendSource = [mainSource, traySource, petNotificationSource].join('\n');
+
+  assert.doesNotMatch(combinedBackendSource, /schedule_macos_traffic_light_sync_series/);
+  assert.doesNotMatch(combinedBackendSource, /set_traffic_lights_inset/);
+  assert.doesNotMatch(mainSource, /WindowEvent::Resized[\s\S]*traffic/i);
   assert.match(
     mainSource,
-    /const MACOS_TRAFFIC_LIGHT_SYNC_DELAYS:\s*\[u64;\s*4\]\s*=\s*\[0,\s*120,\s*320,\s*800\];/,
+    /#\[cfg\(not\(target_os = "macos"\)\)\]\s*let builder = builder\.plugin\(tauri_plugin_decorum::init\(\)\);/,
   );
+  assert.doesNotMatch(fullscreenControls, /will-enter-fullscreen|did-enter-fullscreen|did-exit-fullscreen/);
   assert.match(
-    mainSource,
-    /RunEvent::Reopen[\s\S]*window\.show\(\)[\s\S]*window\.unminimize\(\)[\s\S]*window\.set_focus\(\)[\s\S]*schedule_macos_traffic_light_sync_series\(window,\s*"reopen"\)/,
+    fullscreenControls,
+    /currentWindow\.onResized\(scheduleSync\)[\s\S]*currentWindow\.onFocusChanged\(scheduleSync\)[\s\S]*currentWindow\.onScaleChanged\(scheduleSync\)/,
   );
 });
 
-test('visible-window restore paths resync macOS traffic lights', async () => {
+test('visible-window restore paths keep showing and focusing the window', async () => {
   const [mainSource, traySource, petNotificationSource] = await Promise.all([
     fs.readFile(path.join(tauriSrcDir, 'main.rs'), 'utf8'),
     fs.readFile(path.join(tauriSrcDir, 'tray.rs'), 'utf8'),
@@ -30,18 +70,18 @@ test('visible-window restore paths resync macOS traffic lights', async () => {
 
   assert.match(
     mainSource,
-    /main_window\.show\(\)[\s\S]*main_window\.set_focus\(\)[\s\S]*main_window\.app_handle\(\)\.get_webview_window\("main"\)[\s\S]*schedule_macos_traffic_light_sync_series\(main_webview_window,\s*"boot show"\)/,
+    /main_window\.show\(\)[\s\S]*main_window\.set_focus\(\)/,
   );
   assert.match(
     traySource,
-    /"open_window"[\s\S]*window\.show\(\)[\s\S]*window\.unminimize\(\)[\s\S]*window\.set_focus\(\)[\s\S]*resync_main_window_chrome\(&window,\s*"tray open"\)/,
+    /"open_window"[\s\S]*window\.show\(\)[\s\S]*window\.unminimize\(\)[\s\S]*window\.set_focus\(\)/,
   );
   assert.match(
     traySource,
-    /"settings"[\s\S]*window\.show\(\)[\s\S]*window\.unminimize\(\)[\s\S]*window\.set_focus\(\)[\s\S]*resync_main_window_chrome\(&window,\s*"tray settings"\)/,
+    /"settings"[\s\S]*window\.show\(\)[\s\S]*window\.unminimize\(\)[\s\S]*window\.set_focus\(\)/,
   );
   assert.match(
     petNotificationSource,
-    /main_window\.show\(\)[\s\S]*main_window\.unminimize\(\)[\s\S]*main_window\.set_focus\(\)[\s\S]*schedule_macos_traffic_light_sync_series\(\s*main_window\.clone\(\),\s*"pet notification restore",\s*\)/,
+    /main_window\.show\(\)[\s\S]*main_window\.unminimize\(\)[\s\S]*main_window\.set_focus\(\)/,
   );
 });

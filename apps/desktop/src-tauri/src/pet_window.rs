@@ -57,7 +57,7 @@ fn build_pet_window(app: &AppHandle) -> Result<WebviewWindow, String> {
         WebviewUrl::App("index.html?window=pet".into()),
     )
     .title("CCEM Desktop Pet")
-    // On macOS, tauri-plugin-decorum touches traffic lights for every new window.
+    // On macOS, create decorated while hidden so transparent webview setup has a normal window.
     // Create decorated while hidden, then remove decorations before showing.
     .decorations(cfg!(target_os = "macos"))
     .resizable(false)
