@@ -711,8 +711,8 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
       {/* Page action buttons — portaled to titlebar */}
       <PageActionsSlot>
         <div className="flex items-center gap-2">
-          {/* View toggle */}
-          <div className="flex items-center gap-0.5 p-0.5 rounded-full bg-[hsl(var(--surface-raised))] border border-[hsl(var(--border-subtle))]">
+          {/* View toggle — collapses below lg to free titlebar space */}
+          <div className="hidden lg:flex items-center gap-0.5 p-0.5 rounded-full bg-[hsl(var(--surface-raised))] border border-[hsl(var(--border-subtle))]">
             <button
               type="button"
               onClick={() => setViewMode('card')}
@@ -742,9 +742,11 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
 
           {/* Env selector */}
           <Select value={currentEnv} onValueChange={switchEnvironment}>
-            <SelectTrigger variant="badge" badgeColor={getEnvColorVar(currentEnv)} className="hover:bg-[hsl(var(--surface-raised))]">
-              <Globe className="w-3.5 h-3.5" />
-              <SelectValue />
+            <SelectTrigger variant="badge" badgeColor={getEnvColorVar(currentEnv)} className="hover:bg-[hsl(var(--surface-raised))] max-w-[140px]">
+              <Globe className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">
+                <SelectValue />
+              </span>
             </SelectTrigger>
             <SelectContent>
               {environments.map(env => (
@@ -755,9 +757,11 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
 
           {/* Permission selector */}
           <Select value={permissionMode} onValueChange={(v) => setPermissionMode(v as PermissionModeName)}>
-            <SelectTrigger variant="badge" badgeColor="var(--chart-4)" className="hover:bg-[hsl(var(--surface-raised))]">
-              <Shield className="w-3.5 h-3.5" />
-              <SelectValue />
+            <SelectTrigger variant="badge" badgeColor="var(--chart-4)" className="hover:bg-[hsl(var(--surface-raised))] max-w-[140px]">
+              <Shield className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">
+                <SelectValue />
+              </span>
             </SelectTrigger>
             <SelectContent>
               {Object.keys(PERMISSION_PRESETS).map((mode) => (
@@ -766,30 +770,32 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
             </SelectContent>
           </Select>
 
-          {/* Directory button */}
+          {/* Directory button — text hides below xl to save width */}
           <button
             type="button"
             onClick={() => setShowProjectPicker(true)}
             className="rounded-full border border-[hsl(var(--border-subtle))] px-3 py-2 text-[13px] hover:bg-[hsl(var(--surface-raised))] active:scale-95 transition-all flex items-center gap-1.5"
+            title={launchDirDisplay || t('workspace.selectDir')}
           >
             <FolderOpen className="w-3.5 h-3.5 text-muted-foreground" />
-            <span className="hidden sm:inline font-mono text-xs max-w-[100px] truncate text-muted-foreground">
+            <span className="hidden xl:inline font-mono text-xs max-w-[100px] truncate text-muted-foreground">
               {launchDirDisplay || t('workspace.selectDir')}
             </span>
           </button>
 
-          {/* New Session pill */}
+          {/* New Session pill — icon-only below sm */}
           <button
             type="button"
             onClick={handleLaunchClick}
             disabled={isLaunching}
-            className={`bg-primary text-white rounded-full px-4 py-2 text-[14px] font-medium hover:bg-primary/90 active:scale-95 transition-all flex items-center gap-1.5${isLaunching ? ' opacity-70 cursor-not-allowed' : launched ? ' opacity-90' : ''}`}
+            className={`bg-primary text-white rounded-full px-3 sm:px-4 py-2 text-[14px] font-medium hover:bg-primary/90 active:scale-95 transition-all flex items-center gap-1.5${isLaunching ? ' opacity-70 cursor-not-allowed' : launched ? ' opacity-90' : ''}`}
+            title={t('sessions.newSession')}
           >
             <Plus className="w-4 h-4" />
-            {isLaunching ? t('sessions.launching') : t('sessions.newSession')}
+            <span className="hidden sm:inline">{isLaunching ? t('sessions.launching') : t('sessions.newSession')}</span>
           </button>
 
-          {/* Multi-Launch */}
+          {/* Multi-Launch — collapses below xl */}
           <SessionLauncherPopover
             open={launcherOpen}
             onOpenChange={setLauncherOpen}
@@ -799,7 +805,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
             trigger={
               <button
                 type="button"
-                className="rounded-full border border-[hsl(var(--border-subtle))] px-3 py-2 text-[13px] hover:bg-[hsl(var(--surface-raised))] active:scale-95 transition-all flex items-center gap-1.5"
+                className="hidden xl:flex rounded-full border border-[hsl(var(--border-subtle))] px-3 py-2 text-[13px] hover:bg-[hsl(var(--surface-raised))] active:scale-95 transition-all items-center gap-1.5"
               >
                 <LayoutGrid className="w-3.5 h-3.5" />
                 {t('sessions.multiLaunch')}
@@ -838,14 +844,33 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
 
         {/* Empty state OR session grid */}
         {totalDisplayCount === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20">
-            <Terminal className="w-12 h-12 text-muted-foreground/40 mb-4" />
-            <p className="text-[17px] font-medium text-foreground mb-2">
+          <div className="flex flex-col items-center justify-center py-14 sm:py-20 max-w-md mx-auto text-center">
+            {/* Icon with tinted surface + soft glow halo */}
+            <div className="relative mb-5">
+              <div
+                className="absolute inset-0 -m-3 rounded-[28px] bg-primary/[0.06] blur-2xl"
+                aria-hidden
+              />
+              <div className="relative w-16 h-16 rounded-[18px] bg-[hsl(var(--surface-raised))] border border-[hsl(var(--border-subtle))] flex items-center justify-center">
+                <Terminal className="w-7 h-7 text-primary/70" />
+              </div>
+            </div>
+
+            <h2 className="text-[19px] font-semibold text-foreground tracking-[-0.01em] mb-1.5">
               {t('sessions.noActiveSessions')}
-            </p>
-            <p className="text-[13px] text-muted-foreground">
+            </h2>
+            <p className="text-[13px] text-muted-foreground leading-relaxed mb-5 max-w-[340px]">
               {t('sessions.detectionNote')}
             </p>
+
+            <button
+              type="button"
+              onClick={handleLaunchClick}
+              className="bg-primary text-white rounded-full px-5 py-2.5 text-[14px] font-medium hover:bg-primary/90 active:scale-95 transition-all flex items-center gap-1.5 shadow-sm"
+            >
+              <Plus className="w-4 h-4" />
+              {t('sessions.newSession')}
+            </button>
           </div>
         ) : (
           <div>
