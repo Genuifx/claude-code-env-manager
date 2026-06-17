@@ -1781,11 +1781,19 @@ fn is_retryable_native_child_write_error(message: &str) -> bool {
         || message.starts_with("Failed to write to native sidecar stdin:")
 }
 
-fn merge_colon_path_values(primary: &str, secondary: &str) -> String {
+fn env_path_separator() -> char {
+    if cfg!(windows) {
+        ';'
+    } else {
+        ':'
+    }
+}
+
+fn merge_path_values_with_separator(primary: &str, secondary: &str, separator: char) -> String {
     let mut parts = Vec::new();
     for value in [primary, secondary] {
         for part in value
-            .split(':')
+            .split(separator)
             .map(str::trim)
             .filter(|part| !part.is_empty())
         {
@@ -1794,7 +1802,11 @@ fn merge_colon_path_values(primary: &str, secondary: &str) -> String {
             }
         }
     }
-    parts.join(":")
+    parts.join(&separator.to_string())
+}
+
+fn merge_path_values(primary: &str, secondary: &str) -> String {
+    merge_path_values_with_separator(primary, secondary, env_path_separator())
 }
 
 fn merge_helper_env_path(env_vars: &mut HashMap<String, String>, user_path: &str) {
@@ -1805,7 +1817,7 @@ fn merge_helper_env_path(env_vars: &mut HashMap<String, String>, user_path: &str
 
     let merged = env_vars
         .get("PATH")
-        .map(|existing| merge_colon_path_values(user_path, existing))
+        .map(|existing| merge_path_values(user_path, existing))
         .unwrap_or_else(|| user_path.to_string());
     env_vars.insert("PATH".to_string(), merged);
 }
@@ -1918,10 +1930,11 @@ fn build_runtime_bootstrap_options(
 mod tests {
     use super::{
         clear_terminal_launches, drain_helper_output_lines, is_retryable_native_child_write_error,
-        merge_helper_env_path, native_session_allows_dangerously_skip_permissions,
-        reactivate_record_for_reconnect, read_native_runtime_state_from, take_terminal_launches,
-        HelperInputCommand, NativeProvider, NativeRuntimeManager, NativeSessionHandle,
-        NativeSessionOptions, NativeSessionRecord, NativeTransport, PromptImage,
+        merge_helper_env_path, merge_path_values_with_separator,
+        native_session_allows_dangerously_skip_permissions, reactivate_record_for_reconnect,
+        read_native_runtime_state_from, take_terminal_launches, HelperInputCommand,
+        NativeProvider, NativeRuntimeManager, NativeSessionHandle, NativeSessionOptions,
+        NativeSessionRecord, NativeTransport, PromptImage,
     };
     use crate::event_bus::{SessionEventPayload, SessionStore};
     use crate::native_event_log::NativeEventLog;
@@ -2716,6 +2729,18 @@ mod tests {
         assert_eq!(
             env_vars.get("PATH").map(String::as_str),
             Some("/Users/test/.nvm/versions/node/v22/bin:/usr/bin:/custom/bin")
+        );
+    }
+
+    #[test]
+    fn helper_env_path_merges_windows_paths_without_splitting_drive_letters() {
+        assert_eq!(
+            merge_path_values_with_separator(
+                r"D:\Users\test\AppData\Roaming\npm;C:\Program Files\nodejs",
+                r"C:\custom\bin;D:\Users\test\AppData\Roaming\npm",
+                ';'
+            ),
+            r"D:\Users\test\AppData\Roaming\npm;C:\Program Files\nodejs;C:\custom\bin"
         );
     }
 }
