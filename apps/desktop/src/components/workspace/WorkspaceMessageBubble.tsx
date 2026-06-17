@@ -487,7 +487,7 @@ function CommandPill({
         className={cn(
           'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[11px]',
           subtle
-            ? 'border border-border/40 bg-[hsl(var(--chat-assistant-bg)/0.6)] text-foreground/78 shadow-[0_1px_2px_rgba(0,0,0,0.02)]'
+            ? 'border border-border/40 bg-[hsl(var(--chat-assistant-bg)/0.6)] text-foreground/78'
             : 'border border-primary/20 bg-primary/8 text-primary'
         )}
       >
@@ -1220,7 +1220,7 @@ function WorkspaceImageBlock({ block, index }: { block: ConversationContentBlock
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border/35 bg-background/70 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+    <div className="overflow-hidden rounded-xl border border-border/35 bg-background/70">
       {resolvedSrc ? (
         <img
           src={resolvedSrc}
@@ -1434,7 +1434,7 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
       {hasMainContent ? (
         isUser ? (
           <div className="ml-auto max-w-[78%] min-w-[220px]">
-            <div className="rounded-[24px] border border-border/30 bg-[hsl(var(--chat-assistant-bg)/0.7)] px-5 py-4 text-foreground shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_16px_rgba(0,0,0,0.03)]">
+            <div className="rounded-[24px] border border-border/30 bg-[hsl(var(--chat-assistant-bg)/0.7)] px-5 py-4 text-foreground">
               {renderedContent}
             </div>
             <MessageMetaBar message={message} isUser t={t} />
