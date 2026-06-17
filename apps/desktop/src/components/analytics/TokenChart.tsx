@@ -1,5 +1,5 @@
 // apps/desktop/src/components/analytics/TokenChart.tsx
-import { Fragment, memo, useMemo } from 'react';
+import { Fragment, memo, useId, useMemo } from 'react';
 import {
   AreaChart,
   Area,
@@ -17,6 +17,7 @@ interface TokenChartProps {
   data: ChartDataPoint[];
   seriesKeys: string[];
   animate?: boolean;
+  height?: number;
 }
 
 interface TokenTooltipPayloadItem {
@@ -117,8 +118,11 @@ export const TokenChart = memo(function TokenChart({
   data,
   seriesKeys,
   animate = false,
+  height = 300,
 }: TokenChartProps) {
   const dataKey = seriesKeys[0] ?? 'Tokens';
+  const reactId = useId();
+  const gradientId = `chart-area-gradient-${reactId.replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const yAxisWidth = useMemo(() => {
     const values = data
       .map((point) => point[dataKey])
@@ -128,10 +132,10 @@ export const TokenChart = memo(function TokenChart({
   }, [data, dataKey]);
 
   return (
-    <ResponsiveContainer width="100%" height={300}>
+    <ResponsiveContainer width="100%" height={height}>
       <AreaChart data={data} margin={{ left: 4, top: 12, right: 4, bottom: 4 }}>
         <defs>
-          <linearGradient id="chart-area-gradient" x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="5%" stopColor="hsl(var(--chart-4))" stopOpacity={0.2} />
             <stop offset="95%" stopColor="hsl(var(--chart-4))" stopOpacity={0.02} />
           </linearGradient>
@@ -167,7 +171,7 @@ export const TokenChart = memo(function TokenChart({
           stroke="hsl(var(--chart-4))"
           strokeWidth={2}
           fillOpacity={1}
-          fill="url(#chart-area-gradient)"
+          fill={`url(#${gradientId})`}
           isAnimationActive={animate}
         />
       </AreaChart>
