@@ -4,10 +4,10 @@
 
 Two new entry points for creating cron tasks beyond the existing manual form:
 
-1. **ccem-cron Skill** — Users invoke `/ccem-cron` inside Claude Code. Claude collects info via conversation, writes directly to `~/.ccem/cron-tasks.json`.
+1. **ccem-cron Skill** — Users invoke `/ccem-cron` inside Claude Code. Claude collects info via conversation, then creates/lists/deletes tasks through the structured `ccem cron` CLI.
 2. **Desktop AI Panel** — Users describe tasks in natural language on the Cron page. Streams Claude's thinking, previews the generated task, user confirms/edits before saving.
 
-Both share the same data layer (`~/.ccem/cron-tasks.json`). Desktop app syncs on window focus.
+Both share the same data layer (`~/.ccem/cron-tasks.json`), but agents should treat `ccem cron create/list/delete` as the stable contract instead of editing the file directly. Desktop app syncs on window focus.
 
 ## Task 1: ccem-cron Skill File
 
@@ -15,27 +15,26 @@ File: `~/.claude/skills/ccem-cron.md` (installed via CLI)
 
 Behavior:
 - Conversational: ask what the user wants automated, infer cron expression
-- Auto-detect current working directory as default `working_dir`
-- Read existing `~/.ccem/cron-tasks.json`, append new task, write back
-- Generate UUID for task id, set `enabled: true`, `trigger_type: "schedule"`
+- Auto-detect current working directory as default `workingDir`
+- Use `ccem cron create --from-json - --json` to create tasks
+- Let the CLI generate task id, set `enabled: true`, `triggerType: "schedule"`, validate fields, and persist safely
 - Support: create, list, delete tasks
 
-CronTask JSON schema embedded in skill:
+CLI creation input:
 ```json
 {
-  "id": "uuid",
   "name": "string",
-  "cron_expression": "* * * * *",
+  "cronExpression": "* * * * *",
   "prompt": "string",
-  "working_dir": "/path",
-  "env_name": "optional string",
+  "workingDir": "/path",
+  "envName": "optional string",
+  "executionProfile": "conservative",
+  "maxBudgetUsd": null,
+  "allowedTools": [],
+  "disallowedTools": [],
   "enabled": true,
-  "timeout_secs": 300,
-  "template_id": null,
-  "trigger_type": "schedule",
-  "parent_task_id": null,
-  "created_at": "ISO8601",
-  "updated_at": "ISO8601"
+  "timeoutSecs": 300,
+  "templateId": null
 }
 ```
 
@@ -51,7 +50,7 @@ New subcommand under `setup` group:
 
 New Tauri command in `cron.rs`, pattern from `search_skills_stream`:
 - Spawns `claude -p "<prompt>" --output-format stream-json`
-- Prompt instructs Claude to return `{ name, cron_expression, prompt, working_dir }` JSON
+- Prompt instructs Claude to return `{ name, cronExpression, prompt, workingDir }` JSON
 - Emits `cron-ai-stream` events per line, `cron-ai-done` on completion
 - Injects current environment API config (base_url, api_key, model)
 - Uses `get_user_path()` + `env_remove("CLAUDECODE")`

@@ -66,9 +66,11 @@ test('builds /ccem-cron into an agent prompt instead of a local scheduled task d
   assert.match(request?.prompt ?? '', /Claude Code\/Codex agent 设置这个 CCEM 定时任务/);
   assert.match(request?.prompt ?? '', /任务工作目录固定使用：\/Users\/wzt\/G\/Github\/claude-code-env-manager/);
   assert.match(request?.prompt ?? '', /理解用户的自然语言时间表达/);
-  assert.match(request?.prompt ?? '', /\{ "tasks": \[\] \}/);
-  assert.match(request?.prompt ?? '', /不要写成裸数组/);
-  assert.match(request?.prompt ?? '', /写入后重新读取文件验证新任务存在/);
+  assert.match(request?.prompt ?? '', /ccem cron create --from-json - --json/);
+  assert.match(request?.prompt ?? '', /不要直接读写或手工修改 `~\/.ccem\/cron-tasks.json`/);
+  assert.match(request?.prompt ?? '', /ccem cron list --json/);
+  assert.doesNotMatch(request?.prompt ?? '', /创建前读取现有 `~\/.ccem\/cron-tasks.json`/);
+  assert.doesNotMatch(request?.prompt ?? '', /\{ "tasks": \[\] \}/);
 });
 
 test('preserves the full user cron request for the launched agent', async () => {
