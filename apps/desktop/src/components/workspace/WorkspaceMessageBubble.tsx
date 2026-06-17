@@ -1071,23 +1071,19 @@ const MessageMetaBar = memo(function MessageMetaBar({
   return (
     <div
       className={cn(
-        'flex items-center gap-1.5 select-none',
-        isUser && 'justify-end',
+        'pointer-events-none absolute top-full z-10 flex items-center gap-0.5 select-none opacity-0 transition-opacity duration-150',
+        'group-hover/msg:pointer-events-auto group-hover/msg:opacity-100 group-focus-within/msg:pointer-events-auto group-focus-within/msg:opacity-100',
+        isUser ? 'right-0 justify-end' : 'left-0 justify-start',
       )}
     >
-      {timeLabel ? (
-        <span className="text-[10px] tabular-nums text-muted-foreground/40">
-          {timeLabel}
-        </span>
-      ) : null}
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
+            aria-label={copied ? t('workspace.copied') : t('workspace.copyMessage')}
             onClick={handleCopy}
             className={cn(
               'inline-flex h-4 w-4 items-center justify-center rounded transition-colors',
-              'opacity-40 hover:!opacity-100',
               isUser
                 ? 'text-foreground/50 hover:bg-foreground/10'
                 : 'text-muted-foreground/50 hover:bg-muted/50',
@@ -1104,6 +1100,11 @@ const MessageMetaBar = memo(function MessageMetaBar({
           {copied ? t('workspace.copied') : t('workspace.copyMessage')}
         </TooltipContent>
       </Tooltip>
+      {timeLabel ? (
+        <span className="text-[10px] tabular-nums text-muted-foreground/40">
+          {timeLabel}
+        </span>
+      ) : null}
     </div>
   );
 }, (prev, next) => prev.message === next.message && prev.isUser === next.isUser && prev.t === next.t);
@@ -1433,15 +1434,15 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
     <div className={cn(spacingClass, 'workspace-msg-virtualized group/msg')}>
       {hasMainContent ? (
         isUser ? (
-          <div className="ml-auto max-w-[78%] min-w-[220px]">
+          <div className="relative ml-auto max-w-[78%] min-w-[220px]">
             <div className="rounded-[24px] border border-border/30 bg-[hsl(var(--chat-assistant-bg)/0.7)] px-5 py-4 text-foreground shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_16px_rgba(0,0,0,0.03)]">
               {renderedContent}
             </div>
             <MessageMetaBar message={message} isUser t={t} />
           </div>
         ) : (
-          <div className="space-y-3">
-            {renderedContent}
+          <div className="relative">
+            <div className="space-y-3">{renderedContent}</div>
             <MessageMetaBar message={message} isUser={false} t={t} />
           </div>
         )
