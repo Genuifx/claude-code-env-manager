@@ -1,5 +1,11 @@
 # ccem
 
+## 2.21.0
+
+### Minor Changes
+
+- Release v2.21.0: add structured cron task commands to the CLI, ship workspace transcript message polish (copy button, timestamp, meta hover), stabilize macOS traffic light positioning, set the workspace font baseline to 14px, and harden the sessions page lifecycle (small-screen fit, launch button state, interactive session cleanup, tmux terminal handoff).
+
 ## 2.20.0
 
 ### Minor Changes
