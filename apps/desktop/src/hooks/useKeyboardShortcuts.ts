@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 
 interface ShortcutMap {
-  [key: string]: () => void;
+  [key: string]: () => void | Promise<unknown>;
 }
 
 export function useKeyboardShortcuts(shortcuts: ShortcutMap) {
@@ -33,7 +33,10 @@ export function useKeyboardShortcuts(shortcuts: ShortcutMap) {
       const action = shortcuts[combo];
       if (action) {
         e.preventDefault();
-        action();
+        const result = action();
+        if (result && typeof result.catch === 'function') {
+          result.catch((error) => console.error('Keyboard shortcut failed:', error));
+        }
       }
     };
 

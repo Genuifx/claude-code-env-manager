@@ -1733,6 +1733,52 @@ fn close_interactive_session(
     close_session(state, proxy_state, session_id)
 }
 
+/// Close a unified interactive session with full cleanup.
+///
+/// Unlike `stop_unified_session` (which only stops the runtime but leaves the
+/// handle/records intact), this command mirrors `close_interactive_session`
+/// semantics: stop runtime, remove handle, clean exit file, remove persisted
+/// session, and clear proxy routes. It succeeds even when the legacy
+/// `SessionManager` record is absent, as long as an interactive runtime
+/// handle existed.
+#[tauri::command]
+fn close_unified_interactive_session(
+    state: State<'_, Arc<SessionManager>>,
+    interactive_state: State<'_, Arc<InteractiveRuntimeManager>>,
+    proxy_state: State<'_, Arc<ProxyDebugManager>>,
+    runtime_id: String,
+) -> Result<(), String> {
+    let interactive_exists = interactive_state.summary(&runtime_id).is_some();
+
+    if !interactive_exists {
+        return Err(format!(
+            "Unified interactive session not found: {}",
+            runtime_id
+        ));
+    }
+
+    // Best-effort: close external terminal window if we have legacy metadata.
+    if let Some(session) = state.get_session(&runtime_id) {
+        if session.is_tmux_backed() && session_has_window_control(&session) {
+            if let (Some(term_type), Some(window_id)) = (
+                session_terminal_window_type(&session),
+                session.window_id.as_deref(),
+            ) {
+                let _ = terminal::close_terminal_session(term_type, window_id);
+            }
+        }
+    }
+
+    // Best-effort stop — ok if it fails because the session was already stopped.
+    let _ = interactive_state.stop_session(&runtime_id);
+    interactive_state.remove_session(&runtime_id);
+    cleanup_exit_file(&runtime_id);
+    state.remove_session(&runtime_id);
+    proxy_state.remove_session_routes(&runtime_id);
+
+    Ok(())
+}
+
 #[tauri::command]
 fn minimize_interactive_session(
     state: State<'_, Arc<SessionManager>>,
@@ -3650,6 +3696,7 @@ fn main() {
             focus_interactive_session,
             open_interactive_session_in_terminal,
             close_interactive_session,
+            close_unified_interactive_session,
             minimize_interactive_session,
             write_interactive_input,
             send_interactive_input,

@@ -85,6 +85,7 @@ export function LauncherQuickSection({ onLaunchMulti, onBrowse, isLaunching }: L
           variant="link"
           size="sm"
           onClick={onBrowse}
+          disabled={isLaunching}
           className="text-2xs h-auto p-0"
         >
           <FolderOpen className="w-3 h-3" />

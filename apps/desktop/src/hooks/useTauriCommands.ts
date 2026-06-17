@@ -536,6 +536,11 @@ export function useTauriCommands() {
     await invoke('stop_unified_session', { runtimeId });
   }, []);
 
+  const closeUnifiedInteractiveSession = useCallback(async (runtimeId: string): Promise<void> => {
+    await invoke('close_unified_interactive_session', { runtimeId });
+    await syncInteractiveSessions();
+  }, [syncInteractiveSessions]);
+
   const attachChannel = useCallback(async (
     runtimeId: string,
     channel: ChannelKind,
@@ -1323,6 +1328,7 @@ export function useTauriCommands() {
     getSessionEvents,
     sendSessionInput,
     stopUnifiedSession,
+    closeUnifiedInteractiveSession,
     attachChannel,
     detachChannel,
     debugCompareSessions,

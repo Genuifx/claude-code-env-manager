@@ -14,6 +14,8 @@ import {
   ArrangeBanner,
   SessionLauncherPopover,
 } from '@/components/sessions';
+import { resolveSessionCloseAction } from '@/components/sessions/sessionCloseActions';
+import { launchSingleSession } from '@/components/sessions/sessionLaunchAction';
 import { useAppStore, type ArrangeLayout, type Session, type UnifiedSession } from '@/store';
 import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
@@ -153,12 +155,13 @@ function unifiedToLegacySession(u: UnifiedSession): Session {
     startedAt: new Date(u.createdAt),
     status: statusMap[u.status] ?? 'stopped',
     permMode: u.permMode,
+    tmuxTarget: u.tmuxTarget ?? undefined,
   };
 }
 
 interface SessionsProps {
-  onLaunch: () => void;
-  onLaunchWithDir: (dir: string) => void;
+  onLaunch: () => Promise<void>;
+  onLaunchWithDir: (dir: string) => Promise<void>;
 }
 
 export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
@@ -171,6 +174,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   const [launcherOpen, setLauncherOpen] = useState(false);
   const [isMultiLaunching, setIsMultiLaunching] = useState(false);
   const [launched, setLaunched] = useState(false);
+  const [isLaunching, setIsLaunching] = useState(false);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [tmuxAttachTerminals, setTmuxAttachTerminals] = useState<TmuxAttachTerminalInfo[]>([]);
   const [showRecoveryCandidates, setShowRecoveryCandidates] = useState(false);
@@ -219,6 +223,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
     openDirectoryPicker,
     listUnifiedSessions,
     stopUnifiedSession,
+    closeUnifiedInteractiveSession,
     removeHeadlessSession,
     detachChannel,
     switchEnvironment,
@@ -451,25 +456,51 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
     setIsMultiLaunching(false);
   }, [isMultiLaunching, launchClaudeCode, arrangeSessions, t]);
 
-  // Browse directory and launch single session
-  const handleBrowseAndLaunch = useCallback(async () => {
-    const path = await openDirectoryPicker();
-    if (path) {
-      onLaunchWithDir(path);
-    }
-  }, [openDirectoryPicker, onLaunchWithDir]);
-
-  // Single launch with success feedback
-  const handleLaunchClick = useCallback(() => {
-    if (selectedWorkingDir) {
-      onLaunchWithDir(selectedWorkingDir);
-    } else {
-      onLaunch();
-    }
+  const markLaunchSuccess = useCallback(() => {
     setLaunched(true);
     clearTimeout(launchedTimerRef.current);
     launchedTimerRef.current = setTimeout(() => setLaunched(false), 1200);
-  }, [selectedWorkingDir, onLaunch, onLaunchWithDir]);
+  }, []);
+
+  // Browse directory and launch single session
+  const handleBrowseAndLaunch = useCallback(async () => {
+    if (isLaunching) return;
+    setIsLaunching(true);
+    try {
+      const path = await openDirectoryPicker();
+      if (!path) {
+        return;
+      }
+      await launchSingleSession({
+        selectedWorkingDir: path,
+        onLaunch,
+        onLaunchWithDir,
+      });
+      markLaunchSuccess();
+    } catch (err) {
+      console.error('Launch failed:', err);
+    } finally {
+      setIsLaunching(false);
+    }
+  }, [isLaunching, openDirectoryPicker, onLaunch, onLaunchWithDir, markLaunchSuccess]);
+
+  // Single launch with pending/success/failure state
+  const handleLaunchClick = useCallback(async () => {
+    if (isLaunching) return;
+    setIsLaunching(true);
+    try {
+      await launchSingleSession({
+        selectedWorkingDir,
+        onLaunch,
+        onLaunchWithDir,
+      });
+      markLaunchSuccess();
+    } catch (err) {
+      console.error('Launch failed:', err);
+    } finally {
+      setIsLaunching(false);
+    }
+  }, [isLaunching, selectedWorkingDir, onLaunch, onLaunchWithDir, markLaunchSuccess]);
 
   // Select directory for launch
   const handleSelectDirectory = useCallback(async () => {
@@ -553,19 +584,30 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   const handleConfirmClose = async (id: string) => {
     try {
       const item = findDisplayItem(id);
-      if (item?.unifiedSession?.runtimeKind === 'headless') {
-        // Headless: stop first if running, then remove
-        if (['ready', 'processing', 'waiting_permission', 'initializing'].includes(item.unifiedSession.status)) {
+      const action = resolveSessionCloseAction({
+        unifiedSession: item?.unifiedSession
+          ? {
+              runtimeKind: item.unifiedSession.runtimeKind,
+              status: item.unifiedSession.status,
+              id: item.unifiedSession.id,
+            }
+          : undefined,
+        hasLegacySession: hasLegacySession(id),
+      });
+      switch (action) {
+        case 'stopThenRemoveHeadless':
           await stopUnifiedSession(id);
-        }
-        await removeHeadlessSession(id);
-      } else if (item?.unifiedSession && !hasLegacySession(id)) {
-        // Unified-only interactive (no legacy match): use unified stop to avoid
-        // legacy SessionManager lookup failure in close_interactive_session
-        await stopUnifiedSession(id);
-      } else {
-        // Legacy interactive (has real SessionManager entry): use legacy close
-        await closeSession(id);
+          await removeHeadlessSession(id);
+          break;
+        case 'removeHeadless':
+          await removeHeadlessSession(id);
+          break;
+        case 'closeUnifiedInteractive':
+          await closeUnifiedInteractiveSession(id);
+          break;
+        case 'closeLegacyInteractive':
+          await closeSession(id);
+          break;
       }
     } catch (err) {
       console.error('Failed to close session:', err);
@@ -623,17 +665,31 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
     // Close all merged sessions (both legacy and unified)
     for (const item of mergedSessions) {
       try {
-        if (item.unifiedSession?.runtimeKind === 'headless') {
-          if (['ready', 'processing', 'waiting_permission', 'initializing'].includes(item.unifiedSession.status)) {
-            await stopUnifiedSession(item.unifiedSession.id);
-          }
-          await removeHeadlessSession(item.unifiedSession.id);
-        } else if (item.unifiedSession && !hasLegacySession(item.session.id)) {
-          // Unified-only interactive: use unified stop
-          await stopUnifiedSession(item.unifiedSession.id);
-        } else {
-          // Legacy interactive
-          await closeSession(item.session.id);
+        const id = item.session.id;
+        const action = resolveSessionCloseAction({
+          unifiedSession: item.unifiedSession
+            ? {
+                runtimeKind: item.unifiedSession.runtimeKind,
+                status: item.unifiedSession.status,
+                id: item.unifiedSession.id,
+              }
+            : undefined,
+          hasLegacySession: hasLegacySession(id),
+        });
+        switch (action) {
+          case 'stopThenRemoveHeadless':
+            await stopUnifiedSession(id);
+            await removeHeadlessSession(id);
+            break;
+          case 'removeHeadless':
+            await removeHeadlessSession(id);
+            break;
+          case 'closeUnifiedInteractive':
+            await closeUnifiedInteractiveSession(id);
+            break;
+          case 'closeLegacyInteractive':
+            await closeSession(id);
+            break;
         }
       } catch (err) {
         console.error('Failed to close session:', item.session.id, err);
@@ -726,10 +782,11 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
           <button
             type="button"
             onClick={handleLaunchClick}
-            className={`bg-primary text-white rounded-full px-4 py-2 text-[14px] font-medium hover:bg-primary/90 active:scale-95 transition-all flex items-center gap-1.5${launched ? ' opacity-90' : ''}`}
+            disabled={isLaunching}
+            className={`bg-primary text-white rounded-full px-4 py-2 text-[14px] font-medium hover:bg-primary/90 active:scale-95 transition-all flex items-center gap-1.5${isLaunching ? ' opacity-70 cursor-not-allowed' : launched ? ' opacity-90' : ''}`}
           >
             <Plus className="w-4 h-4" />
-            {t('sessions.newSession')}
+            {isLaunching ? t('sessions.launching') : t('sessions.newSession')}
           </button>
 
           {/* Multi-Launch */}
@@ -738,7 +795,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
             onOpenChange={setLauncherOpen}
             onLaunchMulti={handleMultiLaunch}
             onBrowseAndLaunch={handleBrowseAndLaunch}
-            isLaunching={isMultiLaunching}
+            isLaunching={isMultiLaunching || isLaunching}
             trigger={
               <button
                 type="button"
