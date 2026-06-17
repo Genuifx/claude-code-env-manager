@@ -2719,16 +2719,26 @@ mod tests {
 
     #[test]
     fn helper_env_path_prepends_user_path_to_existing_path() {
-        let mut env_vars = HashMap::from([("PATH".to_string(), "/custom/bin".to_string())]);
+        let (existing_path, user_path, expected_path) = if cfg!(windows) {
+            (
+                r"C:\custom\bin",
+                r"D:\Users\test\AppData\Roaming\npm;C:\Program Files\nodejs",
+                r"D:\Users\test\AppData\Roaming\npm;C:\Program Files\nodejs;C:\custom\bin",
+            )
+        } else {
+            (
+                "/custom/bin",
+                "/Users/test/.nvm/versions/node/v22/bin:/usr/bin",
+                "/Users/test/.nvm/versions/node/v22/bin:/usr/bin:/custom/bin",
+            )
+        };
+        let mut env_vars = HashMap::from([("PATH".to_string(), existing_path.to_string())]);
 
-        merge_helper_env_path(
-            &mut env_vars,
-            "/Users/test/.nvm/versions/node/v22/bin:/usr/bin",
-        );
+        merge_helper_env_path(&mut env_vars, user_path);
 
         assert_eq!(
             env_vars.get("PATH").map(String::as_str),
-            Some("/Users/test/.nvm/versions/node/v22/bin:/usr/bin:/custom/bin")
+            Some(expected_path)
         );
     }
 
