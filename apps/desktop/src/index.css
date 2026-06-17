@@ -294,6 +294,7 @@
   body {
     @apply bg-background text-foreground;
     font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px;
     -webkit-font-smoothing: antialiased;
   }
 

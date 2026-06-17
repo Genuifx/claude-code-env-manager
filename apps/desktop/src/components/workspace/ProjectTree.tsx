@@ -764,7 +764,7 @@ export const ProjectTree = memo(function ProjectTree({
               </>
             )}
           </span>
-          <span className="min-w-0 flex-1 truncate text-[13px] leading-tight font-medium">
+          <span className="min-w-0 flex-1 truncate text-sm leading-tight font-medium">
             {getHistorySessionDisplay(session, t('history.untitledSession'))}
           </span>
           <span className="inline-flex w-10 shrink-0 items-center justify-end gap-1.5 text-[10px] tabular-nums transition-opacity duration-150 group-hover/session:opacity-0">
@@ -907,7 +907,7 @@ export const ProjectTree = memo(function ProjectTree({
                     ) : (
                       <FolderClosed className="w-4 h-4 text-muted-foreground shrink-0" />
                     )}
-                    <span className="text-[13px] font-medium text-foreground truncate flex-1">
+                    <span className="text-sm font-medium text-foreground truncate flex-1">
                       {node.projectName}
                     </span>
                   </button>
