@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Radio, Circle, Flame, Clock, Check, Settings2, ClipboardCheck } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { useLocale } from '@/locales';
@@ -10,7 +11,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
+import { StreakUsagePopoverContent } from './StreakUsagePopover';
 
 interface WorkspaceStatusStripProps {
   onNavigate: (tab: string) => void;
@@ -70,16 +77,18 @@ function StatusChip({
 
 export function WorkspaceStatusStrip({ onNavigate }: WorkspaceStatusStripProps) {
   const { t } = useLocale();
-  const { sessions, currentEnv, environments, continuousUsageDays, cronTasks } = useAppStore(
+  const { sessions, currentEnv, environments, continuousUsageDays, cronTasks, usageStats } = useAppStore(
     (state) => ({
       sessions: state.sessions,
       currentEnv: state.currentEnv,
       environments: state.environments,
       continuousUsageDays: state.continuousUsageDays,
       cronTasks: state.cronTasks,
+      usageStats: state.usageStats,
     }),
     shallow
   );
+  const [streakPopoverOpen, setStreakPopoverOpen] = useState(false);
   const { reviewEntry, reviewPanelOpen, setReviewPanelOpen } = useAppStore(
     (state) => ({
       reviewEntry: state.reviewEntry,
@@ -167,13 +176,33 @@ export function WorkspaceStatusStrip({ onNavigate }: WorkspaceStatusStripProps) 
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {continuousUsageDays > 0 && (
-        <StatusChip
-          icon={Flame}
-          label={`${continuousUsageDays} ${t('workspace.statusStreak')}`}
-          color="hsl(25 95% 53%)"
-          className="hidden md:inline-flex"
-        />
+      {continuousUsageDays > 0 && usageStats && (
+        <Popover open={streakPopoverOpen} onOpenChange={setStreakPopoverOpen}>
+          <PopoverTrigger asChild>
+            <div className="hidden md:inline-flex">
+              <StatusChip
+                icon={Flame}
+                label={`${continuousUsageDays} ${t('workspace.statusStreak')}`}
+                color="hsl(25 95% 53%)"
+              />
+            </div>
+          </PopoverTrigger>
+          <PopoverContent
+            align="start"
+            sideOffset={6}
+            className="w-[360px] p-0 overflow-hidden rounded-xl border border-[hsl(var(--glass-border-light))] bg-popover shadow-lg"
+            onOpenAutoFocus={(e) => e.preventDefault()}
+          >
+            <StreakUsagePopoverContent
+              usageStats={usageStats}
+              continuousUsageDays={continuousUsageDays}
+              onNavigateAnalytics={() => {
+                setStreakPopoverOpen(false);
+                onNavigate('analytics');
+              }}
+            />
+          </PopoverContent>
+        </Popover>
       )}
 
       {activeCronTasks.length > 0 && (
