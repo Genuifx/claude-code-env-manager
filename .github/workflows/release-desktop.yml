@@ -265,8 +265,8 @@ jobs:
           aarch64_sig_url="$(asset_url_any 'CCEM.Desktop_aarch64.app.tar.gz.sig' 'CCEM Desktop_aarch64.app.tar.gz.sig')"
           x64_bundle_url="$(asset_url_any 'CCEM.Desktop_x64.app.tar.gz' 'CCEM Desktop_x64.app.tar.gz')"
           x64_sig_url="$(asset_url_any 'CCEM.Desktop_x64.app.tar.gz.sig' 'CCEM Desktop_x64.app.tar.gz.sig')"
-          windows_bundle_url="$(asset_url_regex '(x64|x86_64).*\.(nsis|msi)\.zip$')"
-          windows_sig_url="$(asset_url_regex '(x64|x86_64).*\.(nsis|msi)\.zip\.sig$')"
+          windows_bundle_url="$(asset_url_regex '(x64|x86_64).*(setup\.exe|(nsis|msi)\.zip)$')"
+          windows_sig_url="$(asset_url_regex '(x64|x86_64).*(setup\.exe|(nsis|msi)\.zip)\.sig$')"
 
           for value in "$aarch64_bundle_url" "$aarch64_sig_url" "$x64_bundle_url" "$x64_sig_url" "$windows_bundle_url" "$windows_sig_url"; do
             if [[ -z "$value" || "$value" == "null" ]]; then
