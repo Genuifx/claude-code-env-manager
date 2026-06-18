@@ -190,7 +190,7 @@ export function WorkspaceStatusStrip({ onNavigate }: WorkspaceStatusStripProps) 
           <PopoverContent
             align="start"
             sideOffset={6}
-            className="p-0 overflow-hidden rounded-xl border border-[hsl(var(--glass-border-light))] bg-popover shadow-lg"
+            className="w-[360px] p-0 overflow-hidden rounded-xl border border-[hsl(var(--glass-border-light))] bg-popover shadow-lg"
             onOpenAutoFocus={(e) => e.preventDefault()}
           >
             <StreakUsagePopoverContent

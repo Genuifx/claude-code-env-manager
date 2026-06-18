@@ -43,7 +43,7 @@ export function StreakUsagePopoverContent({
   const todayCost = usageStats.today.cost ?? 0;
 
   return (
-    <div className="w-[320px] p-4">
+    <div className="p-4">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Flame className="w-4 h-4" style={{ color: 'hsl(25 95% 53%)' }} />
@@ -64,9 +64,9 @@ export function StreakUsagePopoverContent({
         </span>
       </div>
 
-      <div className="mt-3 -mx-1">
+      <div className="mt-3">
         <Suspense fallback={<div className="h-[140px]" />}>
-          <LazyTokenChart data={chartData} seriesKeys={['Tokens']} height={140} />
+          <LazyTokenChart data={chartData} seriesKeys={['Tokens']} height={140} showAllTicks />
         </Suspense>
       </div>
 

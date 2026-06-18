@@ -18,6 +18,7 @@ interface TokenChartProps {
   seriesKeys: string[];
   animate?: boolean;
   height?: number;
+  showAllTicks?: boolean;
 }
 
 interface TokenTooltipPayloadItem {
@@ -119,6 +120,7 @@ export const TokenChart = memo(function TokenChart({
   seriesKeys,
   animate = false,
   height = 300,
+  showAllTicks = false,
 }: TokenChartProps) {
   const dataKey = seriesKeys[0] ?? 'Tokens';
   const reactId = useId();
@@ -152,6 +154,7 @@ export const TokenChart = memo(function TokenChart({
           tickLine={false}
           tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
           dy={8}
+          interval={showAllTicks ? 0 : 'preserveStartEnd'}
         />
         <YAxis
           axisLine={false}
