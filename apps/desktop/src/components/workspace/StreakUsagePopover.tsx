@@ -1,14 +1,11 @@
-import { Suspense, lazy, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Flame, ArrowRight } from 'lucide-react';
 import type { ChartDataPoint, UsageStats } from '@/types/analytics';
 import { sumTokens } from '@/components/analytics/poster-types';
 import { useLocale } from '@/locales';
 import { formatTokens } from '@/lib/utils';
 import { cn } from '@/lib/utils';
-
-const LazyTokenChart = lazy(async () =>
-  import('@/components/analytics/TokenChart').then((module) => ({ default: module.TokenChart }))
-);
+import { StreakChart } from './StreakChart';
 
 interface StreakUsagePopoverContentProps {
   usageStats: UsageStats;
@@ -18,12 +15,11 @@ interface StreakUsagePopoverContentProps {
 
 function buildDailyChartData(
   dailyHistory: UsageStats['dailyHistory'],
-  dateLocale: string,
 ): ChartDataPoint[] {
   const sorted = Object.entries(dailyHistory).sort(([a], [b]) => a.localeCompare(b));
   return sorted.slice(-7).map(([bucketKey, usage]) => ({
     bucketKey,
-    date: new Date(bucketKey).toLocaleDateString(dateLocale, { month: 'short', day: 'numeric' }),
+    date: bucketKey,
     Tokens: sumTokens(usage),
   }));
 }
@@ -33,11 +29,10 @@ export function StreakUsagePopoverContent({
   continuousUsageDays,
   onNavigateAnalytics,
 }: StreakUsagePopoverContentProps) {
-  const { t, lang } = useLocale();
-  const dateLocale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t } = useLocale();
   const chartData = useMemo(
-    () => buildDailyChartData(usageStats.dailyHistory, dateLocale),
-    [usageStats.dailyHistory, dateLocale],
+    () => buildDailyChartData(usageStats.dailyHistory),
+    [usageStats.dailyHistory],
   );
   const todayTokens = sumTokens(usageStats.today);
   const todayCost = usageStats.today.cost ?? 0;
@@ -65,9 +60,7 @@ export function StreakUsagePopoverContent({
       </div>
 
       <div className="mt-3">
-        <Suspense fallback={<div className="h-[140px]" />}>
-          <LazyTokenChart data={chartData} seriesKeys={['Tokens']} height={140} showAllTicks />
-        </Suspense>
+        <StreakChart data={chartData} height={160} />
       </div>
 
       <button
