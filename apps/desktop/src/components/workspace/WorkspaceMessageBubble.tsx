@@ -1431,17 +1431,17 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
   }
 
   return (
-    <div className={cn(spacingClass, 'workspace-msg-virtualized group/msg')}>
+    <div className={cn(spacingClass, 'workspace-msg-virtualized')}>
       {hasMainContent ? (
         isUser ? (
-          <div className="relative ml-auto max-w-[78%] min-w-[220px]">
+          <div className="group/msg relative ml-auto max-w-[78%] min-w-[220px]">
             <div className="rounded-[24px] border border-border/30 bg-[hsl(var(--chat-assistant-bg)/0.7)] px-5 py-4 text-foreground">
               {renderedContent}
             </div>
             <MessageMetaBar message={message} isUser t={t} />
           </div>
         ) : (
-          <div className="relative">
+          <div className="group/msg relative w-fit max-w-full">
             <div className="space-y-3">{renderedContent}</div>
             <MessageMetaBar message={message} isUser={false} t={t} />
           </div>
