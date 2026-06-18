@@ -12,6 +12,7 @@ export interface WorkspaceSidebarLiveSessionEntry {
     | 'status'
     | 'created_at'
     | 'updated_at'
+    | 'output_tokens_per_second'
   >;
   initialPrompt?: string | null;
   generatedTitle?: string | null;
@@ -34,6 +35,10 @@ function parseTimestamp(value: string | undefined): number {
   }
   const timestamp = Date.parse(value);
   return Number.isFinite(timestamp) ? timestamp : Date.now();
+}
+
+function normalizeOutputTokensPerSecond(value: number | null | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
 function liveSessionSidebarId(entry: WorkspaceSidebarLiveSessionEntry): string {
@@ -61,6 +66,7 @@ export function toLiveHistorySessionItem(
     || entry.initialPrompt?.trim()
     || entry.session.provider_session_id?.trim()
     || `${entry.session.provider === 'codex' ? 'Codex' : 'Claude'} workspace session`;
+  const outputTokensPerSecond = normalizeOutputTokensPerSecond(entry.session.output_tokens_per_second);
 
   return {
     id: liveSessionSidebarId(entry),
@@ -71,6 +77,7 @@ export function toLiveHistorySessionItem(
     projectName: basename(project),
     envName: entry.session.env_name,
     configSource: 'ccem',
+    ...(outputTokensPerSecond ? { outputTokensPerSecond } : {}),
   };
 }
 
@@ -89,6 +96,15 @@ export function buildWorkspaceSidebarSessions(
 
     const key = `${liveItem.source}:${liveItem.id}`;
     if (existingKeys.has(key)) {
+      if (liveItem.outputTokensPerSecond) {
+        const index = nextSessions.findIndex((session) => `${session.source}:${session.id}` === key);
+        if (index >= 0 && nextSessions[index].outputTokensPerSecond !== liveItem.outputTokensPerSecond) {
+          nextSessions[index] = {
+            ...nextSessions[index],
+            outputTokensPerSecond: liveItem.outputTokensPerSecond,
+          };
+        }
+      }
       continue;
     }
 

@@ -22,6 +22,8 @@ export interface SessionUsageState {
   estimatedCostUsd: number | null;
   /** Number of token_usage events seen */
   turnCount: number;
+  /** Latest observed output generation speed */
+  latestOutputTokensPerSecond: number | null;
   /** Latest context window snapshot (Claude only, from context_usage events) */
   context: SessionContextSnapshot | null;
 }
@@ -33,6 +35,7 @@ const EMPTY_USAGE: SessionUsageState = {
   totalCacheCreationTokens: 0,
   estimatedCostUsd: null,
   turnCount: 0,
+  latestOutputTokensPerSecond: null,
   context: null,
 };
 
@@ -50,12 +53,21 @@ export function computeSessionUsage(events: SessionEventRecord[]): SessionUsageS
   let totalCacheCreationTokens = 0;
   let estimatedCostUsd: number | null = null;
   let turnCount = 0;
+  let latestOutputTokensPerSecond: number | null = null;
   let context: SessionContextSnapshot | null = null;
 
   for (const event of events) {
     const { payload } = event;
 
     if (payload.type === 'token_usage') {
+      if (
+        typeof payload.output_tokens_per_second === 'number'
+        && Number.isFinite(payload.output_tokens_per_second)
+        && payload.output_tokens_per_second > 0
+      ) {
+        latestOutputTokensPerSecond = payload.output_tokens_per_second;
+      }
+
       // Only count turn_total scope to avoid double-counting per-step + turn_total
       if (payload.scope === 'turn_total') {
         totalInputTokens += payload.input_tokens;
@@ -96,7 +108,7 @@ export function computeSessionUsage(events: SessionEventRecord[]): SessionUsageS
     }
   }
 
-  if (turnCount === 0 && !context) {
+  if (turnCount === 0 && !context && latestOutputTokensPerSecond === null) {
     return EMPTY_USAGE;
   }
 
@@ -105,10 +117,11 @@ export function computeSessionUsage(events: SessionEventRecord[]): SessionUsageS
     totalOutputTokens,
     totalCacheReadTokens,
     totalCacheCreationTokens,
-    estimatedCostUsd,
-    turnCount,
-    context,
-  };
+      estimatedCostUsd,
+      turnCount,
+      latestOutputTokensPerSecond,
+      context,
+    };
 }
 
 /** Format token count for compact display (e.g. 84000 → "84K") */

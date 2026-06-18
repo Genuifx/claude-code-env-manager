@@ -27,6 +27,7 @@ export interface HistorySessionItem {
   projectName: string;
   envName?: string;
   configSource?: 'ccem' | 'native';
+  outputTokensPerSecond?: number;
   taskStage?: SessionTaskStage;
   taskSticker?: SessionStickerId;
   taskLabel?: string;

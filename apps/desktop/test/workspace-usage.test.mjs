@@ -90,3 +90,54 @@ test('does not double-count Claude per-message usage when turn total exists', as
   assert.equal(usage.totalCacheCreationTokens, 3);
   assert.equal(usage.estimatedCostUsd, 0.0123);
 });
+
+test('tracks the latest output token speed without double-counting Claude per-message usage', async () => {
+  const { computeSessionUsage } = await importWorkspaceUsage();
+
+  const usage = computeSessionUsage([
+    event(1, {
+      type: 'token_usage',
+      provider: 'claude',
+      input_tokens: 10,
+      output_tokens: 5,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+      output_tokens_per_second: 42.5,
+    }),
+    event(2, {
+      type: 'token_usage',
+      provider: 'claude',
+      input_tokens: 30,
+      output_tokens: 7,
+      cache_read_tokens: 4,
+      cache_creation_tokens: 3,
+      total_cost_usd: 0.0123,
+      scope: 'turn_total',
+      output_tokens_per_second: 31.25,
+    }),
+  ]);
+
+  assert.equal(usage.turnCount, 1);
+  assert.equal(usage.totalOutputTokens, 7);
+  assert.equal(usage.latestOutputTokensPerSecond, 31.25);
+});
+
+test('keeps Claude per-message token speed even before turn total arrives', async () => {
+  const { computeSessionUsage } = await importWorkspaceUsage();
+
+  const usage = computeSessionUsage([
+    event(1, {
+      type: 'token_usage',
+      provider: 'claude',
+      input_tokens: 10,
+      output_tokens: 5,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+      output_tokens_per_second: 42.5,
+    }),
+  ]);
+
+  assert.equal(usage.turnCount, 0);
+  assert.equal(usage.totalOutputTokens, 0);
+  assert.equal(usage.latestOutputTokensPerSecond, 42.5);
+});

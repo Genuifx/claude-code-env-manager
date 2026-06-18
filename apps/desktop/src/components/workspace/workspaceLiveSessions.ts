@@ -36,7 +36,8 @@ export function areNativeSessionSummariesEqual(
     && previous.is_active === next.is_active
     && previous.last_event_seq === next.last_event_seq
     && previous.can_handoff_to_terminal === next.can_handoff_to_terminal
-    && previous.last_error === next.last_error;
+    && previous.last_error === next.last_error
+    && previous.output_tokens_per_second === next.output_tokens_per_second;
 }
 
 export function upsertWorkspaceLiveSessionEntry(

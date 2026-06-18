@@ -57,6 +57,22 @@ test('adds live native sessions to the workspace sidebar before provider history
   assert.equal(sessions[0].envName, 'DeepSeek');
 });
 
+test('carries live native output token speed into workspace sidebar sessions', async () => {
+  const { buildWorkspaceSidebarSessions } = await importWorkspaceSidebarSessions();
+
+  const sessions = buildWorkspaceSidebarSessions([], [
+    {
+      session: nativeSession({
+        output_tokens_per_second: 36.75,
+      }),
+      initialPrompt: '测速率',
+    },
+  ]);
+
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0].outputTokensPerSecond, 36.75);
+});
+
 test('uses generated live session titles before provider history exists', async () => {
   const { buildWorkspaceSidebarSessions } = await importWorkspaceSidebarSessions();
 
@@ -102,6 +118,39 @@ test('deduplicates live native sessions after matching provider history appears'
   assert.equal(sessions.length, 1);
   assert.equal(sessions[0].id, 'provider-1');
   assert.equal(sessions[0].display, '历史里的真实标题');
+});
+
+test('merges live native output token speed into matching provider history rows', async () => {
+  const { buildWorkspaceSidebarSessions } = await importWorkspaceSidebarSessions();
+  const history = [
+    {
+      id: 'provider-1',
+      source: 'claude',
+      display: '历史里的真实标题',
+      timestamp: Date.parse('2026-05-02T12:53:00.000Z'),
+      project: '/Users/wzt/G/Github/claude-code-env-manager',
+      projectName: 'claude-code-env-manager',
+      envName: 'DeepSeek',
+      configSource: 'ccem',
+    },
+  ];
+
+  const sessions = buildWorkspaceSidebarSessions(history, [
+    {
+      session: nativeSession({
+        runtime_id: 'native-1',
+        provider_session_id: 'provider-1',
+        status: 'ready',
+        output_tokens_per_second: 52.5,
+      }),
+      initialPrompt: '临时标题',
+    },
+  ]);
+
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0].id, 'provider-1');
+  assert.equal(sessions[0].display, '历史里的真实标题');
+  assert.equal(sessions[0].outputTokensPerSecond, 52.5);
 });
 
 test('resolves review provider session id from a native wrapper history session', async () => {

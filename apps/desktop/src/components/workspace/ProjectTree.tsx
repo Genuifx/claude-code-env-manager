@@ -61,6 +61,15 @@ function formatRelativeTime(timestamp: number): string {
   return `${weeks}w`;
 }
 
+function formatOutputTokensPerSecond(value: number | null | undefined): string | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+
+  const rounded = value >= 10 ? Math.round(value).toString() : value.toFixed(1);
+  return `${rounded} t/s`;
+}
+
 function toKey(session: Pick<HistorySessionItem, 'id' | 'source'>): string {
   return `${session.source}:${session.id}`;
 }
@@ -668,6 +677,7 @@ export const ProjectTree = memo(function ProjectTree({
     const rowChrome = options.pinnedSection ? 'mx-0' : 'mx-1';
     const rowPadding = options.pinnedSection ? 'pl-2 pr-2' : 'pl-9 pr-2';
     const editPadding = options.pinnedSection ? 'pl-2 pr-2' : 'pl-9 pr-3';
+    const outputSpeedLabel = formatOutputTokensPerSecond(session.outputTokensPerSecond);
 
     if (isEditing) {
       return (
@@ -767,14 +777,22 @@ export const ProjectTree = memo(function ProjectTree({
           <span className="min-w-0 flex-1 truncate text-sm leading-tight font-medium">
             {getHistorySessionDisplay(session, t('history.untitledSession'))}
           </span>
-          <span className="inline-flex w-10 shrink-0 items-center justify-end gap-1.5 text-[10px] tabular-nums transition-opacity duration-150 group-hover/session:opacity-0">
+          <span className="inline-flex w-[7.25rem] shrink-0 items-center justify-end gap-1 pr-6 text-[10px] tabular-nums">
+            {outputSpeedLabel ? (
+              <span
+                title={`${outputSpeedLabel} tokens/s`}
+                className="max-w-0 overflow-hidden whitespace-nowrap text-primary/70 opacity-0 transition-[max-width,opacity] duration-150 group-hover/session:max-w-[3.5rem] group-hover/session:opacity-100"
+              >
+                {outputSpeedLabel}
+              </span>
+            ) : null}
             {freshDotKeys.has(key) ? (
               <span className="relative inline-flex h-3.5 w-5 shrink-0 items-center justify-center">
                 <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-amber-500/25 opacity-75" />
                 <span className="relative h-1.5 w-1.5 rounded-full bg-amber-500" />
               </span>
             ) : (
-              <span className="text-muted-foreground/60">
+              <span className="whitespace-nowrap text-muted-foreground/60">
                 {formatRelativeTime(session.timestamp)}
               </span>
             )}
