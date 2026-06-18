@@ -17,6 +17,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/Genuifx/claude-code-env-manager)](https://github.com/Genuifx/claude-code-env-manager)
 [![GitHub release](https://img.shields.io/github/v/release/Genuifx/claude-code-env-manager)](https://github.com/Genuifx/claude-code-env-manager/releases)
 [![Release Desktop](https://github.com/Genuifx/claude-code-env-manager/actions/workflows/release-desktop.yml/badge.svg)](https://github.com/Genuifx/claude-code-env-manager/actions/workflows/release-desktop.yml)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Genuifx/claude-code-env-manager)
 [![license](https://img.shields.io/npm/l/ccem.svg)](https://github.com/Genuifx/claude-code-env-manager/blob/main/LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/Genuifx/claude-code-env-manager/pulls)
 
