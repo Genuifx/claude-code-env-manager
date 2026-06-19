@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { ErrorBanner } from '@/components/ui/EmptyState';
 import { useTauriEvent } from '@/hooks/useTauriEvents';
@@ -166,10 +167,10 @@ export function AiCronPanel({ open, onClose, onTaskCreated, onEdit }: AiCronPane
 
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+  return createPortal(
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="relative rounded-2xl max-w-lg w-full mx-4 max-h-[85vh] overflow-hidden shadow-elevation-4 border border-[hsl(var(--glass-border-light)/0.25)]"
+        className="relative rounded-2xl w-[calc(100%-1.5rem)] sm:w-[calc(100%-2rem)] md:w-[calc(100%-2.5rem)] lg:w-[calc(100%-3rem)] xl:w-[calc(100%-4rem)] 2xl:w-[calc(100%-5rem)] mx-auto max-w-md sm:max-w-lg md:max-w-xl lg:max-w-2xl xl:max-w-3xl 2xl:max-w-4xl max-h-[min(90vh,900px)] overflow-hidden shadow-elevation-4 border border-[hsl(var(--glass-border-light)/0.25)]"
         style={{ background: 'hsl(var(--surface-overlay))' }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -193,7 +194,7 @@ export function AiCronPanel({ open, onClose, onTaskCreated, onEdit }: AiCronPane
         </div>
 
         {/* Content */}
-        <div className="px-5 pb-5 space-y-3 overflow-y-auto max-h-[calc(85vh-80px)]">
+        <div className="px-5 pb-5 space-y-3 overflow-y-auto max-h-[calc(min(85vh,900px)-80px)]">
           {/* Working directory hint */}
           {!defaultWorkingDir && (
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-sm">
@@ -305,6 +306,7 @@ export function AiCronPanel({ open, onClose, onTaskCreated, onEdit }: AiCronPane
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -91,6 +91,9 @@ export default {
       fontSize: {
         '2xs': ['0.625rem', { lineHeight: '0.875rem' }],
       },
+      screens: {
+        '3xl': '1920px',
+      },
       spacing: {
         '13': '3.25rem',
         '18': '4.5rem',

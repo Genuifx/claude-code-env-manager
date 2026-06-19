@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { listen } from '@tauri-apps/api/event';
 import { useLocale } from '@/locales';
 import { useAppStore, type CronTask, type CronTaskRun, type CronTemplate } from '@/store';
@@ -124,9 +125,8 @@ function StatusDot({ task, runs }: { task: CronTask; runs?: CronTaskRun[] }) {
 
 function TimelineBar({ tasks, runs }: { tasks: CronTask[]; runs: Record<string, CronTaskRun[]> }) {
   const now = new Date();
-  const currentHour = now.getHours();
-  const currentMinute = now.getMinutes();
-  const progressPercent = ((currentHour * 60 + currentMinute) / (24 * 60)) * 100;
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const progressPercent = (currentMinutes / (24 * 60)) * 100;
 
   // Collect today's run events for dots
   const todayStart = new Date();
@@ -139,10 +139,9 @@ function TimelineBar({ tasks, runs }: { tasks: CronTask[]; runs: Record<string, 
       const startTime = new Date(run.startedAt);
       if (startTime >= todayStart) {
         const runMinutes = startTime.getHours() * 60 + startTime.getMinutes();
-        dots.push({
-          percent: (runMinutes / (24 * 60)) * 100,
-          status: run.status,
-        });
+        // Keep dots inside the rounded bar ends
+        const pct = Math.min(98, Math.max(2, (runMinutes / (24 * 60)) * 100));
+        dots.push({ percent: pct, status: run.status });
       }
     }
   }
@@ -157,8 +156,13 @@ function TimelineBar({ tasks, runs }: { tasks: CronTask[]; runs: Record<string, 
     }
   };
 
+  const labelSets = [
+    { hours: [0, 6, 12, 18], cls: 'text-[11px] text-muted-foreground/70 block' },
+    { hours: [3, 9, 15, 21], cls: 'text-[10px] text-muted-foreground/50 hidden xl:block' },
+  ];
+
   return (
-    <div className="relative h-12 glass-card glass-noise rounded-xl overflow-hidden">
+    <div className="relative h-12 md:h-14 lg:h-16 glass-card glass-noise rounded-xl overflow-hidden">
       {/* Elapsed region */}
       <div
         className="absolute inset-y-0 left-0 bg-[hsl(var(--primary)/0.08)]"
@@ -166,19 +170,21 @@ function TimelineBar({ tasks, runs }: { tasks: CronTask[]; runs: Record<string, 
       />
       {/* Current time indicator */}
       <div
-        className="absolute top-1.5 bottom-1.5 w-0.5 rounded-full bg-[hsl(var(--primary))] shadow-[0_0_4px_hsl(var(--primary)/0.4)]"
-        style={{ left: `${progressPercent}%` }}
+        className="absolute top-1.5 md:top-2 bottom-1.5 md:bottom-2 w-0.5 rounded-full bg-[hsl(var(--primary))] shadow-[0_0_4px_hsl(var(--primary)/0.4)]"
+        style={{ left: `${Math.min(99, Math.max(1, progressPercent))}%` }}
       />
       {/* Time labels */}
-      {[0, 6, 12, 18].map((h) => (
-        <span
-          key={h}
-          className="absolute top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground/70 font-mono select-none"
-          style={{ left: `${(h / 24) * 100 + 1.5}%` }}
-        >
-          {String(h).padStart(2, '0')}:00
-        </span>
-      ))}
+      {labelSets.map((set, setIdx) =>
+        set.hours.map((h) => (
+          <span
+            key={`${setIdx}-${h}`}
+            className={cn('absolute top-1/2 -translate-y-1/2 font-mono select-none', set.cls)}
+            style={{ left: `max(16px, min(calc(100% - 16px), ${(h / 24) * 100}%))` }}
+          >
+            {String(h).padStart(2, '0')}:00
+          </span>
+        ))
+      )}
       {/* Run dots */}
       {dots.map((dot, i) => (
         <div
@@ -290,7 +296,7 @@ function TimelineTaskCard({
       <button
         onClick={onToggleExpand}
         aria-expanded={expanded}
-        className="w-full flex items-center gap-4 px-4 py-3.5 text-left"
+        className="w-full flex items-center gap-4 px-4 py-3 text-left"
       >
         {/* Time column */}
         <div className="w-14 shrink-0 text-center">
@@ -329,7 +335,7 @@ function TimelineTaskCard({
       {/* Expanded detail */}
       <div className={cn('grid transition-[grid-template-rows] duration-200 ease-out', expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]')}>
         <div className="overflow-hidden">
-          <div className="px-4 pb-4 space-y-3 border-t border-[hsl(var(--glass-border-light)/var(--glass-border-opacity))]">
+          <div className="px-4 pb-3.5 space-y-2.5 border-t border-[hsl(var(--glass-border-light)/var(--glass-border-opacity))]">
             {/* Actions */}
             <div className="flex items-center gap-2 pt-3.5">
               <button
@@ -373,15 +379,15 @@ function TimelineTaskCard({
 
             {/* Config grid */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              <div className="glass-subtle glass-noise rounded-lg px-3 py-2.5">
+              <div className="glass-subtle glass-noise rounded-lg px-3 py-2">
                 <div className="text-[10px] font-medium text-muted-foreground/70 uppercase tracking-wider">{t('cron.workingDir')}</div>
                 <div className="text-[11px] font-mono text-foreground/80 mt-1 truncate">{task.workingDir}</div>
               </div>
-              <div className="glass-subtle glass-noise rounded-lg px-3 py-2.5">
+              <div className="glass-subtle glass-noise rounded-lg px-3 py-2">
                 <div className="text-[10px] font-medium text-muted-foreground/70 uppercase tracking-wider">{t('cron.timeout')}</div>
                 <div className="text-[11px] font-medium text-foreground/80 mt-1 tabular-nums">{task.timeoutSecs}s</div>
               </div>
-              <div className="glass-subtle glass-noise rounded-lg px-3 py-2.5">
+              <div className="glass-subtle glass-noise rounded-lg px-3 py-2">
                 <div className="text-[10px] font-medium text-muted-foreground/70 uppercase tracking-wider">{t('cron.executionProfile')}</div>
                 <div className="text-[11px] font-medium text-foreground/80 mt-1">
                   {task.executionProfile === 'conservative' ? t('cron.profileConservative')
@@ -389,7 +395,7 @@ function TimelineTaskCard({
                     : t('cron.profileAutonomous')}
                 </div>
               </div>
-              <div className="glass-subtle glass-noise rounded-lg px-3 py-2.5">
+              <div className="glass-subtle glass-noise rounded-lg px-3 py-2">
                 <div className="text-[10px] font-medium text-muted-foreground/70 uppercase tracking-wider">{t('cron.profileBudget')}</div>
                 <div className="text-[11px] font-medium text-foreground/80 mt-1 tabular-nums">
                   {task.maxBudgetUsd != null ? `$${task.maxBudgetUsd.toFixed(2)}` : '$0.50'}
@@ -403,7 +409,7 @@ function TimelineTaskCard({
                 <p className="text-[10px] font-medium text-muted-foreground/70 uppercase tracking-wider mb-2">{t('cron.runHistory')}</p>
                 <div className="space-y-1">
                   {[...runs].reverse().slice(0, 5).map((run) => (
-                    <div key={run.id} className="group/run flex items-center gap-3 px-3 py-1.5 rounded-lg glass-subtle">
+                    <div key={run.id} className="group/run flex items-center gap-3 px-3 py-1 rounded-lg glass-subtle">
                       <StatusBadge status={run.status} />
                       <span className="text-[11px] text-muted-foreground flex-1">{formatTime(run.startedAt)}</span>
                       <span className="text-[11px] text-muted-foreground tabular-nums">{formatDuration(run.durationMs)}</span>
@@ -517,13 +523,13 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+  return createPortal(
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="task-dialog-title"
-        className="relative rounded-2xl max-w-lg w-full mx-4 max-h-[85vh] overflow-hidden shadow-elevation-4 border border-[hsl(var(--glass-border-light)/0.25)]"
+        className="relative rounded-2xl w-[calc(100%-1.5rem)] sm:w-[calc(100%-2rem)] md:w-[calc(100%-2.5rem)] lg:w-[calc(100%-3rem)] xl:w-[calc(100%-4rem)] 2xl:w-[calc(100%-5rem)] mx-auto max-w-md sm:max-w-lg md:max-w-xl lg:max-w-2xl xl:max-w-3xl 2xl:max-w-4xl max-h-[min(90vh,900px)] overflow-hidden shadow-elevation-4 border border-[hsl(var(--glass-border-light)/0.25)]"
         style={{ background: 'hsl(var(--surface-overlay))' }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -544,7 +550,7 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
         </div>
 
         {/* Form */}
-        <div className="px-5 pb-5 space-y-4 overflow-y-auto max-h-[calc(85vh-80px)]">
+        <div className="px-5 pb-5 space-y-4 overflow-y-auto max-h-[calc(min(85vh,900px)-80px)]">
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">{t('cron.taskName')}</label>
             <input className={INPUT_CLS} value={name} onChange={(e) => setName(e.target.value)} placeholder={t('cron.taskNamePlaceholder')} />
@@ -659,7 +665,8 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -961,19 +968,19 @@ export function CronTasks() {
       ) : cronTasks.length === 0 ? (
         <CronEmptyState onAdd={handleAdd} onAi={() => setShowAiPanel(true)} />
       ) : (
-        <div className="space-y-6 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 220px)' }}>
+        <div className="space-y-5">
           {/* Timeline bar */}
           <TimelineBar tasks={cronTasks} runs={cronRuns} />
 
           {/* Upcoming section */}
           {upcomingTasks.length > 0 && (
-            <div className="space-y-3">
+            <div className="space-y-2.5">
               <div className="flex items-center gap-2">
                 <Zap className="w-3.5 h-3.5 text-primary" />
                 <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">{t('cron.upcoming')}</h3>
                 <span className="text-[10px] font-medium text-primary bg-primary/10 px-1.5 py-0.5 rounded-full tabular-nums">{upcomingTasks.length}</span>
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 {upcomingTasks.map((task) => (
                   <TimelineTaskCard
                     key={task.id}
@@ -995,13 +1002,13 @@ export function CronTasks() {
 
           {/* Disabled tasks */}
           {disabledTasks.length > 0 && (
-            <div className="space-y-3">
+            <div className="space-y-2.5">
               <div className="flex items-center gap-2">
                 <Timer className="w-3.5 h-3.5 text-muted-foreground" />
                 <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{t('cron.disabled')}</h3>
                 <span className="text-[10px] font-medium text-muted-foreground bg-muted-foreground/10 px-1.5 py-0.5 rounded-full tabular-nums">{disabledTasks.length}</span>
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 {disabledTasks.map((task) => (
                   <TimelineTaskCard
                     key={task.id}
@@ -1022,7 +1029,7 @@ export function CronTasks() {
 
           {/* Completed today section */}
           {todayCompletedRuns.length > 0 && (
-            <div className="space-y-3">
+            <div className="space-y-2.5">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-3.5 h-3.5 text-success" />
                 <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">{t('cron.completedToday')}</h3>
@@ -1030,7 +1037,7 @@ export function CronTasks() {
               </div>
               <div className="space-y-1.5">
                 {todayCompletedRuns.slice(0, 10).map(({ task, run }) => (
-                  <div key={run.id} className="group/run glass-subtle glass-noise rounded-lg px-4 py-2.5 flex items-center gap-3">
+                  <div key={run.id} className="group/run glass-subtle glass-noise rounded-lg px-4 py-2 flex items-center gap-3">
                     <StatusBadge status={run.status} />
                     <span className="text-xs font-medium text-foreground flex-1 truncate">{task.name}</span>
                     <span className="text-2xs text-muted-foreground tabular-nums">{formatTimeShort(run.finishedAt)}</span>
@@ -1054,13 +1061,13 @@ export function CronTasks() {
       <TaskDialog open={dialogOpen} onClose={() => setDialogOpen(false)} onSave={handleSave} editTask={editingTask} environments={environments} />
 
       {/* Delete confirmation */}
-      {pendingDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setPendingDelete(null)}>
+      {pendingDelete && createPortal(
+        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setPendingDelete(null)}>
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="delete-dialog-title"
-            className="relative rounded-2xl max-w-sm w-full mx-4 overflow-hidden shadow-elevation-4 border border-[hsl(var(--glass-border-light)/0.25)]"
+            className="relative rounded-2xl w-[calc(100%-2rem)] mx-auto max-w-sm overflow-hidden shadow-elevation-4 border border-[hsl(var(--glass-border-light)/0.25)]"
             style={{ background: 'hsl(var(--surface-overlay))' }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -1081,7 +1088,8 @@ export function CronTasks() {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {/* Run Detail Drawer */}
@@ -1114,15 +1122,15 @@ function RunDetailDrawer({ run, loading, onClose, t }: {
     });
   }, []);
 
-  return (
+  return createPortal(
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px] transition-opacity"
+        className="fixed inset-0 z-[130] bg-black/30 backdrop-blur-[2px] transition-opacity"
         onClick={onClose}
       />
       {/* Drawer panel */}
-      <div className="fixed inset-y-0 right-0 z-50 w-full max-w-md flex flex-col shadow-elevation-4 border-l border-[hsl(var(--glass-border-light)/0.2)] animate-in slide-in-from-right duration-200"
+      <div className="fixed inset-y-0 right-0 z-[130] w-full max-w-full sm:max-w-md md:max-w-lg lg:max-w-xl xl:max-w-2xl 2xl:max-w-3xl 3xl:max-w-4xl flex flex-col shadow-elevation-4 border-l border-[hsl(var(--glass-border-light)/0.2)] animate-in slide-in-from-right duration-200"
         style={{ background: 'hsl(var(--surface-overlay))' }}
       >
         {/* Header */}
@@ -1185,7 +1193,8 @@ function RunDetailDrawer({ run, loading, onClose, t }: {
           )}
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }
 
