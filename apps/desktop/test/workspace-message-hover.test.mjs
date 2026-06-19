@@ -30,3 +30,28 @@ test('workspace message actions are revealed by transcript content hover, not ro
     /group-hover\/msg:pointer-events-auto group-hover\/msg:opacity-100/,
   );
 });
+
+test('workspace does not render estimated token speed in transcript or session rows', async () => {
+  const [messageBubble, projectTree, sidebarSessions] = await Promise.all([
+    fs.readFile(
+      path.join(desktopDir, 'src', 'components', 'workspace', 'WorkspaceMessageBubble.tsx'),
+      'utf8',
+    ),
+    fs.readFile(
+      path.join(desktopDir, 'src', 'components', 'workspace', 'ProjectTree.tsx'),
+      'utf8',
+    ),
+    fs.readFile(
+      path.join(desktopDir, 'src', 'components', 'workspace', 'workspaceSidebarSessions.ts'),
+      'utf8',
+    ),
+  ]);
+
+  assert.match(
+    messageBubble,
+    /group-hover\/msg:pointer-events-auto group-hover\/msg:opacity-100/,
+  );
+  assert.doesNotMatch(messageBubble, /outputTokensPerSecond|output_tokens_per_second|t\/s/);
+  assert.doesNotMatch(projectTree, /outputTokensPerSecond|output_tokens_per_second|t\/s/);
+  assert.doesNotMatch(sidebarSessions, /outputTokensPerSecond|output_tokens_per_second|t\/s/);
+});

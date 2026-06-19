@@ -188,6 +188,32 @@ test('live transcript records process timing metadata for duration display', asy
   assert.equal(toolBlock._completedAt, Date.parse('2026-05-01T00:00:05.000Z'));
 });
 
+test('live transcript attaches token usage to the completed assistant turn', async () => {
+  const { buildMessagesFromEvents } = await importWorkspaceEventTranscript();
+
+  const messages = buildMessagesFromEvents(
+    [{ msgType: 'user', uuid: 'user-1', content: 'run', segmentIndex: 0, isCompactBoundary: false }],
+    [],
+    [
+      event(1, { type: 'lifecycle', stage: 'turn_started', detail: '' }),
+      event(2, { type: 'assistant_chunk', text: 'Done.' }),
+      event(3, { type: 'lifecycle', stage: 'turn_completed', detail: '' }),
+      event(4, {
+        type: 'token_usage',
+        provider: 'codex',
+        input_tokens: 100,
+        output_tokens: 348,
+        cache_read_tokens: 0,
+        cache_creation_tokens: 0,
+      }),
+    ],
+  );
+
+  assert.equal(messages[1].msgType, 'assistant');
+  assert.equal(messages[1].inputTokens, 100);
+  assert.equal(messages[1].outputTokens, 348);
+});
+
 test('renders unmatched failed tool results as visible assistant errors', async () => {
   const { buildMessagesFromEvents } = await importWorkspaceEventTranscript();
 

@@ -19,6 +19,10 @@ interface PendingAssistantTurn {
   id: string;
   timestamp?: number;
   contentBlocks: ConversationContentBlock[];
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheCreationTokens?: number;
+  cacheReadTokens?: number;
 }
 
 function parseOccurredAt(occurredAt: string): number | undefined {
@@ -263,6 +267,13 @@ function createAssistantTextMessage(
   id: string,
   text: string,
   occurredAt?: number,
+  metadata: Partial<Pick<
+    ConversationMessageData,
+    | 'inputTokens'
+    | 'outputTokens'
+    | 'cacheCreationTokens'
+    | 'cacheReadTokens'
+  >> = {},
 ): ConversationMessageData {
   return {
     msgType: 'assistant',
@@ -271,6 +282,7 @@ function createAssistantTextMessage(
     timestamp: occurredAt,
     segmentIndex: 0,
     isCompactBoundary: false,
+    ...metadata,
   };
 }
 
@@ -359,6 +371,12 @@ function createAssistantTurnMessage(
       pendingTurn.id,
       contentBlocks[0].text || '',
       pendingTurn.timestamp,
+      {
+        inputTokens: pendingTurn.inputTokens,
+        outputTokens: pendingTurn.outputTokens,
+        cacheCreationTokens: pendingTurn.cacheCreationTokens,
+        cacheReadTokens: pendingTurn.cacheReadTokens,
+      },
     );
   }
 
@@ -369,6 +387,10 @@ function createAssistantTurnMessage(
     timestamp: pendingTurn.timestamp,
     segmentIndex: 0,
     isCompactBoundary: false,
+    inputTokens: pendingTurn.inputTokens,
+    outputTokens: pendingTurn.outputTokens,
+    cacheCreationTokens: pendingTurn.cacheCreationTokens,
+    cacheReadTokens: pendingTurn.cacheReadTokens,
   };
 }
 
@@ -800,6 +822,40 @@ export function buildMessagesFromEvents(
     return false;
   };
 
+  const applyTokenUsageToMessage = (
+    message: ConversationMessageData,
+    payload: Extract<SessionEventRecord['payload'], { type: 'token_usage' }>,
+  ): ConversationMessageData => {
+    return {
+      ...message,
+      inputTokens: payload.input_tokens,
+      outputTokens: payload.output_tokens,
+      cacheReadTokens: payload.cache_read_tokens,
+      cacheCreationTokens: payload.cache_creation_tokens,
+    };
+  };
+
+  const applyTokenUsageToLatestAssistant = (
+    payload: Extract<SessionEventRecord['payload'], { type: 'token_usage' }>,
+  ) => {
+    if (pendingTurn) {
+      pendingTurn.inputTokens = payload.input_tokens;
+      pendingTurn.outputTokens = payload.output_tokens;
+      pendingTurn.cacheReadTokens = payload.cache_read_tokens;
+      pendingTurn.cacheCreationTokens = payload.cache_creation_tokens;
+      return;
+    }
+
+    for (let index = next.length - 1; index >= 0; index -= 1) {
+      const message = next[index];
+      if (message.msgType !== 'assistant' && message.msgType !== 'ai') {
+        continue;
+      }
+      next[index] = applyTokenUsageToMessage(message, payload);
+      return;
+    }
+  };
+
   const ensurePendingTurn = (event: SessionEventRecord, occurredAt?: number) => {
     if (!pendingTurn) {
       pendingTurn = {
@@ -999,6 +1055,10 @@ export function buildMessagesFromEvents(
             ),
           );
         }
+        break;
+      }
+      case 'token_usage': {
+        applyTokenUsageToLatestAssistant(event.payload);
         break;
       }
       case 'stderr_line': {

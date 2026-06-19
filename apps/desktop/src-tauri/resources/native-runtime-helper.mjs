@@ -16568,29 +16568,6 @@ function readLatestCodexContextUsageFromSessionFile(filePath) {
   return latest;
 }
 
-// src/tokenThroughput.ts
-function finitePositiveNumber(value) {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
-}
-function roundTokensPerSecond(value) {
-  return Math.round(value * 100) / 100;
-}
-function buildOutputTokenThroughput(input) {
-  const startedAtMs = finitePositiveNumber(input.startedAtMs);
-  const completedAtMs = finitePositiveNumber(input.completedAtMs);
-  const firstOutputAtMs = finitePositiveNumber(input.firstOutputAtMs);
-  const outputTokens = finitePositiveNumber(input.outputTokens);
-  const firstTokenMs = startedAtMs && firstOutputAtMs && firstOutputAtMs >= startedAtMs ? firstOutputAtMs - startedAtMs : null;
-  const durationStartMs = firstOutputAtMs && (!startedAtMs || firstOutputAtMs >= startedAtMs) ? firstOutputAtMs : startedAtMs;
-  const outputDurationMs = completedAtMs && durationStartMs && completedAtMs > durationStartMs ? completedAtMs - durationStartMs : null;
-  const outputTokensPerSecond = outputTokens && outputDurationMs ? roundTokensPerSecond(outputTokens / (outputDurationMs / 1e3)) : null;
-  return {
-    first_token_ms: firstTokenMs,
-    output_duration_ms: outputDurationMs,
-    output_tokens_per_second: outputTokensPerSecond
-  };
-}
-
 // src/index.ts
 var initCommand = null;
 var stopped = false;
@@ -16606,15 +16583,11 @@ var claudeInterruptCompletionEmitted = false;
 var claudeSawPartialText = false;
 var claudeSawPartialThinking = false;
 var claudeTurnCompletionEmitted = false;
-var claudeTurnStartedAtMs = null;
-var claudeFirstOutputAtMs = null;
 var claudeSeenMessageIds = /* @__PURE__ */ new Set();
 var claudeContextUsageFailureKey = null;
 var codexClient = null;
 var codexThread = null;
 var codexLastContextUsageKey = null;
-var codexTurnStartedAtMs = null;
-var codexFirstOutputAtMs = null;
 var pendingSettings = null;
 var promptQueue = [];
 var pendingPermissions = /* @__PURE__ */ new Map();
@@ -16827,46 +16800,7 @@ function resetClaudeTurnTracking() {
   claudeSawPartialText = false;
   claudeSawPartialThinking = false;
   claudeTurnCompletionEmitted = false;
-  claudeTurnStartedAtMs = null;
-  claudeFirstOutputAtMs = null;
   claudeSeenMessageIds.clear();
-}
-function markClaudeTurnStarted(nowMs = Date.now()) {
-  resetClaudeTurnTracking();
-  claudeTurnStartedAtMs = nowMs;
-}
-function markClaudeMessageStarted(nowMs = Date.now()) {
-  const existingStartedAtMs = claudeTurnStartedAtMs;
-  resetClaudeTurnTracking();
-  claudeTurnStartedAtMs = existingStartedAtMs ?? nowMs;
-}
-function markClaudeOutputStarted(nowMs = Date.now()) {
-  claudeTurnStartedAtMs ??= nowMs;
-  claudeFirstOutputAtMs ??= nowMs;
-}
-function buildClaudeOutputTokenThroughput(outputTokens) {
-  return buildOutputTokenThroughput({
-    outputTokens,
-    startedAtMs: claudeTurnStartedAtMs,
-    firstOutputAtMs: claudeFirstOutputAtMs,
-    completedAtMs: Date.now()
-  });
-}
-function markCodexTurnStarted(nowMs = Date.now()) {
-  codexTurnStartedAtMs = nowMs;
-  codexFirstOutputAtMs = null;
-}
-function markCodexOutputStarted(nowMs = Date.now()) {
-  codexTurnStartedAtMs ??= nowMs;
-  codexFirstOutputAtMs ??= nowMs;
-}
-function buildCodexOutputTokenThroughput(outputTokens) {
-  return buildOutputTokenThroughput({
-    outputTokens,
-    startedAtMs: codexTurnStartedAtMs,
-    firstOutputAtMs: codexFirstOutputAtMs,
-    completedAtMs: Date.now()
-  });
 }
 function emitClaudeTurnCompleted(detail) {
   if (claudeTurnCompletionEmitted) {
@@ -17201,7 +17135,7 @@ async function waitForPermission(toolName, input, options) {
 }
 function handleClaudePartialEvent(rawEvent) {
   if (rawEvent.type === "message_start") {
-    markClaudeMessageStarted();
+    resetClaudeTurnTracking();
     return;
   }
   if (rawEvent.type !== "content_block_delta") {
@@ -17212,7 +17146,6 @@ function handleClaudePartialEvent(rawEvent) {
     return;
   }
   if (delta.type === "text_delta" && typeof delta.text === "string" && delta.text) {
-    markClaudeOutputStarted();
     claudeSawPartialText = true;
     emitEvent({
       type: "assistant_chunk",
@@ -17221,7 +17154,6 @@ function handleClaudePartialEvent(rawEvent) {
     return;
   }
   if (delta.type === "thinking_delta" && typeof delta.thinking === "string" && delta.thinking) {
-    markClaudeOutputStarted();
     claudeSawPartialThinking = true;
     emitEvent({
       type: "system_message",
@@ -17517,8 +17449,7 @@ async function consumeClaudeMessages() {
             input_tokens: typeof msgUsage.input_tokens === "number" ? msgUsage.input_tokens : 0,
             output_tokens: outputTokens,
             cache_read_tokens: typeof msgUsage.cache_read_input_tokens === "number" ? msgUsage.cache_read_input_tokens : 0,
-            cache_creation_tokens: typeof msgUsage.cache_creation_input_tokens === "number" ? msgUsage.cache_creation_input_tokens : 0,
-            ...buildClaudeOutputTokenThroughput(outputTokens)
+            cache_creation_tokens: typeof msgUsage.cache_creation_input_tokens === "number" ? msgUsage.cache_creation_input_tokens : 0
           });
         }
         const contentBlocks = getClaudeContentBlocks(message.message);
@@ -17530,7 +17461,6 @@ async function consumeClaudeMessages() {
               return;
             }
             emittedThinking.add(thinking);
-            markClaudeOutputStarted();
             emitEvent({
               type: "system_message",
               message: thinking
@@ -17538,7 +17468,6 @@ async function consumeClaudeMessages() {
             return;
           }
           if (block.type === "text" && typeof block.text === "string" && block.text && !claudeSawPartialText) {
-            markClaudeOutputStarted();
             emitEvent({
               type: "assistant_chunk",
               text: block.text
@@ -17609,7 +17538,7 @@ async function consumeClaudeMessages() {
       if (message.type === "system" && message.subtype === "session_state_changed") {
         if (message.state !== claudeLastSessionState) {
           if (message.state === "running") {
-            markClaudeTurnStarted();
+            resetClaudeTurnTracking();
             emitEvent({
               type: "lifecycle",
               stage: "turn_started",
@@ -17652,8 +17581,7 @@ async function consumeClaudeMessages() {
             cache_read_tokens: typeof resultUsage.cache_read_input_tokens === "number" ? resultUsage.cache_read_input_tokens : 0,
             cache_creation_tokens: typeof resultUsage.cache_creation_input_tokens === "number" ? resultUsage.cache_creation_input_tokens : 0,
             total_cost_usd: typeof totalCostUsd === "number" ? totalCostUsd : null,
-            scope: "turn_total",
-            ...buildClaudeOutputTokenThroughput(outputTokens)
+            scope: "turn_total"
           });
         }
         if (message.subtype === "success") {
@@ -17886,7 +17814,6 @@ async function runCodexTurn(text, images) {
       continue;
     }
     if (event.type === "turn.started") {
-      markCodexTurnStarted();
       emitEvent({
         type: "lifecycle",
         stage: "turn_started",
@@ -17907,8 +17834,7 @@ async function runCodexTurn(text, images) {
         input_tokens: event.usage.input_tokens ?? 0,
         output_tokens: outputTokens,
         cache_read_tokens: event.usage.cached_input_tokens ?? 0,
-        cache_creation_tokens: 0,
-        ...buildCodexOutputTokenThroughput(outputTokens)
+        cache_creation_tokens: 0
       });
       await emitCodexContextUsageFromSessionFile(currentProviderSessionId, 10);
       continue;
@@ -17934,14 +17860,12 @@ async function runCodexTurn(text, images) {
       if (nextText.startsWith(previousText)) {
         const delta = nextText.slice(previousText.length);
         if (delta) {
-          markCodexOutputStarted();
           emitEvent({
             type: "assistant_chunk",
             text: delta
           });
         }
       } else if (nextText) {
-        markCodexOutputStarted();
         emitEvent({
           type: "assistant_chunk",
           text: nextText
@@ -17957,14 +17881,12 @@ async function runCodexTurn(text, images) {
       if (nextText.startsWith(previousText)) {
         const delta = nextText.slice(previousText.length);
         if (delta) {
-          markCodexOutputStarted();
           emitEvent({
             type: "system_message",
             message: delta
           });
         }
       } else if (nextText) {
-        markCodexOutputStarted();
         emitEvent({
           type: "system_message",
           message: nextText

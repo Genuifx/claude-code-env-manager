@@ -178,12 +178,6 @@ pub enum SessionEventPayload {
         total_cost_usd: Option<f64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         scope: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        first_token_ms: Option<u64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        output_duration_ms: Option<u64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        output_tokens_per_second: Option<f64>,
     },
     ContextUsage {
         provider: String,

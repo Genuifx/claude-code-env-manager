@@ -732,7 +732,6 @@ export interface NativeSessionSummary {
   last_event_seq?: number | null;
   can_handoff_to_terminal: boolean;
   last_error?: string | null;
-  output_tokens_per_second?: number | null;
 }
 
 export interface NativeHandoffResult {
@@ -972,9 +971,6 @@ export type SessionEventPayload =
       cache_creation_tokens: number;
       total_cost_usd?: number | null;
       scope?: string | null;
-      first_token_ms?: number | null;
-      output_duration_ms?: number | null;
-      output_tokens_per_second?: number | null;
     }
   | {
       type: 'context_usage';

@@ -1096,10 +1096,10 @@ const MessageMetaBar = memo(function MessageMetaBar({
             )}
           </button>
         </TooltipTrigger>
-        <TooltipContent>
-          {copied ? t('workspace.copied') : t('workspace.copyMessage')}
-        </TooltipContent>
-      </Tooltip>
+      <TooltipContent>
+        {copied ? t('workspace.copied') : t('workspace.copyMessage')}
+      </TooltipContent>
+    </Tooltip>
       {timeLabel ? (
         <span className="text-[10px] tabular-nums text-muted-foreground/40">
           {timeLabel}

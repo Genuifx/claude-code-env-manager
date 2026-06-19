@@ -74,8 +74,6 @@ pub struct NativeSessionRecord {
     pub pending_handoff_terminal: Option<TerminalType>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_tokens_per_second: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -101,8 +99,6 @@ pub struct NativeSessionSummary {
     pub can_handoff_to_terminal: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_tokens_per_second: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -305,7 +301,6 @@ impl NativeSessionHandle {
             last_event_seq,
             can_handoff_to_terminal: record.can_handoff_to_terminal,
             last_error: record.last_error,
-            output_tokens_per_second: record.output_tokens_per_second,
         }
     }
 }
@@ -447,7 +442,6 @@ impl NativeRuntimeManager {
             can_handoff_to_terminal: terminal::external_terminal_launch_supported(),
             pending_handoff_terminal: None,
             last_error: None,
-            output_tokens_per_second: None,
         };
 
         let handle = Arc::new(NativeSessionHandle {
@@ -522,7 +516,6 @@ impl NativeRuntimeManager {
                         last_event_seq: None,
                         can_handoff_to_terminal: record.can_handoff_to_terminal,
                         last_error: record.last_error,
-                        output_tokens_per_second: record.output_tokens_per_second,
                     }
                 }
             })
@@ -1246,7 +1239,6 @@ impl NativeRuntimeManager {
             HelperOutputEvent::Event { payload } => {
                 let payload = serde_json::from_value::<SessionEventPayload>(payload)
                     .map_err(|error| format!("Failed to decode helper payload: {}", error))?;
-                self.capture_output_token_speed(runtime_id, &payload)?;
                 self.append_event(runtime_id, payload)
             }
         }
@@ -1463,25 +1455,6 @@ impl NativeRuntimeManager {
         Ok(())
     }
 
-    fn capture_output_token_speed(
-        &self,
-        runtime_id: &str,
-        payload: &SessionEventPayload,
-    ) -> Result<(), String> {
-        let speed = match payload {
-            SessionEventPayload::TokenUsage {
-                output_tokens_per_second: Some(speed),
-                ..
-            } if speed.is_finite() && *speed > 0.0 => *speed,
-            _ => return Ok(()),
-        };
-
-        self.update_record(runtime_id, |record| {
-            record.output_tokens_per_second = Some(speed);
-            record.updated_at = Utc::now();
-        })
-    }
-
     fn insert_record(&self, record: NativeSessionRecord) -> Result<(), String> {
         let mut records = self
             .records
@@ -1645,7 +1618,6 @@ impl NativeRuntimeManager {
                 last_event_seq: None,
                 can_handoff_to_terminal: record.can_handoff_to_terminal,
                 last_error: record.last_error,
-                output_tokens_per_second: record.output_tokens_per_second,
             })
             .ok_or_else(|| format!("Native runtime {} not found", runtime_id))
     }
@@ -1994,7 +1966,6 @@ mod tests {
             can_handoff_to_terminal: false,
             pending_handoff_terminal: None,
             last_error: None,
-            output_tokens_per_second: None,
         };
         let handle = native_session_handle(record.clone());
         let manager = NativeRuntimeManager {
@@ -2055,7 +2026,6 @@ mod tests {
             can_handoff_to_terminal: false,
             pending_handoff_terminal: None,
             last_error: None,
-            output_tokens_per_second: None,
         }
     }
 
@@ -2118,19 +2088,19 @@ mod tests {
     }
 
     #[test]
-    fn helper_token_usage_updates_summary_output_token_speed() {
-        let runtime_id = "native-token-speed";
+    fn helper_token_usage_records_official_token_counts() {
+        let runtime_id = "native-token-usage";
         let manager = manager_with_handle(runtime_id);
 
         manager
             .process_helper_stdout(
                 runtime_id,
-                r#"{"type":"event","payload":{"type":"token_usage","provider":"claude","input_tokens":10,"output_tokens":120,"cache_read_tokens":0,"cache_creation_tokens":0,"output_tokens_per_second":36.75,"first_token_ms":500,"output_duration_ms":3000}}"#,
+                r#"{"type":"event","payload":{"type":"token_usage","provider":"claude","input_tokens":10,"output_tokens":120,"cache_read_tokens":0,"cache_creation_tokens":0}}"#,
             )
             .expect("process token usage");
 
         let summary = manager.summary_for(runtime_id).expect("summary");
-        assert_eq!(summary.output_tokens_per_second, Some(36.75));
+        assert_eq!(summary.runtime_id, runtime_id);
 
         let batch = manager
             .replay_events(runtime_id, None)
@@ -2138,14 +2108,12 @@ mod tests {
         assert_eq!(batch.events.len(), 1);
         match &batch.events[0].payload {
             SessionEventPayload::TokenUsage {
-                output_tokens_per_second,
-                first_token_ms,
-                output_duration_ms,
+                input_tokens,
+                output_tokens,
                 ..
             } => {
-                assert_eq!(*output_tokens_per_second, Some(36.75));
-                assert_eq!(*first_token_ms, Some(500));
-                assert_eq!(*output_duration_ms, Some(3000));
+                assert_eq!(*input_tokens, 10);
+                assert_eq!(*output_tokens, 120);
             }
             payload => panic!("unexpected payload: {:?}", payload),
         }
