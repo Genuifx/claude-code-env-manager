@@ -3296,6 +3296,173 @@ fn get_workspace_file_diff(
     })
 }
 
+#[derive(Debug, serde::Serialize)]
+struct WorkspaceMediaPreview {
+    path: String,
+    kind: String,
+    media_type: String,
+    data_url: Option<String>,
+    byte_size: u64,
+    error: Option<String>,
+}
+
+/// Cap media preview payloads to avoid base64 inflation in the IPC bridge.
+/// Files above this ceiling return `error` instead of `data_url`.
+const WORKSPACE_MEDIA_MAX_BYTES: u64 = 25 * 1024 * 1024;
+
+fn media_kind_for_extension(path: &str) -> Option<(&'static str, &'static str)> {
+    let lower = path.to_ascii_lowercase();
+    let ext = lower.rsplit('.').next()?;
+    if ext.is_empty() || ext.contains('/') || ext.contains('\\') {
+        return None;
+    }
+    match ext {
+        "png" => Some(("image", "image/png")),
+        "jpg" | "jpeg" => Some(("image", "image/jpeg")),
+        "gif" => Some(("image", "image/gif")),
+        "webp" => Some(("image", "image/webp")),
+        "bmp" => Some(("image", "image/bmp")),
+        "svg" => Some(("image", "image/svg+xml")),
+        "ico" => Some(("image", "image/x-icon")),
+        "avif" => Some(("image", "image/avif")),
+        "mp3" => Some(("audio", "audio/mpeg")),
+        "wav" => Some(("audio", "audio/wav")),
+        "ogg" => Some(("audio", "audio/ogg")),
+        "m4a" => Some(("audio", "audio/mp4")),
+        "flac" => Some(("audio", "audio/flac")),
+        "aac" => Some(("audio", "audio/aac")),
+        "mp4" => Some(("video", "video/mp4")),
+        "webm" => Some(("video", "video/webm")),
+        "mov" => Some(("video", "video/quicktime")),
+        "mkv" => Some(("video", "video/x-matroska")),
+        "avi" => Some(("video", "video/x-msvideo")),
+        _ => None,
+    }
+}
+
+fn resolve_workspace_media_path(
+    working_dir: &str,
+    file_path: &str,
+) -> Result<std::path::PathBuf, String> {
+    let working = std::path::Path::new(working_dir)
+        .canonicalize()
+        .map_err(|err| format!("Invalid working_dir {}: {}", working_dir, err))?;
+    let candidate = if std::path::Path::new(file_path).is_absolute() {
+        std::path::PathBuf::from(file_path)
+    } else {
+        working.join(file_path)
+    };
+    let resolved = candidate
+        .canonicalize()
+        .map_err(|err| format!("Cannot resolve path {}: {}", candidate.display(), err))?;
+    if !resolved.starts_with(&working) {
+        return Err(format!("Path '{}' escapes working dir", file_path));
+    }
+    Ok(resolved)
+}
+
+#[tauri::command]
+fn get_workspace_media_preview(
+    working_dir: String,
+    file_path: String,
+) -> Result<WorkspaceMediaPreview, String> {
+    let unsupported = || WorkspaceMediaPreview {
+        path: file_path.clone(),
+        kind: "unsupported".to_string(),
+        media_type: String::new(),
+        data_url: None,
+        byte_size: 0,
+        error: Some("Not a recognized media file".to_string()),
+    };
+
+    let (kind, media_type) = match media_kind_for_extension(&file_path) {
+        Some(value) => value,
+        None => return Ok(unsupported()),
+    };
+
+    let absolute_path = match resolve_workspace_media_path(&working_dir, &file_path) {
+        Ok(path) => path,
+        Err(err) => {
+            return Ok(WorkspaceMediaPreview {
+                path: file_path,
+                kind: kind.to_string(),
+                media_type: media_type.to_string(),
+                data_url: None,
+                byte_size: 0,
+                error: Some(err),
+            });
+        }
+    };
+
+    let metadata = match std::fs::metadata(&absolute_path) {
+        Ok(meta) => meta,
+        Err(err) => {
+            return Ok(WorkspaceMediaPreview {
+                path: file_path,
+                kind: kind.to_string(),
+                media_type: media_type.to_string(),
+                data_url: None,
+                byte_size: 0,
+                error: Some(format!("Failed to stat file: {}", err)),
+            });
+        }
+    };
+
+    let byte_size = metadata.len();
+    if byte_size > WORKSPACE_MEDIA_MAX_BYTES {
+        return Ok(WorkspaceMediaPreview {
+            path: file_path,
+            kind: kind.to_string(),
+            media_type: media_type.to_string(),
+            data_url: None,
+            byte_size,
+            error: Some(format!(
+                "File too large ({} bytes > {} bytes cap)",
+                byte_size, WORKSPACE_MEDIA_MAX_BYTES
+            )),
+        });
+    }
+
+    let bytes = match std::fs::read(&absolute_path) {
+        Ok(value) => value,
+        Err(err) => {
+            return Ok(WorkspaceMediaPreview {
+                path: file_path,
+                kind: kind.to_string(),
+                media_type: media_type.to_string(),
+                data_url: None,
+                byte_size,
+                error: Some(format!("Failed to read file: {}", err)),
+            });
+        }
+    };
+
+    // SVG is XML text — embed as UTF-8 when valid to skip base64 inflation.
+    let data_url = if media_type == "image/svg+xml" {
+        match std::str::from_utf8(&bytes) {
+            Ok(text) => format!("data:{};utf8,{}", media_type, text),
+            Err(_) => {
+                use base64::Engine as _;
+                let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                format!("data:{};base64,{}", media_type, encoded)
+            }
+        }
+    } else {
+        use base64::Engine as _;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        format!("data:{};base64,{}", media_type, encoded)
+    };
+
+    Ok(WorkspaceMediaPreview {
+        path: file_path,
+        kind: kind.to_string(),
+        media_type: media_type.to_string(),
+        data_url: Some(data_url),
+        byte_size,
+        error: None,
+    })
+}
+
 #[tauri::command]
 fn open_text_in_vscode(content: String, suggested_name: Option<String>) -> Result<String, String> {
     let sanitized = sanitize_filename(suggested_name.as_deref().unwrap_or("proxy-debug"));
@@ -3741,6 +3908,7 @@ fn main() {
             clear_proxy_traffic,
             get_workspace_git_snapshot,
             get_workspace_file_diff,
+            get_workspace_media_preview,
             open_text_in_vscode,
             save_file_dialog,
             save_image_dialog,
@@ -3959,8 +4127,8 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        merge_git_numstat, normalize_git_changed_path, parse_git_status_line,
-        WorkspaceGitChangedFile,
+        media_kind_for_extension, merge_git_numstat, normalize_git_changed_path,
+        parse_git_status_line, WorkspaceGitChangedFile,
     };
     use std::collections::HashMap;
 
@@ -4024,5 +4192,41 @@ mod tests {
         let logo = files.get("assets/logo.png").unwrap();
         assert_eq!(logo.additions, Some(0));
         assert_eq!(logo.deletions, Some(0));
+    }
+
+    #[test]
+    fn media_kind_resolver_maps_common_extensions() {
+        assert_eq!(
+            media_kind_for_extension("screenshot.png"),
+            Some(("image", "image/png"))
+        );
+        assert_eq!(
+            media_kind_for_extension("photo.JPG"),
+            Some(("image", "image/jpeg"))
+        );
+        assert_eq!(
+            media_kind_for_extension("assets/anim.gif"),
+            Some(("image", "image/gif"))
+        );
+        assert_eq!(
+            media_kind_for_extension("icon.svg"),
+            Some(("image", "image/svg+xml"))
+        );
+        assert_eq!(
+            media_kind_for_extension("clip.mp4"),
+            Some(("video", "video/mp4"))
+        );
+        assert_eq!(
+            media_kind_for_extension("voice.m4a"),
+            Some(("audio", "audio/mp4"))
+        );
+    }
+
+    #[test]
+    fn media_kind_resolver_rejects_non_media_extensions() {
+        assert_eq!(media_kind_for_extension("README.md"), None);
+        assert_eq!(media_kind_for_extension("src/app.tsx"), None);
+        assert_eq!(media_kind_for_extension("noext"), None);
+        assert_eq!(media_kind_for_extension(""), None);
     }
 }
