@@ -40,6 +40,12 @@ import type {
 } from '@/components/types';
 import { Button, type ButtonProps } from '@/components/ui/button';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
   Popover,
   PopoverAnchor,
   PopoverContent,
@@ -299,9 +305,11 @@ function removeImageAttachmentFromSegments(
 function ComposerAttachmentChip({
   attachment,
   onRemove,
+  onImageClick,
 }: {
   attachment: ComposerAttachment;
   onRemove: (id: string) => void;
+  onImageClick?: (attachment: ComposerImageAttachment) => void;
 }) {
   const { t } = useLocale();
 
@@ -315,13 +323,22 @@ function ComposerAttachmentChip({
     ? attachment.absolutePath
     : attachment.name;
 
-  const thumbnail = attachment.kind === 'image' && attachment.objectUrl
+  const isImage = attachment.kind === 'image' && attachment.objectUrl;
+  const thumbnail = isImage
     ? (
-      <img
-        src={attachment.objectUrl}
-        alt={attachment.name}
-        className="h-8 w-8 rounded-md object-cover"
-      />
+      <button
+        type="button"
+        className="shrink-0 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        onClick={() => onImageClick?.(attachment as ComposerImageAttachment)}
+        aria-label={t('workspace.composerImagePreviewOpen')}
+        title={t('workspace.composerImagePreviewOpen')}
+      >
+        <img
+          src={(attachment as ComposerImageAttachment).objectUrl ?? ''}
+          alt={attachment.name}
+          className="h-8 w-8 rounded-md object-cover ring-1 ring-transparent transition-[box-shadow,ring-color] hover:ring-2 hover:ring-primary/40"
+        />
+      </button>
     )
     : (
       <span className="rounded-md bg-background/80 p-1 text-muted-foreground">
@@ -746,6 +763,7 @@ export function WorkspaceSessionComposer({
   const [draggedFileCount, setDraggedFileCount] = useState(0);
   const [inlineSkillPopover, setInlineSkillPopover] = useState<InlineSkillPopoverState | null>(null);
   const [triggerPanelState, setTriggerPanelState] = useState<PromptAreaTriggerPanelState | null>(null);
+  const [previewingImage, setPreviewingImage] = useState<ComposerImageAttachment | null>(null);
   const composerPlainText = useMemo(() => segmentsToPlainText(composerSegments), [composerSegments]);
   const canSubmitWithAttachments = canSubmit || composerPlainText.trim().length > 0 || attachments.length > 0;
   const resolvedActionLabel = isSubmitting ? loadingLabel : (primaryActionLabel ?? submitLabel);
@@ -1361,6 +1379,7 @@ export function WorkspaceSessionComposer({
                       key={attachment.id}
                       attachment={attachment}
                       onRemove={removeAttachment}
+                      onImageClick={(image) => setPreviewingImage(image)}
                     />
                   ))}
                 </div>
@@ -1445,6 +1464,45 @@ export function WorkspaceSessionComposer({
           </div>
         </div>
       </div>
+
+      <Dialog
+        open={previewingImage !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPreviewingImage(null);
+          }
+        }}
+      >
+        <DialogContent
+          className="max-w-[min(92vw,960px)] border-border/45 bg-popover p-0 sm:rounded-2xl"
+        >
+          <DialogTitle className="sr-only">
+            {t('workspace.composerImagePreview')}
+          </DialogTitle>
+          <DialogDescription className="sr-only">
+            {previewingImage?.name ?? ''}
+          </DialogDescription>
+          {previewingImage?.objectUrl ? (
+            <div className="flex flex-col items-center gap-3 p-2">
+              <div className="flex max-h-[min(78vh,720px)] w-full items-center justify-center overflow-hidden rounded-xl bg-black/85">
+                <img
+                  src={previewingImage.objectUrl}
+                  alt={previewingImage.name}
+                  className="max-h-[min(78vh,720px)] max-w-full object-contain"
+                />
+              </div>
+              <div className="flex w-full items-center justify-between gap-3 px-1 pb-1 text-[11px] text-muted-foreground">
+                <span className="min-w-0 truncate font-medium text-foreground/85">
+                  {previewingImage.name}
+                </span>
+                <span className="shrink-0 tabular-nums">
+                  {formatImageSize(previewingImage.byteSize)}
+                </span>
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
