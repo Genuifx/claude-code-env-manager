@@ -1,5 +1,11 @@
 # ccem
 
+## 2.24.0
+
+### Minor Changes
+
+- Release v2.24.0: workspace composer image preview, Cmd+K global search, workspace hover actions, skill scanning hardening, and cron session environment fix.
+
 ## 2.21.0
 
 ### Minor Changes
