@@ -42,3 +42,5 @@ apps/desktop/src-tauri/binaries/
 baymax
 .worktrees
 .superpowers
+docs/artifacts
+plans/
