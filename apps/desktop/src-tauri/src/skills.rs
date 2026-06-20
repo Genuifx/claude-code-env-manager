@@ -102,6 +102,29 @@ struct CodexConfig {
     disabled_plugins: HashSet<String>,
 }
 
+#[derive(Debug, Default)]
+struct SkillScanState {
+    visited_dirs: HashSet<PathBuf>,
+    seen_skill_files: HashSet<PathBuf>,
+    visited_dir_count: usize,
+}
+
+const MAX_SKILL_SCAN_DEPTH: usize = 6;
+const MAX_SKILL_SCAN_DIRS: usize = 2000;
+const SKILL_SCAN_SKIP_DIR_NAMES: &[&str] = &[
+    ".git",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    ".next",
+    ".nuxt",
+    ".turbo",
+    ".cache",
+    ".parcel-cache",
+    "coverage",
+];
+
 // ============================================
 // Helpers
 // ============================================
@@ -308,6 +331,31 @@ fn is_hidden_dir(path: &Path) -> bool {
         .is_some_and(|name| name.starts_with('.'))
 }
 
+fn is_skipped_scan_dir(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| SKILL_SCAN_SKIP_DIR_NAMES.contains(&name))
+}
+
+fn is_scannable_dir(path: &Path, file_type: &std::fs::FileType) -> bool {
+    if file_type.is_dir() {
+        return true;
+    }
+    file_type.is_symlink()
+        && std::fs::metadata(path)
+            .map(|metadata| metadata.is_dir())
+            .unwrap_or(false)
+}
+
+fn skill_identity(skill: &InstalledSkill) -> PathBuf {
+    let skill_file = skill
+        .skill_file
+        .as_deref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(&skill.path).join("SKILL.md"));
+    normalized_existing_or_raw(&skill_file)
+}
+
 fn build_installed_skill_from_dir(
     path: &Path,
     options: &SkillScanOptions,
@@ -317,7 +365,7 @@ fn build_installed_skill_from_dir(
     }
 
     let skill_md = path.join("SKILL.md");
-    if !skill_md.exists() {
+    if std::fs::symlink_metadata(&skill_md).is_err() {
         return None;
     }
 
@@ -393,10 +441,36 @@ fn build_installed_skill_from_dir(
 }
 
 fn scan_skills_dir_with_options(dir: &Path, options: &SkillScanOptions) -> Vec<InstalledSkill> {
+    let mut state = SkillScanState::default();
+    scan_skills_dir_with_state(dir, options, &mut state, 0)
+}
+
+fn scan_skills_dir_with_state(
+    dir: &Path,
+    options: &SkillScanOptions,
+    state: &mut SkillScanState,
+    depth: usize,
+) -> Vec<InstalledSkill> {
     let mut skills = Vec::new();
 
+    if depth > MAX_SKILL_SCAN_DEPTH || state.visited_dir_count >= MAX_SKILL_SCAN_DIRS {
+        return skills;
+    }
+
+    let dir_identity = normalized_existing_or_raw(dir);
+    if !state.visited_dirs.insert(dir_identity) {
+        return skills;
+    }
+    state.visited_dir_count += 1;
+
     if let Some(skill) = build_installed_skill_from_dir(dir, options) {
-        skills.push(skill);
+        if state.seen_skill_files.insert(skill_identity(&skill)) {
+            skills.push(skill);
+        }
+        return skills;
+    }
+
+    if depth == MAX_SKILL_SCAN_DEPTH {
         return skills;
     }
 
@@ -407,11 +481,17 @@ fn scan_skills_dir_with_options(dir: &Path, options: &SkillScanOptions) -> Vec<I
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if !path.is_dir() || is_hidden_dir(&path) {
+        if is_hidden_dir(&path) || is_skipped_scan_dir(&path) {
+            continue;
+        }
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !is_scannable_dir(&path, &file_type) {
             continue;
         }
 
-        skills.extend(scan_skills_dir_with_options(&path, options));
+        skills.extend(scan_skills_dir_with_state(&path, options, state, depth + 1));
     }
 
     skills
@@ -1322,7 +1402,16 @@ pub fn search_skills_stream(app: AppHandle, query: String) {
 /// 2. Plugin skills: ~/.claude/plugins/installed_plugins.json
 /// 3. Project skills: <defaultWorkingDir>/.claude/skills/ (optional)
 #[tauri::command]
-pub fn list_workspace_skills(
+pub async fn list_workspace_skills(
+    working_dir: Option<String>,
+    provider: Option<String>,
+) -> Result<Vec<InstalledSkill>, String> {
+    tauri::async_runtime::spawn_blocking(move || list_workspace_skills_sync(working_dir, provider))
+        .await
+        .map_err(|error| format!("Failed to join workspace skill scan task: {}", error))?
+}
+
+fn list_workspace_skills_sync(
     working_dir: Option<String>,
     provider: Option<String>,
 ) -> Result<Vec<InstalledSkill>, String> {
@@ -1465,7 +1554,13 @@ fn collect_skill_resource_hints(directory: Option<&Path>) -> Vec<String> {
 }
 
 #[tauri::command]
-pub fn list_installed_skills() -> Result<Vec<InstalledSkill>, String> {
+pub async fn list_installed_skills() -> Result<Vec<InstalledSkill>, String> {
+    tauri::async_runtime::spawn_blocking(list_installed_skills_sync)
+        .await
+        .map_err(|error| format!("Failed to join installed skill scan task: {}", error))?
+}
+
+fn list_installed_skills_sync() -> Result<Vec<InstalledSkill>, String> {
     let mut all_skills = Vec::new();
 
     if let Some(home) = dirs::home_dir() {
@@ -1966,6 +2061,68 @@ Some content here.
         let skills = scan_skills_dir(&dir, "global", &["Claude Code".to_string()], None);
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "Nested Skill");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_scan_skills_dir_deduplicates_symlinked_skill_target() {
+        let dir = std::env::temp_dir().join("ccem-test-skills-symlink-dedupe");
+        let _ = fs::remove_dir_all(&dir);
+        let real_skill = dir.join("real-skill");
+        let linked_skill = dir.join("linked-skill");
+        fs::create_dir_all(&real_skill).unwrap();
+        fs::write(
+            real_skill.join("SKILL.md"),
+            "---\nname: Real Skill\ndescription: Linked once\n---\n",
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(&real_skill, &linked_skill).unwrap();
+
+        let skills = scan_skills_dir(&dir, "global", &["Codex".to_string()], None);
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "Real Skill");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_scan_skills_dir_skips_dependency_trees() {
+        let dir = std::env::temp_dir().join("ccem-test-skills-skip-deps");
+        let _ = fs::remove_dir_all(&dir);
+        let dependency_skill = dir.join("node_modules").join("pkg").join("skill");
+        fs::create_dir_all(&dependency_skill).unwrap();
+        fs::write(
+            dependency_skill.join("SKILL.md"),
+            "---\nname: Dependency Skill\n---\n",
+        )
+        .unwrap();
+
+        let skills = scan_skills_dir(&dir, "global", &["Codex".to_string()], None);
+        assert!(skills.is_empty());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_scan_skills_dir_limits_nested_depth() {
+        let dir = std::env::temp_dir().join("ccem-test-skills-depth-limit");
+        let _ = fs::remove_dir_all(&dir);
+        let deep_skill = dir
+            .join("one")
+            .join("two")
+            .join("three")
+            .join("four")
+            .join("five")
+            .join("six")
+            .join("seven")
+            .join("too-deep");
+        fs::create_dir_all(&deep_skill).unwrap();
+        fs::write(deep_skill.join("SKILL.md"), "---\nname: Too Deep\n---\n").unwrap();
+
+        let skills = scan_skills_dir(&dir, "global", &["Codex".to_string()], None);
+        assert!(skills.is_empty());
 
         let _ = fs::remove_dir_all(&dir);
     }
