@@ -33,6 +33,26 @@ test('composer submit reads live DOM text and attachment ref to avoid paste/subm
   assert.match(submitBlock, /revokeComposerImageUrls\(currentAttachments\);/);
 });
 
+test('composer submit refreshes skills before resolving selected skill files', async () => {
+  const source = await readComposerSource();
+  const submitBlock = sliceBetween(source, 'const handleComposerSubmit = useCallback', 'const hasComposerAttentionPanel');
+  const refreshIndex = submitBlock.indexOf('await onRefreshSkills()');
+  const resolveIndex = submitBlock.indexOf('selectedSkillFilesFromComposerText(promptValue, provider, latestInstalledSkills, workspaceCommands)');
+
+  assert.notEqual(refreshIndex, -1, 'missing submit-time skill refresh');
+  assert.notEqual(resolveIndex, -1, 'missing refreshed skill list in selected skill resolution');
+  assert.ok(refreshIndex < resolveIndex, 'skills must refresh before selected skill resolution');
+});
+
+test('composer submit surfaces selected skill read failures instead of sending raw slash prompts', async () => {
+  const source = await readComposerSource();
+  const submitBlock = sliceBetween(source, 'const handleComposerSubmit = useCallback', 'const hasComposerAttentionPanel');
+
+  assert.match(submitBlock, /toast\.error\(t\('workspace\.composerSkillReadFailed'\)\);/);
+  assert.match(submitBlock, /return false;/);
+  assert.match(submitBlock, /Failed to read selected skill files for composer prompt/);
+});
+
 test('composer attachment ref updates synchronously when pasted attachments are added', async () => {
   const source = await readComposerSource();
   const addBlock = sliceBetween(source, 'const addAttachments = useCallback', 'const syncComposerSegments');

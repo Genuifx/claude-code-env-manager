@@ -426,13 +426,55 @@ export function selectedSkillFilesFromComposerText(
   text: string,
   provider: WorkspaceComposerProvider,
   installedSkills: InstalledSkill[],
+  workspaceCommands: Pick<ComposerCommandDefinition, 'token'>[] = [],
 ): string[] {
   const files = new Set<string>();
+  const commands = new Set([
+    ...getComposerCapabilities(provider).commands.map((command) => command.token.toLowerCase()),
+    ...workspaceCommands.map((command) => command.token.toLowerCase()),
+  ]);
+  const skillLookupByName = new Map<string, InstalledSkill>();
+  for (const skill of installedSkills) {
+    const names = [
+      skill.name,
+      skill.displayName,
+      skill.invocationLabel,
+      skill.uiMetadata?.displayName,
+    ].filter(Boolean) as string[];
+    for (const name of names) {
+      const key = normalizeSkillName(name);
+      if (!skillLookupByName.has(key)) {
+        skillLookupByName.set(key, skill);
+      }
+    }
+  }
+
   for (const token of parseComposerTokens(text, provider, installedSkills)) {
     if (token.kind === 'skill' && token.path && token.display.startsWith('$')) {
       files.add(token.path);
+      continue;
+    }
+    if (
+      token.kind === 'skill'
+      && token.path
+      && token.display.startsWith('/')
+      && !commands.has(token.display.toLowerCase())
+    ) {
+      files.add(token.path);
     }
   }
+
+  for (const match of text.matchAll(COMMAND_TOKEN_REGEX)) {
+    const raw = match[2];
+    if (commands.has(raw.toLowerCase())) {
+      continue;
+    }
+    const skill = skillLookupByName.get(normalizeSkillName(raw));
+    if (skill) {
+      files.add(getSkillFilePath(skill));
+    }
+  }
+
   return [...files];
 }
 

@@ -138,6 +138,7 @@ interface WorkspaceNativeSessionViewProps {
   initialImages?: SessionPromptImage[] | null;
   seedMessages?: ConversationMessageData[];
   installedSkills?: InstalledSkill[];
+  onRefreshSkills?: () => Promise<InstalledSkill[]>;
   workspaceCommands?: WorkspaceCommand[];
   isVisible?: boolean;
   onSessionUpdate: (session: NativeSessionSummary) => void;
@@ -941,6 +942,7 @@ export function WorkspaceNativeSessionView({
   initialImages,
   seedMessages = [],
   installedSkills = [],
+  onRefreshSkills,
   workspaceCommands = [],
   isVisible = true,
   onSessionUpdate,
@@ -2141,6 +2143,7 @@ export function WorkspaceNativeSessionView({
         }
         provider={session.provider}
         installedSkills={installedSkills}
+        onRefreshSkills={onRefreshSkills}
         workspaceCommands={workspaceCommands}
         workingDir={session.project_dir}
         searchWorkspaceFiles={searchWorkspaceFiles}

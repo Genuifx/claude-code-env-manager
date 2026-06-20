@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { shallow } from 'zustand/shallow';
 import { WorkspaceStatusStrip } from '@/components/workspace/WorkspaceStatusStrip';
 import { ProjectTree } from '@/components/workspace/ProjectTree';
+import { WorkspaceGlobalSearch } from '@/components/workspace/WorkspaceGlobalSearch';
 import { WorkspaceNativeSessionView } from '@/components/workspace/WorkspaceNativeSessionView';
 import { WorkspaceSessionComposer } from '@/components/workspace/WorkspaceSessionComposer';
 import { ComposerControls } from '@/components/workspace/ComposerControls';
@@ -256,6 +257,7 @@ export function Workspace({
   const [isCreatingNativeSession, setIsCreatingNativeSession] = useState(false);
   const [isLaunchingComposeTerminal, setIsLaunchingComposeTerminal] = useState(false);
   const [isResumingHistorySession, setIsResumingHistorySession] = useState(false);
+  const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useState(false);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshRequestSeqRef = useRef(0);
   const skillsBootstrapAttemptedRef = useRef(false);
@@ -1176,6 +1178,16 @@ export function Workspace({
     };
   }, [loadWorkspaceCommands, skillsContext]);
 
+  const refreshWorkspaceInstalledSkills = useCallback(async () => {
+    const skills = await loadWorkspaceSkills({
+      workingDir: skillsContext.workingDir,
+      provider: skillsContext.provider,
+    });
+    const nextSkills = skills.length > 0 ? skills : installedSkills;
+    setWorkspaceInstalledSkills(nextSkills);
+    return nextSkills;
+  }, [installedSkills, loadWorkspaceSkills, skillsContext]);
+
   const handleSelect = useCallback(
     async (session: HistorySessionItem) => {
       const key = toSessionKey(session);
@@ -1662,6 +1674,7 @@ export function Workspace({
 
   const shortcuts = useMemo(
     () => ({
+      'meta+k': () => setIsGlobalSearchOpen(true),
       'meta+o': () => void handlePickComposeDir(),
       'meta+enter': () => {
         if (workspaceMode === 'history') {
@@ -1737,6 +1750,7 @@ export function Workspace({
           loadingLabel={t('common.loading')}
           provider={composeProvider}
           installedSkills={workspaceInstalledSkills}
+          onRefreshSkills={refreshWorkspaceInstalledSkills}
           workspaceCommands={workspaceCommands}
           workingDir={effectiveComposeDir}
           searchWorkspaceFiles={searchWorkspaceFiles}
@@ -1824,6 +1838,7 @@ export function Workspace({
           loadingLabel={t('common.loading')}
           provider={historyProvider}
           installedSkills={workspaceInstalledSkills}
+          onRefreshSkills={refreshWorkspaceInstalledSkills}
           workspaceCommands={workspaceCommands}
           workingDir={selectedSession.project || null}
           searchWorkspaceFiles={searchWorkspaceFiles}
@@ -1884,7 +1899,10 @@ export function Workspace({
 
   return (
     <div className="page-transition-enter flex h-full flex-col">
-      <WorkspaceStatusStrip onNavigate={onNavigate} />
+      <WorkspaceStatusStrip
+        onNavigate={onNavigate}
+        onOpenSearch={() => setIsGlobalSearchOpen(true)}
+      />
 
       <div className="workspace-main-container mx-3 mb-3 flex min-h-0 flex-1 overflow-hidden">
         <ProjectTree
@@ -1927,6 +1945,7 @@ export function Workspace({
             setSessions(refreshed);
           }}
           onCreateForProject={handleCreateForProject}
+          onNewSession={() => void handleNewSession(launchClient)}
         />
 
         <div className="workspace-reading-surface relative flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -1984,6 +2003,7 @@ export function Workspace({
                       initialImages={entry.initialImages}
                       seedMessages={entry.seedMessages}
                       installedSkills={workspaceInstalledSkills}
+                      onRefreshSkills={refreshWorkspaceInstalledSkills}
                       workspaceCommands={workspaceCommands}
                       isVisible={isActiveLiveEntry}
                       onSessionUpdate={handleLiveSessionUpdate}
@@ -2002,6 +2022,14 @@ export function Workspace({
           ) : null}
         </div>
       </div>
+
+      <WorkspaceGlobalSearch
+        sessions={sessions}
+        isOpen={isGlobalSearchOpen}
+        onOpenChange={setIsGlobalSearchOpen}
+        onSelectSession={handleSelect}
+        onSelectProject={handleCreateForProject}
+      />
     </div>
   );
 }

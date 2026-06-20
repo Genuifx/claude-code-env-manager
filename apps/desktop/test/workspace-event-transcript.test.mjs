@@ -241,6 +241,39 @@ test('renders unmatched failed tool results as visible assistant errors', async 
   );
 });
 
+test('renders completed turns with only lifecycle detail as visible feedback', async () => {
+  const { buildMessagesFromEvents } = await importWorkspaceEventTranscript();
+
+  const messages = buildMessagesFromEvents(
+    [],
+    [],
+    [
+      event(1, { type: 'user_prompt', text: '/lightweight-dev-mode 继续', image_count: 0 }),
+      event(2, { type: 'lifecycle', stage: 'runtime_resume', detail: 'Reconnected native runtime helper.' }),
+      event(3, { type: 'lifecycle', stage: 'processing', detail: 'Claude is processing a turn.' }),
+      event(4, {
+        type: 'token_usage',
+        provider: 'claude',
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_creation_tokens: 0,
+        scope: 'turn_total',
+      }),
+      event(5, { type: 'lifecycle', stage: 'turn_completed', detail: 'Unknown skill: lightweight-dev-mode' }),
+      event(6, { type: 'lifecycle', stage: 'ready', detail: 'Ready for the next prompt.' }),
+    ],
+  );
+
+  assert.deepEqual(
+    messages.map((message) => [message.msgType, message.content]),
+    [
+      ['user', '/lightweight-dev-mode 继续'],
+      ['assistant', 'Unknown skill: lightweight-dev-mode'],
+    ],
+  );
+});
+
 test('live transcript renders user prompt images from native events', async () => {
   const { buildMessagesFromEvents } = await importWorkspaceEventTranscript();
 

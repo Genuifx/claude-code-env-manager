@@ -116,6 +116,7 @@ interface WorkspaceSessionComposerProps {
   textareaProps?: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'value' | 'onChange' | 'placeholder' | 'disabled'>;
   provider?: WorkspaceComposerProvider;
   installedSkills?: InstalledSkill[];
+  onRefreshSkills?: () => Promise<InstalledSkill[]>;
   workspaceCommands?: ComposerCommandDefinition[];
   workingDir?: string | null;
   searchWorkspaceFiles?: (
@@ -717,6 +718,7 @@ export function WorkspaceSessionComposer({
   textareaProps,
   provider = 'claude',
   installedSkills = [],
+  onRefreshSkills,
   workspaceCommands = [],
   workingDir,
   searchWorkspaceFiles,
@@ -1127,20 +1129,41 @@ export function WorkspaceSessionComposer({
     const currentAttachments = attachmentsRef.current;
     let text = promptValue.trim();
     const displayText = buildComposerDisplayText(promptValue);
+    let latestInstalledSkills = installedSkills;
+    if (onRefreshSkills) {
+      try {
+        const refreshedSkills = await onRefreshSkills();
+        if (refreshedSkills.length > 0) {
+          latestInstalledSkills = refreshedSkills;
+        }
+      } catch (error) {
+        console.error('Failed to refresh skills before composer submit:', error);
+      }
+    }
     const selectedSkillFiles = Array.from(new Set([
       ...selectedSkillTokens
         .filter((token) => token.path)
         .map((token) => token.path as string),
-      ...selectedSkillFilesFromComposerText(promptValue, provider, installedSkills),
+      ...selectedSkillFilesFromComposerText(promptValue, provider, latestInstalledSkills, workspaceCommands),
     ]));
     if (selectedSkillFiles.length > 0) {
       try {
         const selectedSkills = await invoke<SelectedSkillContent[]>('read_skill_files', {
           skillFiles: selectedSkillFiles,
         });
+        const unreadableSkills = selectedSkills.filter((skill) => (
+          skill.content.trim().length === 0
+          && skill.diagnostics.some((diagnostic) => diagnostic.trim().length > 0)
+        ));
+        if (unreadableSkills.length > 0) {
+          toast.error(t('workspace.composerSkillReadFailed'));
+          return false;
+        }
         text = buildComposerPromptWithSelectedSkills(promptValue, selectedSkills);
       } catch (error) {
         console.error('Failed to read selected skill files for composer prompt:', error);
+        toast.error(t('workspace.composerSkillReadFailed'));
+        return false;
       }
     }
 
@@ -1165,7 +1188,16 @@ export function WorkspaceSessionComposer({
       setTriggerPanelState(null);
     }
     return result;
-  }, [composerSegments, installedSkills, onSubmit, provider, selectedSkillTokens]);
+  }, [
+    composerSegments,
+    installedSkills,
+    onRefreshSkills,
+    onSubmit,
+    provider,
+    selectedSkillTokens,
+    t,
+    workspaceCommands,
+  ]);
 
   const hasComposerAttentionPanel = queuedMessages.length > 0;
 

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Radio, Circle, Flame, Clock, Check, Settings2, ClipboardCheck } from 'lucide-react';
+import { Radio, Circle, Flame, Clock, Check, Settings2, ClipboardCheck, Search, Command } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { useLocale } from '@/locales';
 import { getEnvColorVar, cn } from '@/lib/utils';
@@ -21,6 +21,7 @@ import { StreakUsagePopoverContent } from './StreakUsagePopover';
 
 interface WorkspaceStatusStripProps {
   onNavigate: (tab: string) => void;
+  onOpenSearch: () => void;
 }
 
 function StatusChip({
@@ -75,7 +76,10 @@ function StatusChip({
   );
 }
 
-export function WorkspaceStatusStrip({ onNavigate }: WorkspaceStatusStripProps) {
+export function WorkspaceStatusStrip({
+  onNavigate,
+  onOpenSearch,
+}: WorkspaceStatusStripProps) {
   const { t } = useLocale();
   const { sessions, currentEnv, environments, continuousUsageDays, cronTasks, usageStats } = useAppStore(
     (state) => ({
@@ -213,6 +217,29 @@ export function WorkspaceStatusStrip({ onNavigate }: WorkspaceStatusStripProps) 
           className="hidden lg:inline-flex"
         />
       )}
+
+      {/* Global search trigger — always visible, far-right next to review entry */}
+      <button
+        type="button"
+        title={t('workspace.globalSearchTrigger')}
+        onClick={onOpenSearch}
+        className={cn(
+          'group relative ml-auto inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full cursor-pointer',
+          'status-chip-glass',
+          'hover:scale-[1.02] active:scale-[0.98]'
+        )}
+      >
+        <span className="relative flex items-center justify-center w-3.5 h-3.5">
+          <Search className="w-3.5 h-3.5 text-muted-foreground transition-transform duration-200 group-hover:scale-110" />
+        </span>
+        <span className="text-[13px] font-medium text-foreground transition-colors">
+          {t('workspace.globalSearchTrigger')}
+        </span>
+        <span className="hidden sm:inline-flex items-center gap-0.5 text-[10px] text-muted-foreground/60 transition-colors group-hover:text-muted-foreground">
+          <Command className="h-3 w-3" />
+          <span>K</span>
+        </span>
+      </button>
 
       {/* Review audit entry — always visible, far-right, context-aware */}
       <button

@@ -164,6 +164,43 @@ test('dollar query is skill-only and structured tokens parse by exact SKILL.md p
   ]);
   assert.deepEqual(
     selectedSkillFilesFromComposerText('use [/duplicate](/tmp/global/duplicate/SKILL.md) now', 'codex', skills),
+    ['/tmp/global/duplicate/SKILL.md'],
+  );
+});
+
+test('slash skill aliases are injected unless they collide with real commands', async () => {
+  const { selectedSkillFilesFromComposerText } = await importComposerModel();
+  const skills = [
+    skill({
+      name: 'lightweight-dev-mode',
+      displayName: 'lightweight-dev-mode',
+      invocationLabel: 'lightweight-dev-mode',
+      path: '/tmp/global/lightweight-dev-mode',
+      skillFile: '/tmp/global/lightweight-dev-mode/SKILL.md',
+      scope: 'global',
+      provider: 'claude',
+    }),
+    skill({
+      name: 'verify',
+      displayName: 'verify',
+      invocationLabel: 'verify',
+      path: '/tmp/project/verify',
+      skillFile: '/tmp/project/verify/SKILL.md',
+      provider: 'claude',
+    }),
+  ];
+
+  assert.deepEqual(
+    selectedSkillFilesFromComposerText(
+      '/lightweight-dev-mode 按照这个 skill 重新 cherry pick',
+      'claude',
+      skills,
+      [{ token: '/verify' }],
+    ),
+    ['/tmp/global/lightweight-dev-mode/SKILL.md'],
+  );
+  assert.deepEqual(
+    selectedSkillFilesFromComposerText('/verify 先跑检查', 'claude', skills, [{ token: '/verify' }]),
     [],
   );
 });
