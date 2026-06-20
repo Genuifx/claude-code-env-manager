@@ -1,4 +1,5 @@
 import { memo, useMemo, useState, useCallback, useRef, useEffect } from 'react';
+import type { DragEvent } from 'react';
 import { Check, ChevronRight, FolderOpen, FolderClosed, MessageSquare, Pin, RefreshCw, SquarePen, X, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -524,6 +525,71 @@ export const ProjectTree = memo(function ProjectTree({
     });
   }, []);
 
+  // Drag-to-reorder state for pinned sessions
+  const dragSourceKeyRef = useRef<string | null>(null);
+  const [draggingKey, setDraggingKey] = useState<string | null>(null);
+  const [dropTargetKey, setDropTargetKey] = useState<string | null>(null);
+  const [dropPosition, setDropPosition] = useState<'before' | 'after'>('before');
+
+  const clearDragState = useCallback(() => {
+    dragSourceKeyRef.current = null;
+    setDraggingKey(null);
+    setDropTargetKey(null);
+    setDropPosition('before');
+  }, []);
+
+  const handlePinnedDragStart = useCallback(
+    (event: DragEvent<HTMLDivElement>, session: HistorySessionItem) => {
+      const key = toKey(session);
+      dragSourceKeyRef.current = key;
+      setDraggingKey(key);
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', key);
+    },
+    []
+  );
+
+  const handlePinnedDragOver = useCallback(
+    (event: DragEvent<HTMLDivElement>, session: HistorySessionItem) => {
+      if (!dragSourceKeyRef.current) return;
+      const key = toKey(session);
+      if (key === dragSourceKeyRef.current) {
+        if (dropTargetKey) setDropTargetKey(null);
+        return;
+      }
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      const rect = event.currentTarget.getBoundingClientRect();
+      const isTopHalf = event.clientY < rect.top + rect.height / 2;
+      setDropTargetKey(key);
+      setDropPosition(isTopHalf ? 'before' : 'after');
+    },
+    [dropTargetKey]
+  );
+
+  const handlePinnedDrop = useCallback(
+    (event: DragEvent<HTMLDivElement>, session: HistorySessionItem) => {
+      event.preventDefault();
+      const sourceKey = dragSourceKeyRef.current;
+      const targetKey = toKey(session);
+      if (!sourceKey || sourceKey === targetKey) {
+        clearDragState();
+        return;
+      }
+      setPinnedSessionKeys((prev) => {
+        const without = prev.filter((k) => k !== sourceKey);
+        const targetIndex = without.indexOf(targetKey);
+        if (targetIndex === -1) return prev;
+        const insertAt = dropPosition === 'before' ? targetIndex : targetIndex + 1;
+        const next = [...without];
+        next.splice(insertAt, 0, sourceKey);
+        return next;
+      });
+      clearDragState();
+    },
+    [clearDragState, dropPosition]
+  );
+
   // Build project nodes from sessions
   const projectNodes = useMemo(() => {
     const map = new Map<string, ProjectNode>();
@@ -678,6 +744,11 @@ export const ProjectTree = memo(function ProjectTree({
         key={key}
         role="button"
         tabIndex={0}
+        draggable={options.pinnedSection === true}
+        onDragStart={options.pinnedSection ? (event) => handlePinnedDragStart(event, session) : undefined}
+        onDragOver={options.pinnedSection ? (event) => handlePinnedDragOver(event, session) : undefined}
+        onDrop={options.pinnedSection ? (event) => handlePinnedDrop(event, session) : undefined}
+        onDragEnd={options.pinnedSection ? clearDragState : undefined}
         onClick={() => onSelect(session)}
         onDoubleClick={() => {
           setEditingKey(key);
@@ -697,9 +768,17 @@ export const ProjectTree = memo(function ProjectTree({
           isSelected
             ? 'bg-primary/[0.08] text-primary'
             : 'hover:bg-muted/50 text-muted-foreground hover:text-foreground',
-          options.pinnedSection && 'hover:bg-primary/[0.07]'
+          options.pinnedSection && 'hover:bg-primary/[0.07]',
+          options.pinnedSection && draggingKey !== key && 'cursor-grab active:cursor-grabbing',
+          draggingKey === key && 'opacity-40'
         )}
       >
+        {options.pinnedSection && dropTargetKey === key && dropPosition === 'before' && (
+          <div className="pointer-events-none absolute inset-x-1 top-0 z-20 h-0.5 rounded-full bg-primary shadow-[0_0_4px_hsl(var(--primary)/0.5)]" />
+        )}
+        {options.pinnedSection && dropTargetKey === key && dropPosition === 'after' && (
+          <div className="pointer-events-none absolute inset-x-1 bottom-0 z-20 h-0.5 rounded-full bg-primary shadow-[0_0_4px_hsl(var(--primary)/0.5)]" />
+        )}
         <div className="flex min-w-0 items-center gap-1.5">
           <span
             className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center"
@@ -749,6 +828,7 @@ export const ProjectTree = memo(function ProjectTree({
           <TooltipTrigger asChild>
             <button
               type="button"
+              draggable={false}
               onClick={(event) => {
                 event.stopPropagation();
                 togglePinnedSession(session);
