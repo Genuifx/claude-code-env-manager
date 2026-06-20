@@ -1047,10 +1047,12 @@ function formatMessageTime(ts?: number): string | null {
 const MessageMetaBar = memo(function MessageMetaBar({
   message,
   isUser,
+  visible,
   t,
 }: {
   message: ConversationMessageData;
   isUser: boolean;
+  visible: boolean;
   t: (key: string) => string;
 }) {
   const [copied, setCopied] = useState(false);
@@ -1071,8 +1073,8 @@ const MessageMetaBar = memo(function MessageMetaBar({
   return (
     <div
       className={cn(
-        'pointer-events-none absolute top-full z-10 flex items-center gap-0.5 select-none opacity-0 transition-opacity duration-150',
-        'group-hover/msg:pointer-events-auto group-hover/msg:opacity-100 group-focus-within/msg:pointer-events-auto group-focus-within/msg:opacity-100',
+        'absolute bottom-0 z-10 flex items-center gap-1 select-none transition-opacity duration-150',
+        visible ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0',
         isUser ? 'right-0 justify-end' : 'left-0 justify-start',
       )}
     >
@@ -1083,16 +1085,16 @@ const MessageMetaBar = memo(function MessageMetaBar({
             aria-label={copied ? t('workspace.copied') : t('workspace.copyMessage')}
             onClick={handleCopy}
             className={cn(
-              'inline-flex h-4 w-4 items-center justify-center rounded transition-colors',
+              'inline-flex h-5 w-5 items-center justify-center rounded transition-colors',
               isUser
                 ? 'text-foreground/50 hover:bg-foreground/10'
                 : 'text-muted-foreground/50 hover:bg-muted/50',
             )}
           >
             {copied ? (
-              <Check className="h-3 w-3 text-success" />
+              <Check className="h-3.5 w-3.5 text-success" />
             ) : (
-              <Copy className="h-3 w-3" />
+              <Copy className="h-3.5 w-3.5" />
             )}
           </button>
         </TooltipTrigger>
@@ -1107,7 +1109,12 @@ const MessageMetaBar = memo(function MessageMetaBar({
       ) : null}
     </div>
   );
-}, (prev, next) => prev.message === next.message && prev.isUser === next.isUser && prev.t === next.t);
+}, (prev, next) => (
+  prev.message === next.message
+  && prev.isUser === next.isUser
+  && prev.visible === next.visible
+  && prev.t === next.t
+));
 
 function renderAssistantMarkdown(text: string) {
   return (
@@ -1343,6 +1350,8 @@ function renderContentBlocks(
 
 function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessageBubbleProps) {
   const { t } = useLocale();
+  const [isActionHovering, setIsActionHovering] = useState(false);
+  const [isActionFocusWithin, setIsActionFocusWithin] = useState(false);
   const isUser = message.msgType === 'user' || message.msgType === 'human';
   const isSummary = message.msgType === 'summary';
   const isCompactingSummary = message.summary === COMPACTING_SUMMARY_TOKEN;
@@ -1425,6 +1434,13 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
   }
 
   const hasMainContent = renderedContent && !(Array.isArray(renderedContent) && renderedContent.length === 0);
+  const showMessageActions = isActionHovering || isActionFocusWithin;
+
+  const handleActionRegionBlur = useCallback((event: React.FocusEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      setIsActionFocusWithin(false);
+    }
+  }, []);
 
   if (!hasMainContent && teammateMessages.length === 0) {
     return null;
@@ -1434,16 +1450,28 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
     <div className={cn(spacingClass, 'workspace-msg-virtualized')}>
       {hasMainContent ? (
         isUser ? (
-          <div className="group/msg relative ml-auto max-w-[78%] min-w-[220px]">
+          <div
+            className="relative ml-auto max-w-[78%] min-w-[220px] pb-6"
+            onPointerEnter={() => setIsActionHovering(true)}
+            onPointerLeave={() => setIsActionHovering(false)}
+            onFocusCapture={() => setIsActionFocusWithin(true)}
+            onBlurCapture={handleActionRegionBlur}
+          >
             <div className="rounded-[24px] border border-border/30 bg-[hsl(var(--chat-assistant-bg)/0.7)] px-5 py-4 text-foreground">
               {renderedContent}
             </div>
-            <MessageMetaBar message={message} isUser t={t} />
+            <MessageMetaBar message={message} isUser visible={showMessageActions} t={t} />
           </div>
         ) : (
-          <div className="group/msg relative w-fit max-w-full">
+          <div
+            className="relative w-fit max-w-full pb-6"
+            onPointerEnter={() => setIsActionHovering(true)}
+            onPointerLeave={() => setIsActionHovering(false)}
+            onFocusCapture={() => setIsActionFocusWithin(true)}
+            onBlurCapture={handleActionRegionBlur}
+          >
             <div className="space-y-3">{renderedContent}</div>
-            <MessageMetaBar message={message} isUser={false} t={t} />
+            <MessageMetaBar message={message} isUser={false} visible={showMessageActions} t={t} />
           </div>
         )
       ) : null}
