@@ -21,7 +21,13 @@ import {
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import type { NativeSessionSummary, WorkspaceFileDiff, WorkspaceGitSnapshot } from '@/lib/tauri-ipc';
+import type {
+  NativeSessionSummary,
+  WorkspaceFileDiff,
+  WorkspaceGitSnapshot,
+  WorkspaceMediaKind,
+  WorkspaceMediaPreview,
+} from '@/lib/tauri-ipc';
 import { cn, getEnvColorVar } from '@/lib/utils';
 import type {
   ConversationMessageData,
@@ -47,6 +53,8 @@ interface WorkspaceReviewDrawerProps {
   onOpenChange: (open: boolean) => void;
   onRefreshGit: () => void;
   onLoadDiff: (filePath: string) => Promise<WorkspaceFileDiff>;
+  /** Fetch a media data-url preview for binary assets (images, audio, video). */
+  onLoadMediaPreview?: (filePath: string) => Promise<WorkspaceMediaPreview>;
   /** Fetch sub-agent list (+ optional detail). When omitted, the 子 Agent entry is hidden. */
   onLoadSubagents?: (detailAgentId: string | null) => Promise<SessionSubagentsPayload>;
   /** Whether the session is live (enables auto-polling while agents run). */
@@ -67,6 +75,49 @@ function resolveWorkspacePath(projectDir: string, filePath: string) {
 function basename(path: string) {
   const parts = path.replace(/[\\/]+$/, '').split(/[\\/]/);
   return parts[parts.length - 1] || path;
+}
+
+const MEDIA_EXTENSION_KIND: Record<string, WorkspaceMediaKind> = {
+  png: 'image',
+  jpg: 'image',
+  jpeg: 'image',
+  gif: 'image',
+  webp: 'image',
+  bmp: 'image',
+  svg: 'image',
+  ico: 'image',
+  avif: 'image',
+  mp3: 'audio',
+  wav: 'audio',
+  ogg: 'audio',
+  m4a: 'audio',
+  flac: 'audio',
+  aac: 'audio',
+  mp4: 'video',
+  webm: 'video',
+  mov: 'video',
+  mkv: 'video',
+  avi: 'video',
+};
+
+function mediaKindForPath(filePath: string): WorkspaceMediaKind | null {
+  const lower = filePath.toLowerCase();
+  const ext = lower.split('.').pop() ?? '';
+  return MEDIA_EXTENSION_KIND[ext] ?? null;
+}
+
+function formatByteSize(bytes: number): string {
+  if (!bytes || bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const suffix = units[unitIndex];
+  const display = unitIndex === 0 ? `${Math.round(value)}` : value.toFixed(value < 10 ? 1 : 0);
+  return `${display} ${suffix}`;
 }
 
 function todoStatusClass(status: string) {
@@ -290,6 +341,104 @@ function TreeLevel({
         );
       })}
     </>
+  );
+}
+
+function MediaPreviewView({
+  preview,
+  loading,
+  error,
+}: {
+  preview: WorkspaceMediaPreview | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  if (loading) {
+    return (
+      <div className="px-4 py-6">
+        <div className="h-32 rounded-lg bg-surface-raised/60" />
+      </div>
+    );
+  }
+  if (error) {
+    return <p className="px-4 py-4 text-[12px] text-destructive">{error}</p>;
+  }
+  if (!preview) {
+    return null;
+  }
+  if (preview.error || !preview.data_url) {
+    return (
+      <div className="px-4 py-4">
+        <p className="text-[12px] text-muted-foreground">
+          {preview.error || '无法生成多媒体预览。'}
+        </p>
+        {preview.byte_size > 0 ? (
+          <p className="mt-1 font-mono text-[10px] tabular-nums text-muted-foreground/70">
+            {formatByteSize(preview.byte_size)}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
+  const sizeHint = (
+    <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/70">
+      {formatByteSize(preview.byte_size)}
+    </span>
+  );
+
+  if (preview.kind === 'image') {
+    return (
+      <div className="px-4 py-3">
+        <div className="overflow-hidden rounded-lg border border-border-subtle/40 bg-background/40">
+          <img
+            src={preview.data_url}
+            alt={basename(preview.path)}
+            className="block max-h-[60vh] w-full object-contain"
+          />
+        </div>
+        <div className="mt-1.5 flex items-center gap-2 text-[10px] text-muted-foreground">
+          <span className="truncate">{preview.media_type}</span>
+          {sizeHint}
+        </div>
+      </div>
+    );
+  }
+
+  if (preview.kind === 'audio') {
+    return (
+      <div className="px-4 py-3">
+        <audio controls src={preview.data_url} className="w-full" style={{ height: 32 }}>
+          你的浏览器不支持音频预览。
+        </audio>
+        <div className="mt-1.5 flex items-center gap-2 text-[10px] text-muted-foreground">
+          <span className="truncate">{preview.media_type}</span>
+          {sizeHint}
+        </div>
+      </div>
+    );
+  }
+
+  if (preview.kind === 'video') {
+    return (
+      <div className="px-4 py-3">
+        <video
+          controls
+          src={preview.data_url}
+          className="max-h-[60vh] w-full rounded-lg border border-border-subtle/40 bg-black"
+        >
+          你的浏览器不支持视频预览。
+        </video>
+        <div className="mt-1.5 flex items-center gap-2 text-[10px] text-muted-foreground">
+          <span className="truncate">{preview.media_type}</span>
+          {sizeHint}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <p className="px-4 py-4 text-[12px] text-muted-foreground">二进制文件，无法显示差异。</p>
   );
 }
 
@@ -654,6 +803,7 @@ export function WorkspaceReviewDrawer({
   onOpenChange,
   onRefreshGit,
   onLoadDiff,
+  onLoadMediaPreview,
   onLoadSubagents,
   isLive = false,
 }: WorkspaceReviewDrawerProps) {
@@ -662,6 +812,9 @@ export function WorkspaceReviewDrawer({
   const [diff, setDiff] = useState<WorkspaceFileDiff | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
+  const [mediaPreview, setMediaPreview] = useState<WorkspaceMediaPreview | null>(null);
+  const [mediaLoading, setMediaLoading] = useState(false);
+  const [mediaError, setMediaError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [filesWidth, setFilesWidth] = useState(DEFAULT_FILES_WIDTH);
   const [resizing, setResizing] = useState(false);
@@ -687,6 +840,12 @@ export function WorkspaceReviewDrawer({
       setDiff(null);
       setDiffError(null);
       setDiffLoading(true);
+      setMediaPreview(null);
+      setMediaError(null);
+      const isMedia = onLoadMediaPreview && mediaKindForPath(path);
+      if (isMedia) {
+        setMediaLoading(true);
+      }
       try {
         const result = await onLoadDiff(path);
         setDiff(result);
@@ -695,8 +854,18 @@ export function WorkspaceReviewDrawer({
       } finally {
         setDiffLoading(false);
       }
+      if (onLoadMediaPreview && mediaKindForPath(path)) {
+        try {
+          const media = await onLoadMediaPreview(path);
+          setMediaPreview(media);
+        } catch (loadError) {
+          setMediaError(`加载多媒体预览失败：${String(loadError)}`);
+        } finally {
+          setMediaLoading(false);
+        }
+      }
     },
-    [onLoadDiff],
+    [onLoadDiff, onLoadMediaPreview],
   );
 
   const toggleFolder = useCallback((path: string) => {
@@ -732,6 +901,8 @@ export function WorkspaceReviewDrawer({
     if (!isOpen) {
       setPage('main');
       setSelectedPath(null);
+      setMediaPreview(null);
+      setMediaError(null);
       setSubagents([]);
       setSelectedAgentId(null);
       setAgentDetail(null);
@@ -958,7 +1129,13 @@ export function WorkspaceReviewDrawer({
                         {basename(selectedPath)}
                       </p>
                     </div>
-                    {diff && !diff.is_binary ? (
+                    {selectedPath && mediaKindForPath(selectedPath) ? (
+                      mediaPreview && mediaPreview.byte_size > 0 ? (
+                        <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+                          {formatByteSize(mediaPreview.byte_size)}
+                        </span>
+                      ) : null
+                    ) : diff && !diff.is_binary ? (
                       <span className="shrink-0 font-mono text-[11px] tabular-nums">
                         <span className="text-success">+{diff.additions}</span>{' '}
                         <span className="text-destructive">-{diff.deletions}</span>
@@ -977,7 +1154,15 @@ export function WorkspaceReviewDrawer({
                     </Button>
                   </div>
                   <ScrollArea className="min-h-0 flex-1">
-                    <DiffView diff={diff} loading={diffLoading} error={diffError} />
+                    {selectedPath && mediaKindForPath(selectedPath) ? (
+                      <MediaPreviewView
+                        preview={mediaPreview}
+                        loading={mediaLoading}
+                        error={mediaError}
+                      />
+                    ) : (
+                      <DiffView diff={diff} loading={diffLoading} error={diffError} />
+                    )}
                   </ScrollArea>
                 </>
               ) : (

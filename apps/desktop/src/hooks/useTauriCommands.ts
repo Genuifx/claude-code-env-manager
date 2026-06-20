@@ -34,6 +34,7 @@ import type {
   WorkspaceFileSuggestion,
   WorkspaceGitSnapshot,
   WorkspaceFileDiff,
+  WorkspaceMediaPreview,
   WorkspaceCommand,
 } from '@/lib/tauri-ipc';
 
@@ -852,6 +853,13 @@ export function useTauriCommands() {
     return invoke<WorkspaceFileDiff>('get_workspace_file_diff', { workingDir, filePath });
   }, []);
 
+  const getWorkspaceMediaPreview = useCallback(async (
+    workingDir: string,
+    filePath: string,
+  ): Promise<WorkspaceMediaPreview> => {
+    return invoke<WorkspaceMediaPreview>('get_workspace_media_preview', { workingDir, filePath });
+  }, []);
+
   const getSessionSubagents = useCallback(async (
     sessionId: string,
     source: string,
@@ -1364,6 +1372,7 @@ export function useTauriCommands() {
     handoffNativeSessionToTerminal,
     getWorkspaceGitSnapshot,
     getWorkspaceFileDiff,
+    getWorkspaceMediaPreview,
     getSessionSubagents,
     launchOpenCodeWeb,
     loadAppConfig,

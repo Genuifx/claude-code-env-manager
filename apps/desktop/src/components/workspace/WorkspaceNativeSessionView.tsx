@@ -965,6 +965,7 @@ export function WorkspaceNativeSessionView({
     handoffNativeSessionToTerminal,
     getWorkspaceGitSnapshot,
     getWorkspaceFileDiff,
+    getWorkspaceMediaPreview,
     getSessionSubagents,
     listNativeSessions,
     searchWorkspaceFiles,
@@ -2059,6 +2060,7 @@ export function WorkspaceNativeSessionView({
         onOpenChange={setReviewPanelOpen}
         onRefreshGit={() => void refreshGitSnapshot()}
         onLoadDiff={(filePath) => getWorkspaceFileDiff(session.project_dir, filePath)}
+        onLoadMediaPreview={(filePath) => getWorkspaceMediaPreview(session.project_dir, filePath)}
         isLive
         onLoadSubagents={
           session.provider === 'claude' && session.provider_session_id
