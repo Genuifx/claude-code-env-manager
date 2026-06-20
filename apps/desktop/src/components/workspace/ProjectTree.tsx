@@ -1,5 +1,5 @@
-import { memo, useMemo, useState, useDeferredValue, useCallback, useRef, useEffect } from 'react';
-import { Check, ChevronRight, FolderOpen, FolderClosed, MessageSquare, Pin, RefreshCw, Search, SquarePen, X } from 'lucide-react';
+import { memo, useMemo, useState, useCallback, useRef, useEffect } from 'react';
+import { Check, ChevronRight, FolderOpen, FolderClosed, MessageSquare, Pin, RefreshCw, SquarePen, X, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -38,6 +38,7 @@ interface ProjectTreeProps {
   ) => Promise<void>;
   onSessionsChanged?: () => Promise<void>;
   onCreateForProject?: (projectPath: string) => void;
+  onNewSession?: () => void;
 }
 
 interface ProjectNode {
@@ -118,20 +119,6 @@ function readPinnedSessionKeys(): string[] {
   } catch {
     return [];
   }
-}
-
-function sessionMatchesSearch(session: HistorySessionItem, query: string): boolean {
-  if (!query) {
-    return true;
-  }
-
-  const haystack = [
-    getHistorySessionDisplay(session, ''),
-    session.projectName,
-    session.project,
-  ].join(' ').toLowerCase();
-
-  return haystack.includes(query);
 }
 
 function hasSessionAnnotation(session: HistorySessionItem) {
@@ -444,9 +431,9 @@ export const ProjectTree = memo(function ProjectTree({
   onSaveAnnotation,
   onSessionsChanged,
   onCreateForProject,
+  onNewSession,
 }: ProjectTreeProps) {
   const { t } = useLocale();
-  const [search, setSearch] = useState('');
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [pinnedSessionKeys, setPinnedSessionKeys] = useState(readPinnedSessionKeys);
@@ -499,10 +486,8 @@ export const ProjectTree = memo(function ProjectTree({
     }
   }, [onSaveTitle, onSessionsChanged]);
 
-  const deferredSearch = useDeferredValue(search);
   const [expandedProjects, setExpandedProjects] = useState<Set<string> | null>(null);
   const [projectVisibleCount, setProjectVisibleCount] = useState<Record<string, number>>({});
-  const normalizedSearch = deferredSearch.trim().toLowerCase();
 
   const pinnedSessionKeySet = useMemo(
     () => new Set(pinnedSessionKeys),
@@ -522,11 +507,6 @@ export const ProjectTree = memo(function ProjectTree({
       .map((key) => sessionByKey.get(key))
       .filter((session): session is HistorySessionItem => !!session),
     [pinnedSessionKeys, sessionByKey]
-  );
-
-  const visiblePinnedSessions = useMemo(
-    () => pinnedSessions.filter((session) => sessionMatchesSearch(session, normalizedSearch)),
-    [normalizedSearch, pinnedSessions]
   );
 
   const unpinnedSessions = useMemo(
@@ -578,21 +558,6 @@ export const ProjectTree = memo(function ProjectTree({
     if (expandedProjects !== null) return expandedProjects;
     return new Set(projectNodes.slice(0, 3).map((n) => n.project));
   }, [expandedProjects, projectNodes]);
-
-  // Filter by search
-  const filteredNodes = useMemo(() => {
-    if (!normalizedSearch) return projectNodes;
-    return projectNodes
-      .map((node) => {
-        const nameMatch = node.projectName.toLowerCase().includes(normalizedSearch);
-        const filteredSessions = node.sessions.filter(
-          (s) => sessionMatchesSearch(s, normalizedSearch) || nameMatch
-        );
-        if (filteredSessions.length === 0) return null;
-        return { ...node, sessions: nameMatch ? node.sessions : filteredSessions };
-      })
-      .filter(Boolean) as ProjectNode[];
-  }, [projectNodes, normalizedSearch]);
 
   // Per-project visible count helper
   const getVisibleCount = useCallback(
@@ -811,19 +776,22 @@ export const ProjectTree = memo(function ProjectTree({
 
   return (
     <div className="flex w-[clamp(220px,30vw,280px)] shrink-0 flex-col bg-sidebar backdrop-blur-xl">
-      {/* Header: Search + pinned conversations */}
+      {/* Header: New session + pinned conversations */}
       <div className="shrink-0 p-2 flex flex-col gap-2">
         <div className="flex items-center gap-2">
-          <div className="relative flex-1">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={t('workspace.searchProjects')}
-              className="w-full h-8 pl-8 pr-3 rounded-md text-xs bg-surface-raised/75 text-foreground placeholder:text-muted-foreground outline-none focus:bg-surface-raised focus:ring-1 focus:ring-primary/20 transition-all"
-            />
-          </div>
+          <button
+            type="button"
+            onClick={onNewSession}
+            className={cn(
+              'flex flex-1 items-center justify-center gap-1.5 h-8 rounded-md',
+              'text-muted-foreground hover:text-foreground hover:bg-muted/50',
+              'text-xs font-medium transition-colors',
+              'disabled:pointer-events-none disabled:opacity-50'
+            )}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {t('workspace.newSession')}
+          </button>
           <button
             type="button"
             onClick={onRefresh}
@@ -852,13 +820,13 @@ export const ProjectTree = memo(function ProjectTree({
               </span>
             ) : null}
           </div>
-          {visiblePinnedSessions.length > 0 ? (
+          {pinnedSessions.length > 0 ? (
             <div className="mt-1 max-h-[148px] overflow-y-auto pr-0.5">
-              {visiblePinnedSessions.map((session) => renderSessionRow(session, { pinnedSection: true }))}
+              {pinnedSessions.map((session) => renderSessionRow(session, { pinnedSection: true }))}
             </div>
           ) : (
             <div className="mt-1 px-2 py-2 text-[11px] text-muted-foreground/60">
-              {pinnedSessions.length > 0 ? t('workspace.noPinnedMatches') : t('workspace.noPinnedSessions')}
+              {t('workspace.noPinnedSessions')}
             </div>
           )}
         </div>
@@ -868,8 +836,8 @@ export const ProjectTree = memo(function ProjectTree({
       <ScrollArea className="flex-1 min-h-0 py-1">
         {isLoading ? (
           <ProjectTreeSkeleton />
-        ) : filteredNodes.length === 0 ? (
-          visiblePinnedSessions.length > 0 ? null : (
+        ) : projectNodes.length === 0 ? (
+          pinnedSessions.length > 0 ? null : (
           <div className="flex flex-col items-center justify-center py-12 text-center px-4">
             <MessageSquare className="w-8 h-8 text-muted-foreground/40 mb-3" />
             <p className="text-xs text-muted-foreground mb-1">{t('workspace.noHistory')}</p>
@@ -877,7 +845,7 @@ export const ProjectTree = memo(function ProjectTree({
           </div>
           )
         ) : (
-          filteredNodes.map((node) => {
+          projectNodes.map((node) => {
             const isExpanded = effectiveExpanded.has(node.project);
             const visible = node.sessions.slice(0, getVisibleCount(node.project));
             const hasMore = node.sessions.length > visible.length;

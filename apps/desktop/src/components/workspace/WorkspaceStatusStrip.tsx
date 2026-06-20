@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Radio, Circle, Flame, Clock, Check, Settings2, ClipboardCheck } from 'lucide-react';
+import { Radio, Circle, Flame, Clock, Check, Settings2, ClipboardCheck, Search, Command } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { useLocale } from '@/locales';
 import { getEnvColorVar, cn } from '@/lib/utils';
@@ -21,6 +21,7 @@ import { StreakUsagePopoverContent } from './StreakUsagePopover';
 
 interface WorkspaceStatusStripProps {
   onNavigate: (tab: string) => void;
+  onOpenSearch: () => void;
 }
 
 function StatusChip({
@@ -75,7 +76,10 @@ function StatusChip({
   );
 }
 
-export function WorkspaceStatusStrip({ onNavigate }: WorkspaceStatusStripProps) {
+export function WorkspaceStatusStrip({
+  onNavigate,
+  onOpenSearch,
+}: WorkspaceStatusStripProps) {
   const { t } = useLocale();
   const { sessions, currentEnv, environments, continuousUsageDays, cronTasks, usageStats } = useAppStore(
     (state) => ({
@@ -214,6 +218,29 @@ export function WorkspaceStatusStrip({ onNavigate }: WorkspaceStatusStripProps) 
         />
       )}
 
+      {/* Global search trigger — spotlight-style field, distinct from status chips */}
+      <button
+        type="button"
+        title={t('workspace.globalSearchPlaceholder')}
+        onClick={onOpenSearch}
+        className={cn(
+          'group ml-auto inline-flex h-8 items-center gap-2 rounded-full px-3',
+          'min-w-[160px] lg:min-w-[220px]',
+          'border border-[hsl(var(--glass-border-light))]/40 bg-muted/25',
+          'transition-colors duration-150',
+          'hover:border-[hsl(var(--glass-border-light))]/70 hover:bg-muted/40'
+        )}
+      >
+        <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="flex-1 truncate text-left text-[12px] text-muted-foreground/70">
+          {t('workspace.globalSearchPlaceholder')}
+        </span>
+        <kbd className="inline-flex shrink-0 items-center gap-0.5 rounded border border-border/30 bg-background/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/60">
+          <Command className="h-2.5 w-2.5" />
+          K
+        </kbd>
+      </button>
+
       {/* Review audit entry — always visible, far-right, context-aware */}
       <button
         type="button"
@@ -221,7 +248,7 @@ export function WorkspaceStatusStrip({ onNavigate }: WorkspaceStatusStripProps) 
         title={t('workspace.reviewEntry')}
         onClick={() => setReviewPanelOpen(!reviewPanelOpen)}
         className={cn(
-          'group relative ml-auto inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full cursor-pointer',
+          'group relative inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full cursor-pointer',
           'status-chip-glass',
           'hover:scale-[1.02] active:scale-[0.98]',
           reviewPanelOpen && 'ring-1 ring-inset ring-primary/40'
