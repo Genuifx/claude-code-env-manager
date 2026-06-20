@@ -6,12 +6,16 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
 use std::process::Stdio;
+#[cfg(test)]
+use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
 
 static USER_PATH: OnceLock<String> = OnceLock::new();
 static TMUX_BINARY: OnceLock<String> = OnceLock::new();
+#[cfg(test)]
+static TMUX_INTEGRATION_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 const DEFAULT_TMUX_SESSION: &str = "ccem";
 const DEFAULT_TMUX_WINDOW: &str = "main";
@@ -966,6 +970,14 @@ fn tmux_command() -> Result<Command, String> {
     Ok(Command::new(resolve_tmux_binary()?))
 }
 
+#[cfg(test)]
+fn tmux_integration_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    TMUX_INTEGRATION_TEST_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("tmux integration test lock")
+}
+
 fn get_user_path() -> &'static str {
     USER_PATH.get_or_init(|| {
         let current_path = std::env::var("PATH").unwrap_or_default();
@@ -1042,8 +1054,9 @@ mod tests {
         detect_state_from_capture, is_managed_session_name, is_missing_tmux_session_error,
         is_tmux_session_create_race_error, merge_path_entries, orphaned_managed_tmux_targets,
         parse_target_line, parse_window_line, session_name_for_runtime,
-        target_candidates_for_runtime, tmux_command, window_name_for_runtime, ClaudeTerminalState,
-        ManagedTmuxTargetAction, TmuxManager, TmuxWindowInfo,
+        target_candidates_for_runtime, tmux_command, tmux_integration_test_lock,
+        window_name_for_runtime, ClaudeTerminalState, ManagedTmuxTargetAction, TmuxManager,
+        TmuxWindowInfo,
     };
     use std::collections::HashMap;
     use std::process::Stdio;
@@ -1177,6 +1190,8 @@ mod tests {
 
     #[test]
     fn resolve_live_attach_target_checks_real_tmux_targets_before_attach() {
+        let _tmux_guard = tmux_integration_test_lock();
+
         if TmuxManager::check_tmux_installed().is_err() {
             return;
         }
@@ -1261,6 +1276,8 @@ mod tests {
 
     #[test]
     fn launch_healthcheck_rejects_immediately_exited_tmux_target() {
+        let _tmux_guard = tmux_integration_test_lock();
+
         if TmuxManager::check_tmux_installed().is_err() {
             return;
         }
