@@ -1,7 +1,11 @@
 use crate::config;
+use crate::session_provenance::{
+    register_launch, spawn_claude_source_binding, SessionProvenanceUpsert, DEFAULT_CONFIG_SOURCE,
+};
 use crate::telegram;
 use crate::terminal::resolve_claude_path;
 use crate::unified_runtime::UnifiedSessionManager;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
@@ -321,17 +325,74 @@ fn next_runs(expression: &str, count: usize) -> Vec<String> {
 // Task execution
 // ============================================================================
 
-fn build_env_vars(env_name: &Option<String>) -> HashMap<String, String> {
-    let resolved_name = match config::read_config() {
-        Ok(cfg) => env_name.clone().or(cfg.current),
-        Err(_) => env_name.clone(),
-    };
+fn resolve_cron_env_name(env_name: &Option<String>) -> Option<String> {
+    env_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| {
+            config::read_config()
+                .ok()
+                .and_then(|cfg| cfg.current)
+                .map(|name| name.trim().to_string())
+                .filter(|name| !name.is_empty())
+        })
+}
 
+fn build_env_vars(env_name: &Option<String>) -> HashMap<String, String> {
+    let resolved_name = resolve_cron_env_name(env_name);
     resolved_name
         .as_deref()
         .and_then(|name| config::resolve_claude_env(name).ok())
         .map(|resolved| resolved.env_vars)
         .unwrap_or_default()
+}
+
+fn build_cron_launch_provenance(
+    task: &CronTask,
+    run_id: &str,
+    working_dir: &str,
+) -> Option<SessionProvenanceUpsert> {
+    let env_name = resolve_cron_env_name(&task.env_name)?;
+
+    Some(SessionProvenanceUpsert {
+        ccem_session_id: run_id.to_string(),
+        client: "claude".to_string(),
+        env_name,
+        config_source: Some(DEFAULT_CONFIG_SOURCE.to_string()),
+        working_dir: working_dir.to_string(),
+        perm_mode: Some(resolve_task_tool_policy(task).permission_mode),
+        launch_mode: "cron".to_string(),
+        started_via: "cron".to_string(),
+        source_session_id: None,
+    })
+}
+
+fn register_cron_launch_provenance(
+    task: &CronTask,
+    run_id: &str,
+    working_dir: &str,
+    started_at: DateTime<Utc>,
+) {
+    let Some(provenance) = build_cron_launch_provenance(task, run_id, working_dir) else {
+        return;
+    };
+
+    if let Err(error) = register_launch(provenance) {
+        eprintln!(
+            "Failed to register cron launch provenance for {}: {}",
+            run_id, error
+        );
+        return;
+    }
+
+    spawn_claude_source_binding(
+        run_id.to_string(),
+        working_dir.to_string(),
+        started_at,
+        None,
+    );
 }
 
 fn format_cron_notification(task: &CronTask, run: &CronTaskRun) -> String {
@@ -654,7 +715,8 @@ fn execute_task(
     task: CronTask,
 ) {
     let run_id = generate_id("run");
-    let started_at = chrono::Utc::now().to_rfc3339();
+    let started_at_instant = Utc::now();
+    let started_at = started_at_instant.to_rfc3339();
 
     let run = CronTaskRun {
         id: run_id.clone(),
@@ -682,6 +744,7 @@ fn execute_task(
     let home = dirs::home_dir();
     let expanded_path = build_cron_user_path(home.as_deref(), std::env::var_os("PATH"));
     let working_dir = expand_cron_working_dir(&task.working_dir, home.as_deref());
+    register_cron_launch_provenance(&task, &run_id, &working_dir, started_at_instant);
 
     let mut cmd =
         build_cron_claude_command(&task, &working_dir, &env_vars, &expanded_path, &tool_policy);
@@ -1204,9 +1267,9 @@ pub fn generate_cron_task_stream(app: AppHandle, query: String) {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_cron_claude_command, build_cron_user_path, expand_cron_working_dir,
-        normalize_execution_profile, resolve_execution_profile, resolve_task_tool_policy, CronTask,
-        ResolvedToolPolicy,
+        build_cron_claude_command, build_cron_launch_provenance, build_cron_user_path,
+        expand_cron_working_dir, normalize_execution_profile, resolve_cron_env_name,
+        resolve_execution_profile, resolve_task_tool_policy, CronTask, ResolvedToolPolicy,
     };
     use std::collections::HashMap;
     use std::ffi::OsStr;
@@ -1232,6 +1295,50 @@ mod tests {
         assert!(user_path.contains(if cfg!(windows) { ';' } else { ':' }));
         assert!(paths.contains(&home.join(".volta").join("bin")));
         assert_eq!(paths.iter().filter(|path| **path == local_bin).count(), 1);
+    }
+
+    #[test]
+    fn resolve_cron_env_name_prefers_task_environment_for_workspace_metadata() {
+        assert_eq!(
+            resolve_cron_env_name(&Some("glm5.2".to_string())).as_deref(),
+            Some("glm5.2")
+        );
+    }
+
+    #[test]
+    fn build_cron_launch_provenance_uses_task_environment_for_workspace_history() {
+        let task = CronTask {
+            id: "cron-1".to_string(),
+            name: "Example".to_string(),
+            cron_expression: "0 9 * * 1-5".to_string(),
+            prompt: "Do work".to_string(),
+            working_dir: "/tmp/project".to_string(),
+            env_name: Some("glm5.2".to_string()),
+            execution_profile: "standard".to_string(),
+            max_budget_usd: None,
+            allowed_tools: Vec::new(),
+            disallowed_tools: Vec::new(),
+            enabled: true,
+            timeout_secs: 300,
+            template_id: None,
+            trigger_type: "schedule".to_string(),
+            parent_task_id: None,
+            created_at: "2026-03-08T00:00:00Z".to_string(),
+            updated_at: "2026-03-08T00:00:00Z".to_string(),
+        };
+
+        let provenance = build_cron_launch_provenance(&task, "run-1", "/tmp/project")
+            .expect("cron launch provenance");
+
+        assert_eq!(provenance.ccem_session_id, "run-1");
+        assert_eq!(provenance.client, "claude");
+        assert_eq!(provenance.env_name, "glm5.2");
+        assert_eq!(provenance.config_source.as_deref(), Some("ccem"));
+        assert_eq!(provenance.working_dir, "/tmp/project");
+        assert_eq!(provenance.perm_mode.as_deref(), Some("default"));
+        assert_eq!(provenance.launch_mode, "cron");
+        assert_eq!(provenance.started_via, "cron");
+        assert_eq!(provenance.source_session_id, None);
     }
 
     #[test]
