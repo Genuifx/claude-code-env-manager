@@ -1,5 +1,11 @@
 # ccem
 
+## 2.25.0
+
+### Minor Changes
+
+- Desktop workspace UX overhaul: command-palette search, drag-to-reorder pinned sessions, transcript image thumbnails with lightbox, media file preview in workspace review drawer, and a fix to ensure all pinned sessions render without inner scroll.
+
 ## 2.24.0
 
 ### Minor Changes
