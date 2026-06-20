@@ -784,7 +784,7 @@ export const ProjectTree = memo(function ProjectTree({
             onClick={onNewSession}
             className={cn(
               'flex flex-1 items-center justify-center gap-1.5 h-8 rounded-md',
-              'bg-primary/10 text-primary hover:bg-primary/15',
+              'text-muted-foreground hover:text-foreground hover:bg-muted/50',
               'text-xs font-medium transition-colors',
               'disabled:pointer-events-none disabled:opacity-50'
             )}

@@ -218,27 +218,27 @@ export function WorkspaceStatusStrip({
         />
       )}
 
-      {/* Global search trigger — always visible, far-right next to review entry */}
+      {/* Global search trigger — spotlight-style field, distinct from status chips */}
       <button
         type="button"
-        title={t('workspace.globalSearchTrigger')}
+        title={t('workspace.globalSearchPlaceholder')}
         onClick={onOpenSearch}
         className={cn(
-          'group relative ml-auto inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full cursor-pointer',
-          'status-chip-glass',
-          'hover:scale-[1.02] active:scale-[0.98]'
+          'group ml-auto inline-flex h-8 items-center gap-2 rounded-full px-3',
+          'min-w-[160px] lg:min-w-[220px]',
+          'border border-[hsl(var(--glass-border-light))]/40 bg-muted/25',
+          'transition-colors duration-150',
+          'hover:border-[hsl(var(--glass-border-light))]/70 hover:bg-muted/40'
         )}
       >
-        <span className="relative flex items-center justify-center w-3.5 h-3.5">
-          <Search className="w-3.5 h-3.5 text-muted-foreground transition-transform duration-200 group-hover:scale-110" />
+        <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="flex-1 truncate text-left text-[12px] text-muted-foreground/70">
+          {t('workspace.globalSearchPlaceholder')}
         </span>
-        <span className="text-[13px] font-medium text-foreground transition-colors">
-          {t('workspace.globalSearchTrigger')}
-        </span>
-        <span className="hidden sm:inline-flex items-center gap-0.5 text-[10px] text-muted-foreground/60 transition-colors group-hover:text-muted-foreground">
-          <Command className="h-3 w-3" />
-          <span>K</span>
-        </span>
+        <kbd className="inline-flex shrink-0 items-center gap-0.5 rounded border border-border/30 bg-background/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/60">
+          <Command className="h-2.5 w-2.5" />
+          K
+        </kbd>
       </button>
 
       {/* Review audit entry — always visible, far-right, context-aware */}
@@ -248,7 +248,7 @@ export function WorkspaceStatusStrip({
         title={t('workspace.reviewEntry')}
         onClick={() => setReviewPanelOpen(!reviewPanelOpen)}
         className={cn(
-          'group relative ml-auto inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full cursor-pointer',
+          'group relative inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full cursor-pointer',
           'status-chip-glass',
           'hover:scale-[1.02] active:scale-[0.98]',
           reviewPanelOpen && 'ring-1 ring-inset ring-primary/40'
