@@ -278,7 +278,15 @@
     "contextCacheRead": "Cache read",
     "contextCost": "Estimated cost",
     "copyMessage": "Copy message",
-    "copied": "Copied"
+    "copied": "Copied",
+    "imageStripPrev": "Previous image",
+    "imageStripNext": "Next image",
+    "imageStripCounter": "{current} / {total}",
+    "imageLightboxClose": "Close",
+    "imageLightboxPrev": "Previous",
+    "imageLightboxNext": "Next",
+    "imageThumbnailAlt": "Attached image {index}",
+    "imageLoadFailed": "Image unavailable"
   },
   "sessions": {
     "subtitle": "Manage running Claude Code sessions",

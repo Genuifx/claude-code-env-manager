@@ -278,7 +278,15 @@
     "contextCacheRead": "缓存读取",
     "contextCost": "预估费用",
     "copyMessage": "复制内容",
-    "copied": "已复制"
+    "copied": "已复制",
+    "imageStripPrev": "上一张图片",
+    "imageStripNext": "下一张图片",
+    "imageStripCounter": "{current} / {total}",
+    "imageLightboxClose": "关闭",
+    "imageLightboxPrev": "上一张",
+    "imageLightboxNext": "下一张",
+    "imageThumbnailAlt": "附加图片 {index}",
+    "imageLoadFailed": "图片不可用"
   },
   "sessions": {
     "subtitle": "管理运行中的 Claude Code 会话",

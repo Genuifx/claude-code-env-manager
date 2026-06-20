@@ -5,13 +5,17 @@ import {
   Brain,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Circle,
   ClipboardList,
   Copy,
+  ImageIcon,
   LoaderCircle,
   Scissors,
   Terminal,
   Wrench,
+  X,
 } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/history/MarkdownRenderer';
 import {
@@ -26,6 +30,7 @@ import {
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Dialog, DialogContent, DialogPortal, DialogOverlay } from '@/components/ui/dialog';
 import { useLocale } from '@/locales';
 import type {
   ConversationContentBlock,
@@ -1167,54 +1172,58 @@ function imageBlockStoragePath(block: ConversationContentBlock): string {
       : '';
 }
 
-function imageBlockAlt(block: ConversationContentBlock, index: number): string {
-  return typeof block.placeholder === 'string' && block.placeholder.trim()
-    ? block.placeholder.trim()
-    : `Attached image ${index + 1}`;
-}
-
-function WorkspaceImageBlock({ block, index }: { block: ConversationContentBlock; index: number }) {
+function useImageBlockSrc(block: ConversationContentBlock): {
+  src: string | null;
+  loading: boolean;
+  failed: boolean;
+} {
   const inlineSrc = imageBlockInlineSrc(block);
   const mediaType = imageBlockMediaType(block);
   const storagePath = imageBlockStoragePath(block);
-  const alt = imageBlockAlt(block, index);
-  const [resolvedSrc, setResolvedSrc] = useState<string | null>(inlineSrc);
-  const [loadFailed, setLoadFailed] = useState(false);
+  const [src, setSrc] = useState<string | null>(inlineSrc);
+  const [loading, setLoading] = useState(!inlineSrc && !!storagePath);
+  const [failed, setFailed] = useState(!inlineSrc && !storagePath);
 
   useEffect(() => {
     let cancelled = false;
 
     if (inlineSrc) {
-      setResolvedSrc(inlineSrc);
-      setLoadFailed(false);
+      setSrc(inlineSrc);
+      setLoading(false);
+      setFailed(false);
       return () => {
         cancelled = true;
       };
     }
 
     if (!mediaType.startsWith('image/') || !storagePath) {
-      setResolvedSrc(null);
-      setLoadFailed(true);
+      setSrc(null);
+      setLoading(false);
+      setFailed(true);
       return () => {
         cancelled = true;
       };
     }
 
-    setResolvedSrc(null);
-    setLoadFailed(false);
+    setSrc(null);
+    setLoading(true);
+    setFailed(false);
     invoke<string>('read_prompt_image_attachment', {
       storagePath,
       mediaType,
     })
-      .then((src) => {
+      .then((resolved) => {
         if (!cancelled) {
-          setResolvedSrc(src);
-          setLoadFailed(false);
+          setSrc(resolved);
+          setLoading(false);
+          setFailed(false);
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setLoadFailed(true);
+          setSrc(null);
+          setLoading(false);
+          setFailed(true);
         }
       });
 
@@ -1223,33 +1232,282 @@ function WorkspaceImageBlock({ block, index }: { block: ConversationContentBlock
     };
   }, [inlineSrc, mediaType, storagePath]);
 
-  if (!inlineSrc && !storagePath) {
+  return { src, loading, failed };
+}
+
+function WorkspaceImageLightbox({
+  blocks,
+  initialIndex,
+  onClose,
+  onIndexChange,
+  t,
+}: {
+  blocks: ConversationContentBlock[];
+  initialIndex: number;
+  onClose: () => void;
+  onIndexChange: (index: number) => void;
+  t: (key: string, params?: Record<string, unknown>) => string;
+}) {
+  const [index, setIndex] = useState(initialIndex);
+  const hasMultiple = blocks.length > 1;
+
+  useEffect(() => {
+    onIndexChange(index);
+  }, [index, onIndexChange]);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      } else if (event.key === 'ArrowLeft' && hasMultiple) {
+        setIndex((prev) => (prev - 1 + blocks.length) % blocks.length);
+      } else if (event.key === 'ArrowRight' && hasMultiple) {
+        setIndex((prev) => (prev + 1) % blocks.length);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [blocks.length, hasMultiple, onClose]);
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogPortal>
+        <DialogOverlay />
+        <DialogContent
+          className="max-h-[92vh] max-w-[92vw] gap-0 overflow-hidden rounded-xl border-none bg-transparent p-0 shadow-black/40 shadow-2xl sm:max-h-[92vh] sm:max-w-[92vw]"
+          showCloseButton={false}
+        >
+          <WorkspaceLightboxImage block={blocks[index]} index={index} t={t} />
+          {hasMultiple ? (
+            <>
+              <button
+                type="button"
+                aria-label={t('workspace.imageLightboxPrev')}
+                onClick={() => setIndex((prev) => (prev - 1 + blocks.length) % blocks.length)}
+                className="absolute left-2 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white/85 backdrop-blur-sm transition hover:bg-black/65 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/40"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <button
+                type="button"
+                aria-label={t('workspace.imageLightboxNext')}
+                onClick={() => setIndex((prev) => (prev + 1) % blocks.length)}
+                className="absolute right-2 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white/85 backdrop-blur-sm transition hover:bg-black/65 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/40"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
+              <span className="pointer-events-none absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-full bg-black/55 px-3 py-1 text-[11px] font-medium tabular-nums text-white/90">
+                {t('workspace.imageStripCounter', { current: index + 1, total: blocks.length })}
+              </span>
+            </>
+          ) : null}
+          <button
+            type="button"
+            aria-label={t('workspace.imageLightboxClose')}
+            onClick={onClose}
+            className="absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white/85 backdrop-blur-sm transition hover:bg-black/65 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/40"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </DialogContent>
+      </DialogPortal>
+    </Dialog>
+  );
+}
+
+function WorkspaceLightboxImage({
+  block,
+  index,
+  t,
+}: {
+  block: ConversationContentBlock;
+  index: number;
+  t: (key: string, params?: Record<string, unknown>) => string;
+}) {
+  const { src, loading, failed } = useImageBlockSrc(block);
+  const altKey = t('workspace.imageThumbnailAlt', { index: index + 1 });
+
+  if (loading) {
+    return (
+      <div className="flex h-[60vh] w-[80vw] max-w-[1100px] items-center justify-center rounded-xl bg-black/70">
+        <LoaderCircle className="h-6 w-6 animate-spin text-white/70" />
+      </div>
+    );
+  }
+
+  if (failed || !src) {
+    return (
+      <div className="flex h-[40vh] w-[60vw] max-w-[800px] flex-col items-center justify-center gap-2 rounded-xl bg-black/70 px-6 text-center">
+        <ImageIcon className="h-7 w-7 text-white/40" />
+        <span className="text-[12px] text-white/60">{t('workspace.imageLoadFailed')}</span>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={altKey}
+      loading="lazy"
+      className="block max-h-[88vh] max-w-[88vw] rounded-xl object-contain"
+    />
+  );
+}
+
+function WorkspaceImageThumbnail({
+  block,
+  index,
+  active,
+  onSelect,
+  t,
+}: {
+  block: ConversationContentBlock;
+  index: number;
+  active: boolean;
+  onSelect: () => void;
+  t: (key: string, params?: Record<string, unknown>) => string;
+}) {
+  const { src, loading, failed } = useImageBlockSrc(block);
+  const altLabel = t('workspace.imageThumbnailAlt', { index: index + 1 });
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-label={altLabel}
+      aria-current={active ? 'true' : undefined}
+      className={cn(
+        'group relative flex h-[68px] w-[68px] shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-surface/80 backdrop-blur-sm transition',
+        active
+          ? 'border-primary/70 ring-2 ring-primary/30'
+          : 'border-border/40 hover:border-border/70 hover:bg-surface',
+      )}
+    >
+      {src ? (
+        <img
+          src={src}
+          alt={altLabel}
+          loading="lazy"
+          className="h-full w-full object-cover transition group-hover:scale-[1.03]"
+        />
+      ) : loading ? (
+        <div className="h-full w-full animate-pulse bg-muted/30" />
+      ) : (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-muted-foreground/70">
+          <ImageIcon className="h-4 w-4" />
+          {failed ? <span className="text-[9px] tabular-nums">{index + 1}</span> : null}
+        </div>
+      )}
+      <span className="pointer-events-none absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/55 to-transparent px-1 py-0.5 text-left text-[9px] font-medium tabular-nums text-white/85 opacity-0 transition group-hover:opacity-100">
+        {index + 1}
+      </span>
+    </button>
+  );
+}
+
+function WorkspaceImageStrip({
+  blocks,
+  isUser,
+  t,
+}: {
+  blocks: ConversationContentBlock[];
+  isUser: boolean;
+  t: (key: string, params?: Record<string, unknown>) => string;
+}) {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const hasMultiple = blocks.length > 1;
+
+  useEffect(() => {
+    if (activeIndex >= blocks.length) {
+      setActiveIndex(0);
+    }
+  }, [blocks.length, activeIndex]);
+
+  useEffect(() => {
+    if (!lightboxOpen) {
+      return;
+    }
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [lightboxOpen]);
+
+  if (blocks.length === 0) {
     return null;
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border/35 bg-background/70">
-      {resolvedSrc ? (
-        <img
-          src={resolvedSrc}
-          alt={alt}
-          loading="lazy"
-          className="block max-h-[320px] w-full max-w-full object-contain"
-        />
-      ) : (
-        <div
-          aria-label={alt}
-          className="flex h-40 items-center justify-center bg-muted/25 text-[12px] text-muted-foreground"
-        >
-          {loadFailed ? alt : null}
-        </div>
-      )}
-    </div>
-  );
-}
+    <>
+      <div
+        className={cn(
+          'mt-2 flex items-center gap-1.5',
+          isUser ? 'justify-end' : 'justify-start',
+        )}
+      >
+        {hasMultiple ? (
+          <button
+            type="button"
+            aria-label={t('workspace.imageStripPrev')}
+            onClick={() => setActiveIndex((prev) => (prev - 1 + blocks.length) % blocks.length)}
+            className="flex h-7 w-7 items-center justify-center rounded-full border border-border/40 bg-surface/70 text-muted-foreground transition hover:border-border/70 hover:bg-surface hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+        ) : null}
 
-function renderImageBlock(block: ConversationContentBlock, index: number) {
-  return <WorkspaceImageBlock block={block} index={index} />;
+        <div
+          className={cn(
+            'flex items-center gap-1.5 overflow-x-auto',
+            hasMultiple ? 'max-w-[260px]' : 'max-w-[260px]',
+          )}
+        >
+          {blocks.map((block, index) => (
+            <WorkspaceImageThumbnail
+              key={`img-thumb-${index}`}
+              block={block}
+              index={index}
+              active={index === activeIndex}
+              onSelect={() => {
+                setActiveIndex(index);
+                setLightboxOpen(true);
+              }}
+              t={t}
+            />
+          ))}
+        </div>
+
+        {hasMultiple ? (
+          <button
+            type="button"
+            aria-label={t('workspace.imageStripNext')}
+            onClick={() => setActiveIndex((prev) => (prev + 1) % blocks.length)}
+            className="flex h-7 w-7 items-center justify-center rounded-full border border-border/40 bg-surface/70 text-muted-foreground transition hover:border-border/70 hover:bg-surface hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        ) : null}
+
+        {hasMultiple ? (
+          <span className="ml-1 text-[11px] tabular-nums text-muted-foreground/70">
+            {t('workspace.imageStripCounter', { current: activeIndex + 1, total: blocks.length })}
+          </span>
+        ) : null}
+      </div>
+
+      {lightboxOpen ? (
+        <WorkspaceImageLightbox
+          blocks={blocks}
+          initialIndex={Math.min(activeIndex, blocks.length - 1)}
+          onClose={() => setLightboxOpen(false)}
+          onIndexChange={(next) => setActiveIndex(next)}
+          t={t}
+        />
+      ) : null}
+    </>
+  );
 }
 
 function renderTextBlock(text: string, isUser: boolean, t: (key: string) => string) {
@@ -1299,8 +1557,9 @@ function renderContentBlocks(
   blocks: ConversationContentBlock[],
   isUser: boolean,
   t: (key: string) => string,
-) {
+): { content: React.ReactNode[]; images: ConversationContentBlock[] } {
   const result: React.ReactNode[] = [];
+  const imageBlocks: ConversationContentBlock[] = [];
   let index = 0;
 
   while (index < blocks.length) {
@@ -1326,7 +1585,7 @@ function renderContentBlocks(
         result.push(<div key={`text-${index}`}>{renderTextBlock(block.text || '', isUser, t)}</div>);
         break;
       case 'image':
-        result.push(<div key={`image-${index}`}>{renderImageBlock(block, index)}</div>);
+        imageBlocks.push(block);
         break;
       case 'thinking':
         result.push(
@@ -1345,7 +1604,7 @@ function renderContentBlocks(
     index += 1;
   }
 
-  return result;
+  return { content: result, images: imageBlocks };
 }
 
 function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessageBubbleProps) {
@@ -1363,9 +1622,13 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
   const currentRole = isUser ? 'user' : 'assistant';
   const spacingClass = prevRole == null ? 'mt-0' : prevRole === currentRole ? 'mt-4' : 'mt-8';
 
-  const { renderedContent, teammateMessages } = useMemo(() => {
+  const { renderedContent, teammateMessages, imageBlocks } = useMemo(() => {
     if (isSummary || message.isCompactBoundary || message.planContent) {
-      return { renderedContent: null as React.ReactNode, teammateMessages: [] as TeammateMessage[] };
+      return {
+        renderedContent: null as React.ReactNode,
+        teammateMessages: [] as TeammateMessage[],
+        imageBlocks: [] as ConversationContentBlock[],
+      };
     }
 
     const collected: TeammateMessage[] = [];
@@ -1378,6 +1641,7 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
 
     const content = message.content;
     let nextRenderedContent: React.ReactNode = null;
+    let nextImageBlocks: ConversationContentBlock[] = [];
 
     if (typeof content === 'string') {
       collect(content);
@@ -1392,13 +1656,21 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
       if (textBlocks.length === 1 && textBlocks.length === content.length && isCommandOnlyText(textBlocks[0].text || '')) {
         nextRenderedContent = renderTextBlock(textBlocks[0].text || '', isUser, t);
       } else {
-        nextRenderedContent = renderContentBlocks(content, isUser, t);
+        const rendered = renderContentBlocks(content, isUser, t);
+        nextRenderedContent = rendered.content;
+        nextImageBlocks = rendered.images;
       }
     } else if (content && typeof content === 'object') {
-      nextRenderedContent = renderContentBlocks([content as ConversationContentBlock], isUser, t);
+      const rendered = renderContentBlocks([content as ConversationContentBlock], isUser, t);
+      nextRenderedContent = rendered.content;
+      nextImageBlocks = rendered.images;
     }
 
-    return { renderedContent: nextRenderedContent, teammateMessages: collected };
+    return {
+      renderedContent: nextRenderedContent,
+      teammateMessages: collected,
+      imageBlocks: nextImageBlocks,
+    };
   }, [isSummary, isUser, message.content, message.isCompactBoundary, message.planContent, t]);
 
   if (isSummary) {
@@ -1434,6 +1706,7 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
   }
 
   const hasMainContent = renderedContent && !(Array.isArray(renderedContent) && renderedContent.length === 0);
+  const hasImages = imageBlocks.length > 0;
   const showMessageActions = isActionHovering || isActionFocusWithin;
 
   const handleActionRegionBlur = useCallback((event: React.FocusEvent<HTMLDivElement>) => {
@@ -1442,7 +1715,7 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
     }
   }, []);
 
-  if (!hasMainContent && teammateMessages.length === 0) {
+  if (!hasMainContent && !hasImages && teammateMessages.length === 0) {
     return null;
   }
 
@@ -1476,8 +1749,19 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
         )
       ) : null}
 
+      {hasImages ? (
+        <div
+          className={cn(
+            hasMainContent ? 'mt-1' : '',
+            isUser ? 'flex justify-end pl-4' : 'flex justify-start',
+          )}
+        >
+          <WorkspaceImageStrip blocks={imageBlocks} isUser={isUser} t={t} />
+        </div>
+      ) : null}
+
       {teammateMessages.length > 0 ? (
-        <div className={cn('space-y-3', hasMainContent && 'mt-3')}>
+        <div className={cn('space-y-3', (hasMainContent || hasImages) && 'mt-3')}>
           {teammateMessages.map((msg, index) => (
             <AgentNoteBlock key={`${msg.id}-${index}`} msg={msg} label={t('workspace.agentNotes')} />
           ))}
