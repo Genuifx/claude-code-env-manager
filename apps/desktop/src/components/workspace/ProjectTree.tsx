@@ -901,7 +901,7 @@ export const ProjectTree = memo(function ProjectTree({
             ) : null}
           </div>
           {pinnedSessions.length > 0 ? (
-            <div className="mt-1 max-h-[148px] overflow-y-auto pr-0.5">
+            <div className="mt-1 pr-0.5">
               {pinnedSessions.map((session) => renderSessionRow(session, { pinnedSection: true }))}
             </div>
           ) : (
