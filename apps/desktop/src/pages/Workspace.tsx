@@ -1178,6 +1178,16 @@ export function Workspace({
     };
   }, [loadWorkspaceCommands, skillsContext]);
 
+  const refreshWorkspaceInstalledSkills = useCallback(async () => {
+    const skills = await loadWorkspaceSkills({
+      workingDir: skillsContext.workingDir,
+      provider: skillsContext.provider,
+    });
+    const nextSkills = skills.length > 0 ? skills : installedSkills;
+    setWorkspaceInstalledSkills(nextSkills);
+    return nextSkills;
+  }, [installedSkills, loadWorkspaceSkills, skillsContext]);
+
   const handleSelect = useCallback(
     async (session: HistorySessionItem) => {
       const key = toSessionKey(session);
@@ -1740,6 +1750,7 @@ export function Workspace({
           loadingLabel={t('common.loading')}
           provider={composeProvider}
           installedSkills={workspaceInstalledSkills}
+          onRefreshSkills={refreshWorkspaceInstalledSkills}
           workspaceCommands={workspaceCommands}
           workingDir={effectiveComposeDir}
           searchWorkspaceFiles={searchWorkspaceFiles}
@@ -1827,6 +1838,7 @@ export function Workspace({
           loadingLabel={t('common.loading')}
           provider={historyProvider}
           installedSkills={workspaceInstalledSkills}
+          onRefreshSkills={refreshWorkspaceInstalledSkills}
           workspaceCommands={workspaceCommands}
           workingDir={selectedSession.project || null}
           searchWorkspaceFiles={searchWorkspaceFiles}
@@ -1991,6 +2003,7 @@ export function Workspace({
                       initialImages={entry.initialImages}
                       seedMessages={entry.seedMessages}
                       installedSkills={workspaceInstalledSkills}
+                      onRefreshSkills={refreshWorkspaceInstalledSkills}
                       workspaceCommands={workspaceCommands}
                       isVisible={isActiveLiveEntry}
                       onSessionUpdate={handleLiveSessionUpdate}

@@ -874,7 +874,7 @@ export function buildMessagesFromEvents(
 
   const flushPendingTurn = () => {
     if (!pendingTurn) {
-      return;
+      return false;
     }
 
     const assistantMessage = createAssistantTurnMessage(pendingTurn);
@@ -882,6 +882,18 @@ export function buildMessagesFromEvents(
       next.push(assistantMessage);
     }
     pendingTurn = null;
+    return Boolean(assistantMessage);
+  };
+
+  const appendVisibleTurnDetail = (event: SessionEventRecord, occurredAt?: number) => {
+    if (event.payload.type !== 'lifecycle') {
+      return;
+    }
+    const detail = event.payload.detail?.trim();
+    if (!detail) {
+      return;
+    }
+    appendErrorMessage(`turn-detail-${event.seq}`, detail, occurredAt);
   };
 
   const appendErrorMessage = (id: string, text?: string | null, occurredAt?: number) => {
@@ -1098,7 +1110,16 @@ export function buildMessagesFromEvents(
           || event.payload.stage === 'turn_completed'
           || event.payload.stage === 'turn_interrupted'
         ) {
-          flushPendingTurn();
+          const flushedTurn = flushPendingTurn();
+          if (
+            !flushedTurn
+            && (
+              event.payload.stage === 'turn_completed'
+              || event.payload.stage === 'turn_interrupted'
+            )
+          ) {
+            appendVisibleTurnDetail(event, occurredAt);
+          }
         }
         if (
           (event.payload.stage === 'turn_completed' || event.payload.stage === 'turn_interrupted')

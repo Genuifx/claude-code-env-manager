@@ -131,6 +131,7 @@
     "globalSearchHint": "输入关键词搜索会话和项目",
     "globalSearchNavigate": "选择",
     "globalSearchSelect": "打开",
+    "composerSkillReadFailed": "读取所选技能失败，请刷新技能或检查全局链接。",
     "refresh": "刷新工作间",
     "refreshing": "刷新中...",
     "refreshFailed": "刷新工作间失败",

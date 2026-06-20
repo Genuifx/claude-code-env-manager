@@ -131,6 +131,7 @@
     "globalSearchHint": "Type to search across conversations and projects",
     "globalSearchNavigate": "Navigate",
     "globalSearchSelect": "Open",
+    "composerSkillReadFailed": "Failed to read the selected skill. Refresh skills or check the global link.",
     "refresh": "Refresh workspace",
     "refreshing": "Refreshing...",
     "refreshFailed": "Failed to refresh workspace",
