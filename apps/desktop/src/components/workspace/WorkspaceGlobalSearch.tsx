@@ -9,13 +9,16 @@ import {
   FolderClosed,
   MessageSquare,
   Search,
+  X,
 } from 'lucide-react';
 import { cn, getProjectName } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { getHistorySessionDisplay } from '@/components/history/historySession';
 import {
   Dialog,
+  DialogClose,
   DialogContent,
+  DialogDescription,
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -275,6 +278,7 @@ export const WorkspaceGlobalSearch = memo(function WorkspaceGlobalSearch({
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent
+        showCloseButton={false}
         className={cn(
           'max-w-2xl gap-0 overflow-hidden rounded-2xl border border-border bg-popover p-0 shadow-xl',
           'data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95',
@@ -282,6 +286,9 @@ export const WorkspaceGlobalSearch = memo(function WorkspaceGlobalSearch({
         )}
       >
         <DialogTitle className="sr-only">{t('workspace.globalSearchTitle')}</DialogTitle>
+        <DialogDescription className="sr-only">
+          {t('workspace.globalSearchHint')}
+        </DialogDescription>
 
         {/* Input area */}
         <div className="flex items-center gap-3.5 px-5 py-4">
@@ -292,11 +299,20 @@ export const WorkspaceGlobalSearch = memo(function WorkspaceGlobalSearch({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t('workspace.globalSearchPlaceholder')}
-            className="flex-1 bg-transparent text-[15px] leading-none text-foreground placeholder:text-muted-foreground outline-none"
+            className="min-w-0 flex-1 bg-transparent text-[15px] leading-none text-foreground placeholder:text-muted-foreground outline-none"
           />
-          <kbd className="hidden shrink-0 rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline-block">
-            Esc
-          </kbd>
+          <div className="flex shrink-0 items-center gap-2">
+            <kbd className="hidden shrink-0 rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline-block">
+              Esc
+            </kbd>
+            <DialogClose
+              type="button"
+              aria-label={t('common.close')}
+              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+            >
+              <X className="h-3.5 w-3.5" />
+            </DialogClose>
+          </div>
         </div>
 
         {/* Divider */}
