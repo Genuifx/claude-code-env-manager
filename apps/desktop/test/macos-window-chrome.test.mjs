@@ -8,7 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.resolve(__dirname, '..');
 const tauriSrcDir = path.join(desktopDir, 'src-tauri', 'src');
 
-test('macOS traffic light position is declared in window config', async () => {
+test('macOS traffic light position includes the overlay titlebar visual offset', async () => {
   const [configSource, styles] = await Promise.all([
     fs.readFile(path.join(desktopDir, 'src-tauri', 'tauri.conf.json'), 'utf8'),
     fs.readFile(path.join(desktopDir, 'src', 'index.css'), 'utf8'),
@@ -24,13 +24,17 @@ test('macOS traffic light position is declared in window config', async () => {
 
   const controlCenter = readPixelVar('--ccem-titlebar-control-center-y');
   const controlHalfSize = readPixelVar('--ccem-window-controls-half-size');
+  const webTitlebarControlTop = controlCenter - controlHalfSize;
+  // Tauri applies the native control position in the macOS overlay titlebar
+  // coordinate space, while the web titlebar row paints slightly lower.
+  const nativeOverlayOffsetY = 10;
 
   assert.equal(mainWindow.decorations, true);
   assert.equal(mainWindow.titleBarStyle, 'Overlay');
   assert.equal(mainWindow.hiddenTitle, true);
   assert.deepEqual(mainWindow.trafficLightPosition, {
     x: 24,
-    y: controlCenter - controlHalfSize,
+    y: webTitlebarControlTop + nativeOverlayOffsetY,
   });
 });
 
