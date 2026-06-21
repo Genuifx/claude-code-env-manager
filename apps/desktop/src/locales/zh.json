@@ -289,7 +289,8 @@
     "imageLightboxPrev": "上一张",
     "imageLightboxNext": "下一张",
     "imageThumbnailAlt": "附加图片 {index}",
-    "imageLoadFailed": "图片不可用"
+    "imageLoadFailed": "图片不可用",
+    "markdownImageClickToExpand": "点击查看大图"
   },
   "sessions": {
     "subtitle": "管理运行中的 Claude Code 会话",

@@ -1,11 +1,12 @@
-import { Suspense, lazy, useCallback, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Check, Copy } from 'lucide-react';
+import { Check, Copy, Maximize2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { getPerformanceMode } from '@/lib/performance';
 import { isMarkdownCodeBlock } from './markdownCodeBlocks';
+import { Dialog, DialogContent, DialogOverlay, DialogPortal } from '@/components/ui/dialog';
 
 interface MarkdownRendererProps {
   content: string;
@@ -311,6 +312,90 @@ function CodeBlockFrame({
   );
 }
 
+function MarkdownImage({
+  src,
+  alt,
+  isUser,
+}: {
+  src?: string;
+  alt?: string;
+  isUser: boolean;
+}) {
+  const { t } = useLocale();
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
+  if (!src) return null;
+
+  const ariaLabel = alt || t('workspace.markdownImageClickToExpand');
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label={ariaLabel}
+        className={cn(
+          'group relative my-2 inline-flex items-center justify-center overflow-hidden rounded-lg border transition',
+          isUser
+            ? 'border-white/20 hover:border-white/40'
+            : 'border-border/40 hover:border-border/70',
+        )}
+      >
+        <img
+          src={src}
+          alt={alt || ''}
+          loading="lazy"
+          className="block max-h-[300px] max-w-full object-contain transition group-hover:scale-[1.01]"
+        />
+        <span className="pointer-events-none absolute bottom-1.5 right-1.5 inline-flex h-6 w-6 items-center justify-center rounded-md bg-black/55 text-white/85 opacity-0 backdrop-blur-sm transition group-hover:opacity-100">
+          <Maximize2 className="h-3 w-3" />
+        </span>
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogPortal>
+          <DialogOverlay />
+          <DialogContent
+            showCloseButton={false}
+            className="max-h-[92vh] max-w-[92vw] gap-0 overflow-hidden rounded-xl border-none bg-transparent p-0 shadow-black/40 shadow-2xl sm:max-h-[92vh] sm:max-w-[92vw]"
+          >
+            <img
+              src={src}
+              alt={alt || ''}
+              className="block max-h-[88vh] max-w-[88vw] rounded-xl object-contain"
+            />
+            <button
+              type="button"
+              aria-label={t('workspace.imageLightboxClose')}
+              onClick={() => setOpen(false)}
+              className="absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white/85 backdrop-blur-sm transition hover:bg-black/65 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/40"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </DialogContent>
+        </DialogPortal>
+      </Dialog>
+    </>
+  );
+}
+
 export function MarkdownRenderer({
   content,
   className,
@@ -463,6 +548,11 @@ export function MarkdownRenderer({
           // Delete (strikethrough)
           del: ({ children }) => (
             <del className="text-muted-foreground line-through">{children}</del>
+          ),
+
+          // Images — clickable to open lightbox
+          img: ({ src, alt }) => (
+            <MarkdownImage src={src} alt={alt} isUser={isUser} />
           ),
         }}
       >

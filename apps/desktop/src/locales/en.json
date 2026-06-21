@@ -289,7 +289,8 @@
     "imageLightboxPrev": "Previous",
     "imageLightboxNext": "Next",
     "imageThumbnailAlt": "Attached image {index}",
-    "imageLoadFailed": "Image unavailable"
+    "imageLoadFailed": "Image unavailable",
+    "markdownImageClickToExpand": "Click to view image"
   },
   "sessions": {
     "subtitle": "Manage running Claude Code sessions",
