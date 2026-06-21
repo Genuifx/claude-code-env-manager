@@ -23,11 +23,19 @@ export function useTauriEvent<T>(
 
     const setupListener = async () => {
       try {
-        unlisten = await listen<T>(eventName, (event) => {
+        const cleanup = await listen<T>(eventName, (event) => {
           if (mounted) {
             handlerRef.current(event.payload);
           }
         });
+
+        // If component unmounted while listen() was resolving, clean up immediately
+        // to prevent leaked listeners that would cause duplicate reloads or stale handlers
+        if (!mounted) {
+          cleanup();
+          return;
+        }
+        unlisten = cleanup;
       } catch (err) {
         console.error(`Failed to listen to event "${eventName}":`, err);
       }

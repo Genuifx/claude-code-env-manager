@@ -739,18 +739,25 @@ export function CronTasks() {
 
   // Event listeners for cron task lifecycle
   useEffect(() => {
+    let mounted = true;
     const unsubs: (() => void)[] = [];
     const setup = async () => {
       try {
-        unsubs.push(await listen('cron-task-started', () => loadCronTasks()));
-        unsubs.push(await listen('cron-task-completed', () => loadCronTasks()));
-        unsubs.push(await listen('cron-task-failed', () => loadCronTasks()));
+        for (const evt of ['cron-task-started', 'cron-task-completed', 'cron-task-failed']) {
+          const fn = await listen(evt, () => { if (mounted) loadCronTasks(); });
+          // If unmounted while listen() was resolving, immediately clean up
+          if (!mounted) { fn(); return; }
+          unsubs.push(fn);
+        }
       } catch (err) {
         console.error('Failed to setup cron event listeners:', err);
       }
     };
     setup();
-    return () => unsubs.forEach((fn) => fn());
+    return () => {
+      mounted = false;
+      unsubs.forEach((fn) => fn());
+    };
   }, [loadCronTasks]);
 
   // Fetch next run times for each task
