@@ -44,7 +44,7 @@ function StatusChip({
       type="button"
       onClick={onClick}
       className={cn(
-        'group relative inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full',
+        'group relative inline-flex items-center gap-1.5 sm:gap-2 px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-full',
         'status-chip-glass',
         'hover:scale-[1.02] active:scale-[0.98]',
         onClick && 'cursor-pointer',
@@ -69,7 +69,7 @@ function StatusChip({
           </>
         )}
       </span>
-      <span className="text-[13px] font-medium text-foreground group-hover:text-foreground transition-colors">
+      <span className="text-[12px] sm:text-[13px] font-medium text-foreground group-hover:text-foreground transition-colors">
         {label}
       </span>
     </button>
@@ -109,7 +109,7 @@ export function WorkspaceStatusStrip({
   return (
     <div
       data-tauri-drag-region
-      className="workspace-status-strip h-12 flex items-center gap-2.5 shrink-0 min-w-0 overflow-x-auto scroll-glass-root [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="workspace-status-strip h-11 sm:h-12 flex items-center gap-1.5 sm:gap-2.5 shrink-0 min-w-0 overflow-x-auto scroll-glass-root [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       <StatusChip
         icon={Radio}
@@ -129,7 +129,7 @@ export function WorkspaceStatusStrip({
           <button
             type="button"
             className={cn(
-              'group relative inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full',
+              'group relative inline-flex items-center gap-1.5 sm:gap-2 px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-full',
               'status-chip-glass',
               'hover:scale-[1.02] active:scale-[0.98]',
               'cursor-pointer'
@@ -141,7 +141,7 @@ export function WorkspaceStatusStrip({
                 style={{ color: getEnvColorVar(currentEnv) }}
               />
             </span>
-            <span className="text-[13px] font-medium text-foreground transition-colors">
+            <span className="text-[12px] sm:text-[13px] font-medium text-foreground transition-colors">
               {currentEnv || '—'}
             </span>
           </button>
@@ -224,18 +224,18 @@ export function WorkspaceStatusStrip({
         title={t('workspace.globalSearchPlaceholder')}
         onClick={onOpenSearch}
         className={cn(
-          'group ml-auto inline-flex h-8 items-center gap-2 rounded-full px-3',
-          'min-w-[160px] lg:min-w-[220px]',
+          'group ml-auto inline-flex h-7 sm:h-8 items-center gap-1.5 sm:gap-2 rounded-full px-2.5 sm:px-3',
+          'min-w-[120px] sm:min-w-[160px] lg:min-w-[220px]',
           'border border-[hsl(var(--glass-border-light))]/40 bg-muted/25',
           'transition-colors duration-150',
           'hover:border-[hsl(var(--glass-border-light))]/70 hover:bg-muted/40'
         )}
       >
         <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="flex-1 truncate text-left text-[12px] text-muted-foreground/70">
+        <span className="hidden sm:inline flex-1 truncate text-left text-[12px] text-muted-foreground/70">
           {t('workspace.globalSearchPlaceholder')}
         </span>
-        <kbd className="inline-flex shrink-0 items-center gap-0.5 rounded border border-border/30 bg-background/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/60">
+        <kbd className="hidden md:inline-flex shrink-0 items-center gap-0.5 rounded border border-border/30 bg-background/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/60">
           <Command className="h-2.5 w-2.5" />
           K
         </kbd>
@@ -248,7 +248,7 @@ export function WorkspaceStatusStrip({
         title={t('workspace.reviewEntry')}
         onClick={() => setReviewPanelOpen(!reviewPanelOpen)}
         className={cn(
-          'group relative inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full cursor-pointer',
+          'group relative inline-flex items-center gap-1.5 sm:gap-2 px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-full cursor-pointer',
           'status-chip-glass',
           'hover:scale-[1.02] active:scale-[0.98]',
           reviewPanelOpen && 'ring-1 ring-inset ring-primary/40'
@@ -269,7 +269,7 @@ export function WorkspaceStatusStrip({
             />
           ) : null}
         </span>
-        <span className="text-[13px] font-medium text-foreground transition-colors">
+        <span className="text-[12px] sm:text-[13px] font-medium text-foreground transition-colors">
           {t('workspace.reviewEntry')}
         </span>
         {reviewEntry && reviewEntry.failedTools > 0 ? (
