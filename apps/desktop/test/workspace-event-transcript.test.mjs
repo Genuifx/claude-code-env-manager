@@ -689,6 +689,134 @@ test('trims hydrated history when the provider prompt wraps the visible prompt',
   );
 });
 
+test('trims hydrated skill prompt history when the native prompt has image attachments', async () => {
+  const { trimSeedMessagesBeforeFirstUserPrompt } = await importWorkspaceEventTranscript();
+  const seedMessages = [
+    { msgType: 'user', uuid: 'old-user', content: 'old prompt', segmentIndex: 0, isCompactBoundary: false },
+    {
+      msgType: 'user',
+      uuid: 'skill-image-user',
+      content: [
+        {
+          type: 'text',
+          text: [
+            '<selected_skills>',
+            '<skill name="lightweight-dev-mode" path="/Users/wzt/.claude/skills/lightweight-dev-mode/SKILL.md">',
+            '<description>快速响应用户的软件开发需求</description>',
+            '</skill>',
+            '</selected_skills>',
+            '',
+            '<user_request>',
+            '/lightweight-dev-mode transcript 展示的图片应该支持点击查看大图',
+          ].join('\n'),
+        },
+        {
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: 'image/png',
+            data: 'iVBORw0KGgo=',
+          },
+        },
+        { type: 'text', text: '</user_request>' },
+      ],
+      segmentIndex: 0,
+      isCompactBoundary: false,
+    },
+  ];
+
+  const trimmed = trimSeedMessagesBeforeFirstUserPrompt(
+    seedMessages,
+    [
+      event(1, {
+        type: 'user_prompt',
+        text: '/lightweight-dev-mode transcript 展示的图片应该支持点击查看大图[Image #1]\n\nImages attached: 1',
+        image_count: 1,
+        images: [{
+          mediaType: 'image/png',
+          storagePath: 'prompt-image.png',
+          placeholder: '[Image #1]',
+        }],
+      }),
+    ],
+  );
+
+  assert.deepEqual(
+    trimmed.map((message) => message.uuid),
+    ['old-user'],
+  );
+});
+
+test('live transcript trims duplicated hydrated skill prompt before replaying native events', async () => {
+  const { buildMessagesFromEvents } = await importWorkspaceEventTranscript();
+  const seedMessages = [
+    {
+      msgType: 'user',
+      uuid: 'skill-image-user',
+      content: [
+        {
+          type: 'text',
+          text: [
+            '<selected_skills>',
+            '<skill name="lightweight-dev-mode" path="/Users/wzt/.claude/skills/lightweight-dev-mode/SKILL.md">',
+            '<description>快速响应用户的软件开发需求</description>',
+            '</skill>',
+            '</selected_skills>',
+            '',
+            '<user_request>',
+            '/lightweight-dev-mode transcript 展示的图片应该支持点击查看大图',
+          ].join('\n'),
+        },
+        {
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: 'image/png',
+            data: 'iVBORw0KGgo=',
+          },
+        },
+        { type: 'text', text: '</user_request>' },
+      ],
+      segmentIndex: 0,
+      isCompactBoundary: false,
+    },
+    {
+      msgType: 'assistant',
+      uuid: 'hydrated-assistant',
+      content: 'provider history answer',
+      segmentIndex: 0,
+      isCompactBoundary: false,
+    },
+  ];
+
+  const messages = buildMessagesFromEvents(
+    seedMessages,
+    [],
+    [
+      event(1, {
+        type: 'user_prompt',
+        text: '/lightweight-dev-mode transcript 展示的图片应该支持点击查看大图[Image #1]\n\nImages attached: 1',
+        image_count: 1,
+        images: [{
+          mediaType: 'image/png',
+          storagePath: 'prompt-image.png',
+          placeholder: '[Image #1]',
+        }],
+      }),
+      event(2, { type: 'assistant_chunk', text: 'native replay answer' }),
+      event(3, { type: 'lifecycle', stage: 'turn_completed', detail: '' }),
+    ],
+  );
+
+  assert.deepEqual(
+    messages.map((message) => message.uuid),
+    ['user-prompt-1', 'assistant-turn-2'],
+  );
+  assert.equal(messages[0].content[0].text, '/lightweight-dev-mode transcript 展示的图片应该支持点击查看大图[Image #1]');
+  assert.equal(messages[0].content[1].type, 'image');
+  assert.match(JSON.stringify(messages[1].content), /native replay answer/);
+});
+
 test('stabilizes unchanged message references but updates visible tool metadata changes', async () => {
   const {
     buildMessagesFromEvents,

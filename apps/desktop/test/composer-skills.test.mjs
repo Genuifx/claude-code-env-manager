@@ -249,7 +249,12 @@ test('selected skill prompt augmentation stays out of user-visible display text'
     'utf8',
   );
 
-  assert.match(composerSource, /const displayText = buildComposerDisplayText\(promptValue\);/);
+  assert.match(
+    composerSource,
+    /const displayText = ensureComposerImagePlaceholders\(buildComposerDisplayText\(promptValue\), currentAttachments\);/,
+  );
+  assert.match(composerSource, /buildComposerPromptWithSelectedSkills\(displayText, selectedSkills\)/);
+  assert.doesNotMatch(composerSource, /buildComposerPromptWithSelectedSkills\(promptValue, selectedSkills\)/);
   assert.match(composerSource, /displayText,/);
   assert.match(workspaceSource, /const displayPrompt = payload\?\.displayText \?\? rawPrompt;/);
   assert.match(workspaceSource, /const previewPrompt = buildComposerPromptPreview\(displayPrompt, attachments\);/);

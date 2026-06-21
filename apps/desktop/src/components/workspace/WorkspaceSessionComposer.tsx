@@ -67,6 +67,7 @@ import {
   createComposerImageAttachment,
   createComposerImagePlaceholder,
   createComposerTextAttachment,
+  ensureComposerImagePlaceholders,
   getNextComposerImagePlaceholderIndex,
   isLargeComposerPaste,
   loadComposerRecentFiles,
@@ -1145,8 +1146,8 @@ export function WorkspaceSessionComposer({
   const handleComposerSubmit = useCallback(async () => {
     const promptValue = promptAreaRef.current?.getPlainText() ?? segmentsToPlainText(composerSegments);
     const currentAttachments = attachmentsRef.current;
-    let text = promptValue.trim();
-    const displayText = buildComposerDisplayText(promptValue);
+    let text = ensureComposerImagePlaceholders(promptValue, currentAttachments);
+    const displayText = ensureComposerImagePlaceholders(buildComposerDisplayText(promptValue), currentAttachments);
     let latestInstalledSkills = installedSkills;
     if (onRefreshSkills) {
       try {
@@ -1177,7 +1178,7 @@ export function WorkspaceSessionComposer({
           toast.error(t('workspace.composerSkillReadFailed'));
           return false;
         }
-        text = buildComposerPromptWithSelectedSkills(promptValue, selectedSkills);
+        text = buildComposerPromptWithSelectedSkills(displayText, selectedSkills);
       } catch (error) {
         console.error('Failed to read selected skill files for composer prompt:', error);
         toast.error(t('workspace.composerSkillReadFailed'));

@@ -134,6 +134,25 @@ function promptTextKey(text: string | null | undefined): string {
   return (text ?? '').trim();
 }
 
+function extractTaggedUserRequest(text: string): string | null {
+  const tagged = /<user_request>([\s\S]*?)(?:<\/user_request>|$)/.exec(text);
+  return tagged?.[1]?.trim() || null;
+}
+
+function normalizePromptMatchText(text: string | null | undefined): string {
+  const keyed = promptTextKey(text);
+  const requestText = extractTaggedUserRequest(keyed) ?? keyed;
+
+  return requestText
+    .split('\n')
+    .filter((line) => !/^Images attached:\s*\d+\s*$/.test(line.trim()))
+    .join('\n')
+    .replace(/\[Image #\d+\]/gi, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function messageContentText(content: ConversationMessageData['content']): string {
   if (typeof content === 'string') {
     return content.trim();
@@ -167,8 +186,8 @@ function messageContentText(content: ConversationMessageData['content']): string
 }
 
 function promptMatchesMessage(promptText: string, messageText: string): boolean {
-  const prompt = promptTextKey(promptText);
-  const message = promptTextKey(messageText);
+  const prompt = normalizePromptMatchText(promptText);
+  const message = normalizePromptMatchText(messageText);
   if (!prompt || !message) {
     return false;
   }
@@ -754,7 +773,7 @@ export function buildMessagesFromEvents(
   events: SessionEventRecord[],
   terminalError?: string | null,
 ): ConversationMessageData[] {
-  const next = [...baseMessages];
+  const next = [...trimSeedMessagesBeforeFirstUserPrompt(baseMessages, events)];
   let pendingTurn: PendingAssistantTurn | null = null;
   const hiddenInteractiveToolUseIds = new Set<string>();
   const emittedErrorTexts = new Set<string>();
