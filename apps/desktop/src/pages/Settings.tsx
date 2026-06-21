@@ -13,7 +13,7 @@ import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { setPerformancePreference as applyPerformancePreference, type PerformancePreference } from '@/lib/performance';
 import { scheduleAfterFirstPaint } from '@/lib/idle';
 import {
-  exportPerfLogAsJson,
+  exportDoctorReportAsJson,
   getPerfSummary,
   clearPerfLog,
   recordPerfMark,
@@ -927,6 +927,7 @@ function InstallStatusBadge({ status }: { status: boolean | null }) {
 function DiagnosticsPanel({ active }: { active: boolean }) {
   const { t } = useLocale();
   const [summary, setSummary] = useState<PerfSummary>(() => getPerfSummary());
+  const [isExporting, setIsExporting] = useState(false);
 
   // Auto-refresh while the About section is visible so the user can see
   // events accumulate without manually clicking Refresh.
@@ -941,23 +942,38 @@ function DiagnosticsPanel({ active }: { active: boolean }) {
     };
   }, [active]);
 
-  const handleExport = () => {
+  const handleExport = async () => {
+    setIsExporting(true);
+    recordPerfMark('doctor:export-start');
+
     try {
-      const json = exportPerfLogAsJson();
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
+      let backendReport: unknown;
+      let backendError: string | undefined;
+
+      try {
+        backendReport = await invoke<unknown>('collect_doctor_report');
+      } catch (error) {
+        backendError = String(error);
+      }
+
+      const json = exportDoctorReportAsJson({
+        backend: backendReport,
+        backendError,
+      });
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-      a.href = url;
-      a.download = `ccem-perf-log-${stamp}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      recordPerfMark('diagnostics:exported');
-      toast.success(t('settings.diagnosticsExported'));
+      const saved = await invoke<boolean>('save_file_dialog', {
+        content: json,
+        defaultName: `ccem-doctor-${stamp}.json`,
+      });
+
+      if (saved) {
+        recordPerfMark('doctor:exported', backendError ? { backendError } : undefined);
+        toast.success(t('settings.diagnosticsExported'));
+      }
     } catch (error) {
       toast.error(t('settings.diagnosticsExportFailed').replace('{error}', String(error)));
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -1018,6 +1034,7 @@ function DiagnosticsPanel({ active }: { active: boolean }) {
           variant="outline"
           size="sm"
           className="active:scale-[0.97] transition-transform"
+          disabled={isExporting}
           onClick={handleExport}
         >
           <Download className="w-3.5 h-3.5 mr-1.5" />

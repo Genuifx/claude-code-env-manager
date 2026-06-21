@@ -146,7 +146,7 @@ export function getPerfSummary(): PerfSummary {
   return summary;
 }
 
-interface DiagnosticsEnvelope {
+export interface DiagnosticsEnvelope {
   generatedAt: string;
   appUserAgent: string;
   language: string;
@@ -156,6 +156,15 @@ interface DiagnosticsEnvelope {
   deviceMemory?: number;
   summary: PerfSummary;
   events: PerfEvent[];
+}
+
+export interface DoctorEnvelope {
+  schemaVersion: 1;
+  kind: 'ccem-doctor-report';
+  generatedAt: string;
+  frontend: DiagnosticsEnvelope;
+  backend?: unknown;
+  backendError?: string;
 }
 
 /** Build the JSON envelope that the export button writes to disk. */
@@ -178,6 +187,36 @@ export function buildDiagnosticsEnvelope(): DiagnosticsEnvelope {
 /** Serialize the diagnostics envelope as a pretty-printed JSON string. */
 export function exportPerfLogAsJson(): string {
   return JSON.stringify(buildDiagnosticsEnvelope(), null, 2);
+}
+
+/** Build a support bundle that combines frontend perf data with backend diagnostics. */
+export function buildDoctorEnvelope(options: {
+  backend?: unknown;
+  backendError?: string;
+} = {}): DoctorEnvelope {
+  const envelope: DoctorEnvelope = {
+    schemaVersion: 1,
+    kind: 'ccem-doctor-report',
+    generatedAt: new Date().toISOString(),
+    frontend: buildDiagnosticsEnvelope(),
+  };
+
+  if (options.backend !== undefined) {
+    envelope.backend = options.backend;
+  }
+  if (options.backendError) {
+    envelope.backendError = options.backendError;
+  }
+
+  return envelope;
+}
+
+/** Serialize the combined Doctor report as pretty-printed JSON. */
+export function exportDoctorReportAsJson(options: {
+  backend?: unknown;
+  backendError?: string;
+} = {}): string {
+  return JSON.stringify(buildDoctorEnvelope(options), null, 2);
 }
 
 function safeObserve(type: string, callback: (entries: PerformanceEntryList) => void) {
@@ -264,7 +303,28 @@ function patchTauriInvoke(targetWindow: Window): boolean {
     }
   };
   (wrapped as { __ccemInstrumented?: boolean }).__ccemInstrumented = true;
-  internals.invoke = wrapped as TauriInternals['invoke'];
+
+  try {
+    Object.defineProperty(internals, 'invoke', {
+      value: wrapped,
+      configurable: true,
+      writable: true,
+    });
+  } catch (defineError) {
+    try {
+      internals.invoke = wrapped as TauriInternals['invoke'];
+    } catch (assignError) {
+      record({
+        type: 'mark',
+        name: 'perf-log:ipc-patch-skipped',
+        meta: {
+          defineError: defineError instanceof Error ? defineError.message : String(defineError),
+          assignError: assignError instanceof Error ? assignError.message : String(assignError),
+        },
+      });
+      return false;
+    }
+  }
   return true;
 }
 

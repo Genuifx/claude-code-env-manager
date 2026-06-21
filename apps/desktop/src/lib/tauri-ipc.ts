@@ -348,6 +348,7 @@ export interface TauriCommands {
   check_codex_installed: [void, boolean];
   check_opencode_installed: [void, boolean];
   check_tmux_installed: [void, boolean];
+  collect_doctor_report: [void, unknown];
 
   // 历史记录
   get_conversation_history: [void, ConversationHistoryEntry[]];
@@ -421,6 +422,7 @@ export interface TauriCommands {
   sync_vscode_projects: [void, VSCodeProject[]];
   sync_jetbrains_projects: [void, JetBrainsProject[]];
   open_directory_dialog: [void, string | null];
+  save_file_dialog: [{ content: string; defaultName: string }, boolean];
 
   // 远程加载
   load_from_remote: [
