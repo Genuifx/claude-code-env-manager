@@ -93,6 +93,7 @@ interface EnvironmentDialogProps {
   onSave: (env: Environment) => void;
   onServerSync?: (
     url: string,
+    key: string,
     secret: string
   ) => Promise<{
     count: number;
@@ -125,6 +126,7 @@ export function EnvironmentDialog({
   const [runtimeModel, setRuntimeModel] = React.useState("opus");
   const [subagentModel, setSubagentModel] = React.useState("");
   const [serverUrl, setServerUrl] = React.useState("");
+  const [serverKey, setServerKey] = React.useState("");
   const [serverSecret, setServerSecret] = React.useState("");
   const [serverLoading, setServerLoading] = React.useState(false);
   const [serverPasteCommand, setServerPasteCommand] = React.useState("");
@@ -168,6 +170,7 @@ export function EnvironmentDialog({
     setSubagentModel("");
     setActiveTab("manual");
     setServerUrl("");
+    setServerKey("");
     setServerSecret("");
     setServerLoading(false);
     setSelectedPreset(null);
@@ -202,7 +205,7 @@ export function EnvironmentDialog({
 
     setServerLoading(true);
     try {
-      const result = await onServerSync(serverUrl.trim(), serverSecret.trim());
+      const result = await onServerSync(serverUrl.trim(), serverKey.trim(), serverSecret.trim());
       toast.success(
         t("environmentDialog.serverSyncSuccess").replace(
           "{count}",
@@ -219,6 +222,15 @@ export function EnvironmentDialog({
 
   const handlePasteCommand = (value: string) => {
     const trimmed = value.trim();
+    // Support: ccem load <url> --key <key> --secret <secret>
+    const matchWithKey = trimmed.match(/^ccem\s+load\s+(\S+)\s+--key\s+(\S+)\s+--secret\s+(\S+)$/);
+    if (matchWithKey) {
+      setServerUrl(matchWithKey[1]);
+      setServerKey(matchWithKey[2]);
+      setServerSecret(matchWithKey[3]);
+      return;
+    }
+    // Legacy: ccem load <url> --secret <secret>
     const match = trimmed.match(/^ccem\s+load\s+(\S+)\s+--secret\s+(\S+)$/);
     if (match) {
       setServerUrl(match[1]);
@@ -566,6 +578,22 @@ export function EnvironmentDialog({
                       value={serverUrl}
                       onChange={(e) => setServerUrl(e.target.value)}
                       placeholder={t("environmentDialog.serverPlaceholder")}
+                      disabled={serverLoading}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label
+                      htmlFor="serverKey"
+                      className="flex items-center gap-1.5"
+                    >
+                      <Key className="h-3.5 w-3.5 text-muted-foreground" />
+                      {t("environmentDialog.serverKey")}
+                    </Label>
+                    <Input
+                      id="serverKey"
+                      value={serverKey}
+                      onChange={(e) => setServerKey(e.target.value)}
+                      placeholder={t("environmentDialog.serverKeyPlaceholder")}
                       disabled={serverLoading}
                     />
                   </div>

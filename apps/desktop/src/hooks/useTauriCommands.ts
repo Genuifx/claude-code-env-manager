@@ -987,11 +987,11 @@ export function useTauriCommands() {
     }
   }, [loadAppConfig, setError]);
 
-  const loadFromRemote = useCallback(async (url: string, secret: string) => {
+  const loadFromRemote = useCallback(async (url: string, key: string, secret: string) => {
     const result = await invoke<{
       count: number;
       environments: Array<{ name: string; original_name: string; renamed: boolean }>;
-    }>('load_from_remote', { url, secret });
+    }>('load_from_remote', { url, key, secret });
     await loadEnvironments();
     return result;
   }, [loadEnvironments]);

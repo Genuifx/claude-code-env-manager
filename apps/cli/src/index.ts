@@ -1379,10 +1379,11 @@ skillCmd
 program
   .command('load <url>')
   .description('从远程服务器加载环境配置')
-  .requiredOption('--secret <secret>', '解密密钥')
+  .requiredOption('--secret <secret>', '解密密钥（encryption secret）')
+  .option('--key <key>', '访问密钥（access key，用于认证；不填则回退用 --secret 认证）')
   .option('--json', '以 JSON 格式输出结果（供程序调用）')
-  .action(async (url: string, options: { secret: string; json?: boolean }) => {
-    const results = await loadFromRemote(url, options.secret);
+  .action(async (url: string, options: { secret: string; key?: string; json?: boolean }) => {
+    const results = await loadFromRemote(url, options.key ?? '', options.secret);
 
     // 如果指定了 --json，输出 JSON 格式供程序解析
     if (options.json) {

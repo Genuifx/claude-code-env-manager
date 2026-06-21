@@ -230,8 +230,14 @@ ccem skill rm <name>        # Remove
 Share API configurations across your team with encrypted transport:
 
 ```bash
+# Recommended: pass access key via --key header (more secure than query param)
+ccem load https://your-server.com/api/env --key YOUR_KEY --secret YOUR_SECRET
+
+# Legacy: key in URL query param also works
 ccem load https://your-server.com/api/env?key=YOUR_KEY --secret YOUR_SECRET
 ```
+
+**Key vs Secret:** The **access key** (`--key`) authenticates your request against `keys.json` on the server. The **encryption secret** (`--secret`) decrypts the AES-256-CBC response payload. These are separate values — the key is configured in `keys.json`, the secret is auto-generated in `.secret` on the server.
 
 <details>
 <summary><b>Server deployment</b></summary>
