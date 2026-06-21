@@ -93,6 +93,7 @@ function ensureSessionsDir(): string {
  */
 export async function launchClaude(options: LaunchOptions): Promise<void> {
   const { envName, envConfig, permMode, workingDir, sessionId, resumeSessionId, silent } = options;
+  const ccemRuntimeId = sessionId ?? `cli-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   // Build env
   const env = { ...process.env };
@@ -104,6 +105,8 @@ export async function launchClaude(options: LaunchOptions): Promise<void> {
   }
   // Prevent nested session detection
   delete env.CLAUDECODE;
+  env.CCEM_RUNTIME_ID = ccemRuntimeId;
+  env.CCEM_SESSION_ID = ccemRuntimeId;
 
   // Build args
   const args: string[] = [];
@@ -151,6 +154,7 @@ export async function launchClaude(options: LaunchOptions): Promise<void> {
       }
 
       provenanceTracking = startCliClaudeProvenanceTracking({
+        ccemSessionId: ccemRuntimeId,
         envName: envName ?? 'unknown',
         workingDir: effectiveWorkingDir,
         permMode,

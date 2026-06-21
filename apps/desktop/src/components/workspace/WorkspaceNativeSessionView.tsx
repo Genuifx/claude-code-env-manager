@@ -966,6 +966,8 @@ export function WorkspaceNativeSessionView({
     getSessionSubagents,
     listNativeSessions,
     searchWorkspaceFiles,
+    getWecomTaskBindingDefaults,
+    bindSessionToBot,
   } = useTauriCommands();
   const [sessionEnv, setSessionEnv] = useState(session.env_name);
   const [sessionRuntimePermMode, setSessionRuntimePermMode] = useState(
@@ -999,6 +1001,7 @@ export function WorkspaceNativeSessionView({
   const [isSending, setIsSending] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [isHandingOff, setIsHandingOff] = useState(false);
+  const [isBindingWecom, setIsBindingWecom] = useState(false);
   const reviewPanelOpen = useAppStore((state) => state.reviewPanelOpen);
   const setReviewPanelOpen = useAppStore((state) => state.setReviewPanelOpen);
   const setReviewEntry = useAppStore((state) => state.setReviewEntry);
@@ -2019,6 +2022,56 @@ export function WorkspaceNativeSessionView({
     }
   }, [handoffNativeSessionToTerminal, refreshSummary, session.runtime_id, t]);
 
+  const handleBindWecom = useCallback(async () => {
+    setIsBindingWecom(true);
+    try {
+      const [target] = await getWecomTaskBindingDefaults();
+      if (!target) {
+        toast.error(t('workspace.wecomBindNoDefault'));
+        return;
+      }
+
+      const targetScope = target.targetType === 'group' ? 'group' : 'single';
+      const peerId = `${targetScope}:${target.peerId.trim()}`;
+      const sendTaskCard = target.autoSendCard;
+      const result = await bindSessionToBot({
+        runtime_id: session.runtime_id,
+        platform: 'wecom',
+        peer_id: peerId,
+        bot_id: target.botId.trim(),
+        task_title: `${providerDisplayName(session.provider)} session`,
+        task_summary: session.project_dir,
+        send_task_card: sendTaskCard,
+      });
+      if (!sendTaskCard) {
+        toast.success(t('workspace.wecomBindBound'));
+      } else if (result.delivery_status === 'delivered') {
+        toast.success(t('workspace.wecomBindDelivered'));
+      } else {
+        toast.error(
+          t('workspace.wecomBindFailed').replace(
+            '{error}',
+            result.last_delivery_error || result.delivery_status,
+          ),
+        );
+      }
+      await refreshSummary({ force: true });
+    } catch (error) {
+      console.error('Failed to bind native session to WeCom:', error);
+      toast.error(t('workspace.wecomBindFailed').replace('{error}', String(error)));
+    } finally {
+      setIsBindingWecom(false);
+    }
+  }, [
+    bindSessionToBot,
+    getWecomTaskBindingDefaults,
+    refreshSummary,
+    session.project_dir,
+    session.provider,
+    session.runtime_id,
+    t,
+  ]);
+
   useEffect(() => {
     if (
       queuedMessages.length === 0
@@ -2187,6 +2240,28 @@ export function WorkspaceNativeSessionView({
         secondaryActions={(
           <>
             <ContextWindowIndicator usage={sessionUsage} />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-9 w-9 rounded-full"
+                    aria-label={t('workspace.wecomBindSession')}
+                    disabled={isBindingWecom || isTerminalStatus(session.status)}
+                    onClick={() => void handleBindWecom()}
+                  >
+                    {isBindingWecom ? (
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Bot className="h-4 w-4" />
+                    )}
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top">{t('workspace.wecomBindSession')}</TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="inline-flex">

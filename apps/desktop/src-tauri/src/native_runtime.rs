@@ -14,9 +14,9 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 #[cfg(test)]
 use std::sync::OnceLock;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::AppHandle;
 use tauri_plugin_shell::{
@@ -325,7 +325,10 @@ fn terminal_launches() -> &'static Mutex<Vec<TerminalLaunchInvocation>> {
 
 #[cfg(test)]
 fn clear_terminal_launches() {
-    terminal_launches().lock().expect("terminal launches").clear();
+    terminal_launches()
+        .lock()
+        .expect("terminal launches")
+        .clear();
 }
 
 #[cfg(test)]
@@ -424,6 +427,8 @@ impl NativeRuntimeManager {
         let mut options = options;
         merge_helper_env_path(&mut options.helper_env_vars, &terminal::get_user_path());
         let runtime_id = generate_runtime_id();
+        inject_ccem_runtime_env(&mut options.helper_env_vars, &runtime_id);
+        inject_ccem_runtime_env(&mut options.terminal_env_vars, &runtime_id);
         let now = Utc::now();
         let record = NativeSessionRecord {
             runtime_id: runtime_id.clone(),
@@ -1880,7 +1885,7 @@ fn persist_native_runtime_state_to(
 fn build_runtime_bootstrap_options(
     record: &NativeSessionRecord,
 ) -> Result<NativeSessionOptions, String> {
-    let (mut helper_env_vars, terminal_env_vars, codex_base_url, codex_api_key) =
+    let (mut helper_env_vars, mut terminal_env_vars, codex_base_url, codex_api_key) =
         match record.provider {
             NativeProvider::Claude => {
                 let resolved = resolve_claude_env(&record.env_name)?;
@@ -1893,6 +1898,8 @@ fn build_runtime_bootstrap_options(
             }
         };
     merge_helper_env_path(&mut helper_env_vars, &terminal::get_user_path());
+    inject_ccem_runtime_env(&mut helper_env_vars, &record.runtime_id);
+    inject_ccem_runtime_env(&mut terminal_env_vars, &record.runtime_id);
 
     Ok(NativeSessionOptions {
         provider: record.provider,
@@ -1912,6 +1919,11 @@ fn build_runtime_bootstrap_options(
         codex_api_key,
         effort: record.effort.clone(),
     })
+}
+
+fn inject_ccem_runtime_env(env_vars: &mut HashMap<String, String>, runtime_id: &str) {
+    env_vars.insert("CCEM_RUNTIME_ID".to_string(), runtime_id.to_string());
+    env_vars.insert("CCEM_SESSION_ID".to_string(), runtime_id.to_string());
 }
 
 #[cfg(test)]
@@ -2483,10 +2495,7 @@ mod tests {
         clear_terminal_launches();
 
         manager
-            .handoff_to_terminal(
-                runtime_id,
-                Some(crate::terminal::TerminalType::TerminalApp),
-            )
+            .handoff_to_terminal(runtime_id, Some(crate::terminal::TerminalType::TerminalApp))
             .expect("handoff should enter pending state");
 
         assert!(take_terminal_launches().is_empty());
@@ -2524,7 +2533,10 @@ mod tests {
 
         let launches = take_terminal_launches();
         assert_eq!(launches.len(), 1);
-        assert_eq!(launches[0].resume_session_id.as_deref(), Some("provider-session-1"));
+        assert_eq!(
+            launches[0].resume_session_id.as_deref(),
+            Some("provider-session-1")
+        );
         assert_eq!(launches[0].runtime_id, runtime_id);
 
         let summary = manager.summary_for(runtime_id).expect("summary");

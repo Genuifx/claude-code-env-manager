@@ -13,6 +13,13 @@ pub struct WecomSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WecomTaskBindingTargetType {
+    User,
+    Group,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WecomBotConfig {
     pub id: String,
     #[serde(default)]
@@ -65,6 +72,24 @@ pub struct WecomBotConfig {
     pub user_perm_mode: String,
     #[serde(rename = "defaultEnvName", alias = "default_env_name", default)]
     pub default_env_name: Option<String>,
+    #[serde(
+        rename = "taskBindingDefaultTargetType",
+        alias = "task_binding_default_target_type",
+        default
+    )]
+    pub task_binding_default_target_type: Option<WecomTaskBindingTargetType>,
+    #[serde(
+        rename = "taskBindingDefaultPeerId",
+        alias = "task_binding_default_peer_id",
+        default
+    )]
+    pub task_binding_default_peer_id: Option<String>,
+    #[serde(
+        rename = "taskBindingAutoSendCard",
+        alias = "task_binding_auto_send_card",
+        default = "default_true"
+    )]
+    pub task_binding_auto_send_card: bool,
     #[serde(rename = "wsUrl", alias = "ws_url", default = "default_ws_url")]
     pub ws_url: String,
 }
@@ -88,6 +113,9 @@ impl Default for WecomBotConfig {
             admin_perm_mode: default_admin_perm_mode(),
             user_perm_mode: default_user_perm_mode(),
             default_env_name: None,
+            task_binding_default_target_type: None,
+            task_binding_default_peer_id: None,
+            task_binding_auto_send_card: true,
             ws_url: default_ws_url(),
         }
     }
@@ -141,4 +169,63 @@ pub fn default_ws_url() -> String {
 
 fn default_true() -> bool {
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_wecom_bot_config_loads_without_task_binding_fields() {
+        let config: WecomBotConfig = serde_json::from_str(
+            r#"{
+                "id": "webot",
+                "botId": "aibot-123",
+                "workspaceDir": "/tmp/ccem"
+            }"#,
+        )
+        .expect("old config should load");
+
+        assert_eq!(config.id, "webot");
+        assert_eq!(config.bot_id, "aibot-123");
+        assert_eq!(config.workspace_dir, "/tmp/ccem");
+        assert_eq!(config.task_binding_default_target_type, None);
+        assert_eq!(config.task_binding_default_peer_id, None);
+        assert!(config.task_binding_auto_send_card);
+    }
+
+    #[test]
+    fn default_wecom_bot_config_auto_sends_task_cards() {
+        let config = WecomBotConfig::default();
+
+        assert!(config.enabled);
+        assert_eq!(config.task_binding_default_target_type, None);
+        assert_eq!(config.task_binding_default_peer_id, None);
+        assert!(config.task_binding_auto_send_card);
+    }
+
+    #[test]
+    fn task_binding_defaults_accept_snake_case_aliases() {
+        let config: WecomBotConfig = serde_json::from_str(
+            r#"{
+                "id": "webot",
+                "bot_id": "aibot-123",
+                "workspace_dir": "/tmp/ccem",
+                "task_binding_default_target_type": "group",
+                "task_binding_default_peer_id": "chat-123",
+                "task_binding_auto_send_card": false
+            }"#,
+        )
+        .expect("snake_case config should load");
+
+        assert_eq!(
+            config.task_binding_default_target_type,
+            Some(WecomTaskBindingTargetType::Group)
+        );
+        assert_eq!(
+            config.task_binding_default_peer_id.as_deref(),
+            Some("chat-123")
+        );
+        assert!(!config.task_binding_auto_send_card);
+    }
 }

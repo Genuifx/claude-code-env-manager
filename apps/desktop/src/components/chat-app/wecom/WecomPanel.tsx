@@ -59,6 +59,9 @@ function blankBot(): WecomBotConfig {
     adminPermMode: 'dev',
     userPermMode: 'readonly',
     defaultEnvName: null,
+    taskBindingDefaultTargetType: null,
+    taskBindingDefaultPeerId: null,
+    taskBindingAutoSendCard: true,
     wsUrl: 'wss://openws.work.weixin.qq.com',
   };
 }
@@ -213,6 +216,9 @@ export function WecomPanel() {
         userAccessPolicy: bot.userAccessPolicy?.trim() || DEFAULT_USER_ACCESS_POLICY,
         wsUrl: bot.wsUrl?.trim() || 'wss://openws.work.weixin.qq.com',
         defaultEnvName: bot.defaultEnvName || null,
+        taskBindingDefaultTargetType: bot.taskBindingDefaultTargetType || null,
+        taskBindingDefaultPeerId: bot.taskBindingDefaultPeerId?.trim() || null,
+        taskBindingAutoSendCard: bot.taskBindingAutoSendCard ?? true,
       })),
     };
     await saveWecomSettings(normalized);
@@ -499,6 +505,11 @@ function BotReadView({ bot }: { bot: WecomBotConfig }) {
           label={t('settings.wecomRequireMention')}
           value={bot.requireMention ? t('settings.wecomRequired') : t('settings.wecomNotRequired')}
         />
+        <ReadRow
+          label={t('settings.wecomTaskBindingDefault')}
+          value={formatTaskBindingDefault(bot, t)}
+          mono
+        />
       </div>
     </div>
   );
@@ -679,6 +690,41 @@ function BotEditView({
         </div>
       </div>
 
+      {/* Task binding */}
+      <div className="space-y-2.5">
+        <SectionHeader title={t('settings.wecomSectionTaskBinding')} />
+        <div className="grid gap-3 md:grid-cols-3">
+          <Field label={t('settings.wecomTaskBindingTargetType')}>
+            <Select
+              value={bot.taskBindingDefaultTargetType ?? 'user'}
+              onValueChange={(value) => onUpdate({ taskBindingDefaultTargetType: value as 'user' | 'group' })}
+            >
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="user">{t('settings.wecomTaskBindingUser')}</SelectItem>
+                <SelectItem value="group">{t('settings.wecomTaskBindingGroup')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label={t('settings.wecomTaskBindingPeerId')}>
+            <input
+              className={INPUT_CLS}
+              value={bot.taskBindingDefaultPeerId ?? ''}
+              onChange={(e) => onUpdate({ taskBindingDefaultPeerId: e.target.value })}
+            />
+          </Field>
+          <div className="flex items-end">
+            <ToggleSetting
+              checked={bot.taskBindingAutoSendCard ?? true}
+              onChange={(taskBindingAutoSendCard) => onUpdate({ taskBindingAutoSendCard })}
+              title={t('settings.wecomTaskBindingAutoSendCard')}
+            />
+          </div>
+        </div>
+      </div>
+
       {/* Policy */}
       <Disclosure title={t('settings.wecomSectionPolicy')} open={showPolicy} onToggle={() => setShowPolicy(!showPolicy)}>
         <div className="space-y-2">
@@ -730,4 +776,13 @@ function Field({ label, children }: FieldProps) {
       {children}
     </div>
   );
+}
+
+function formatTaskBindingDefault(bot: WecomBotConfig, t: (key: string) => string): string {
+  const peerId = bot.taskBindingDefaultPeerId?.trim();
+  if (!peerId) return t('settings.wecomNotSet');
+  const targetType = bot.taskBindingDefaultTargetType === 'group'
+    ? t('settings.wecomTaskBindingGroup')
+    : t('settings.wecomTaskBindingUser');
+  return `${targetType}: ${peerId}`;
 }

@@ -25,6 +25,15 @@ pub enum ChannelKind {
         bot_id: String,
         peer_id: String,
     },
+    BotBinding {
+        binding_id: String,
+        platform: crate::remote::RemotePlatform,
+        peer_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bot_id: Option<String>,
+    },
 }
 
 impl ChannelKind {
@@ -38,6 +47,17 @@ impl ChannelKind {
             Self::Wecom { bot_id, peer_id } => {
                 Some(RemotePeerRef::wecom(bot_id.clone(), peer_id.clone()))
             }
+            Self::BotBinding {
+                platform,
+                peer_id,
+                thread_id,
+                bot_id,
+                ..
+            } => Some(RemotePeerRef {
+                platform: *platform,
+                peer_id: peer_id.clone(),
+                thread_id: bot_id.clone().or_else(|| thread_id.clone()),
+            }),
         }
     }
 
