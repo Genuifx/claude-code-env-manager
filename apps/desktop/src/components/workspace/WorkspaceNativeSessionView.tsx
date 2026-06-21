@@ -1225,31 +1225,45 @@ export function WorkspaceNativeSessionView({
 
   const sessionUsage = useMemo(() => computeSessionUsage(events), [events]);
 
-  const openExternalActionsMenu = useCallback(() => {
+  const clearExternalActionsCloseTimer = useCallback(() => {
     if (externalActionsCloseTimerRef.current !== null) {
       window.clearTimeout(externalActionsCloseTimerRef.current);
       externalActionsCloseTimerRef.current = null;
     }
-    setIsExternalActionsOpen(true);
   }, []);
 
+  const openExternalActionsMenu = useCallback(() => {
+    clearExternalActionsCloseTimer();
+    setIsExternalActionsOpen(true);
+  }, [clearExternalActionsCloseTimer]);
+
+  const closeExternalActionsMenu = useCallback(() => {
+    clearExternalActionsCloseTimer();
+    setIsExternalActionsOpen(false);
+  }, [clearExternalActionsCloseTimer]);
+
   const scheduleExternalActionsClose = useCallback(() => {
-    if (externalActionsCloseTimerRef.current !== null) {
-      window.clearTimeout(externalActionsCloseTimerRef.current);
-    }
+    clearExternalActionsCloseTimer();
     externalActionsCloseTimerRef.current = window.setTimeout(() => {
       setIsExternalActionsOpen(false);
       externalActionsCloseTimerRef.current = null;
     }, 180);
-  }, []);
+  }, [clearExternalActionsCloseTimer]);
+
+  const handleExternalActionsOpenChange = useCallback((open: boolean) => {
+    if (open) {
+      openExternalActionsMenu();
+      return;
+    }
+
+    closeExternalActionsMenu();
+  }, [closeExternalActionsMenu, openExternalActionsMenu]);
 
   useEffect(() => {
     return () => {
-      if (externalActionsCloseTimerRef.current !== null) {
-        window.clearTimeout(externalActionsCloseTimerRef.current);
-      }
+      clearExternalActionsCloseTimer();
     };
-  }, []);
+  }, [clearExternalActionsCloseTimer]);
 
   const refreshGitSnapshot = useCallback(async () => {
     const requestSeq = gitSnapshotRequestSeqRef.current + 1;
@@ -2457,7 +2471,7 @@ export function WorkspaceNativeSessionView({
         secondaryActions={(
           <>
             <ContextWindowIndicator usage={sessionUsage} />
-            <DropdownMenu open={isExternalActionsOpen} onOpenChange={setIsExternalActionsOpen}>
+            <DropdownMenu modal={false} open={isExternalActionsOpen} onOpenChange={handleExternalActionsOpenChange}>
               <span
                 className="inline-flex"
                 onMouseEnter={openExternalActionsMenu}
@@ -2488,7 +2502,9 @@ export function WorkspaceNativeSessionView({
                       </Button>
                     </DropdownMenuTrigger>
                   </TooltipTrigger>
-                  <TooltipContent side="top">{t('workspace.externalActions')}</TooltipContent>
+                  {!isExternalActionsOpen && (
+                    <TooltipContent side="top">{t('workspace.externalActions')}</TooltipContent>
+                  )}
                 </Tooltip>
               </span>
               <DropdownMenuContent
@@ -2503,7 +2519,7 @@ export function WorkspaceNativeSessionView({
                   className="gap-2.5"
                   disabled={isTerminalStatus(session.status)}
                   onSelect={() => {
-                    setIsExternalActionsOpen(false);
+                    closeExternalActionsMenu();
                     setIsWecomBindDialogOpen(true);
                   }}
                 >
@@ -2515,7 +2531,7 @@ export function WorkspaceNativeSessionView({
                   className="gap-2.5"
                   disabled={isHandingOff || isHandoffPending}
                   onSelect={() => {
-                    setIsExternalActionsOpen(false);
+                    closeExternalActionsMenu();
                     void handleHandoff();
                   }}
                 >
