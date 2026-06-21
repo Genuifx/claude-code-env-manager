@@ -459,7 +459,7 @@ export interface TauriCommands {
 
   // 远程加载
   load_from_remote: [
-    { url: string; secret: string },
+    { url: string; key: string; secret: string },
     LoadResult
   ];
 

@@ -2538,11 +2538,16 @@ struct RemoteEnvironments {
 }
 
 #[tauri::command]
-fn load_from_remote(url: String, secret: String) -> Result<LoadResult, String> {
+fn load_from_remote(url: String, key: String, secret: String) -> Result<LoadResult, String> {
     // Path A: try CLI if installed
     if let Some(ccem_path) = terminal::resolve_ccem_path() {
+        let mut args: Vec<String> = vec!["load".into(), url.clone(), "--secret".into(), secret.clone(), "--json".into()];
+        if !key.is_empty() {
+            args.insert(2, "--key".into());
+            args.insert(3, key.clone());
+        }
         let output = Command::new(&ccem_path)
-            .args(["load", &url, "--secret", &secret, "--json"])
+            .args(&args)
             .output();
 
         if let Ok(out) = output {
@@ -2565,10 +2570,12 @@ fn load_from_remote(url: String, secret: String) -> Result<LoadResult, String> {
     }
 
     // Path B: native Rust implementation
+    // Use key for auth header; fall back to secret for backward compatibility
+    let header_val = if key.is_empty() { &secret } else { &key };
     let client = reqwest::blocking::Client::new();
     let response = client
         .get(&url)
-        .header("X-CCEM-Key", &secret)
+        .header("X-CCEM-Key", header_val)
         .send()
         .map_err(|e| format!("Network error: {}", e))?;
 

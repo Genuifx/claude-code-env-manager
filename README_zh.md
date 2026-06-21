@@ -229,8 +229,14 @@ ccem skill rm <name>        # 删掉
 团队共享 API 配置，加密传输：
 
 ```bash
+# 推荐：通过 --key 传递访问密钥（比查询参数更安全）
+ccem load https://your-server.com/api/env --key YOUR_KEY --secret YOUR_SECRET
+
+# 兼容旧版：URL 中带 ?key= 也可以
 ccem load https://your-server.com/api/env?key=YOUR_KEY --secret YOUR_SECRET
 ```
+
+**Key 与 Secret 的区别：** **访问密钥**（`--key`）用于服务器认证（对照 `keys.json`）；**解密密钥**（`--secret`）用于 AES-256-CBC 解密响应体。两者是不同的值——key 在 `keys.json` 中配置，secret 在服务器 `.secret` 文件中自动生成。
 
 <details>
 <summary><b>服务端部署</b></summary>

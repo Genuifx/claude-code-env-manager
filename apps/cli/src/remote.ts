@@ -56,18 +56,26 @@ interface LoadResult {
 
 /**
  * 从远程 URL 加载环境配置
+ * @param url    服务器地址（可含 ?key= 查询参数）
+ * @param key    访问密钥（access key，用于服务器认证）；为空时回退用 secret 认证（兼容旧版）
+ * @param secret 解密密钥（encryption secret，用于 AES-256-CBC 解密响应体）
  * @returns 本次导入的环境列表
  */
-export const loadFromRemote = async (url: string, secret: string): Promise<LoadResult[]> => {
+export const loadFromRemote = async (url: string, key: string, secret: string): Promise<LoadResult[]> => {
   // 1. 发送请求
   console.log(chalk.gray('Fetching from remote...'));
 
+  const headerKey = key || secret;
+  if (!key) {
+    console.log(chalk.yellow('Warning: --key not provided; using --secret for authentication (deprecated). Use --key <access-key> --secret <encryption-secret>.'));
+  }
+
   let response: Response;
   try {
-    // 使用 X-CCEM-Key header 传递密钥（更安全）
+    // 使用 X-CCEM-Key header 传递访问密钥（更安全）
     response = await fetch(url, {
       headers: {
-        'X-CCEM-Key': secret,
+        'X-CCEM-Key': headerKey,
       },
     });
   } catch (err) {
