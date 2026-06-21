@@ -22,6 +22,7 @@ The file-size CI gate blocks new source files over 1000 lines unless they are do
 - `apps/desktop/src/components/workspace/WorkspaceReviewDrawer.tsx`: Workspace review drawer rendering remains concentrated while sub-agent execution details are being iterated.
 - `apps/desktop/src/components/workspace/WorkspaceMessageBubble.tsx`: Workspace transcript rendering is still bundled with attachment, diff, and tool-call presentation during the workspace redesign.
 - `apps/desktop/src/components/workspace/workspaceEventTranscript.ts`: Workspace event transcript projection remains concentrated while native/runtime event shapes are still being unified.
+- `apps/desktop/src/components/workspace/ProjectTree.tsx`: Workspace project tree rendering and navigation state remain concentrated during the workspace redesign.
 - `apps/desktop/src/components/workspace/WorkspaceSessionComposer.tsx`: Workspace composer state, image attachment handling, and model/provider controls remain concentrated during the workspace redesign.
 - `apps/desktop/src/components/workspace/WorkspaceNativeSessionView.tsx`: Native workspace transcript, attention handling, and composer orchestration remain concentrated during the workspace redesign.
 - `apps/desktop/src/pages/CronTasks.tsx`: Cron task list, run timeline, and editor orchestration are still centralized during the scheduler surface redesign.
