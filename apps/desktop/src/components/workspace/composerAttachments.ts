@@ -262,6 +262,14 @@ export function revokeComposerImageUrls(attachments: ComposerAttachment[]) {
   }
 }
 
+export function getComposerImageAttachmentSrc(attachment: ComposerImageAttachment): string | null {
+  const base64Data = attachment.base64Data.trim();
+  if (base64Data) {
+    return `data:${attachment.mediaType};base64,${base64Data}`;
+  }
+  return attachment.objectUrl;
+}
+
 export function extractComposerImagePayloads(attachments: ComposerAttachment[]): ComposerImagePayload[] {
   return attachments
     .filter((a): a is ComposerImageAttachment => a.kind === 'image')

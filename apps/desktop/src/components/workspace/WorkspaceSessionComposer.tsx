@@ -1,4 +1,5 @@
 import {
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   type TextareaHTMLAttributes,
@@ -69,6 +70,7 @@ import {
   createComposerImagePlaceholder,
   createComposerTextAttachment,
   ensureComposerImagePlaceholders,
+  getComposerImageAttachmentSrc,
   getNextComposerImagePlaceholderIndex,
   isLargeComposerPaste,
   loadComposerRecentFiles,
@@ -325,20 +327,22 @@ function ComposerAttachmentChip({
     ? attachment.absolutePath
     : attachment.name;
 
-  const isImage = attachment.kind === 'image' && attachment.objectUrl;
-  const thumbnail = isImage
+  const imageSrc = attachment.kind === 'image'
+    ? getComposerImageAttachmentSrc(attachment)
+    : null;
+  const thumbnail = attachment.kind === 'image' && imageSrc
     ? (
       <button
         type="button"
-        className="shrink-0 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        className="shrink-0 overflow-hidden rounded-lg border border-border/45 bg-background/80 outline-none transition-[border-color,box-shadow] hover:border-primary/45 focus-visible:ring-2 focus-visible:ring-primary/40"
         onClick={() => onImageClick?.(attachment as ComposerImageAttachment)}
         aria-label={t('workspace.composerImagePreviewOpen')}
         title={t('workspace.composerImagePreviewOpen')}
       >
         <img
-          src={(attachment as ComposerImageAttachment).objectUrl ?? ''}
+          src={imageSrc}
           alt={attachment.name}
-          className="h-8 w-8 rounded-md object-cover ring-1 ring-transparent transition-[box-shadow,ring-color] hover:ring-2 hover:ring-primary/40"
+          className="h-11 w-16 object-contain"
         />
       </button>
     )
@@ -768,8 +772,26 @@ export function WorkspaceSessionComposer({
   const [draggedFileCount, setDraggedFileCount] = useState(0);
   const [inlineSkillPopover, setInlineSkillPopover] = useState<InlineSkillPopoverState | null>(null);
   const [triggerPanelState, setTriggerPanelState] = useState<PromptAreaTriggerPanelState | null>(null);
-  const [previewingImage, setPreviewingImage] = useState<ComposerImageAttachment | null>(null);
+  const [previewingImageId, setPreviewingImageId] = useState<string | null>(null);
+  const [previewImageSize, setPreviewImageSize] = useState<{ width: number; height: number } | null>(null);
   const composerPlainText = useMemo(() => segmentsToPlainText(composerSegments), [composerSegments]);
+  const previewingImage = useMemo(
+    () => attachments.find((attachment): attachment is ComposerImageAttachment => (
+      attachment.kind === 'image' && attachment.id === previewingImageId
+    )) ?? null,
+    [attachments, previewingImageId],
+  );
+  const previewingImageSrc = previewingImage ? getComposerImageAttachmentSrc(previewingImage) : null;
+  const previewImageFrameStyle = useMemo<CSSProperties | undefined>(() => {
+    if (!previewImageSize) {
+      return undefined;
+    }
+
+    return {
+      aspectRatio: `${previewImageSize.width} / ${previewImageSize.height}`,
+      width: `min(${previewImageSize.width}px, min(92vw, 960px), calc(min(78vh, 720px) * ${previewImageSize.width} / ${previewImageSize.height}))`,
+    };
+  }, [previewImageSize]);
   const canSubmitWithAttachments = canSubmit || composerPlainText.trim().length > 0 || attachments.length > 0;
   const resolvedActionLabel = isSubmitting ? loadingLabel : (primaryActionLabel ?? submitLabel);
   const resolvedPrimaryDisabled = primaryActionDisabled ?? (!canSubmitWithAttachments || disabled);
@@ -821,6 +843,10 @@ export function WorkspaceSessionComposer({
       setInlineSkillPopover(null);
     }
   }, [inlineSkillPopover, selectedSkillTokens]);
+
+  useEffect(() => {
+    setPreviewImageSize(null);
+  }, [previewingImageSrc]);
 
   useEffect(() => {
     if (value === syncedPlainTextRef.current) {
@@ -929,7 +955,6 @@ export function WorkspaceSessionComposer({
     }
 
     if (imageAttachments.length > 0) {
-      addAttachments(imageAttachments);
       for (const attachment of imageAttachments) {
         promptAreaRef.current?.insertChip({
           trigger: '',
@@ -943,6 +968,7 @@ export function WorkspaceSessionComposer({
           } satisfies ComposerPromptChipData,
         });
       }
+      addAttachments(imageAttachments);
     }
   }, [addAttachments, capabilities.supportsImages, t]);
 
@@ -1067,6 +1093,9 @@ export function WorkspaceSessionComposer({
     const removed = previous.find((attachment) => attachment.id === id);
     if (removed?.kind === 'image' && removed.objectUrl) {
       URL.revokeObjectURL(removed.objectUrl);
+    }
+    if (removed?.kind === 'image') {
+      setPreviewingImageId((current) => (current === removed.id ? null : current));
     }
     if (removed?.kind === 'image') {
       setComposerSegments((segments) => {
@@ -1384,7 +1413,7 @@ export function WorkspaceSessionComposer({
                       key={attachment.id}
                       attachment={attachment}
                       onRemove={removeAttachment}
-                      onImageClick={(image) => setPreviewingImage(image)}
+                      onImageClick={(image) => setPreviewingImageId(image.id)}
                     />
                   ))}
                 </div>
@@ -1474,12 +1503,13 @@ export function WorkspaceSessionComposer({
         open={previewingImage !== null}
         onOpenChange={(open) => {
           if (!open) {
-            setPreviewingImage(null);
+            setPreviewingImageId(null);
+            setPreviewImageSize(null);
           }
         }}
       >
         <DialogContent
-          className="max-w-[min(92vw,960px)] border-border/45 bg-popover p-0 sm:rounded-2xl"
+          className="w-fit max-w-[calc(100vw-2rem)] border-border/45 bg-popover p-0 sm:max-w-[calc(100vw-3rem)] sm:rounded-2xl"
         >
           <DialogTitle className="sr-only">
             {t('workspace.composerImagePreview')}
@@ -1487,13 +1517,27 @@ export function WorkspaceSessionComposer({
           <DialogDescription className="sr-only">
             {previewingImage?.name ?? ''}
           </DialogDescription>
-          {previewingImage?.objectUrl ? (
-            <div className="flex flex-col items-center gap-3 p-2">
-              <div className="flex max-h-[min(78vh,720px)] w-full items-center justify-center overflow-hidden rounded-xl bg-black/85">
+          {previewingImage && previewingImageSrc ? (
+            <div className="flex w-fit max-w-full flex-col items-center gap-3 p-2">
+              <div
+                className="flex max-h-[min(78vh,720px)] max-w-[min(92vw,960px)] items-center justify-center overflow-hidden rounded-xl bg-black/85"
+                style={previewImageFrameStyle}
+              >
                 <img
-                  src={previewingImage.objectUrl}
+                  src={previewingImageSrc}
                   alt={previewingImage.name}
-                  className="max-h-[min(78vh,720px)] max-w-full object-contain"
+                  className={cn(
+                    'block object-contain',
+                    previewImageSize
+                      ? 'h-full w-full'
+                      : 'max-h-[min(78vh,720px)] max-w-[min(92vw,960px)]',
+                  )}
+                  onLoad={(event) => {
+                    const { naturalHeight, naturalWidth } = event.currentTarget;
+                    if (naturalWidth > 0 && naturalHeight > 0) {
+                      setPreviewImageSize({ width: naturalWidth, height: naturalHeight });
+                    }
+                  }}
                 />
               </div>
               <div className="flex w-full items-center justify-between gap-3 px-1 pb-1 text-[11px] text-muted-foreground">

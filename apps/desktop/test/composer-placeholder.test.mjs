@@ -64,6 +64,40 @@ test('ensures image attachments have request text placeholders', async () => {
   );
 });
 
+test('builds composer image preview src from the submitted base64 payload', async () => {
+  const { getComposerImageAttachmentSrc } = await importComposerAttachments();
+
+  assert.equal(
+    getComposerImageAttachmentSrc({
+      id: 'image-1',
+      kind: 'image',
+      source: 'paste',
+      name: 'Pasted image',
+      placeholder: '[Image #1]',
+      mediaType: 'image/png',
+      base64Data: 'abc123',
+      byteSize: 6,
+      objectUrl: 'blob:stale-preview',
+    }),
+    'data:image/png;base64,abc123',
+  );
+
+  assert.equal(
+    getComposerImageAttachmentSrc({
+      id: 'image-2',
+      kind: 'image',
+      source: 'paste',
+      name: 'Pasted image',
+      placeholder: '[Image #2]',
+      mediaType: 'image/jpeg',
+      base64Data: '   ',
+      byteSize: 6,
+      objectUrl: 'blob:fallback-preview',
+    }),
+    'blob:fallback-preview',
+  );
+});
+
 test('builds selected skill prompt attachments inside user request', async () => {
   const { buildComposerPromptText } = await importComposerAttachments();
   const prompt = [

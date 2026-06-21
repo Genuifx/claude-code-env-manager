@@ -73,3 +73,34 @@ test('composer forwards all pasted images from PromptArea', async () => {
   assert.match(source, /onImagePaste=\{\(files\) => void handleImagePaste\(files\)\}/);
   assert.doesNotMatch(source, /handleImagePaste\(\[file\]\)/);
 });
+
+test('composer inserts pasted image chips before registering attachments', async () => {
+  const source = await readComposerSource();
+  const pasteBlock = sliceBetween(source, 'const handleImagePaste = useCallback', 'const handleBeforeTextPaste');
+  const insertIndex = pasteBlock.indexOf('promptAreaRef.current?.insertChip');
+  const addIndex = pasteBlock.indexOf('addAttachments(imageAttachments)');
+
+  assert.notEqual(insertIndex, -1, 'missing pasted image chip insertion');
+  assert.notEqual(addIndex, -1, 'missing pasted image attachment registration');
+  assert.ok(
+    insertIndex < addIndex,
+    'new image chips must exist before attachment pruning can see the new image attachments',
+  );
+});
+
+test('composer image preview dialog sizes itself from the loaded image', async () => {
+  const source = await readComposerSource();
+  const previewBlock = sliceBetween(source, 'open={previewingImage !== null}', '</Dialog>');
+
+  assert.match(source, /const \[previewImageSize, setPreviewImageSize\] = useState/);
+  assert.match(source, /const previewImageFrameStyle = useMemo<CSSProperties \| undefined>/);
+  assert.match(
+    source,
+    /width: `min\(\$\{previewImageSize\.width\}px, min\(92vw, 960px\), calc\(min\(78vh, 720px\) \* \$\{previewImageSize\.width\} \/ \$\{previewImageSize\.height\}\)\)`/,
+  );
+  assert.match(previewBlock, /className="w-fit max-w-\[calc\(100vw-2rem\)\]/);
+  assert.match(previewBlock, /style=\{previewImageFrameStyle\}/);
+  assert.match(previewBlock, /naturalWidth/);
+  assert.match(previewBlock, /naturalHeight/);
+  assert.doesNotMatch(previewBlock, /flex max-h-\[min\(78vh,720px\)\] w-full/);
+});
