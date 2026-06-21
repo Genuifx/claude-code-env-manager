@@ -14,6 +14,7 @@ import {
 } from './claudeSkills';
 import { buildPromptContentParts, type PromptImage } from './promptContent';
 import { normalizeClaudePermissionMode, normalizeCodexSandboxMode } from './permissionModes';
+import { createLocalImageInputs, cleanupTempFiles } from './imageInputs';
 import {
   buildCodexContextUsageFromTokenCount,
   findCodexSessionFile,
@@ -1683,37 +1684,32 @@ async function runCodexTurn(text: string, images?: PromptImage[] | null) {
   let input: import('@openai/codex-sdk').Input;
   const parts = buildPromptContentParts(text, images);
   const hasImages = parts.some((part) => part.type === 'image');
+
+  let tempFiles: string[] = [];
+
   if (hasImages) {
-    const tempDir = path.join(os.tmpdir(), 'ccem-images');
-    fs.mkdirSync(tempDir, { recursive: true });
-
-    const inputParts: import('@openai/codex-sdk').UserInput[] = [];
-    for (const part of parts) {
-      if (part.type === 'text') {
-        inputParts.push({ type: 'text', text: part.text });
-        continue;
-      }
-
-      const ext = part.image.mediaType.split('/')[1] || 'png';
-      const filename = `paste-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
-      const filePath = path.join(tempDir, filename);
-      fs.writeFileSync(filePath, Buffer.from(part.image.base64Data, 'base64'));
-      inputParts.push({ type: 'local_image', path: filePath });
+    try {
+      const result = createLocalImageInputs(parts);
+      input = result.inputs;
+      tempFiles = result.tempFiles;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      emitEvent({ type: 'stderr_line', line: message });
+      throw error;
     }
-
-    input = inputParts;
   } else {
     input = text.trim();
   }
 
-  const streamed = await thread.runStreamed(input, {
-    signal: currentAbortController.signal,
-  });
+  try {
+    const streamed = await thread.runStreamed(input, {
+      signal: currentAbortController.signal,
+    });
 
-  const seenTextByItem = new Map<string, string>();
-  const seenReasoningByItem = new Map<string, string>();
+    const seenTextByItem = new Map<string, string>();
+    const seenReasoningByItem = new Map<string, string>();
 
-  for await (const event of streamed.events) {
+    for await (const event of streamed.events) {
     const rawEvent = event as { type: string; payload?: Record<string, unknown> };
     if (rawEvent.type === 'event_msg') {
       const payload = rawEvent.payload;
@@ -1842,6 +1838,9 @@ async function runCodexTurn(text: string, images?: PromptImage[] | null) {
       });
       continue;
     }
+    }
+  } finally {
+    cleanupTempFiles(tempFiles);
   }
 }
 
