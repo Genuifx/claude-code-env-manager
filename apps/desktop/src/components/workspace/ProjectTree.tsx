@@ -1,6 +1,6 @@
 import { memo, useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import type { DragEvent } from 'react';
-import { Check, ChevronRight, FolderOpen, FolderClosed, MessageSquare, Pin, RefreshCw, SquarePen, X, Plus } from 'lucide-react';
+import { Check, ChevronRight, ChevronsUp, FolderOpen, FolderClosed, MessageSquare, Pin, RefreshCw, SquarePen, X, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -635,6 +635,16 @@ export const ProjectTree = memo(function ProjectTree({
       setProjectVisibleCount((prev) => ({ ...prev, [project]: (prev[project] ?? PAGE_SIZE) + PAGE_SIZE })),
     []
   );
+  const collapseList = useCallback(
+    (project: string) =>
+      setProjectVisibleCount((prev) => {
+        if (!prev[project]) return prev;
+        const next = { ...prev };
+        delete next[project];
+        return next;
+      }),
+    []
+  );
 
   const toggleProject = useCallback(
     (project: string) => {
@@ -927,8 +937,10 @@ export const ProjectTree = memo(function ProjectTree({
         ) : (
           projectNodes.map((node) => {
             const isExpanded = effectiveExpanded.has(node.project);
-            const visible = node.sessions.slice(0, getVisibleCount(node.project));
+            const visibleCount = getVisibleCount(node.project);
+            const visible = node.sessions.slice(0, visibleCount);
             const hasMore = node.sessions.length > visible.length;
+            const canCollapse = visibleCount > PAGE_SIZE;
             return (
               <div key={node.project} className="mb-0.5">
                 {/* Project header */}
@@ -994,14 +1006,28 @@ export const ProjectTree = memo(function ProjectTree({
                 {isExpanded && (
                   <div className="pb-1">
                     {visible.map((session) => renderSessionRow(session))}
-                    {hasMore && (
-                      <button
-                        type="button"
-                        onClick={() => loadMore(node.project)}
-                        className="w-full py-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors pl-9"
-                      >
-                        {t('workspace.loadMore')}
-                      </button>
+                    {(hasMore || canCollapse) && (
+                      <div className="flex items-center gap-3 pl-9 py-1.5 text-[11px]">
+                        {canCollapse && (
+                          <button
+                            type="button"
+                            onClick={() => collapseList(node.project)}
+                            className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            <ChevronsUp className="h-3 w-3" />
+                            {t('workspace.collapseList')}
+                          </button>
+                        )}
+                        {hasMore && (
+                          <button
+                            type="button"
+                            onClick={() => loadMore(node.project)}
+                            className="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            {t('workspace.loadMore')}
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
