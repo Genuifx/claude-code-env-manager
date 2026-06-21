@@ -1233,15 +1233,30 @@ export function WorkspaceNativeSessionView({
     setIsExternalActionsOpen(true);
   }, []);
 
+  const closeExternalActionsMenu = useCallback(() => {
+    if (externalActionsCloseTimerRef.current !== null) {
+      window.clearTimeout(externalActionsCloseTimerRef.current);
+      externalActionsCloseTimerRef.current = null;
+    }
+    setIsExternalActionsOpen(false);
+  }, []);
+
   const scheduleExternalActionsClose = useCallback(() => {
     if (externalActionsCloseTimerRef.current !== null) {
       window.clearTimeout(externalActionsCloseTimerRef.current);
     }
     externalActionsCloseTimerRef.current = window.setTimeout(() => {
-      setIsExternalActionsOpen(false);
-      externalActionsCloseTimerRef.current = null;
+      closeExternalActionsMenu();
     }, 180);
-  }, []);
+  }, [closeExternalActionsMenu]);
+
+  const handleExternalActionsOpenChange = useCallback((open: boolean) => {
+    if (open) {
+      openExternalActionsMenu();
+      return;
+    }
+    closeExternalActionsMenu();
+  }, [closeExternalActionsMenu, openExternalActionsMenu]);
 
   useEffect(() => {
     return () => {
@@ -2457,7 +2472,7 @@ export function WorkspaceNativeSessionView({
         secondaryActions={(
           <>
             <ContextWindowIndicator usage={sessionUsage} />
-            <DropdownMenu open={isExternalActionsOpen} onOpenChange={setIsExternalActionsOpen}>
+            <DropdownMenu modal={false} open={isExternalActionsOpen} onOpenChange={handleExternalActionsOpenChange}>
               <span
                 className="inline-flex"
                 onMouseEnter={openExternalActionsMenu}
@@ -2488,7 +2503,9 @@ export function WorkspaceNativeSessionView({
                       </Button>
                     </DropdownMenuTrigger>
                   </TooltipTrigger>
-                  <TooltipContent side="top">{t('workspace.externalActions')}</TooltipContent>
+                  {!isExternalActionsOpen && (
+                    <TooltipContent side="top">{t('workspace.externalActions')}</TooltipContent>
+                  )}
                 </Tooltip>
               </span>
               <DropdownMenuContent

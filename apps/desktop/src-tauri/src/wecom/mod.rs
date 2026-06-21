@@ -43,6 +43,8 @@ const WECOM_TEXT_LIMIT: usize = 20_000;
 const WECOM_ADMISSION_TIMEOUT_MS: u64 = 30_000;
 const WECOM_ADMISSION_POLL_MS: u64 = 250;
 const WECOM_SEND_ACK_TIMEOUT_MS: u64 = 5_000;
+const WECOM_MARKDOWN_SEND_RETRY_TIMEOUT_MS: u64 = 15_000;
+const WECOM_MARKDOWN_SEND_RETRY_MS: u64 = 500;
 
 type WecomSocket = WebSocket<MaybeTlsStream<TcpStream>>;
 
@@ -304,6 +306,28 @@ impl WecomBridgeManager {
         peer_id: &str,
         content: &str,
     ) -> Result<String, String> {
+        let started_at = Instant::now();
+        loop {
+            match self.try_send_markdown_message(bot_id, peer_id, content) {
+                Ok(message_id) => return Ok(message_id),
+                Err(error)
+                    if wecom_markdown_send_error_is_retryable(&error)
+                        && started_at.elapsed()
+                            < Duration::from_millis(WECOM_MARKDOWN_SEND_RETRY_TIMEOUT_MS) =>
+                {
+                    thread::sleep(Duration::from_millis(WECOM_MARKDOWN_SEND_RETRY_MS));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    fn try_send_markdown_message(
+        &self,
+        bot_id: Option<&str>,
+        peer_id: &str,
+        content: &str,
+    ) -> Result<String, String> {
         let connection = self.connection_for_bot(bot_id)?;
         if !connection.is_connected() {
             return Err("WeCom bot connection is not active.".to_string());
@@ -414,7 +438,7 @@ impl WecomConnection {
 
     pub fn send_markdown_message(&self, chatid: &str, content: &str) -> Result<String, String> {
         let req_id = generate_req_id("aibot_send_msg");
-        self.send_frame_waiting_for_ack(
+        match self.send_frame_waiting_for_ack(
             &req_id,
             json!({
                 "cmd": "aibot_send_msg",
@@ -427,7 +451,13 @@ impl WecomConnection {
                     }
                 }
             }),
-        )?;
+        ) {
+            Ok(()) => {}
+            Err(error) if error.starts_with("WeCom send ack timed out:") => {
+                eprintln!("WeCom send markdown ack timeout warning: {}", error);
+            }
+            Err(error) => return Err(error),
+        }
         Ok(req_id)
     }
 
@@ -1176,6 +1206,15 @@ fn wecom_chatid_from_peer_id(peer_id: &str) -> String {
         .to_string()
 }
 
+fn wecom_markdown_send_error_is_retryable(error: &str) -> bool {
+    error == "WeCom socket is not connected"
+        || error == "WeCom bot connection is not active."
+        || error == "No WeCom bot connection is active."
+        || error.starts_with("WeCom bot is not connected:")
+        || error.starts_with("Failed to send WeCom frame:")
+        || error.starts_with("WeCom send ack channel closed:")
+}
+
 fn read_next_frame(connection: &WecomConnection) -> Result<Option<WecomFrame>, String> {
     let mut guard = connection
         .socket
@@ -1286,6 +1325,9 @@ fn try_route_bot_binding_message(
 
     let unified_state = app.state::<Arc<crate::unified_runtime::UnifiedSessionManager>>();
     let native_state = app.state::<Arc<crate::native_runtime::NativeRuntimeManager>>();
+    let outbox_cursor = bot_binding_manager
+        .outbox(Some(binding.binding_id.clone()))
+        .len();
     bot_binding_manager.send_inbound_command(
         app,
         unified_state.inner().as_ref(),
@@ -1303,9 +1345,395 @@ fn try_route_bot_binding_message(
         &frame.headers.req_id,
         stream_id,
         "已转入绑定的 CCEM 会话。",
-        true,
+        false,
+    )?;
+    spawn_bot_binding_stream_relay(
+        Arc::clone(manager),
+        bot_binding_manager.inner().clone(),
+        binding.binding_id.clone(),
+        binding.bot_id.clone(),
+        frame.headers.req_id.clone(),
+        stream_id.to_string(),
+        outbox_cursor,
     )?;
     Ok(true)
+}
+
+fn spawn_bot_binding_stream_relay(
+    manager: Arc<WecomBridgeManager>,
+    bot_binding_manager: Arc<crate::bot_binding::BotBindingManager>,
+    binding_id: String,
+    bot_id: Option<String>,
+    req_id: String,
+    stream_id: String,
+    start_cursor: usize,
+) -> Result<(), String> {
+    const POLL_MS: u64 = 750;
+    const MAX_MS: u64 = 6 * 60 * 60 * 1_000;
+    const TEXT_LIMIT: usize = 18_000;
+
+    thread::Builder::new()
+        .name(format!("wecom-bot-binding-relay-{binding_id}"))
+        .spawn(move || {
+            let started_at = Instant::now();
+            let mut cursor = start_cursor;
+            let mut content = String::new();
+            let mut last_sent = String::new();
+
+            loop {
+                let frames = bot_binding_manager.outbox(Some(binding_id.clone()));
+                let mut should_finish = false;
+
+                if cursor < frames.len() {
+                    for frame in frames.iter().skip(cursor) {
+                        let has_content = !content.trim().is_empty();
+                        if let Some(block) = format_bot_binding_stream_block(frame, has_content) {
+                            append_bot_binding_stream_block(
+                                &mut content,
+                                &block,
+                                bot_binding_frame_is_inline_text(frame),
+                            );
+                        }
+                        if bot_binding_frame_finishes_stream(frame) {
+                            should_finish = true;
+                            break;
+                        }
+                    }
+                    cursor = frames.len();
+
+                    if should_finish && content.trim().is_empty() {
+                        content.push_str("完成。");
+                    }
+
+                    if should_finish || content != last_sent {
+                        let payload = truncate_utf8(&content, TEXT_LIMIT);
+                        match send_bot_binding_stream_update(
+                            &manager,
+                            bot_id.as_deref(),
+                            &req_id,
+                            &stream_id,
+                            &payload,
+                            should_finish,
+                        ) {
+                            Ok(()) => last_sent = content.clone(),
+                            Err(error) => {
+                                eprintln!("WeCom bot binding relay warning: {}", error);
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if should_finish {
+                    break;
+                }
+
+                if started_at.elapsed() >= Duration::from_millis(MAX_MS) {
+                    append_bot_binding_stream_block(
+                        &mut content,
+                        "绑定会话仍在运行，企微本次推送窗口已结束。",
+                        false,
+                    );
+                    let payload = truncate_utf8(&content, TEXT_LIMIT);
+                    if let Err(error) = send_bot_binding_stream_update(
+                        &manager,
+                        bot_id.as_deref(),
+                        &req_id,
+                        &stream_id,
+                        &payload,
+                        true,
+                    ) {
+                        eprintln!("WeCom bot binding relay timeout warning: {}", error);
+                    }
+                    break;
+                }
+
+                thread::sleep(Duration::from_millis(POLL_MS));
+            }
+        })
+        .map(|_| ())
+        .map_err(|error| format!("Failed to spawn WeCom bot binding relay: {}", error))
+}
+
+pub fn start_bot_binding_markdown_relay(
+    manager: Arc<WecomBridgeManager>,
+    bot_binding_manager: Arc<crate::bot_binding::BotBindingManager>,
+    binding: crate::bot_binding::BotBindingInfo,
+    start_cursor: usize,
+) -> Result<(), String> {
+    if binding.platform != RemotePlatform::Wecom {
+        return Ok(());
+    }
+
+    const POLL_MS: u64 = 750;
+    const MAX_MS: u64 = 6 * 60 * 60 * 1_000;
+    const TEXT_LIMIT: usize = 18_000;
+
+    let binding_id = binding.binding_id.clone();
+    let bot_id = binding.bot_id.clone();
+    let peer_id = binding.peer_id.clone();
+    thread::Builder::new()
+        .name(format!("wecom-bot-binding-markdown-relay-{binding_id}"))
+        .spawn(move || {
+            let started_at = Instant::now();
+            let mut cursor = start_cursor;
+            let mut sent_any = false;
+            let mut skipping_streamed_reply = false;
+
+            loop {
+                let frames = bot_binding_manager.outbox(Some(binding_id.clone()));
+                let mut blocks = Vec::<String>::new();
+                let mut should_finish = false;
+                let mut skipped_streamed_reply_finished = false;
+                let mut next_cursor = cursor;
+
+                if cursor < frames.len() {
+                    for (index, frame) in frames.iter().enumerate().skip(cursor) {
+                        next_cursor = index + 1;
+                        if matches!(
+                            &frame.kind,
+                            crate::bot_binding::BotBindingOutboxFrameKind::InboundCommand
+                        ) {
+                            skipping_streamed_reply = true;
+                            continue;
+                        }
+                        let frame_finishes = bot_binding_frame_finishes_stream(frame);
+                        if skipping_streamed_reply {
+                            if frame_finishes {
+                                skipping_streamed_reply = false;
+                                skipped_streamed_reply_finished = true;
+                                should_finish = true;
+                                break;
+                            }
+                            continue;
+                        }
+
+                        let has_prior_content = sent_any || !blocks.is_empty();
+                        if let Some(block) =
+                            format_bot_binding_stream_block(frame, has_prior_content)
+                        {
+                            append_bot_binding_stream_vec_block(
+                                &mut blocks,
+                                block,
+                                bot_binding_frame_is_inline_text(frame),
+                            );
+                        }
+                        if frame_finishes {
+                            should_finish = true;
+                            break;
+                        }
+                    }
+                    if should_finish && blocks.is_empty() && !skipped_streamed_reply_finished {
+                        blocks.push("完成。".to_string());
+                    }
+
+                    let mut batch_delivered = blocks.is_empty();
+                    let mut stop_relay = false;
+                    if !blocks.is_empty() {
+                        let payload = truncate_utf8(&blocks.join("\n\n"), TEXT_LIMIT);
+                        match manager.send_markdown_message(bot_id.as_deref(), &peer_id, &payload) {
+                            Ok(_) => {
+                                sent_any = true;
+                                batch_delivered = true;
+                            }
+                            Err(error) => {
+                                eprintln!("WeCom bot binding markdown relay warning: {}", error);
+                                match bot_binding_markdown_send_outcome(&error) {
+                                    BotBindingMarkdownSendOutcome::AssumeDelivered => {
+                                        sent_any = true;
+                                        batch_delivered = true;
+                                    }
+                                    BotBindingMarkdownSendOutcome::RetryLater => {}
+                                    BotBindingMarkdownSendOutcome::Fatal => {
+                                        stop_relay = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if batch_delivered {
+                        cursor = next_cursor;
+                    }
+                    if stop_relay || (should_finish && batch_delivered) {
+                        break;
+                    }
+                }
+
+                if started_at.elapsed() >= Duration::from_millis(MAX_MS) {
+                    let payload = "绑定会话仍在运行，企微本次同步窗口已结束。";
+                    if let Err(error) =
+                        manager.send_markdown_message(bot_id.as_deref(), &peer_id, payload)
+                    {
+                        eprintln!(
+                            "WeCom bot binding markdown relay timeout warning: {}",
+                            error
+                        );
+                    }
+                    break;
+                }
+
+                thread::sleep(Duration::from_millis(POLL_MS));
+            }
+        })
+        .map(|_| ())
+        .map_err(|error| {
+            format!(
+                "Failed to spawn WeCom bot binding markdown relay: {}",
+                error
+            )
+        })
+}
+
+fn send_bot_binding_stream_update(
+    manager: &WecomBridgeManager,
+    bot_id: Option<&str>,
+    req_id: &str,
+    stream_id: &str,
+    content: &str,
+    finish: bool,
+) -> Result<(), String> {
+    let connection = manager.connection_for_bot(bot_id)?;
+    if !connection.is_connected() {
+        return Err("WeCom bot connection is not active.".to_string());
+    }
+    connection.send_stream(req_id, stream_id, content, finish)
+}
+
+fn format_bot_binding_stream_block(
+    frame: &crate::bot_binding::BotBindingOutboxFrame,
+    has_prior_content: bool,
+) -> Option<String> {
+    let text = frame.text.trim();
+    match &frame.kind {
+        crate::bot_binding::BotBindingOutboxFrameKind::TaskCard
+        | crate::bot_binding::BotBindingOutboxFrameKind::InboundCommand => None,
+        crate::bot_binding::BotBindingOutboxFrameKind::EventUpdate
+            if matches!(
+                frame.title.as_str(),
+                "User prompt" | "System message" | "Token usage" | "Context usage"
+            ) =>
+        {
+            None
+        }
+        crate::bot_binding::BotBindingOutboxFrameKind::EventUpdate
+            if frame.title == "Assistant update" =>
+        {
+            (!frame.text.trim().is_empty()).then(|| frame.text.clone())
+        }
+        crate::bot_binding::BotBindingOutboxFrameKind::EventUpdate
+            if frame.title == "Lifecycle · turn_completed" =>
+        {
+            if has_prior_content || text.is_empty() {
+                Some("完成。".to_string())
+            } else {
+                Some(format!("完成：{text}"))
+            }
+        }
+        crate::bot_binding::BotBindingOutboxFrameKind::EventUpdate => {
+            format_titled_bot_binding_block(&frame.title, text)
+        }
+        crate::bot_binding::BotBindingOutboxFrameKind::InteractiveOutput => {
+            Some(format!("{}\n```text\n{}\n```", frame.title, text))
+        }
+        crate::bot_binding::BotBindingOutboxFrameKind::PermissionPrompt => {
+            format_titled_bot_binding_block(&format!("需要处理：{}", frame.title), text)
+        }
+        crate::bot_binding::BotBindingOutboxFrameKind::SessionCompleted => {
+            if has_prior_content || text.is_empty() || matches!(text, "completed" | "stopped") {
+                Some("完成。".to_string())
+            } else {
+                Some(format!("完成：{text}"))
+            }
+        }
+        crate::bot_binding::BotBindingOutboxFrameKind::Error => {
+            format_titled_bot_binding_block(&format!("错误：{}", frame.title), text)
+        }
+    }
+}
+
+fn format_titled_bot_binding_block(title: &str, text: &str) -> Option<String> {
+    if title.trim().is_empty() && text.is_empty() {
+        None
+    } else if text.is_empty() {
+        Some(title.trim().to_string())
+    } else if title.trim().is_empty() {
+        Some(text.to_string())
+    } else {
+        Some(format!("**{}**\n{}", title.trim(), text))
+    }
+}
+
+fn append_bot_binding_stream_block(content: &mut String, block: &str, inline: bool) {
+    if inline {
+        if !block.trim().is_empty() {
+            content.push_str(block);
+        }
+        return;
+    }
+
+    let trimmed = block.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if !content.trim().is_empty() {
+        content.push_str("\n\n");
+    }
+    content.push_str(trimmed);
+}
+
+fn append_bot_binding_stream_vec_block(blocks: &mut Vec<String>, block: String, inline: bool) {
+    if inline {
+        if block.trim().is_empty() {
+            return;
+        }
+        match blocks.last_mut() {
+            Some(last) if !last.starts_with("**") && !last.contains("\n```") => {
+                last.push_str(&block);
+            }
+            _ => blocks.push(block),
+        }
+        return;
+    }
+
+    let trimmed = block.trim();
+    if !trimmed.is_empty() {
+        blocks.push(trimmed.to_string());
+    }
+}
+
+fn bot_binding_frame_is_inline_text(frame: &crate::bot_binding::BotBindingOutboxFrame) -> bool {
+    matches!(
+        &frame.kind,
+        crate::bot_binding::BotBindingOutboxFrameKind::EventUpdate
+    ) && frame.title == "Assistant update"
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BotBindingMarkdownSendOutcome {
+    AssumeDelivered,
+    RetryLater,
+    Fatal,
+}
+
+fn bot_binding_markdown_send_outcome(error: &str) -> BotBindingMarkdownSendOutcome {
+    if error.starts_with("WeCom send ack timed out:") {
+        return BotBindingMarkdownSendOutcome::AssumeDelivered;
+    }
+    if error.starts_with("WeCom send ack failed:") {
+        return BotBindingMarkdownSendOutcome::Fatal;
+    }
+    BotBindingMarkdownSendOutcome::RetryLater
+}
+
+fn bot_binding_frame_finishes_stream(frame: &crate::bot_binding::BotBindingOutboxFrame) -> bool {
+    matches!(
+        &frame.kind,
+        crate::bot_binding::BotBindingOutboxFrameKind::SessionCompleted
+    ) || (matches!(
+        &frame.kind,
+        crate::bot_binding::BotBindingOutboxFrameKind::EventUpdate
+    ) && frame.title == "Lifecycle · turn_completed")
 }
 
 fn set_socket_read_timeout(socket: &mut WecomSocket) {
@@ -1364,12 +1792,29 @@ fn generate_req_id(prefix: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bot_binding::{BotBindingOutboxFrame, BotBindingOutboxFrameKind};
 
     #[test]
     fn wecom_chatid_from_peer_id_strips_internal_scope_prefixes() {
         assert_eq!(wecom_chatid_from_peer_id("single:user_a"), "user_a");
         assert_eq!(wecom_chatid_from_peer_id("group:chat_1"), "chat_1");
         assert_eq!(wecom_chatid_from_peer_id(" raw_id "), "raw_id");
+    }
+
+    #[test]
+    fn wecom_markdown_send_retries_transient_connection_errors() {
+        assert!(wecom_markdown_send_error_is_retryable(
+            "WeCom socket is not connected"
+        ));
+        assert!(wecom_markdown_send_error_is_retryable(
+            "WeCom bot is not connected: webot"
+        ));
+        assert!(wecom_markdown_send_error_is_retryable(
+            "Failed to send WeCom frame: AlreadyClosed"
+        ));
+        assert!(!wecom_markdown_send_error_is_retryable(
+            "WeCom send ack failed: invalid chatid"
+        ));
     }
 
     #[test]
@@ -1390,5 +1835,136 @@ mod tests {
             markers.correlation_marker.as_deref(),
             Some("ccem-bot-binding:binding:ccem-task-runtime")
         );
+    }
+
+    #[test]
+    fn bot_binding_stream_block_skips_routing_noise() {
+        let user_prompt = bot_binding_frame(
+            BotBindingOutboxFrameKind::EventUpdate,
+            "User prompt",
+            "[ccem bot-bound command]\ncontinue",
+        );
+        let system_message = bot_binding_frame(
+            BotBindingOutboxFrameKind::EventUpdate,
+            "System message",
+            "internal native sdk chunk",
+        );
+        let inbound = bot_binding_frame(
+            BotBindingOutboxFrameKind::InboundCommand,
+            "Inbound bot command",
+            "continue",
+        );
+
+        assert_eq!(format_bot_binding_stream_block(&user_prompt, false), None);
+        assert_eq!(
+            format_bot_binding_stream_block(&system_message, false),
+            None
+        );
+        assert_eq!(format_bot_binding_stream_block(&inbound, false), None);
+    }
+
+    #[test]
+    fn bot_binding_assistant_chunks_preserve_spacing_and_merge_inline() {
+        let first = bot_binding_frame(
+            BotBindingOutboxFrameKind::EventUpdate,
+            "Assistant update",
+            "最新",
+        );
+        let second = bot_binding_frame(
+            BotBindingOutboxFrameKind::EventUpdate,
+            "Assistant update",
+            " AI",
+        );
+        let mut blocks = Vec::new();
+
+        let first_block = format_bot_binding_stream_block(&first, false).unwrap();
+        let second_block = format_bot_binding_stream_block(&second, true).unwrap();
+        append_bot_binding_stream_vec_block(
+            &mut blocks,
+            first_block,
+            bot_binding_frame_is_inline_text(&first),
+        );
+        append_bot_binding_stream_vec_block(
+            &mut blocks,
+            second_block,
+            bot_binding_frame_is_inline_text(&second),
+        );
+
+        assert_eq!(blocks, vec!["最新 AI"]);
+    }
+
+    #[test]
+    fn bot_binding_turn_completed_finishes_stream_without_repeating_answer() {
+        let assistant = bot_binding_frame(
+            BotBindingOutboxFrameKind::EventUpdate,
+            "Assistant update",
+            "已经定位到问题。",
+        );
+        let completed = bot_binding_frame(
+            BotBindingOutboxFrameKind::EventUpdate,
+            "Lifecycle · turn_completed",
+            "已经定位到问题。",
+        );
+
+        assert_eq!(
+            format_bot_binding_stream_block(&assistant, false).as_deref(),
+            Some("已经定位到问题。")
+        );
+        assert_eq!(
+            format_bot_binding_stream_block(&completed, true).as_deref(),
+            Some("完成。")
+        );
+        assert!(bot_binding_frame_finishes_stream(&completed));
+    }
+
+    #[test]
+    fn bot_binding_tool_events_are_streamed_as_progress() {
+        let tool = bot_binding_frame(
+            BotBindingOutboxFrameKind::EventUpdate,
+            "Tool started · rg",
+            "rg -n bot_binding",
+        );
+
+        assert_eq!(
+            format_bot_binding_stream_block(&tool, false).as_deref(),
+            Some("**Tool started · rg**\nrg -n bot_binding")
+        );
+        assert!(!bot_binding_frame_finishes_stream(&tool));
+    }
+
+    #[test]
+    fn bot_binding_markdown_relay_keeps_running_on_send_ack_timeout() {
+        assert_eq!(
+            bot_binding_markdown_send_outcome("WeCom send ack timed out: aibot_send_msg_1"),
+            BotBindingMarkdownSendOutcome::AssumeDelivered
+        );
+        assert_eq!(
+            bot_binding_markdown_send_outcome("WeCom socket is not connected"),
+            BotBindingMarkdownSendOutcome::RetryLater
+        );
+        assert_eq!(
+            bot_binding_markdown_send_outcome("WeCom send ack failed: errcode 1"),
+            BotBindingMarkdownSendOutcome::Fatal
+        );
+    }
+
+    fn bot_binding_frame(
+        kind: BotBindingOutboxFrameKind,
+        title: &str,
+        text: &str,
+    ) -> BotBindingOutboxFrame {
+        BotBindingOutboxFrame {
+            frame_id: "frame-1".to_string(),
+            binding_id: "binding-1".to_string(),
+            runtime_id: "runtime-1".to_string(),
+            task_id: "ccem-task-runtime-1".to_string(),
+            kind,
+            title: title.to_string(),
+            text: text.to_string(),
+            quoted_task_id: None,
+            correlation_marker: None,
+            delivery_message_id: None,
+            occurred_at: Utc::now(),
+        }
     }
 }

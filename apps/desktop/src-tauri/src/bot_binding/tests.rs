@@ -164,6 +164,16 @@ fn persisted_binding_state_restores_delivery_route_metadata() {
 }
 
 #[test]
+fn native_relay_claim_dedupes_and_can_be_released_after_restart() {
+    let manager = BotBindingManager::default();
+
+    assert!(manager.claim_native_relay("binding-1"));
+    assert!(!manager.claim_native_relay("binding-1"));
+    manager.release_native_relay("binding-1");
+    assert!(manager.claim_native_relay("binding-1"));
+}
+
+#[test]
 fn route_lookup_matches_quoted_task_or_correlation_marker() {
     let manager = BotBindingManager::default();
     let (info, _) = manager

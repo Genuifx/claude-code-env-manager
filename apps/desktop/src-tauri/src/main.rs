@@ -1044,6 +1044,9 @@ fn deliver_bot_binding_task_card(
         return Ok(info.clone());
     }
 
+    let relay_cursor = bot_binding_manager
+        .outbox(Some(info.binding_id.clone()))
+        .len();
     let pending = bot_binding_manager.mark_task_card_delivery_pending(&info.binding_id)?;
     match wecom_manager.send_markdown_message(
         pending.bot_id.as_deref(),
@@ -1051,7 +1054,17 @@ fn deliver_bot_binding_task_card(
         &format_wecom_task_binding_card(&pending),
     ) {
         Ok(message_id) => {
-            bot_binding_manager.mark_task_card_delivered(&pending.binding_id, message_id)
+            let delivered =
+                bot_binding_manager.mark_task_card_delivered(&pending.binding_id, message_id)?;
+            if let Err(error) = wecom::start_bot_binding_markdown_relay(
+                Arc::clone(wecom_manager),
+                Arc::clone(bot_binding_manager),
+                delivered.clone(),
+                relay_cursor,
+            ) {
+                eprintln!("WeCom bot binding markdown relay start warning: {}", error);
+            }
+            Ok(delivered)
         }
         Err(error) => {
             bot_binding_manager.mark_task_card_delivery_failed(&pending.binding_id, error)

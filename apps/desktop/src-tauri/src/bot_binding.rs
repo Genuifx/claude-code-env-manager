@@ -131,6 +131,7 @@ pub struct BotBindingManager {
     bindings: Mutex<HashMap<String, BotBindingInfo>>,
     outbox: Mutex<Vec<BotBindingOutboxFrame>>,
     processed_file_requests: Mutex<HashSet<String>>,
+    native_relay_bindings: Mutex<HashSet<String>>,
     storage_path: Option<PathBuf>,
 }
 
@@ -167,6 +168,7 @@ impl BotBindingManager {
             bindings: Mutex::new(bindings),
             outbox: Mutex::new(Vec::new()),
             processed_file_requests: Mutex::new(HashSet::new()),
+            native_relay_bindings: Mutex::new(HashSet::new()),
             storage_path,
         }
     }
@@ -250,8 +252,8 @@ impl BotBindingManager {
                 &format_task_card(&info),
                 None,
             )?;
-            self.start_native_relay(native, info.clone());
         }
+        self.start_native_relay(native, info.clone());
 
         Ok(info)
     }
@@ -604,6 +606,10 @@ impl BotBindingManager {
         native: Arc<NativeRuntimeManager>,
         info: BotBindingInfo,
     ) {
+        if !self.claim_native_relay(&info.binding_id) {
+            return;
+        }
+
         let manager = self.clone();
         thread::spawn(move || {
             let channel = BotBindingChannel::new(manager.clone(), info.clone());
@@ -632,7 +638,21 @@ impl BotBindingManager {
                 }
                 thread::sleep(Duration::from_millis(REQUEST_WATCH_INTERVAL_MS));
             }
+            manager.release_native_relay(&info.binding_id);
         });
+    }
+
+    fn claim_native_relay(&self, binding_id: &str) -> bool {
+        self.native_relay_bindings
+            .lock()
+            .map(|mut active| active.insert(binding_id.to_string()))
+            .unwrap_or(false)
+    }
+
+    fn release_native_relay(&self, binding_id: &str) {
+        if let Ok(mut active) = self.native_relay_bindings.lock() {
+            active.remove(binding_id);
+        }
     }
 }
 
