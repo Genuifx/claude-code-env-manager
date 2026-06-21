@@ -69,3 +69,33 @@ test('can start Claude in plan mode while enabling later bypass restore', async 
     },
   );
 });
+
+test('normalizeCodexSandboxMode maps each permission mode to correct sandbox + network policy', async () => {
+  const { normalizeCodexSandboxMode } = await importPermissionModesModule();
+
+  const cases = [
+    // yolo / danger-full-access → full access, network ON
+    { mode: 'yolo', sandboxMode: 'danger-full-access', approvalPolicy: 'never', networkAccessEnabled: true },
+    { mode: 'danger-full-access', sandboxMode: 'danger-full-access', approvalPolicy: 'never', networkAccessEnabled: true },
+
+    // readonly / audit / plan / read-only → read-only sandbox, network OFF
+    { mode: 'readonly', sandboxMode: 'read-only', approvalPolicy: 'never', networkAccessEnabled: false },
+    { mode: 'audit', sandboxMode: 'read-only', approvalPolicy: 'never', networkAccessEnabled: false },
+    { mode: 'plan', sandboxMode: 'read-only', approvalPolicy: 'never', networkAccessEnabled: false },
+    { mode: 'read-only', sandboxMode: 'read-only', approvalPolicy: 'never', networkAccessEnabled: false },
+
+    // safe / ci → workspace-write but network OFF (conservative)
+    { mode: 'safe', sandboxMode: 'workspace-write', approvalPolicy: 'on-request', networkAccessEnabled: false },
+    { mode: 'ci', sandboxMode: 'workspace-write', approvalPolicy: 'on-request', networkAccessEnabled: false },
+
+    // dev / default / unknown → workspace-write, network ON (development workflow)
+    { mode: 'dev', sandboxMode: 'workspace-write', approvalPolicy: 'on-request', networkAccessEnabled: true },
+    { mode: 'default', sandboxMode: 'workspace-write', approvalPolicy: 'on-request', networkAccessEnabled: true },
+    { mode: 'unknown-mode', sandboxMode: 'workspace-write', approvalPolicy: 'on-request', networkAccessEnabled: true },
+  ];
+
+  for (const { mode, ...expected } of cases) {
+    const result = normalizeCodexSandboxMode(mode);
+    assert.deepEqual(result, expected, `mode "${mode}" should map to ${JSON.stringify(expected)}`);
+  }
+});
