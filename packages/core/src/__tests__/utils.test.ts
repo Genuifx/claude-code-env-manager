@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import crypto from 'crypto';
 import { encrypt, decrypt } from '../utils.js';
 import {
   findProjectRoot,
@@ -69,6 +70,63 @@ describe('utils', () => {
     it('should return input for malformed encrypted string', () => {
       expect(decrypt('enc:invalid')).toBe('enc:invalid');
       expect(decrypt('enc:xx:yy:zz')).toBe('enc:xx:yy:zz');
+    });
+
+    it('should produce v2 format with GCM structure', () => {
+      const encrypted = encrypt('test-token');
+      expect(encrypted.startsWith('enc:v2:')).toBe(true);
+      const parts = encrypted.split(':');
+      expect(parts.length).toBe(5); // enc, v2, nonce, ciphertext, tag
+      expect(parts[2].length).toBe(24); // 12-byte nonce = 24 hex chars
+      expect(parts[4].length).toBe(32); // 16-byte tag = 32 hex chars
+    });
+
+    it('should decrypt legacy enc: format (AES-256-CBC migration)', () => {
+      // Simulate a legacy encrypted value created with the old hardcoded key
+      const legacyKey = crypto.scryptSync('claude-code-env-manager-secret', 'salt', 32);
+      const iv = crypto.randomBytes(16);
+      const cipher = crypto.createCipheriv('aes-256-cbc', legacyKey, iv);
+      let enc = cipher.update('legacy-api-key', 'utf8', 'hex');
+      enc += cipher.final('hex');
+      const legacyEncrypted = `enc:${iv.toString('hex')}:${enc}`;
+
+      // decrypt should handle legacy format
+      const decrypted = decrypt(legacyEncrypted);
+      expect(decrypted).toBe('legacy-api-key');
+    });
+
+    it('should migrate legacy to v2: decrypt legacy, re-encrypt, decrypt v2', () => {
+      const plaintext = 'migration-test-value-123';
+
+      // Create legacy encrypted value
+      const legacyKey = crypto.scryptSync('claude-code-env-manager-secret', 'salt', 32);
+      const iv = crypto.randomBytes(16);
+      const cipher = crypto.createCipheriv('aes-256-cbc', legacyKey, iv);
+      let enc = cipher.update(plaintext, 'utf8', 'hex');
+      enc += cipher.final('hex');
+      const legacyEncrypted = `enc:${iv.toString('hex')}:${enc}`;
+
+      // Step 1: Decrypt legacy
+      const decrypted = decrypt(legacyEncrypted);
+      expect(decrypted).toBe(plaintext);
+
+      // Step 2: Re-encrypt with v2
+      const v2Encrypted = encrypt(decrypted);
+      expect(v2Encrypted.startsWith('enc:v2:')).toBe(true);
+
+      // Step 3: Decrypt v2 — should match original
+      const finalDecrypted = decrypt(v2Encrypted);
+      expect(finalDecrypted).toBe(plaintext);
+    });
+
+    it('should detect tampered v2 ciphertext (AEAD auth tag)', () => {
+      const encrypted = encrypt('sensitive-value');
+      const parts = encrypted.split(':');
+
+      // Replace auth tag with zeros — GCM auth should fail
+      const tampered = `${parts[0]}:${parts[1]}:${parts[2]}:${parts[3]}:${'0'.repeat(32)}`;
+      // v2 tamper must throw — silently returning ciphertext as plaintext is dangerous
+      expect(() => decrypt(tampered)).toThrow(/Failed to decrypt enc:v2/);
     });
   });
 });
