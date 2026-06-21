@@ -3,27 +3,86 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-// Encryption setup
-const ALGORITHM = 'aes-256-cbc';
-const SECRET_KEY = crypto.scryptSync('claude-code-env-manager-secret', 'salt', 32);
+// Legacy key (for migration decryption only — hardcoded, same as pre-v2)
+const LEGACY_ALGORITHM = 'aes-256-cbc';
+const LEGACY_KEY = crypto.scryptSync('claude-code-env-manager-secret', 'salt', 32);
 
+// v2 encryption: AES-256-GCM with per-install random key
+const V2_ALGORITHM = 'aes-256-gcm';
+let _installKey: Buffer | null = null;
+
+/**
+ * Get or create the per-install encryption key from ~/.ccem/.install-key.
+ * The key is 32 random bytes, stored hex-encoded with mode 0600.
+ * Shared between CLI and desktop since both use the same ~/.ccem/ directory.
+ */
+function getOrCreateInstallKey(): Buffer {
+  if (_installKey) return _installKey;
+
+  const keyPath = path.join(getCcemConfigDir(), '.install-key');
+  if (fs.existsSync(keyPath)) {
+    _installKey = Buffer.from(fs.readFileSync(keyPath, 'utf-8').trim(), 'hex');
+    return _installKey;
+  }
+
+  // Create directory if needed, then write new key
+  ensureCcemDir();
+  _installKey = crypto.randomBytes(32);
+  fs.writeFileSync(keyPath, _installKey.toString('hex'), { mode: 0o600 });
+  return _installKey;
+}
+
+/**
+ * Encrypt plaintext using AES-256-GCM with the install-bound key.
+ * Format: enc:v2:<nonce_hex>:<ciphertext_hex>:<auth_tag_hex>
+ */
 export const encrypt = (text: string): string => {
   if (!text) return text;
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv(ALGORITHM, SECRET_KEY, iv);
+  const key = getOrCreateInstallKey();
+  const nonce = crypto.randomBytes(12); // 96-bit nonce for GCM
+  const cipher = crypto.createCipheriv(V2_ALGORITHM, key, nonce);
   let encrypted = cipher.update(text, 'utf8', 'hex');
   encrypted += cipher.final('hex');
-  return `enc:${iv.toString('hex')}:${encrypted}`;
+  const tag = cipher.getAuthTag();
+  return `enc:v2:${nonce.toString('hex')}:${encrypted}:${tag.toString('hex')}`;
 };
 
+/**
+ * Decrypt ciphertext. Auto-detects v2 (AES-256-GCM) vs legacy (AES-256-CBC).
+ * Legacy format is kept solely for migration; on next save it gets re-encrypted as v2.
+ */
 export const decrypt = (text: string): string => {
   if (!text || !text.startsWith('enc:')) return text;
+
+  // v2 format: enc:v2:nonce_hex:ciphertext_hex:tag_hex
+  if (text.startsWith('enc:v2:')) {
+    const parts = text.split(':');
+    if (parts.length !== 5) return text; // malformed — graceful fallback
+    try {
+      const key = getOrCreateInstallKey();
+      const nonce = Buffer.from(parts[2], 'hex');
+      const ciphertext = parts[3];
+      const tag = Buffer.from(parts[4], 'hex');
+      const decipher = crypto.createDecipheriv(V2_ALGORITHM, key, nonce);
+      decipher.setAuthTag(tag);
+      let decrypted = decipher.update(ciphertext, 'hex', 'utf8');
+      decrypted += decipher.final('utf8');
+      return decrypted;
+    } catch {
+      // AEAD auth tag failure = tampered data or wrong key.
+      // Must NOT return the ciphertext as plaintext — that would silently
+      // use a tampered/invalid value as the actual token.
+      throw new Error('Failed to decrypt enc:v2: data (tampered or wrong install key)');
+    }
+  }
+
+  // Legacy format: enc:iv_hex:ciphertext_hex (AES-256-CBC with hardcoded key)
   try {
     const parts = text.split(':');
     if (parts.length !== 3) return text;
     const iv = Buffer.from(parts[1], 'hex');
     const encryptedText = parts[2];
-    const decipher = crypto.createDecipheriv(ALGORITHM, SECRET_KEY, iv);
+    const decipher = crypto.createDecipheriv(LEGACY_ALGORITHM, LEGACY_KEY, iv);
     let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
     decrypted += decipher.final('utf8');
     return decrypted;
