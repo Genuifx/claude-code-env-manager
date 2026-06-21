@@ -1,5 +1,11 @@
 # ccem
 
+## 2.26.0
+
+### Minor Changes
+
+- Desktop workspace v2.26.0: WeCom task and session bot binding with streamlined external actions, workspace model guidance queue, clickable transcript markdown image lightbox, selected-skill composer attachment fix, macOS traffic light alignment with tightened titlebar fold, narrow-window status strip adaptation, and Windows helper PATH preservation.
+
 ## 2.25.0
 
 ### Minor Changes
