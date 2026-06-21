@@ -465,7 +465,7 @@
   --ccem-sidebar-toggle-size: 28px;
   --ccem-sidebar-toggle-gap: 4px;
   --ccem-update-indicator-size: 28px;
-  --ccem-update-indicator-gap: 4px;
+  --ccem-update-indicator-gap: 0px;
   --ccem-workspace-shortcut-size: 28px;
   --ccem-workspace-shortcut-gap: 4px;
   --ccem-sidebar-toggle-clearance: 10px;
