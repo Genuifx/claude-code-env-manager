@@ -1225,46 +1225,44 @@ export function WorkspaceNativeSessionView({
 
   const sessionUsage = useMemo(() => computeSessionUsage(events), [events]);
 
-  const openExternalActionsMenu = useCallback(() => {
+  const clearExternalActionsCloseTimer = useCallback(() => {
     if (externalActionsCloseTimerRef.current !== null) {
       window.clearTimeout(externalActionsCloseTimerRef.current);
       externalActionsCloseTimerRef.current = null;
     }
-    setIsExternalActionsOpen(true);
   }, []);
+
+  const openExternalActionsMenu = useCallback(() => {
+    clearExternalActionsCloseTimer();
+    setIsExternalActionsOpen(true);
+  }, [clearExternalActionsCloseTimer]);
 
   const closeExternalActionsMenu = useCallback(() => {
-    if (externalActionsCloseTimerRef.current !== null) {
-      window.clearTimeout(externalActionsCloseTimerRef.current);
-      externalActionsCloseTimerRef.current = null;
-    }
+    clearExternalActionsCloseTimer();
     setIsExternalActionsOpen(false);
-  }, []);
+  }, [clearExternalActionsCloseTimer]);
 
   const scheduleExternalActionsClose = useCallback(() => {
-    if (externalActionsCloseTimerRef.current !== null) {
-      window.clearTimeout(externalActionsCloseTimerRef.current);
-    }
+    clearExternalActionsCloseTimer();
     externalActionsCloseTimerRef.current = window.setTimeout(() => {
       closeExternalActionsMenu();
     }, 180);
-  }, [closeExternalActionsMenu]);
+  }, [clearExternalActionsCloseTimer, closeExternalActionsMenu]);
 
   const handleExternalActionsOpenChange = useCallback((open: boolean) => {
     if (open) {
       openExternalActionsMenu();
       return;
     }
+
     closeExternalActionsMenu();
   }, [closeExternalActionsMenu, openExternalActionsMenu]);
 
   useEffect(() => {
     return () => {
-      if (externalActionsCloseTimerRef.current !== null) {
-        window.clearTimeout(externalActionsCloseTimerRef.current);
-      }
+      clearExternalActionsCloseTimer();
     };
-  }, []);
+  }, [clearExternalActionsCloseTimer]);
 
   const refreshGitSnapshot = useCallback(async () => {
     const requestSeq = gitSnapshotRequestSeqRef.current + 1;
@@ -2520,7 +2518,7 @@ export function WorkspaceNativeSessionView({
                   className="gap-2.5"
                   disabled={isTerminalStatus(session.status)}
                   onSelect={() => {
-                    setIsExternalActionsOpen(false);
+                    closeExternalActionsMenu();
                     setIsWecomBindDialogOpen(true);
                   }}
                 >
@@ -2532,7 +2530,7 @@ export function WorkspaceNativeSessionView({
                   className="gap-2.5"
                   disabled={isHandingOff || isHandoffPending}
                   onSelect={() => {
-                    setIsExternalActionsOpen(false);
+                    closeExternalActionsMenu();
                     void handleHandoff();
                   }}
                 >
