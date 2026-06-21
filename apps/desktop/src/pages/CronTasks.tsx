@@ -2,22 +2,21 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { listen } from '@tauri-apps/api/event';
 import { useLocale } from '@/locales';
-import { useAppStore, type CronTask, type CronTaskRun, type CronTemplate } from '@/store';
+import { useAppStore, type CronTask, type CronTaskRun, type CronTemplate, type CronWecomNotification } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { CronEditor } from '@/components/cron';
-import { AiCronPanel } from '@/components/cron/AiCronPanel';
 import { PageActionsSlot } from '@/components/layout';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import {
   Clock, Plus, Play, Trash2, CheckCircle2, XCircle,
   Timer, AlertTriangle, FolderOpen, ChevronDown, GitPullRequest,
   FlaskConical, FileText, Shield, Newspaper, Sparkles, X,
-  Zap, Terminal, Copy, Check,
+  Zap, Terminal, Copy, Check, Bell,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { shallow } from 'zustand/shallow';
-import type { PlatformCapabilities } from '@/lib/tauri-ipc';
+import type { PlatformCapabilities, WecomTaskBindingOption } from '@/lib/tauri-ipc';
 
 // --- Utility functions ---
 
@@ -78,6 +77,10 @@ function parseToolListInput(input: string) {
 
 function formatToolListInput(values?: string[] | null) {
   return (values ?? []).join(', ');
+}
+
+function normalizeWecomPeerComparable(peerId: string) {
+  return peerId.trim().replace(/^(single|group):/, '');
 }
 
 const TEMPLATE_ICONS: Record<string, typeof Clock> = {
@@ -435,6 +438,7 @@ function TimelineTaskCard({
 // --- Task Dialog ---
 
 const INPUT_CLS = 'w-full px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 transition-all';
+const MODAL_SELECT_CONTENT_CLS = '!z-[160]';
 
 function TaskDialog({ open, onClose, onSave, editTask, environments }: {
   open: boolean;
@@ -450,12 +454,13 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
     allowedTools?: string[];
     disallowedTools?: string[];
     timeoutSecs?: number;
+    wecomNotification?: CronWecomNotification | null;
   }) => Promise<void>;
   editTask?: CronTask;
   environments: { name: string }[];
 }) {
   const { t } = useLocale();
-  const { openDirectoryPicker } = useTauriCommands();
+  const { openDirectoryPicker, getWecomTaskBindingOptions } = useTauriCommands();
   const [name, setName] = useState('');
   const [cronExpr, setCronExpr] = useState('0 9 * * 1-5');
   const [prompt, setPrompt] = useState('');
@@ -466,7 +471,35 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
   const [allowedToolsInput, setAllowedToolsInput] = useState('');
   const [disallowedToolsInput, setDisallowedToolsInput] = useState('');
   const [timeoutSecs, setTimeoutSecs] = useState(300);
+  const [notifyWecom, setNotifyWecom] = useState(false);
+  const [wecomBotId, setWecomBotId] = useState('');
+  const [wecomPeerId, setWecomPeerId] = useState('');
+  const [useManualWecomTarget, setUseManualWecomTarget] = useState(false);
+  const [wecomOptions, setWecomOptions] = useState<WecomTaskBindingOption[]>([]);
   const [saving, setSaving] = useState(false);
+
+  const wecomTargetOptions = useMemo(() => wecomOptions.flatMap((bot) => (
+    bot.targets.map((target, index) => ({
+      id: `${bot.botId}::${index}`,
+      botId: bot.botId,
+      peerId: target.peerId,
+      label: `${bot.name} · ${target.label}${target.isDefault ? ` · ${t('cron.wecomDefaultTarget')}` : ''}`,
+    }))
+  )), [t, wecomOptions]);
+
+  const selectedWecomTargetValue = useMemo(() => {
+    if (useManualWecomTarget) {
+      return '__manual__';
+    }
+    if (!wecomBotId.trim() && !wecomPeerId.trim()) {
+      return '__default__';
+    }
+    const match = wecomTargetOptions.find((target) => (
+      target.botId === wecomBotId.trim()
+      && normalizeWecomPeerComparable(target.peerId) === normalizeWecomPeerComparable(wecomPeerId)
+    ));
+    return match?.id ?? '__manual__';
+  }, [useManualWecomTarget, wecomBotId, wecomPeerId, wecomTargetOptions]);
 
   useEffect(() => {
     if (editTask) {
@@ -480,6 +513,10 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
       setAllowedToolsInput(formatToolListInput(editTask.allowedTools));
       setDisallowedToolsInput(formatToolListInput(editTask.disallowedTools));
       setTimeoutSecs(editTask.timeoutSecs);
+      setNotifyWecom(Boolean(editTask.wecomNotification?.enabled));
+      setWecomBotId(editTask.wecomNotification?.botId || '');
+      setWecomPeerId(editTask.wecomNotification?.peerId || '');
+      setUseManualWecomTarget(false);
     } else {
       setName('');
       setCronExpr('0 9 * * 1-5');
@@ -491,8 +528,21 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
       setAllowedToolsInput('');
       setDisallowedToolsInput('');
       setTimeoutSecs(300);
+      setNotifyWecom(false);
+      setWecomBotId('');
+      setWecomPeerId('');
+      setUseManualWecomTarget(false);
     }
   }, [editTask, open]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    getWecomTaskBindingOptions()
+      .then(setWecomOptions)
+      .catch(() => setWecomOptions([]));
+  }, [getWecomTaskBindingOptions, open]);
 
   if (!open) return null;
 
@@ -516,6 +566,11 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
         allowedTools: parseToolListInput(allowedToolsInput),
         disallowedTools: parseToolListInput(disallowedToolsInput),
         timeoutSecs,
+        wecomNotification: notifyWecom ? {
+          enabled: true,
+          botId: wecomBotId.trim() || null,
+          peerId: wecomPeerId.trim() || null,
+        } : null,
       });
       onClose();
     } finally {
@@ -579,7 +634,7 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
                 <SelectTrigger className="w-full h-auto px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm">
                   <SelectValue placeholder={t('cron.envDefault')} />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className={MODAL_SELECT_CONTENT_CLS}>
                   <SelectItem value="__default__">{t('cron.envDefault')}</SelectItem>
                   {environments.map((env) => <SelectItem key={env.name} value={env.name}>{env.name}</SelectItem>)}
                 </SelectContent>
@@ -598,7 +653,7 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
                 <SelectTrigger className="w-full h-auto px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className={MODAL_SELECT_CONTENT_CLS}>
                   <SelectItem value="conservative">{t('cron.profileConservative')}</SelectItem>
                   <SelectItem value="standard">{t('cron.profileStandard')}</SelectItem>
                   <SelectItem value="autonomous">{t('cron.profileAutonomous')}</SelectItem>
@@ -612,6 +667,90 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
                     : t('cron.profileAutonomousDesc')}
               </p>
             </div>
+          </div>
+          <div className="rounded-xl border border-black/[0.08] dark:border-white/[0.08] bg-black/[0.02] dark:bg-white/[0.03] p-3 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <Bell className="h-3.5 w-3.5 text-primary" />
+                  <p className="text-xs font-medium text-foreground">{t('cron.resultNotification')}</p>
+                </div>
+                <p className="mt-1 text-2xs text-muted-foreground">{t('cron.wecomNotificationDesc')}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setNotifyWecom((value) => !value)}
+                className={cn(
+                  'shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-all active:scale-[0.97]',
+                  notifyWecom
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'border border-black/[0.08] dark:border-white/[0.12] text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {notifyWecom ? t('cron.wecomNotifyOn') : t('cron.wecomNotifyOff')}
+              </button>
+            </div>
+            {notifyWecom && (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">{t('cron.wecomTarget')}</label>
+                  <Select
+                    value={selectedWecomTargetValue}
+                    onValueChange={(value) => {
+                      if (value === '__default__') {
+                        setWecomBotId('');
+                        setWecomPeerId('');
+                        setUseManualWecomTarget(false);
+                        return;
+                      }
+                      if (value === '__manual__') {
+                        setUseManualWecomTarget(true);
+                        return;
+                      }
+                      const target = wecomTargetOptions.find((item) => item.id === value);
+                      if (target) {
+                        setWecomBotId(target.botId);
+                        setWecomPeerId(target.peerId);
+                        setUseManualWecomTarget(false);
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="w-full h-auto px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className={MODAL_SELECT_CONTENT_CLS}>
+                      <SelectItem value="__default__">{t('cron.wecomDefaultTarget')}</SelectItem>
+                      {wecomTargetOptions.map((target) => (
+                        <SelectItem key={target.id} value={target.id}>{target.label}</SelectItem>
+                      ))}
+                      <SelectItem value="__manual__">{t('cron.wecomManualTarget')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {selectedWecomTargetValue === '__manual__' && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-muted-foreground">{t('cron.wecomBotId')}</label>
+                      <input
+                        className={cn(INPUT_CLS, 'font-mono')}
+                        value={wecomBotId}
+                        onChange={(e) => { setUseManualWecomTarget(true); setWecomBotId(e.target.value); }}
+                        placeholder="aibot..."
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-muted-foreground">{t('cron.wecomPeerId')}</label>
+                      <input
+                        className={cn(INPUT_CLS, 'font-mono')}
+                        value={wecomPeerId}
+                        onChange={(e) => { setUseManualWecomTarget(true); setWecomPeerId(e.target.value); }}
+                        placeholder="iveswen or group:chatid"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <div className="rounded-xl border border-black/[0.08] dark:border-white/[0.08] bg-black/[0.02] dark:bg-white/[0.03] p-3 space-y-3">
             <div className="space-y-1">
@@ -672,7 +811,7 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
 
 // --- Main Export Component ---
 
-export function CronTasks() {
+export function CronTasks({ onAiCreate }: { onAiCreate?: () => void }) {
   const { t } = useLocale();
   const { cronTasks, cronRuns, environments, isLoadingCron } = useAppStore(
     (state) => ({
@@ -695,7 +834,6 @@ export function CronTasks() {
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<CronTask | null>(null);
   const [templates, setTemplates] = useState<CronTemplate[]>([]);
-  const [showAiPanel, setShowAiPanel] = useState(false);
   const [platformCapabilities, setPlatformCapabilities] = useState<PlatformCapabilities | null>(null);
   const [nextRunTimes, setNextRunTimes] = useState<Record<string, string>>({});
   const [drawerRun, setDrawerRun] = useState<CronTaskRun | null>(null);
@@ -806,29 +944,8 @@ export function CronTasks() {
 
   const handleAdd = () => { setEditingTask(undefined); setDialogOpen(true); };
   const handleEdit = (task: CronTask) => { setEditingTask(task); setDialogOpen(true); };
-
-  const handleAiEdit = (task: { name: string; cronExpression: string; prompt: string; workingDir: string }) => {
-    setEditingTask({
-      id: '',
-      name: task.name,
-      cronExpression: task.cronExpression,
-      prompt: task.prompt,
-      workingDir: task.workingDir,
-      envName: null,
-      executionProfile: 'conservative',
-      maxBudgetUsd: null,
-      allowedTools: [],
-      disallowedTools: [],
-      enabled: true,
-      timeoutSecs: 300,
-      templateId: null,
-      triggerType: 'schedule',
-      parentTaskId: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    } as CronTask);
-    setDialogOpen(true);
-    setShowAiPanel(false);
+  const handleAiCreate = () => {
+    onAiCreate?.();
   };
 
   const handleTemplateCreate = async (tpl: CronTemplate) => {
@@ -855,6 +972,7 @@ export function CronTasks() {
     allowedTools?: string[];
     disallowedTools?: string[];
     timeoutSecs?: number;
+    wecomNotification?: CronWecomNotification | null;
   }) => {
     if (editingTask) {
       await updateCronTask({ id: editingTask.id, ...data });
@@ -903,14 +1021,8 @@ export function CronTasks() {
       {/* Page action buttons — portaled to titlebar */}
       <PageActionsSlot>
         <button
-          onClick={() => setShowAiPanel(!showAiPanel)}
-          aria-pressed={showAiPanel}
-          className={cn(
-            'inline-flex items-center gap-1.5 px-4 py-[7px] rounded-full text-[13px] font-medium transition-all active:scale-[0.97]',
-            showAiPanel
-              ? 'bg-primary text-white shadow-sm'
-              : 'bg-transparent text-primary border border-primary/40 hover:border-primary/70'
-          )}
+          onClick={handleAiCreate}
+          className="inline-flex items-center gap-1.5 px-4 py-[7px] rounded-full text-[13px] font-medium bg-transparent text-primary border border-primary/40 hover:border-primary/70 transition-all active:scale-[0.97]"
         >
           <Sparkles className="w-3.5 h-3.5" />
           {t('cron.aiCreate')}
@@ -923,16 +1035,6 @@ export function CronTasks() {
           {t('cron.addTask')}
         </button>
       </PageActionsSlot>
-
-      {/* AI Panel */}
-      {showAiPanel && (
-        <AiCronPanel
-          open={showAiPanel}
-          onClose={() => setShowAiPanel(false)}
-          onTaskCreated={() => { loadCronTasks(); setShowAiPanel(false); }}
-          onEdit={handleAiEdit}
-        />
-      )}
 
       {/* Templates (shown when no tasks) */}
       {templates.length > 0 && cronTasks.length === 0 && (
@@ -966,7 +1068,7 @@ export function CronTasks() {
           ))}
         </div>
       ) : cronTasks.length === 0 ? (
-        <CronEmptyState onAdd={handleAdd} onAi={() => setShowAiPanel(true)} />
+        <CronEmptyState onAdd={handleAdd} onAi={handleAiCreate} />
       ) : (
         <div className="space-y-5">
           {/* Timeline bar */}

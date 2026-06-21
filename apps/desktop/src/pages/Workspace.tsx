@@ -152,6 +152,7 @@ interface WorkspaceProps {
   isActive?: boolean;
   onNavigate: (tab: string) => void;
   onLaunchWithDir: (dir: string, client?: LaunchClient) => void;
+  composeSeed?: { id: number; value: string } | null;
   petOpenRequest?: PetOpenSessionRequest | null;
   onPetOpenHandled?: () => void;
 }
@@ -159,6 +160,7 @@ interface WorkspaceProps {
 export function Workspace({
   isActive = true,
   onNavigate,
+  composeSeed = null,
   petOpenRequest = null,
   onPetOpenHandled,
 }: WorkspaceProps) {
@@ -254,6 +256,7 @@ export function Workspace({
   const [workspaceGitSnapshot, setWorkspaceGitSnapshot] = useState<WorkspaceGitSnapshot | null>(null);
   const [isRefreshingWorkspaceGitSnapshot, setIsRefreshingWorkspaceGitSnapshot] = useState(false);
   const workspaceGitSnapshotRequestSeqRef = useRef(0);
+  const lastComposeSeedIdRef = useRef<number | null>(null);
   const [isCreatingNativeSession, setIsCreatingNativeSession] = useState(false);
   const [isLaunchingComposeTerminal, setIsLaunchingComposeTerminal] = useState(false);
   const [isResumingHistorySession, setIsResumingHistorySession] = useState(false);
@@ -287,6 +290,19 @@ export function Workspace({
       setComposeDir(selectedWorkingDir);
     }
   }, [composeDir, selectedWorkingDir]);
+
+  useEffect(() => {
+    if (!composeSeed || composeSeed.id === lastComposeSeedIdRef.current) {
+      return;
+    }
+    lastComposeSeedIdRef.current = composeSeed.id;
+    setWorkspaceMode('compose');
+    setComposePrompt(composeSeed.value);
+    setComposePlanModeEnabled(false);
+    if (!composeDir && (selectedWorkingDir || defaultWorkingDir)) {
+      setComposeDir(selectedWorkingDir || defaultWorkingDir || null);
+    }
+  }, [composeDir, composeSeed, defaultWorkingDir, selectedWorkingDir]);
 
   const replaceLiveSessionsByRuntimeId = useCallback((next: WorkspaceLiveSessionsByRuntimeId) => {
     return replaceWorkspaceLiveSessionsSnapshot(

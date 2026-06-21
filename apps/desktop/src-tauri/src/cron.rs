@@ -1162,6 +1162,7 @@ pub fn update_cron_task(
     allowed_tools: Option<Vec<String>>,
     disallowed_tools: Option<Vec<String>>,
     timeout_secs: Option<u64>,
+    wecom_notification: Option<CronWecomNotification>,
 ) -> Result<CronTask, String> {
     let mut tasks = read_tasks()?;
     let task = tasks
@@ -1196,6 +1197,7 @@ pub fn update_cron_task(
     if let Some(v) = timeout_secs {
         task.timeout_secs = v;
     }
+    task.wecom_notification = wecom_notification;
     task.updated_at = chrono::Utc::now().to_rfc3339();
 
     let updated = task.clone();

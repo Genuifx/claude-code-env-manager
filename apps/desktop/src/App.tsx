@@ -85,6 +85,7 @@ function App() {
   const [pendingDeleteEnv, setPendingDeleteEnv] = useState<string | null>(null);
   const [startupReady, setStartupReady] = useState(false);
   const [petOpenRequest, setPetOpenRequest] = useState<PetOpenSessionRequest | null>(null);
+  const [workspaceComposeSeed, setWorkspaceComposeSeed] = useState<{ id: number; value: string } | null>(null);
   const lastFocusSyncAtRef = useRef(0);
   const launchInFlightRef = useRef<Set<string>>(new Set());
   const [, startTransition] = useTransition();
@@ -176,6 +177,11 @@ function App() {
       setActiveTab(tab);
     });
   }, [prefetchTab, startTransition]);
+
+  const openWorkspaceCronCreate = useCallback(() => {
+    setWorkspaceComposeSeed({ id: Date.now(), value: '/ccem-cron ' });
+    navigateToTab('workspace');
+  }, [navigateToTab]);
 
   useEffect(() => {
     if (!perfAutopilotEnabled) {
@@ -636,7 +642,7 @@ function App() {
       case 'history':
         return <HistoryPage />;
       case 'cron':
-        return <CronTasksPage />;
+        return <CronTasksPage onAiCreate={openWorkspaceCronCreate} />;
       case 'chat-app':
         return <ChatAppPage />;
       case 'proxy-debug':
@@ -669,6 +675,7 @@ function App() {
                     isActive={activeTab === 'workspace'}
                     onNavigate={navigateToTab}
                     onLaunchWithDir={handleLaunchWithDir}
+                    composeSeed={workspaceComposeSeed}
                     petOpenRequest={petOpenRequest}
                     onPetOpenHandled={() => setPetOpenRequest(null)}
                   />

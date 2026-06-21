@@ -8,6 +8,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.resolve(__dirname, '..');
+const appPath = path.join(desktopDir, 'src', 'App.tsx');
+const cronPagePath = path.join(desktopDir, 'src', 'pages', 'CronTasks.tsx');
 const workspacePagePath = path.join(desktopDir, 'src', 'pages', 'Workspace.tsx');
 const workspaceNativeViewPath = path.join(
   desktopDir,
@@ -112,6 +114,39 @@ test('workspace cron submit launches a native agent session instead of creating 
   assert.match(source, /planModeEnabled: isCronCommand \? false : historyPlanModeEnabled/);
   assert.match(liveSource, /buildWorkspaceCronAgentPrompt\(text, session\.project_dir\)/);
   assert.match(liveSource, /planMode: isCronCommand \? false : composerPlanModeEnabled/);
+});
+
+test('cron AI Create opens workspace composer seeded with /ccem-cron', async () => {
+  const appSource = await fs.readFile(appPath, 'utf8');
+  const cronSource = await fs.readFile(cronPagePath, 'utf8');
+  const workspaceSource = await fs.readFile(workspacePagePath, 'utf8');
+
+  assert.match(appSource, /workspaceComposeSeed/);
+  assert.match(appSource, /value: '\/ccem-cron '/);
+  assert.match(appSource, /<CronTasksPage onAiCreate=\{openWorkspaceCronCreate\}/);
+  assert.match(appSource, /composeSeed=\{workspaceComposeSeed\}/);
+  assert.match(workspaceSource, /composeSeed/);
+  assert.match(workspaceSource, /setWorkspaceMode\('compose'\)/);
+  assert.match(workspaceSource, /setComposePrompt\(composeSeed\.value\)/);
+  assert.doesNotMatch(cronSource, /AiCronPanel/);
+});
+
+test('cron Add Task form exposes WeCom result notification fields', async () => {
+  const cronSource = await fs.readFile(cronPagePath, 'utf8');
+
+  assert.match(cronSource, /getWecomTaskBindingOptions/);
+  assert.match(cronSource, /resultNotification/);
+  assert.match(cronSource, /wecomNotification: notifyWecom/);
+  assert.match(cronSource, /wecomDefaultTarget/);
+  assert.match(cronSource, /wecomManualTarget/);
+});
+
+test('cron task dialog select menus render above the modal overlay', async () => {
+  const cronSource = await fs.readFile(cronPagePath, 'utf8');
+  const modalSelectContentUses = cronSource.match(/SelectContent className=\{MODAL_SELECT_CONTENT_CLS\}/g) ?? [];
+
+  assert.match(cronSource, /const MODAL_SELECT_CONTENT_CLS = '!z-\[160\]'/);
+  assert.equal(modalSelectContentUses.length, 3);
 });
 
 test('ignores normal workspace prompts and empty cron commands', async () => {

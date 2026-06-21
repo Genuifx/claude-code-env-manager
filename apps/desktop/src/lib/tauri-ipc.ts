@@ -434,6 +434,7 @@ export interface TauriCommands {
       allowedTools?: string[] | null;
       disallowedTools?: string[] | null;
       timeoutSecs?: number;
+      wecomNotification?: CronWecomNotification | null;
     },
     CronTask
   ];

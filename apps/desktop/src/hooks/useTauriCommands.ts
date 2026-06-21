@@ -1141,6 +1141,7 @@ export function useTauriCommands() {
     allowedTools?: string[];
     disallowedTools?: string[];
     timeoutSecs?: number;
+    wecomNotification?: CronWecomNotification | null;
   }) => {
     const task = await invoke<CronTask>('update_cron_task', data);
     const tasks = await invoke<CronTask[]>('list_cron_tasks');
