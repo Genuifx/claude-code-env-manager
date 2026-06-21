@@ -4,7 +4,7 @@ import {
   ChevronDown,
   FolderOpen,
   LoaderCircle,
-  TerminalSquare,
+  Terminal,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { shallow } from 'zustand/shallow';
@@ -1761,7 +1761,7 @@ export function Workspace({
                     {isLaunchingComposeTerminal ? (
                       <LoaderCircle className="h-4 w-4 animate-spin" />
                     ) : (
-                      <TerminalSquare className="h-4 w-4" />
+                      <Terminal className="h-4 w-4" />
                     )}
                   </Button>
                 </span>
@@ -1866,7 +1866,7 @@ export function Workspace({
                         .catch(() => toast.error(t('workspace.nativeHandoffFailed')));
                     }}
                   >
-                    <TerminalSquare className="h-4 w-4" />
+                    <Terminal className="h-4 w-4" />
                   </Button>
                 </span>
               </TooltipTrigger>

@@ -205,6 +205,7 @@
     "nativeHandoffDone": "Opened this session in Terminal",
     "nativeHandoffPending": "Waiting for the session to be ready, then Terminal will open automatically",
     "nativeHandoffFailed": "Failed to open Terminal handoff",
+    "externalActions": "Send / continue",
     "wecomBindSession": "Bind to WeCom task",
     "wecomBindNoDefault": "Set a task-binding default target on a WeCom bot first",
     "wecomBindBound": "Bound to WeCom task",
