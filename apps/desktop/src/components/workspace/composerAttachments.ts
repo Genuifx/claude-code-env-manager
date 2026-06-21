@@ -67,6 +67,7 @@ const LARGE_PASTE_CHAR_THRESHOLD = 1200;
 const LARGE_PASTE_LINE_THRESHOLD = 14;
 const MAX_TEXT_ATTACHMENT_CHARS = 16_000;
 const MAX_IMAGE_BYTE_SIZE = 10 * 1024 * 1024;
+const USER_REQUEST_CLOSE_TAG = '</user_request>';
 
 const SUPPORTED_IMAGE_TYPES: Record<string, ComposerImageMediaType> = {
   'image/png': 'image/png',
@@ -267,6 +268,34 @@ export function extractComposerImagePayloads(attachments: ComposerAttachment[]):
     .map((a) => ({ mediaType: a.mediaType, base64Data: a.base64Data, placeholder: a.placeholder }));
 }
 
+function missingComposerImagePlaceholders(
+  text: string,
+  attachments: ComposerAttachment[],
+): string[] {
+  const trimmedText = text.trim();
+  return attachments
+    .filter((attachment): attachment is ComposerImageAttachment => attachment.kind === 'image')
+    .map((attachment) => attachment.placeholder.trim())
+    .filter((placeholder) => placeholder && !trimmedText.includes(placeholder));
+}
+
+export function ensureComposerImagePlaceholders(
+  text: string,
+  attachments: ComposerAttachment[],
+): string {
+  const trimmedText = text.trim();
+  const missingPlaceholders = missingComposerImagePlaceholders(trimmedText, attachments);
+
+  if (missingPlaceholders.length === 0) {
+    return trimmedText;
+  }
+
+  return [
+    trimmedText,
+    missingPlaceholders.join('\n'),
+  ].filter(Boolean).join('\n');
+}
+
 export function mergeComposerAttachments(
   previous: ComposerAttachment[],
   next: ComposerAttachment[],
@@ -375,6 +404,26 @@ function wrapAttachmentContent(content: string): string {
   return `${fence}text\n${content}\n${fence}`;
 }
 
+function appendSectionsToText(text: string, sections: string[]): string {
+  return [
+    text.trim(),
+    ...sections,
+  ].filter(Boolean).join('\n\n').trim();
+}
+
+function appendSectionsToUserRequest(text: string, sections: string[]): string {
+  const trimmedText = text.trim();
+  const closeIndex = trimmedText.lastIndexOf(USER_REQUEST_CLOSE_TAG);
+  if (!trimmedText.includes('<user_request>') || closeIndex === -1) {
+    return appendSectionsToText(trimmedText, sections);
+  }
+
+  return [
+    appendSectionsToText(trimmedText.slice(0, closeIndex), sections),
+    trimmedText.slice(closeIndex).trimStart(),
+  ].filter(Boolean).join('\n');
+}
+
 export function buildComposerPromptText(
   text: string,
   attachments: ComposerAttachment[],
@@ -387,9 +436,10 @@ export function buildComposerPromptText(
   const fileAttachments = attachments.filter((attachment): attachment is ComposerFileAttachment => attachment.kind === 'file');
   const textAttachments = attachments.filter((attachment): attachment is ComposerTextAttachment => attachment.kind === 'text');
   const sections: string[] = [];
+  const missingImagePlaceholders = missingComposerImagePlaceholders(trimmedText, attachments);
 
-  if (trimmedText) {
-    sections.push(trimmedText);
+  if (missingImagePlaceholders.length > 0) {
+    sections.push(missingImagePlaceholders.join('\n'));
   }
 
   if (fileAttachments.length > 0) {
@@ -413,7 +463,7 @@ export function buildComposerPromptText(
     ].join('\n\n'));
   }
 
-  return sections.join('\n\n').trim();
+  return appendSectionsToUserRequest(trimmedText, sections);
 }
 
 export function buildComposerPromptPreview(

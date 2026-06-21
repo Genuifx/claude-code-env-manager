@@ -29,6 +29,11 @@ test('composer submit reads live DOM text and attachment ref to avoid paste/subm
     /promptAreaRef\.current\?\.getPlainText\(\) \?\? segmentsToPlainText\(composerSegments\)/,
   );
   assert.match(submitBlock, /const currentAttachments = attachmentsRef\.current;/);
+  assert.match(submitBlock, /let text = ensureComposerImagePlaceholders\(promptValue, currentAttachments\);/);
+  assert.match(
+    submitBlock,
+    /const displayText = ensureComposerImagePlaceholders\(buildComposerDisplayText\(promptValue\), currentAttachments\);/,
+  );
   assert.match(submitBlock, /attachments: currentAttachments,/);
   assert.match(submitBlock, /revokeComposerImageUrls\(currentAttachments\);/);
 });

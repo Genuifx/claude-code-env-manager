@@ -35,3 +35,87 @@ test('splits image placeholders for highlighted composer rendering', async () =>
     { kind: 'image', text: '[Image #2]' },
   ]);
 });
+
+test('ensures image attachments have request text placeholders', async () => {
+  const { ensureComposerImagePlaceholders } = await importComposerAttachments();
+  const imageAttachment = (placeholder) => ({
+    id: `attachment-${placeholder}`,
+    kind: 'image',
+    source: 'paste',
+    name: 'Pasted image',
+    placeholder,
+    mediaType: 'image/png',
+    base64Data: 'abc',
+    byteSize: 3,
+    objectUrl: null,
+  });
+
+  assert.equal(
+    ensureComposerImagePlaceholders('看这个', [imageAttachment('[Image #1]')]),
+    '看这个\n[Image #1]',
+  );
+  assert.equal(
+    ensureComposerImagePlaceholders('看这个 [Image #1]', [imageAttachment('[Image #1]')]),
+    '看这个 [Image #1]',
+  );
+  assert.equal(
+    ensureComposerImagePlaceholders('', [imageAttachment('[Image #1]'), imageAttachment('[Image #2]')]),
+    '[Image #1]\n[Image #2]',
+  );
+});
+
+test('builds selected skill prompt attachments inside user request', async () => {
+  const { buildComposerPromptText } = await importComposerAttachments();
+  const prompt = [
+    '<selected_skills>',
+    '<skill name="lightweight-dev-mode" path="/tmp/lightweight-dev-mode/SKILL.md">',
+    '<instruction>Use this selected skill for the user request.</instruction>',
+    '</skill>',
+    '</selected_skills>',
+    '',
+    '<user_request>',
+    '/lightweight-dev-mode 修这个',
+    '</user_request>',
+  ].join('\n');
+
+  const result = buildComposerPromptText(prompt, [
+    {
+      id: 'image-1',
+      kind: 'image',
+      source: 'paste',
+      name: 'Pasted image',
+      placeholder: '[Image #1]',
+      mediaType: 'image/png',
+      base64Data: 'abc',
+      byteSize: 3,
+      objectUrl: null,
+    },
+    {
+      id: 'file-1',
+      kind: 'file',
+      source: 'drop',
+      name: 'App.tsx',
+      absolutePath: '/repo/src/App.tsx',
+      relativePath: 'src/App.tsx',
+      displayPath: 'src/App.tsx',
+      isOutsideWorkspace: false,
+    },
+    {
+      id: 'text-1',
+      kind: 'text',
+      source: 'paste',
+      name: 'Pasted text',
+      content: 'large paste',
+      lineCount: 1,
+      charCount: 11,
+    },
+  ]);
+
+  const userRequest = /<user_request>([\s\S]*?)<\/user_request>/.exec(result)?.[1] ?? '';
+  const afterUserRequest = result.slice(result.indexOf('</user_request>') + '</user_request>'.length);
+  assert.match(userRequest, /\[Image #1\]/);
+  assert.match(userRequest, /Attached files:\n- @src\/App\.tsx \(\/repo\/src\/App\.tsx\)/);
+  assert.match(userRequest, /Attached text snippets:\n\n- Pasted text \(1 lines\)/);
+  assert.match(userRequest, /```text\nlarge paste\n```/);
+  assert.doesNotMatch(afterUserRequest, /Attached files:|Attached text snippets:|\[Image #1\]/);
+});
