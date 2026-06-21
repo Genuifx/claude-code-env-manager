@@ -90,24 +90,37 @@ export function normalizeCodexSandboxMode(permMode: string) {
     return {
       sandboxMode: 'danger-full-access' as const,
       approvalPolicy: 'never' as const,
+      networkAccessEnabled: true,
     };
   }
 
   if (
     permMode === 'readonly'
     || permMode === 'audit'
-    || permMode === 'ci'
     || permMode === 'plan'
     || permMode === 'read-only'
   ) {
     return {
       sandboxMode: 'read-only' as const,
       approvalPolicy: 'never' as const,
+      networkAccessEnabled: false,
     };
   }
 
+  // safe, ci, dev, default, and unknown modes
+  // safe/ci: conservative — limit network to prevent untrusted fetches
+  if (permMode === 'safe' || permMode === 'ci') {
+    return {
+      sandboxMode: 'workspace-write' as const,
+      approvalPolicy: 'on-request' as const,
+      networkAccessEnabled: false,
+    };
+  }
+
+  // dev, default, and unknown modes — allow network for development workflow
   return {
     sandboxMode: 'workspace-write' as const,
     approvalPolicy: 'on-request' as const,
+    networkAccessEnabled: true,
   };
 }

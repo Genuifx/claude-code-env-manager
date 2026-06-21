@@ -1658,9 +1658,10 @@ async function ensureCodexThread() {
     const sandbox = normalizeCodexSandboxMode(initCommand.perm_mode);
     const threadOptions = {
       workingDirectory: initCommand.working_dir,
-      networkAccessEnabled: true,
+      networkAccessEnabled: sandbox.networkAccessEnabled,
       skipGitRepoCheck: true,
-      ...sandbox,
+      sandboxMode: sandbox.sandboxMode,
+      approvalPolicy: sandbox.approvalPolicy,
       ...(initCommand.effort ? { modelReasoningEffort: initCommand.effort } : {}),
     };
     codexThread = currentProviderSessionId
