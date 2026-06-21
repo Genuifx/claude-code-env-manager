@@ -2816,6 +2816,24 @@ struct WecomTaskBindingDefault {
     auto_send_card: bool,
 }
 
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WecomTaskBindingTargetOption {
+    target_type: WecomTaskBindingTargetType,
+    peer_id: String,
+    label: String,
+    is_default: bool,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WecomTaskBindingOption {
+    bot_id: String,
+    name: String,
+    auto_send_card: bool,
+    targets: Vec<WecomTaskBindingTargetOption>,
+}
+
 #[tauri::command]
 fn get_wecom_task_binding_defaults() -> Result<Vec<WecomTaskBindingDefault>, String> {
     let settings = wecom::read_wecom_settings()?;
@@ -2837,6 +2855,117 @@ fn get_wecom_task_binding_defaults() -> Result<Vec<WecomTaskBindingDefault>, Str
             })
         })
         .collect())
+}
+
+#[tauri::command]
+fn get_wecom_task_binding_options() -> Result<Vec<WecomTaskBindingOption>, String> {
+    let settings = wecom::read_wecom_settings()?;
+    Ok(settings
+        .bots
+        .into_iter()
+        .filter(|bot| bot.enabled && !bot.bot_id.trim().is_empty())
+        .map(|bot| {
+            let default_target_type = bot
+                .task_binding_default_target_type
+                .clone()
+                .unwrap_or(WecomTaskBindingTargetType::User);
+            let mut targets = Vec::<WecomTaskBindingTargetOption>::new();
+            if let Some(peer_id) = bot
+                .task_binding_default_peer_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                push_wecom_task_target(
+                    &mut targets,
+                    default_target_type.clone(),
+                    peer_id,
+                    "Default",
+                    true,
+                );
+            }
+            for user_id in &bot.admin_user_ids {
+                push_wecom_task_target(
+                    &mut targets,
+                    WecomTaskBindingTargetType::User,
+                    user_id,
+                    "Admin",
+                    false,
+                );
+            }
+            for user_id in &bot.allowed_user_ids {
+                push_wecom_task_target(
+                    &mut targets,
+                    WecomTaskBindingTargetType::User,
+                    user_id,
+                    "User",
+                    false,
+                );
+            }
+            for group_id in &bot.allowed_group_chat_ids {
+                push_wecom_task_target(
+                    &mut targets,
+                    WecomTaskBindingTargetType::Group,
+                    group_id,
+                    "Group",
+                    false,
+                );
+            }
+            WecomTaskBindingOption {
+                bot_id: bot.bot_id,
+                name: if bot.name.trim().is_empty() {
+                    bot.id
+                } else {
+                    bot.name
+                },
+                auto_send_card: bot.task_binding_auto_send_card,
+                targets,
+            }
+        })
+        .collect())
+}
+
+fn push_wecom_task_target(
+    targets: &mut Vec<WecomTaskBindingTargetOption>,
+    target_type: WecomTaskBindingTargetType,
+    peer_id: &str,
+    kind: &str,
+    is_default: bool,
+) {
+    let peer_id = peer_id.trim();
+    if peer_id.is_empty()
+        || targets
+            .iter()
+            .any(|target| target.target_type == target_type && target.peer_id == peer_id)
+    {
+        return;
+    }
+    let scope = match &target_type {
+        WecomTaskBindingTargetType::User => "user",
+        WecomTaskBindingTargetType::Group => "group",
+    };
+    targets.push(WecomTaskBindingTargetOption {
+        target_type,
+        peer_id: peer_id.to_string(),
+        label: format!("{kind} {scope} · {}", compact_wecom_peer_id(peer_id)),
+        is_default,
+    });
+}
+
+fn compact_wecom_peer_id(peer_id: &str) -> String {
+    if peer_id.chars().count() <= 18 {
+        return peer_id.to_string();
+    }
+    let start = peer_id.chars().take(8).collect::<String>();
+    let end = peer_id
+        .chars()
+        .rev()
+        .take(6)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    format!("{start}...{end}")
 }
 
 #[tauri::command]
@@ -3909,6 +4038,7 @@ fn main() {
             get_telegram_settings,
             get_wecom_settings,
             get_wecom_task_binding_defaults,
+            get_wecom_task_binding_options,
             get_weixin_settings,
             save_telegram_settings,
             save_wecom_settings,

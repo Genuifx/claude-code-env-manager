@@ -29,6 +29,7 @@ import type {
   WecomBridgeStatus,
   WecomSettings,
   WecomTaskBindingDefault,
+  WecomTaskBindingOption,
   WeixinBridgeStatus,
   WeixinLoginSession,
   WeixinSettings,
@@ -1198,6 +1199,10 @@ export function useTauriCommands() {
     return invoke<WecomTaskBindingDefault[]>('get_wecom_task_binding_defaults');
   }, []);
 
+  const getWecomTaskBindingOptions = useCallback(async (): Promise<WecomTaskBindingOption[]> => {
+    return invoke<WecomTaskBindingOption[]>('get_wecom_task_binding_options');
+  }, []);
+
   const saveWecomSettings = useCallback(async (settings: WecomSettings): Promise<void> => {
     await invoke('save_wecom_settings', { settings });
   }, []);
@@ -1432,6 +1437,7 @@ export function useTauriCommands() {
     bindTelegramTopic,
     getWecomSettings,
     getWecomTaskBindingDefaults,
+    getWecomTaskBindingOptions,
     saveWecomSettings,
     getWecomBridgeStatus,
     startWecomBridge,

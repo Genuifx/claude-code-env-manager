@@ -67,6 +67,7 @@ export interface TauriCommands {
   stop_telegram_bridge: [void, TelegramBridgeStatus];
   get_wecom_settings: [void, WecomSettings];
   get_wecom_task_binding_defaults: [void, WecomTaskBindingDefault[]];
+  get_wecom_task_binding_options: [void, WecomTaskBindingOption[]];
   save_wecom_settings: [{ settings: WecomSettings }, void];
   get_wecom_bridge_status: [void, WecomBridgeStatus];
   start_wecom_bridge: [void, WecomBridgeStatus];
@@ -654,6 +655,20 @@ export interface WecomTaskBindingDefault {
   targetType: WecomTaskBindingTargetType;
   peerId: string;
   autoSendCard: boolean;
+}
+
+export interface WecomTaskBindingTargetOption {
+  targetType: WecomTaskBindingTargetType;
+  peerId: string;
+  label: string;
+  isDefault: boolean;
+}
+
+export interface WecomTaskBindingOption {
+  botId: string;
+  name: string;
+  autoSendCard: boolean;
+  targets: WecomTaskBindingTargetOption[];
 }
 
 export interface WecomBridgeStatus {
