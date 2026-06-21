@@ -147,6 +147,7 @@
     "noHistoryHint": "启动 Claude Code 开始你的第一个对话",
     "projectSessions": "个会话",
     "loadMore": "加载更多",
+    "collapseList": "折叠",
     "manageEnvs": "管理环境...",
     "focusSession": "当前会话",
     "processedLabel": "已处理",
