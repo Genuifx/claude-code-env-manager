@@ -67,6 +67,8 @@ export function getRemotePlatformFromChannel(kind: ChannelKind | string): Remote
       return 'weixin';
     case 'wecom':
       return 'wecom';
+    case 'bot_binding':
+      return typeof kind !== 'string' && kind.kind === 'bot_binding' ? kind.platform : null;
     default:
       return null;
   }

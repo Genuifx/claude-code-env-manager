@@ -6,6 +6,10 @@ import { shallow } from 'zustand/shallow';
 import type { SessionStickerId, SessionTaskStage, SessionSubagentsPayload } from '@/features/conversations/types';
 import type {
   ChannelKind,
+  BindSessionToBotRequest,
+  BotBindingInboundRequest,
+  BotBindingInfo,
+  BotBindingOutboxFrame,
   HeadlessSessionSummary,
   InteractivePromptAnnotation,
   InteractiveReplayBatch,
@@ -24,6 +28,8 @@ import type {
   TelegramTopicBinding,
   WecomBridgeStatus,
   WecomSettings,
+  WecomTaskBindingDefault,
+  WecomTaskBindingOption,
   WeixinBridgeStatus,
   WeixinLoginSession,
   WeixinSettings,
@@ -554,6 +560,38 @@ export function useTauriCommands() {
     channel: ChannelKind,
   ): Promise<void> => {
     await invoke('detach_channel', { runtimeId, channel });
+  }, []);
+
+  const bindSessionToBot = useCallback(async (
+    request: BindSessionToBotRequest,
+  ): Promise<BotBindingInfo> => {
+    return invoke<BotBindingInfo>('bind_session_to_bot', { request });
+  }, []);
+
+  const listSessionBotBindings = useCallback(async (
+    runtimeId?: string | null,
+  ): Promise<BotBindingInfo[]> => {
+    return invoke<BotBindingInfo[]>('list_session_bot_bindings', {
+      runtimeId: runtimeId ?? null,
+    });
+  }, []);
+
+  const getSessionBotBindingOutbox = useCallback(async (
+    bindingId?: string | null,
+  ): Promise<BotBindingOutboxFrame[]> => {
+    return invoke<BotBindingOutboxFrame[]>('get_session_bot_binding_outbox', {
+      bindingId: bindingId ?? null,
+    });
+  }, []);
+
+  const sendBotBoundSessionInput = useCallback(async (
+    request: BotBindingInboundRequest,
+  ): Promise<void> => {
+    await invoke('send_bot_bound_session_input', { request });
+  }, []);
+
+  const processBotBindingRequests = useCallback(async (): Promise<BotBindingInfo[]> => {
+    return invoke<BotBindingInfo[]>('process_bot_binding_requests');
   }, []);
 
   const debugCompareSessions = useCallback(async (): Promise<UnifiedSessionDebugComparison> => {
@@ -1182,6 +1220,14 @@ export function useTauriCommands() {
     return invoke<WecomSettings>('get_wecom_settings');
   }, []);
 
+  const getWecomTaskBindingDefaults = useCallback(async (): Promise<WecomTaskBindingDefault[]> => {
+    return invoke<WecomTaskBindingDefault[]>('get_wecom_task_binding_defaults');
+  }, []);
+
+  const getWecomTaskBindingOptions = useCallback(async (): Promise<WecomTaskBindingOption[]> => {
+    return invoke<WecomTaskBindingOption[]>('get_wecom_task_binding_options');
+  }, []);
+
   const saveWecomSettings = useCallback(async (settings: WecomSettings): Promise<void> => {
     await invoke('save_wecom_settings', { settings });
   }, []);
@@ -1339,6 +1385,11 @@ export function useTauriCommands() {
     closeUnifiedInteractiveSession,
     attachChannel,
     detachChannel,
+    bindSessionToBot,
+    listSessionBotBindings,
+    getSessionBotBindingOutbox,
+    sendBotBoundSessionInput,
+    processBotBindingRequests,
     debugCompareSessions,
     resizeInteractiveSession,
     deleteSession,
@@ -1412,6 +1463,8 @@ export function useTauriCommands() {
     getTelegramForumTopics,
     bindTelegramTopic,
     getWecomSettings,
+    getWecomTaskBindingDefaults,
+    getWecomTaskBindingOptions,
     saveWecomSettings,
     getWecomBridgeStatus,
     startWecomBridge,

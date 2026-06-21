@@ -5,6 +5,7 @@ mod types;
 
 use crate::config;
 use crate::crypto;
+use crate::remote::RemotePlatform;
 use crate::runtime::{HeadlessRuntimeManager, HeadlessSessionOptions, HeadlessSessionSource};
 use chrono::Utc;
 use rand::RngCore;
@@ -15,7 +16,7 @@ use std::fs;
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
@@ -31,6 +32,7 @@ use self::message::{
 };
 pub use self::types::{
     default_ws_url, WecomBotConfig, WecomBotStatus, WecomBridgeStatus, WecomSettings,
+    WecomTaskBindingTargetType,
 };
 
 const WECOM_READ_TIMEOUT_MS: u64 = 500;
@@ -40,6 +42,7 @@ const WECOM_RECONNECT_MAX_MS: u64 = 30_000;
 const WECOM_TEXT_LIMIT: usize = 20_000;
 const WECOM_ADMISSION_TIMEOUT_MS: u64 = 30_000;
 const WECOM_ADMISSION_POLL_MS: u64 = 250;
+const WECOM_SEND_ACK_TIMEOUT_MS: u64 = 5_000;
 
 type WecomSocket = WebSocket<MaybeTlsStream<TcpStream>>;
 
@@ -54,6 +57,7 @@ struct WecomState {
 
 pub struct WecomBridgeManager {
     state: Mutex<WecomState>,
+    connections: Mutex<HashMap<String, Arc<WecomConnection>>>,
     stop_flag: AtomicBool,
     workers: Mutex<Vec<thread::JoinHandle<()>>>,
 }
@@ -62,6 +66,7 @@ impl Default for WecomBridgeManager {
     fn default() -> Self {
         Self {
             state: Mutex::new(WecomState::default()),
+            connections: Mutex::new(HashMap::new()),
             stop_flag: AtomicBool::new(false),
             workers: Mutex::new(Vec::new()),
         }
@@ -154,9 +159,7 @@ impl WecomBridgeManager {
         self.cleanup_finished_workers();
         if let Ok(mut workers) = self.workers.lock() {
             for handle in workers.drain(..) {
-                if handle.is_finished() {
-                    let _ = handle.join();
-                }
+                let _ = handle.join();
             }
         }
         if let Ok(mut state) = self.state.lock() {
@@ -166,6 +169,9 @@ impl WecomBridgeManager {
             for status in state.bot_statuses.values_mut() {
                 status.running = false;
             }
+        }
+        if let Ok(mut connections) = self.connections.lock() {
+            connections.clear();
         }
         self.status()
     }
@@ -275,10 +281,68 @@ impl WecomBridgeManager {
             );
         }
     }
+
+    fn remember_connection(&self, bot: &WecomBotConfig, connection: Arc<WecomConnection>) {
+        if let Ok(mut connections) = self.connections.lock() {
+            connections.insert(bot.id.clone(), Arc::clone(&connection));
+            connections.insert(bot.bot_id.clone(), connection);
+        }
+    }
+
+    fn forget_connection(&self, bot: &WecomBotConfig, connection: &Arc<WecomConnection>) {
+        if let Ok(mut connections) = self.connections.lock() {
+            connections.retain(|key, value| {
+                let same_key = key == &bot.id || key == &bot.bot_id;
+                !(same_key && Arc::ptr_eq(value, connection))
+            });
+        }
+    }
+
+    pub fn send_markdown_message(
+        &self,
+        bot_id: Option<&str>,
+        peer_id: &str,
+        content: &str,
+    ) -> Result<String, String> {
+        let connection = self.connection_for_bot(bot_id)?;
+        if !connection.is_connected() {
+            return Err("WeCom bot connection is not active.".to_string());
+        }
+        connection.send_markdown_message(&wecom_chatid_from_peer_id(peer_id), content)
+    }
+
+    fn connection_for_bot(&self, bot_id: Option<&str>) -> Result<Arc<WecomConnection>, String> {
+        let connections = self
+            .connections
+            .lock()
+            .map_err(|_| "Failed to lock WeCom connections".to_string())?;
+        if let Some(bot_id) = bot_id.map(str::trim).filter(|value| !value.is_empty()) {
+            return connections
+                .get(bot_id)
+                .cloned()
+                .ok_or_else(|| format!("WeCom bot is not connected: {bot_id}"));
+        }
+
+        let mut unique = Vec::<Arc<WecomConnection>>::new();
+        for connection in connections.values() {
+            if !unique
+                .iter()
+                .any(|candidate| Arc::ptr_eq(candidate, connection))
+            {
+                unique.push(Arc::clone(connection));
+            }
+        }
+        match unique.as_slice() {
+            [connection] => Ok(Arc::clone(connection)),
+            [] => Err("No WeCom bot connection is active.".to_string()),
+            _ => Err("Multiple WeCom bot connections are active; bot_id is required.".to_string()),
+        }
+    }
 }
 
 pub struct WecomConnection {
     socket: Mutex<Option<WecomSocket>>,
+    pending_acks: Mutex<HashMap<String, mpsc::Sender<Result<(), String>>>>,
     connected: AtomicBool,
 }
 
@@ -286,6 +350,7 @@ impl Default for WecomConnection {
     fn default() -> Self {
         Self {
             socket: Mutex::new(None),
+            pending_acks: Mutex::new(HashMap::new()),
             connected: AtomicBool::new(false),
         }
     }
@@ -346,6 +411,75 @@ impl WecomConnection {
             }
         }))
     }
+
+    pub fn send_markdown_message(&self, chatid: &str, content: &str) -> Result<String, String> {
+        let req_id = generate_req_id("aibot_send_msg");
+        self.send_frame_waiting_for_ack(
+            &req_id,
+            json!({
+                "cmd": "aibot_send_msg",
+                "headers": { "req_id": req_id.clone() },
+                "body": {
+                    "chatid": chatid,
+                    "msgtype": "markdown",
+                    "markdown": {
+                        "content": truncate_utf8(content, WECOM_TEXT_LIMIT),
+                    }
+                }
+            }),
+        )?;
+        Ok(req_id)
+    }
+
+    fn send_frame_waiting_for_ack(&self, req_id: &str, frame: Value) -> Result<(), String> {
+        let (sender, receiver) = mpsc::channel();
+        self.pending_acks
+            .lock()
+            .map_err(|_| "Failed to lock WeCom pending acks".to_string())?
+            .insert(req_id.to_string(), sender);
+        if let Err(error) = self.send_frame(frame) {
+            if let Ok(mut pending) = self.pending_acks.lock() {
+                pending.remove(req_id);
+            }
+            return Err(error);
+        }
+        match receiver.recv_timeout(Duration::from_millis(WECOM_SEND_ACK_TIMEOUT_MS)) {
+            Ok(result) => result,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if let Ok(mut pending) = self.pending_acks.lock() {
+                    pending.remove(req_id);
+                }
+                Err(format!("WeCom send ack timed out: {req_id}"))
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                Err(format!("WeCom send ack channel closed: {req_id}"))
+            }
+        }
+    }
+
+    fn complete_pending_ack(&self, frame: &WecomFrame) -> bool {
+        let req_id = frame.headers.req_id.as_str();
+        let sender = self
+            .pending_acks
+            .lock()
+            .ok()
+            .and_then(|mut pending| pending.remove(req_id));
+        let Some(sender) = sender else {
+            return false;
+        };
+        let result = match frame.errcode {
+            Some(code) if code != 0 => Err(format!(
+                "WeCom send ack failed: {}",
+                frame
+                    .errmsg
+                    .clone()
+                    .unwrap_or_else(|| format!("errcode {code}"))
+            )),
+            _ => Ok(()),
+        };
+        let _ = sender.send(result);
+        true
+    }
 }
 
 fn run_bot_loop(
@@ -373,6 +507,11 @@ fn run_bot_loop(
                 if connection.set_socket(socket).is_err() {
                     return;
                 }
+                if manager.stop_flag.load(Ordering::SeqCst) {
+                    connection.clear_socket();
+                    return;
+                }
+                manager.remember_connection(&bot, Arc::clone(&connection));
                 manager.set_bot_status(&bot, true, None);
                 reconnect_attempt = 0;
                 let _ = send_auth(&connection, &bot, secret);
@@ -407,6 +546,7 @@ fn run_bot_loop(
                     }
                 }
                 connection.clear_socket();
+                manager.forget_connection(&bot, &connection);
             }
             Err(error) => {
                 manager.set_bot_status(
@@ -423,6 +563,7 @@ fn run_bot_loop(
         interruptible_sleep(&manager, Duration::from_millis(delay));
     }
     connection.clear_socket();
+    manager.forget_connection(&bot, &connection);
     manager.set_bot_status(&bot, false, None);
 }
 
@@ -489,6 +630,9 @@ fn handle_frame(
             frame.errmsg.unwrap_or_else(|| "unknown error".to_string())
         ));
     }
+    if connection.complete_pending_ack(&frame) {
+        return Ok(());
+    }
     Ok(())
 }
 
@@ -527,6 +671,22 @@ fn handle_message(
     };
     let peer_id = peer_id_for_message(&message);
     let stream_id = generate_req_id("stream");
+    if try_route_bot_binding_message(
+        manager,
+        app,
+        runtime_manager,
+        connection,
+        bot,
+        &actor,
+        role,
+        &peer_id,
+        &frame,
+        &mut normalized,
+        &stream_id,
+    )? {
+        return Ok(());
+    }
+
     let prompt = match role {
         UserRole::Admin => {
             prepare_message_attachments(bot, &peer_id, &frame.headers.req_id, &mut normalized);
@@ -940,6 +1100,45 @@ enum UserRole {
     User,
 }
 
+struct BotBindingRouteMarkers {
+    quoted_task_id: Option<String>,
+    correlation_marker: Option<String>,
+}
+
+fn extract_bot_binding_route_markers(
+    message: &self::message::NormalizedMessage,
+) -> BotBindingRouteMarkers {
+    let texts = [
+        message.quote.as_deref().unwrap_or(""),
+        message.text.as_str(),
+    ];
+    BotBindingRouteMarkers {
+        quoted_task_id: texts
+            .iter()
+            .find_map(|text| extract_marker_token(text, "ccem-task-")),
+        correlation_marker: texts
+            .iter()
+            .find_map(|text| extract_marker_token(text, "ccem-bot-binding:")),
+    }
+}
+
+fn extract_marker_token(text: &str, prefix: &str) -> Option<String> {
+    let start = text.find(prefix)?;
+    let token = text[start..]
+        .split(|ch: char| {
+            ch.is_whitespace()
+                || matches!(
+                    ch,
+                    '`' | '"' | '\'' | '<' | '>' | '(' | ')' | '[' | ']' | '，' | '。' | '；'
+                )
+        })
+        .next()
+        .unwrap_or("")
+        .trim_matches(|ch: char| matches!(ch, '.' | ',' | ':' | ';' | '。' | '，'))
+        .to_string();
+    (!token.is_empty()).then_some(token)
+}
+
 fn reply_text(connection: &WecomConnection, frame: &WecomFrame, text: &str) -> Result<(), String> {
     connection.send_stream(
         &frame.headers.req_id,
@@ -966,6 +1165,15 @@ fn send_ping(connection: &WecomConnection) -> Result<(), String> {
         "cmd": "ping",
         "headers": { "req_id": generate_req_id("ping") }
     }))
+}
+
+fn wecom_chatid_from_peer_id(peer_id: &str) -> String {
+    peer_id
+        .trim()
+        .strip_prefix("single:")
+        .or_else(|| peer_id.trim().strip_prefix("group:"))
+        .unwrap_or_else(|| peer_id.trim())
+        .to_string()
 }
 
 fn read_next_frame(connection: &WecomConnection) -> Result<Option<WecomFrame>, String> {
@@ -999,6 +1207,105 @@ fn read_next_frame(connection: &WecomConnection) -> Result<Option<WecomFrame>, S
         }
         Err(error) => Err(format!("WeCom WebSocket read failed: {}", error)),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn try_route_bot_binding_message(
+    manager: &Arc<WecomBridgeManager>,
+    app: &AppHandle,
+    runtime_manager: &Arc<HeadlessRuntimeManager>,
+    connection: &Arc<WecomConnection>,
+    bot: &WecomBotConfig,
+    actor: &str,
+    role: UserRole,
+    peer_id: &str,
+    frame: &WecomFrame,
+    normalized: &mut self::message::NormalizedMessage,
+    stream_id: &str,
+) -> Result<bool, String> {
+    let markers = extract_bot_binding_route_markers(normalized);
+    if markers.quoted_task_id.is_none() && markers.correlation_marker.is_none() {
+        return Ok(false);
+    }
+
+    let bot_binding_manager = app.state::<Arc<crate::bot_binding::BotBindingManager>>();
+    let Some(binding) = bot_binding_manager.find_binding_for_route(
+        RemotePlatform::Wecom,
+        Some(&bot.bot_id),
+        peer_id,
+        markers.quoted_task_id.as_deref(),
+        markers.correlation_marker.as_deref(),
+    ) else {
+        return Ok(false);
+    };
+
+    let prompt = match role {
+        UserRole::Admin => {
+            prepare_message_attachments(bot, peer_id, &frame.headers.req_id, normalized);
+            normalized.to_prompt()
+        }
+        UserRole::User => {
+            connection.send_stream(
+                &frame.headers.req_id,
+                stream_id,
+                "收到，正在判断是否符合普通用户范围...",
+                false,
+            )?;
+            let decision = match evaluate_user_admission(
+                manager,
+                app,
+                runtime_manager,
+                bot,
+                actor,
+                normalized,
+            ) {
+                Ok(decision) => decision,
+                Err(error) => {
+                    connection.send_stream(
+                        &frame.headers.req_id,
+                        stream_id,
+                        &format!("普通用户准入判断失败：{}", error),
+                        true,
+                    )?;
+                    return Ok(true);
+                }
+            };
+            if !decision.allow {
+                connection.send_stream(
+                    &frame.headers.req_id,
+                    stream_id,
+                    &format!("未通过普通用户权限策略：{}", decision.reason),
+                    true,
+                )?;
+                return Ok(true);
+            }
+            prepare_message_attachments(bot, peer_id, &frame.headers.req_id, normalized);
+            build_user_policy_prompt(&bot.user_access_policy, normalized)
+        }
+    };
+
+    let unified_state = app.state::<Arc<crate::unified_runtime::UnifiedSessionManager>>();
+    let native_state = app.state::<Arc<crate::native_runtime::NativeRuntimeManager>>();
+    bot_binding_manager.send_inbound_command(
+        app,
+        unified_state.inner().as_ref(),
+        native_state.inner().clone(),
+        crate::bot_binding::BotBindingInboundRequest {
+            binding_id: binding.binding_id.clone(),
+            text: prompt,
+            quoted_task_id: markers
+                .quoted_task_id
+                .or_else(|| Some(binding.task_id.clone())),
+            responder: Some(actor.to_string()),
+        },
+    )?;
+    connection.send_stream(
+        &frame.headers.req_id,
+        stream_id,
+        "已转入绑定的 CCEM 会话。",
+        true,
+    )?;
+    Ok(true)
 }
 
 fn set_socket_read_timeout(socket: &mut WecomSocket) {
@@ -1052,4 +1359,36 @@ fn generate_req_id(prefix: &str) -> String {
         Utc::now().timestamp_millis(),
         hex::encode(random)
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wecom_chatid_from_peer_id_strips_internal_scope_prefixes() {
+        assert_eq!(wecom_chatid_from_peer_id("single:user_a"), "user_a");
+        assert_eq!(wecom_chatid_from_peer_id("group:chat_1"), "chat_1");
+        assert_eq!(wecom_chatid_from_peer_id(" raw_id "), "raw_id");
+    }
+
+    #[test]
+    fn extract_bot_binding_route_markers_reads_quote_before_text() {
+        let message = self::message::NormalizedMessage {
+            text: "继续推进 ccem-task-other".to_string(),
+            attachments: Vec::new(),
+            quote: Some(
+                "**Task**\n任务：`ccem-task-runtime`\n标记：`ccem-bot-binding:binding:ccem-task-runtime`"
+                    .to_string(),
+            ),
+        };
+
+        let markers = extract_bot_binding_route_markers(&message);
+
+        assert_eq!(markers.quoted_task_id.as_deref(), Some("ccem-task-runtime"));
+        assert_eq!(
+            markers.correlation_marker.as_deref(),
+            Some("ccem-bot-binding:binding:ccem-task-runtime")
+        );
+    }
 }

@@ -140,6 +140,9 @@ impl InteractiveRuntimeManager {
         session_manager: Arc<SessionManager>,
         options: InteractiveSessionOptions,
     ) -> Result<Session, String> {
+        let mut env_vars = options.env_vars.clone();
+        env_vars.insert("CCEM_RUNTIME_ID".to_string(), options.session_id.clone());
+        env_vars.insert("CCEM_SESSION_ID".to_string(), options.session_id.clone());
         let window = self.tmux.create_session(
             &options.session_id,
             &options.client,
@@ -150,7 +153,7 @@ impl InteractiveRuntimeManager {
                 options.resume_session_id.as_deref(),
                 options.initial_prompt.as_deref(),
             ),
-            &options.env_vars,
+            &env_vars,
             Path::new(&options.working_dir),
         )?;
 

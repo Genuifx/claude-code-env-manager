@@ -66,6 +66,8 @@ export interface TauriCommands {
   start_telegram_bridge: [void, TelegramBridgeStatus];
   stop_telegram_bridge: [void, TelegramBridgeStatus];
   get_wecom_settings: [void, WecomSettings];
+  get_wecom_task_binding_defaults: [void, WecomTaskBindingDefault[]];
+  get_wecom_task_binding_options: [void, WecomTaskBindingOption[]];
   save_wecom_settings: [{ settings: WecomSettings }, void];
   get_wecom_bridge_status: [void, WecomBridgeStatus];
   start_wecom_bridge: [void, WecomBridgeStatus];
@@ -173,6 +175,11 @@ export interface TauriCommands {
   stop_unified_session: [{ runtimeId: string }, void];
   attach_channel: [{ runtimeId: string; channel: ChannelKind }, void];
   detach_channel: [{ runtimeId: string; channel: ChannelKind }, void];
+  bind_session_to_bot: [{ request: BindSessionToBotRequest }, BotBindingInfo];
+  list_session_bot_bindings: [{ runtimeId?: string | null }, BotBindingInfo[]];
+  get_session_bot_binding_outbox: [{ bindingId?: string | null }, BotBindingOutboxFrame[]];
+  send_bot_bound_session_input: [{ request: BotBindingInboundRequest }, void];
+  process_bot_binding_requests: [void, BotBindingInfo[]];
   debug_compare_sessions: [void, UnifiedSessionDebugComparison];
   resize_interactive_session: [{ sessionId: string; cols: number; rows: number }, void];
   create_managed_session: [
@@ -622,6 +629,8 @@ export interface WecomSettings {
   bots: WecomBotConfig[];
 }
 
+export type WecomTaskBindingTargetType = 'user' | 'group';
+
 export interface WecomBotConfig {
   id: string;
   name?: string;
@@ -639,7 +648,31 @@ export interface WecomBotConfig {
   adminPermMode: string;
   userPermMode: string;
   defaultEnvName?: string | null;
+  taskBindingDefaultTargetType?: WecomTaskBindingTargetType | null;
+  taskBindingDefaultPeerId?: string | null;
+  taskBindingAutoSendCard?: boolean;
   wsUrl: string;
+}
+
+export interface WecomTaskBindingDefault {
+  botId: string;
+  targetType: WecomTaskBindingTargetType;
+  peerId: string;
+  autoSendCard: boolean;
+}
+
+export interface WecomTaskBindingTargetOption {
+  targetType: WecomTaskBindingTargetType;
+  peerId: string;
+  label: string;
+  isDefault: boolean;
+}
+
+export interface WecomTaskBindingOption {
+  botId: string;
+  name: string;
+  autoSendCard: boolean;
+  targets: WecomTaskBindingTargetOption[];
 }
 
 export interface WecomBridgeStatus {
@@ -780,7 +813,15 @@ export type ChannelKind =
   | { kind: 'desktop_ui' }
   | { kind: 'telegram'; chat_id: number; thread_id?: number | null }
   | { kind: 'weixin'; peer_id: string }
-  | { kind: 'wecom'; bot_id: string; peer_id: string };
+  | { kind: 'wecom'; bot_id: string; peer_id: string }
+  | {
+      kind: 'bot_binding';
+      binding_id: string;
+      platform: 'telegram' | 'weixin' | 'wecom';
+      peer_id: string;
+      thread_id?: string | null;
+      bot_id?: string | null;
+    };
 
 export interface AttachedChannelInfo {
   kind: ChannelKind;
@@ -792,6 +833,72 @@ export type RuntimeInput =
   | { type: 'message'; text: string }
   | { type: 'approval'; approved: boolean; responder?: string | null }
   | { type: 'raw_terminal'; data: string };
+
+export interface BindSessionToBotRequest {
+  runtime_id: string;
+  platform: 'telegram' | 'weixin' | 'wecom';
+  peer_id: string;
+  thread_id?: string | null;
+  bot_id?: string | null;
+  task_title?: string | null;
+  task_summary?: string | null;
+  send_task_card?: boolean;
+}
+
+export interface BotBindingInfo {
+  binding_id: string;
+  runtime_id: string;
+  task_id: string;
+  platform: 'telegram' | 'weixin' | 'wecom';
+  peer_id: string;
+  thread_id?: string | null;
+  bot_id?: string | null;
+  task_title: string;
+  task_summary?: string | null;
+  send_task_card?: boolean;
+  correlation_marker: string;
+  task_card_message_id?: string | null;
+  delivery_status: BotBindingDeliveryStatus;
+  last_delivery_error?: string | null;
+  delivered_at?: string | null;
+  connected_at: string;
+}
+
+export type BotBindingDeliveryStatus =
+  | 'bound_only'
+  | 'pending'
+  | 'delivered'
+  | 'failed';
+
+export type BotBindingOutboxFrameKind =
+  | 'task_card'
+  | 'event_update'
+  | 'interactive_output'
+  | 'inbound_command'
+  | 'permission_prompt'
+  | 'session_completed'
+  | 'error';
+
+export interface BotBindingOutboxFrame {
+  frame_id: string;
+  binding_id: string;
+  runtime_id: string;
+  task_id: string;
+  kind: BotBindingOutboxFrameKind;
+  title: string;
+  text: string;
+  quoted_task_id?: string | null;
+  correlation_marker?: string | null;
+  delivery_message_id?: string | null;
+  occurred_at: string;
+}
+
+export interface BotBindingInboundRequest {
+  binding_id: string;
+  text: string;
+  quoted_task_id?: string | null;
+  responder?: string | null;
+}
 
 export interface UnifiedSessionInfo {
   id: string;

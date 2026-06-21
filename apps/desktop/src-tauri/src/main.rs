@@ -5,6 +5,7 @@
 
 mod analytics;
 mod app_updates;
+mod bot_binding;
 mod channel;
 mod companion;
 mod config;
@@ -49,6 +50,10 @@ mod workspace_search;
 use analytics::{
     get_continuous_usage_days, get_usage_history, get_usage_model_breakdown, get_usage_stats,
 };
+use bot_binding::{
+    BindSessionToBotRequest, BotBindingInboundRequest, BotBindingInfo, BotBindingManager,
+    BotBindingOutboxFrame,
+};
 use channel::ChannelKind;
 use config::{
     create_env_with_encrypted_key, resolve_claude_env, resolve_codex_runtime,
@@ -73,6 +78,7 @@ use prompt_image_store::PromptImageStore;
 use proxy_debug::{
     ProxyDebugManager, ProxyDebugState, ProxyTrafficDetail, ProxyTrafficPage, RegisterRouteRequest,
 };
+use remote::RemotePlatform;
 use runtime::{
     cleanup_orphaned_runtime_processes, clear_runtime_recovery_candidates_by_claude_session_id,
     dismiss_runtime_recovery_candidate as dismiss_runtime_recovery_candidate_entry,
@@ -100,7 +106,7 @@ use telegram::{
 use tmux::ClaudeTerminalState;
 use unified_runtime::UnifiedSessionManager;
 use unified_session::{RuntimeInput, UnifiedSessionDebugComparison, UnifiedSessionInfo};
-use wecom::{WecomBridgeManager, WecomBridgeStatus, WecomSettings};
+use wecom::{WecomBridgeManager, WecomBridgeStatus, WecomSettings, WecomTaskBindingTargetType};
 use weixin::{WeixinBridgeManager, WeixinBridgeStatus, WeixinLoginSession, WeixinSettings};
 use workspace_search::search_workspace_files;
 
@@ -948,6 +954,121 @@ fn detach_channel(
     channel: ChannelKind,
 ) -> Result<(), String> {
     unified_state.detach_channel(&runtime_id, &channel)
+}
+
+#[tauri::command]
+fn bind_session_to_bot(
+    app: tauri::AppHandle,
+    unified_state: State<'_, Arc<UnifiedSessionManager>>,
+    native_state: State<'_, Arc<NativeRuntimeManager>>,
+    bot_binding_state: State<'_, Arc<BotBindingManager>>,
+    wecom_state: State<'_, Arc<WecomBridgeManager>>,
+    request: BindSessionToBotRequest,
+) -> Result<BotBindingInfo, String> {
+    let send_task_card = request.send_task_card;
+    let info = bot_binding_state.bind_any_session(
+        &app,
+        &unified_state,
+        native_state.inner().clone(),
+        request,
+    )?;
+    if !send_task_card {
+        return Ok(info);
+    }
+    deliver_bot_binding_task_card(bot_binding_state.inner(), wecom_state.inner(), &info)
+}
+
+#[tauri::command]
+fn list_session_bot_bindings(
+    bot_binding_state: State<'_, Arc<BotBindingManager>>,
+    runtime_id: Option<String>,
+) -> Vec<BotBindingInfo> {
+    bot_binding_state.list_bindings(runtime_id)
+}
+
+#[tauri::command]
+fn get_session_bot_binding_outbox(
+    bot_binding_state: State<'_, Arc<BotBindingManager>>,
+    binding_id: Option<String>,
+) -> Vec<BotBindingOutboxFrame> {
+    bot_binding_state.outbox(binding_id)
+}
+
+#[tauri::command]
+fn send_bot_bound_session_input(
+    app: tauri::AppHandle,
+    unified_state: State<'_, Arc<UnifiedSessionManager>>,
+    native_state: State<'_, Arc<NativeRuntimeManager>>,
+    bot_binding_state: State<'_, Arc<BotBindingManager>>,
+    request: BotBindingInboundRequest,
+) -> Result<(), String> {
+    bot_binding_state.send_inbound_command(
+        &app,
+        &unified_state,
+        native_state.inner().clone(),
+        request,
+    )
+}
+
+#[tauri::command]
+fn process_bot_binding_requests(
+    app: tauri::AppHandle,
+    unified_state: State<'_, Arc<UnifiedSessionManager>>,
+    native_state: State<'_, Arc<NativeRuntimeManager>>,
+    bot_binding_state: State<'_, Arc<BotBindingManager>>,
+    wecom_state: State<'_, Arc<WecomBridgeManager>>,
+) -> Result<Vec<BotBindingInfo>, String> {
+    let infos = bot_binding_state.process_file_requests(
+        &app,
+        &unified_state,
+        native_state.inner().clone(),
+    )?;
+    infos
+        .into_iter()
+        .map(|info| {
+            if info.send_task_card {
+                deliver_bot_binding_task_card(bot_binding_state.inner(), wecom_state.inner(), &info)
+            } else {
+                Ok(info)
+            }
+        })
+        .collect()
+}
+
+fn deliver_bot_binding_task_card(
+    bot_binding_manager: &Arc<BotBindingManager>,
+    wecom_manager: &Arc<WecomBridgeManager>,
+    info: &BotBindingInfo,
+) -> Result<BotBindingInfo, String> {
+    if info.platform != RemotePlatform::Wecom {
+        return Ok(info.clone());
+    }
+
+    let pending = bot_binding_manager.mark_task_card_delivery_pending(&info.binding_id)?;
+    match wecom_manager.send_markdown_message(
+        pending.bot_id.as_deref(),
+        &pending.peer_id,
+        &format_wecom_task_binding_card(&pending),
+    ) {
+        Ok(message_id) => {
+            bot_binding_manager.mark_task_card_delivered(&pending.binding_id, message_id)
+        }
+        Err(error) => {
+            bot_binding_manager.mark_task_card_delivery_failed(&pending.binding_id, error)
+        }
+    }
+}
+
+fn format_wecom_task_binding_card(info: &BotBindingInfo) -> String {
+    let summary = info
+        .task_summary
+        .as_deref()
+        .filter(|summary| !summary.trim().is_empty())
+        .unwrap_or("无摘要");
+    format!(
+        "**{}**\n\n任务：`{}`\n会话：`{}`\n标记：`{}`\n\n{}\n\n引用这条消息回复，即可继续这个 CCEM 会话。",
+        info.task_title, info.task_id, info.runtime_id, info.correlation_marker, summary
+    )
 }
 
 #[tauri::command]
@@ -2655,6 +2776,167 @@ fn get_wecom_settings() -> Result<WecomSettings, String> {
     wecom::read_wecom_settings()
 }
 
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WecomTaskBindingDefault {
+    bot_id: String,
+    target_type: WecomTaskBindingTargetType,
+    peer_id: String,
+    auto_send_card: bool,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WecomTaskBindingTargetOption {
+    target_type: WecomTaskBindingTargetType,
+    peer_id: String,
+    label: String,
+    is_default: bool,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WecomTaskBindingOption {
+    bot_id: String,
+    name: String,
+    auto_send_card: bool,
+    targets: Vec<WecomTaskBindingTargetOption>,
+}
+
+#[tauri::command]
+fn get_wecom_task_binding_defaults() -> Result<Vec<WecomTaskBindingDefault>, String> {
+    let settings = wecom::read_wecom_settings()?;
+    Ok(settings
+        .bots
+        .into_iter()
+        .filter_map(|bot| {
+            let peer_id = bot.task_binding_default_peer_id?.trim().to_string();
+            if !bot.enabled || bot.bot_id.trim().is_empty() || peer_id.is_empty() {
+                return None;
+            }
+            Some(WecomTaskBindingDefault {
+                bot_id: bot.bot_id,
+                target_type: bot
+                    .task_binding_default_target_type
+                    .unwrap_or(WecomTaskBindingTargetType::User),
+                peer_id,
+                auto_send_card: bot.task_binding_auto_send_card,
+            })
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn get_wecom_task_binding_options() -> Result<Vec<WecomTaskBindingOption>, String> {
+    let settings = wecom::read_wecom_settings()?;
+    Ok(settings
+        .bots
+        .into_iter()
+        .filter(|bot| bot.enabled && !bot.bot_id.trim().is_empty())
+        .map(|bot| {
+            let default_target_type = bot
+                .task_binding_default_target_type
+                .clone()
+                .unwrap_or(WecomTaskBindingTargetType::User);
+            let mut targets = Vec::<WecomTaskBindingTargetOption>::new();
+            if let Some(peer_id) = bot
+                .task_binding_default_peer_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                push_wecom_task_target(
+                    &mut targets,
+                    default_target_type.clone(),
+                    peer_id,
+                    "Default",
+                    true,
+                );
+            }
+            for user_id in &bot.admin_user_ids {
+                push_wecom_task_target(
+                    &mut targets,
+                    WecomTaskBindingTargetType::User,
+                    user_id,
+                    "Admin",
+                    false,
+                );
+            }
+            for user_id in &bot.allowed_user_ids {
+                push_wecom_task_target(
+                    &mut targets,
+                    WecomTaskBindingTargetType::User,
+                    user_id,
+                    "User",
+                    false,
+                );
+            }
+            for group_id in &bot.allowed_group_chat_ids {
+                push_wecom_task_target(
+                    &mut targets,
+                    WecomTaskBindingTargetType::Group,
+                    group_id,
+                    "Group",
+                    false,
+                );
+            }
+            WecomTaskBindingOption {
+                bot_id: bot.bot_id,
+                name: if bot.name.trim().is_empty() {
+                    bot.id
+                } else {
+                    bot.name
+                },
+                auto_send_card: bot.task_binding_auto_send_card,
+                targets,
+            }
+        })
+        .collect())
+}
+
+fn push_wecom_task_target(
+    targets: &mut Vec<WecomTaskBindingTargetOption>,
+    target_type: WecomTaskBindingTargetType,
+    peer_id: &str,
+    kind: &str,
+    is_default: bool,
+) {
+    let peer_id = peer_id.trim();
+    if peer_id.is_empty()
+        || targets
+            .iter()
+            .any(|target| target.target_type == target_type && target.peer_id == peer_id)
+    {
+        return;
+    }
+    let scope = match &target_type {
+        WecomTaskBindingTargetType::User => "user",
+        WecomTaskBindingTargetType::Group => "group",
+    };
+    targets.push(WecomTaskBindingTargetOption {
+        target_type,
+        peer_id: peer_id.to_string(),
+        label: format!("{kind} {scope} · {}", compact_wecom_peer_id(peer_id)),
+        is_default,
+    });
+}
+
+fn compact_wecom_peer_id(peer_id: &str) -> String {
+    if peer_id.chars().count() <= 18 {
+        return peer_id.to_string();
+    }
+    let start = peer_id.chars().take(8).collect::<String>();
+    let end = peer_id
+        .chars()
+        .rev()
+        .take(6)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    format!("{start}...{end}")
+}
+
 #[tauri::command]
 async fn save_telegram_settings(
     telegram_state: State<'_, Arc<TelegramBridgeManager>>,
@@ -3680,6 +3962,7 @@ fn main() {
     let telegram_bridge_manager = Arc::new(TelegramBridgeManager::default());
     let wecom_bridge_manager = Arc::new(WecomBridgeManager::default());
     let weixin_bridge_manager = Arc::new(WeixinBridgeManager::default());
+    let bot_binding_manager = Arc::new(BotBindingManager::load_from_disk());
     let session_manager_for_setup = session_manager.clone();
     let proxy_manager_for_setup = proxy_debug_manager.clone();
     let proxy_manager_for_run = proxy_debug_manager.clone();
@@ -3692,6 +3975,7 @@ fn main() {
     let wecom_manager_for_run = wecom_bridge_manager.clone();
     let weixin_manager_for_setup = weixin_bridge_manager.clone();
     let weixin_manager_for_run = weixin_bridge_manager.clone();
+    let bot_binding_manager_for_setup = bot_binding_manager.clone();
     let notification_prefs_state = notifications::NotificationPrefsState::new();
     let main_window_boot_shown = Arc::new(AtomicBool::new(false));
     let main_window_boot_shown_for_page_load = main_window_boot_shown.clone();
@@ -3723,6 +4007,7 @@ fn main() {
         .manage(telegram_bridge_manager.clone())
         .manage(wecom_bridge_manager.clone())
         .manage(weixin_bridge_manager.clone())
+        .manage(bot_binding_manager.clone())
         .manage(proxy_debug_manager.clone())
         .manage(app_updates::PendingUpdate::default())
         .manage(notification_prefs_state)
@@ -3825,6 +4110,11 @@ fn main() {
             stop_unified_session,
             attach_channel,
             detach_channel,
+            bind_session_to_bot,
+            list_session_bot_bindings,
+            get_session_bot_binding_outbox,
+            send_bot_bound_session_input,
+            process_bot_binding_requests,
             debug_compare_sessions,
             list_sessions,
             stop_session,
@@ -3883,6 +4173,8 @@ fn main() {
             send_test_notification,
             get_telegram_settings,
             get_wecom_settings,
+            get_wecom_task_binding_defaults,
+            get_wecom_task_binding_options,
             get_weixin_settings,
             save_telegram_settings,
             save_wecom_settings,
@@ -4034,6 +4326,26 @@ fn main() {
             app.manage(cron_scheduler.clone());
             let cron_app = app.handle().clone();
             start_cron_scheduler(cron_app, cron_scheduler, unified_session_manager.clone());
+            bot_binding_manager_for_setup.start_request_watcher(
+                app.handle().clone(),
+                unified_session_manager.clone(),
+                native_runtime_manager.clone(),
+                {
+                    let bot_binding_manager = bot_binding_manager_for_setup.clone();
+                    let wecom_manager = wecom_manager_for_setup.clone();
+                    move |infos| {
+                        for info in infos {
+                            if info.send_task_card {
+                                let _ = deliver_bot_binding_task_card(
+                                    &bot_binding_manager,
+                                    &wecom_manager,
+                                    &info,
+                                );
+                            }
+                        }
+                    }
+                },
+            );
 
             if let Ok(settings) = telegram::read_telegram_settings() {
                 telegram_manager_for_setup.sync_settings(&settings);

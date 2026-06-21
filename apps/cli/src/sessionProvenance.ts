@@ -34,6 +34,7 @@ export interface CliProvenanceTrackingHandle {
 }
 
 interface StartCliClaudeTrackingOptions {
+  ccemSessionId?: string;
   envName: string;
   workingDir: string;
   permMode?: string;
@@ -61,7 +62,8 @@ export function startCliClaudeProvenanceTracking(
     return null;
   }
 
-  const ccemSessionId = `cli-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const ccemSessionId = normalizeText(options.ccemSessionId)
+    ?? `cli-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   try {
     registerLaunch({

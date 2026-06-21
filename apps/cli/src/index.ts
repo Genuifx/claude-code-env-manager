@@ -65,6 +65,7 @@ import {
 } from './skills.js';
 import { runSkillSelector } from './components/index.js';
 import { loadFromRemote } from './remote.js';
+import { CCEM_BOT_BIND_SKILL_CONTENT } from './bot-bind-skill.js';
 import { CCEM_CRON_SKILL_CONTENT } from './cron-skill.js';
 import {
   createCronTask,
@@ -488,6 +489,7 @@ type InteractiveAttachSession = {
 
 const getSessionsFilePath = (): string => path.join(getCcemConfigDir(), 'sessions.json');
 const getRuntimeStateFilePath = (): string => path.join(getCcemConfigDir(), 'runtime-state.json');
+const getBotBindRequestFilePath = (): string => path.join(getCcemConfigDir(), 'bot-bind-requests.jsonl');
 
 const parseJsonFile = <T>(filePath: string): T | null => {
   if (!fs.existsSync(filePath)) {
@@ -588,6 +590,37 @@ const attachTmuxTarget = (target: string): Promise<void> => {
   });
 };
 
+type BotBindPlatform = 'telegram' | 'weixin' | 'wecom';
+
+const normalizeBotBindPlatform = (value: string): BotBindPlatform | null => {
+  const normalized = value.trim().toLowerCase();
+  return normalized === 'telegram' || normalized === 'weixin' || normalized === 'wecom'
+    ? normalized
+    : null;
+};
+
+const resolveBotBindRuntimeId = (explicitRuntimeId?: string): string | null => {
+  const explicit = explicitRuntimeId?.trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  const fromEnv = process.env.CCEM_RUNTIME_ID?.trim() || process.env.CCEM_SESSION_ID?.trim();
+  if (fromEnv) {
+    return fromEnv;
+  }
+
+  const sessions = readInteractiveAttachSessions();
+  return sessions.length === 1 ? sessions[0].id : null;
+};
+
+const appendBotBindRequest = (payload: Record<string, unknown>): string => {
+  const requestPath = getBotBindRequestFilePath();
+  fs.mkdirSync(path.dirname(requestPath), { recursive: true });
+  fs.appendFileSync(requestPath, `${JSON.stringify(payload)}\n`, 'utf-8');
+  return requestPath;
+};
+
 // 环境管理命令
 program
   .command('ls')
@@ -665,6 +698,79 @@ program
       console.error(chalk.red(`Failed to attach ${session.tmuxTarget}: ${String(error)}`));
       process.exit(1);
     }
+  });
+
+program
+  .command('bot-bind')
+  .description('Request binding the current ccem session to a chat bot target')
+  .requiredOption('--platform <platform>', 'target platform: telegram, weixin, or wecom')
+  .option('--peer-id <peerId>', 'target user/chat id')
+  .option('--peer <peerId>', 'alias for --peer-id')
+  .option('--runtime-id <runtimeId>', 'ccem runtime id; defaults to CCEM_RUNTIME_ID')
+  .option('--bot-id <botId>', 'WeCom bot id or platform bot id')
+  .option('--thread-id <threadId>', 'thread/topic id for platforms that support it')
+  .option('--title <title>', 'task card title')
+  .option('--summary <summary>', 'task card summary')
+  .option('--no-send-card', 'bind without sending the initial task card')
+  .option('--json', 'print the queued request as JSON')
+  .action((options) => {
+    const platform = normalizeBotBindPlatform(options.platform);
+    if (!platform) {
+      console.error(chalk.red('✗ --platform must be telegram, weixin, or wecom'));
+      process.exitCode = 1;
+      return;
+    }
+
+    const peerId = (options.peerId ?? options.peer ?? '').trim();
+    if (!peerId) {
+      console.error(chalk.red('✗ --peer-id is required'));
+      process.exitCode = 1;
+      return;
+    }
+
+    const runtimeId = resolveBotBindRuntimeId(options.runtimeId);
+    if (!runtimeId) {
+      console.error(chalk.red('✗ Unable to resolve ccem runtime id'));
+      console.error(chalk.gray('  Run from a ccem-launched session or pass --runtime-id explicitly.'));
+      process.exitCode = 1;
+      return;
+    }
+
+    const botId = options.botId?.trim() || undefined;
+    if (platform === 'wecom' && !botId) {
+      console.error(chalk.red('✗ --bot-id is required for WeCom bot bindings'));
+      process.exitCode = 1;
+      return;
+    }
+
+    const payload = {
+      request_id: `botbind-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      runtime_id: runtimeId,
+      platform,
+      peer_id: peerId,
+      bot_id: botId,
+      thread_id: options.threadId?.trim() || undefined,
+      task_title: options.title?.trim() || undefined,
+      task_summary: options.summary?.trim() || undefined,
+      send_task_card: options.sendCard !== false,
+      created_at: new Date().toISOString(),
+    };
+
+    const requestPath = appendBotBindRequest(payload);
+    if (options.json) {
+      console.log(JSON.stringify({ requestPath, payload }, null, 2));
+      return;
+    }
+
+    console.log(chalk.green('✓ 已提交 bot 绑定请求'));
+    console.log(chalk.gray(`  runtime: ${runtimeId}`));
+    console.log(chalk.gray(`  target: ${platform}/${peerId}`));
+    console.log(chalk.gray(`  queue: ${requestPath}`));
+    console.log(chalk.cyan(
+      options.sendCard === false
+        ? '  如果 CCEM Desktop 正在运行，会自动消费该请求并建立绑定。'
+        : '  如果 CCEM Desktop 正在运行，会自动消费该请求并发送任务卡片到绑定目标。'
+    ));
   });
 
 program
@@ -1145,6 +1251,41 @@ setupCmd
     console.log(chalk.green(`✓ 已安装 ccem-cron skill`));
     console.log(chalk.gray(`  路径: ${targetPath}`));
     console.log(chalk.cyan(`\n在 Claude Code 中使用 /ccem-cron 即可调用此 skill`));
+  });
+
+setupCmd
+  .command('bot-bind')
+  .description('安装 ccem-bot-bind skill 到 Claude Code（~/.claude/skills/）')
+  .option('--force', '强制覆盖已有文件')
+  .action(async function(this: any) {
+    const options = this.opts();
+    const skillDir = path.join(getHomeDir(), '.claude', 'skills');
+    const targetPath = path.join(skillDir, 'ccem-bot-bind.md');
+
+    if (!fs.existsSync(skillDir)) {
+      fs.mkdirSync(skillDir, { recursive: true });
+      console.log(chalk.gray(`创建目录: ${skillDir}`));
+    }
+
+    if (fs.existsSync(targetPath) && !options.force) {
+      const { overwrite } = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'overwrite',
+          message: `${targetPath} 已存在，是否覆盖？`,
+          default: false
+        }
+      ]);
+      if (!overwrite) {
+        console.log(chalk.yellow('已取消'));
+        return;
+      }
+    }
+
+    fs.writeFileSync(targetPath, CCEM_BOT_BIND_SKILL_CONTENT, 'utf-8');
+    console.log(chalk.green(`✓ 已安装 ccem-bot-bind skill`));
+    console.log(chalk.gray(`  路径: ${targetPath}`));
+    console.log(chalk.cyan(`\n在 Claude Code 中让它使用 ccem-bot-bind skill 即可绑定当前会话到 bot`));
   });
 
 // skill 命令组（管理 Claude Code skills）

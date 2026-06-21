@@ -1189,6 +1189,8 @@ fn build_claude_command(
 
     command
         .env("PATH", get_user_path())
+        .env("CCEM_RUNTIME_ID", runtime_id)
+        .env("CCEM_SESSION_ID", runtime_id)
         .env_remove("CLAUDECODE")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
