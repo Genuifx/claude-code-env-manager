@@ -20,10 +20,17 @@ export interface CronTask {
   enabled: boolean;
   timeoutSecs: number;
   templateId: string | null;
+  wecomNotification: CronWecomNotification | null;
   triggerType: 'schedule';
   parentTaskId: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CronWecomNotification {
+  botId?: string | null;
+  peerId?: string | null;
+  enabled?: boolean | null;
 }
 
 export interface CronCreateInput {
@@ -39,6 +46,7 @@ export interface CronCreateInput {
   enabled?: boolean | null;
   timeoutSecs?: number | null;
   templateId?: string | null;
+  wecomNotification?: CronWecomNotification | null;
 }
 
 interface CronTasksFile {
@@ -134,6 +142,41 @@ export function parseStringList(value?: string | string[] | null): string[] {
   return trimmed.split(',').map((item) => item.trim()).filter(Boolean);
 }
 
+export function normalizeWecomNotification(
+  value?: CronWecomNotification | null,
+): CronWecomNotification | null {
+  if (!value) {
+    return null;
+  }
+
+  return {
+    botId: value.botId?.trim() || null,
+    peerId: value.peerId?.trim() || null,
+    enabled: value.enabled ?? true,
+  };
+}
+
+function parseWecomNotification(value: unknown): CronWecomNotification | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  return {
+    botId: typeof record.botId === 'string'
+      ? record.botId
+      : typeof record.bot_id === 'string'
+        ? record.bot_id
+        : null,
+    peerId: typeof record.peerId === 'string'
+      ? record.peerId
+      : typeof record.peer_id === 'string'
+        ? record.peer_id
+        : null,
+    enabled: typeof record.enabled === 'boolean' ? record.enabled : true,
+  };
+}
+
 export function createCronTask(input: CronCreateInput, tasksPath = getCronTasksPath()): CronTask {
   const name = input.name?.trim();
   if (!name) {
@@ -176,6 +219,7 @@ export function createCronTask(input: CronCreateInput, tasksPath = getCronTasksP
     enabled: input.enabled ?? true,
     timeoutSecs,
     templateId: input.templateId?.trim() || null,
+    wecomNotification: normalizeWecomNotification(input.wecomNotification),
     triggerType: 'schedule',
     parentTaskId: null,
     createdAt: now,
@@ -223,6 +267,7 @@ export function resolveJsonInput(raw: string): string {
 
 export function parseCronCreateJson(raw: string): CronCreateInput {
   const parsed = JSON.parse(resolveJsonInput(raw)) as Record<string, unknown>;
+  const wecomNotification = parsed.wecomNotification ?? parsed.wecom_notification;
   return {
     name: String(parsed.name ?? ''),
     cronExpression: String(parsed.cronExpression ?? parsed.schedule ?? ''),
@@ -240,6 +285,7 @@ export function parseCronCreateJson(raw: string): CronCreateInput {
     enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : null,
     timeoutSecs: typeof parsed.timeoutSecs === 'number' ? parsed.timeoutSecs : null,
     templateId: typeof parsed.templateId === 'string' ? parsed.templateId : null,
+    wecomNotification: parseWecomNotification(wecomNotification),
   };
 }
 

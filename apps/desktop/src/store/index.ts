@@ -120,10 +120,17 @@ export interface CronTask {
   enabled: boolean;
   timeoutSecs: number;
   templateId: string | null;
+  wecomNotification?: CronWecomNotification | null;
   triggerType: string;
   parentTaskId: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CronWecomNotification {
+  botId?: string | null;
+  peerId?: string | null;
+  enabled?: boolean | null;
 }
 
 export interface CronTaskRun {

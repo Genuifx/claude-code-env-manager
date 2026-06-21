@@ -108,11 +108,42 @@ describe('cron task store', () => {
       schedule: '0 7 * * *',
       prompt: 'Run task',
       timeoutSecs: 120,
+      wecom_notification: {
+        enabled: true,
+        bot_id: 'aibot-1',
+        peer_id: 'iveswen',
+      },
     }))).toMatchObject({
       name: 'From JSON',
       cronExpression: '0 7 * * *',
       prompt: 'Run task',
       timeoutSecs: 120,
+      wecomNotification: {
+        enabled: true,
+        botId: 'aibot-1',
+        peerId: 'iveswen',
+      },
     });
+  });
+
+  it('creates a task with WeCom result notifications enabled', () => {
+    const task = createCronTask({
+      name: 'WeCom Report',
+      cronExpression: '0 9 * * *',
+      prompt: 'Send report',
+      workingDir: '/repo',
+      wecomNotification: {
+        enabled: true,
+        botId: ' aibot-1 ',
+        peerId: ' iveswen ',
+      },
+    }, tasksPath);
+
+    expect(task.wecomNotification).toEqual({
+      enabled: true,
+      botId: 'aibot-1',
+      peerId: 'iveswen',
+    });
+    expect(readCronTasks(tasksPath)[0]?.wecomNotification).toEqual(task.wecomNotification);
   });
 });

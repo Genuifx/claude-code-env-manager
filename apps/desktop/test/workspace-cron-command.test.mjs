@@ -84,6 +84,19 @@ test('preserves the full user cron request for the launched agent', async () => 
   assert.match(agentPrompt?.prompt ?? '', /不要强制覆盖任何现有任务/);
 });
 
+test('instructs the agent to use WeCom result notification when requested', async () => {
+  const { buildWorkspaceCronAgentPrompt } = await importWorkspaceCronCommand();
+  const agentPrompt = buildWorkspaceCronAgentPrompt(
+    '/ccem-cron 每天下午 6 点总结今天的 git 变更并把结果推送到企微',
+    '/tmp/project',
+  );
+
+  assert.match(agentPrompt?.prompt ?? '', /wecomNotification/);
+  assert.match(agentPrompt?.prompt ?? '', /ChatApp\/WeCom/);
+  assert.match(agentPrompt?.prompt ?? '', /\{ enabled: true, botId: null, peerId: null \}/);
+  assert.match(agentPrompt?.prompt ?? '', /不要猜测联系人或群/);
+});
+
 test('workspace cron submit launches a native agent session instead of creating a task directly', async () => {
   const source = await fs.readFile(workspacePagePath, 'utf8');
   const liveSource = await fs.readFile(workspaceNativeViewPath, 'utf8');

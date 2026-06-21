@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { useAppStore, type Environment, type Session, type ArrangeLayout, type InstalledSkill, type CronTask, type CronTaskRun, type CronTemplate, type LaunchClient } from '@/store';
+import { useAppStore, type Environment, type Session, type ArrangeLayout, type InstalledSkill, type CronTask, type CronTaskRun, type CronTemplate, type CronWecomNotification, type LaunchClient } from '@/store';
 import { useCallback } from 'react';
 import { toast } from 'sonner';
 import { shallow } from 'zustand/shallow';
@@ -1108,6 +1108,7 @@ export function useTauriCommands() {
     disallowedTools?: string[];
     timeoutSecs?: number;
     templateId?: string;
+    wecomNotification?: CronWecomNotification | null;
   }) => {
     const task = await invoke<CronTask>('add_cron_task', {
       name: data.name,
@@ -1121,6 +1122,7 @@ export function useTauriCommands() {
       disallowedTools: data.disallowedTools ?? [],
       timeoutSecs: data.timeoutSecs || 300,
       templateId: data.templateId || null,
+      wecomNotification: data.wecomNotification ?? null,
     });
     const tasks = await invoke<CronTask[]>('list_cron_tasks');
     setCronTasks(tasks);

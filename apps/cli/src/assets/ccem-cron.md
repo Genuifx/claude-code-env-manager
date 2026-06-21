@@ -20,6 +20,10 @@ If the request is specific enough, create the task directly. Ask a follow-up onl
 - Working directory: default to the current directory via `pwd`.
 - Timeout: default to 300 seconds unless the task clearly needs longer.
 - Execution profile: use `conservative`, `standard`, or `autonomous` based on risk.
+- WeCom result delivery: when the user asks to push/send cron results to 企微/企业微信/WeCom, add `wecomNotification`.
+  - Use `{ "enabled": true, "botId": null, "peerId": null }` to send to the ChatApp/WeCom default target configured in CCEM.
+  - If the user gives an explicit bot or peer target, fill `botId` and `peerId`.
+  - If the user asks for WeCom delivery but neither a default target nor an explicit target is available, ask for confirmation instead of guessing.
 
 Common cron patterns:
 
@@ -50,7 +54,8 @@ ccem cron create --from-json - --json <<'JSON'
   "disallowedTools": [],
   "enabled": true,
   "timeoutSecs": 300,
-  "templateId": null
+  "templateId": null,
+  "wecomNotification": null
 }
 JSON
 ```

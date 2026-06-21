@@ -5,6 +5,7 @@ use crate::session_provenance::{
 use crate::telegram;
 use crate::terminal::resolve_claude_path;
 use crate::unified_runtime::UnifiedSessionManager;
+use crate::wecom::{read_wecom_settings, WecomBridgeManager, WecomTaskBindingTargetType};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -16,7 +17,7 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 // ============================================================================
 // Data Structures
@@ -46,6 +47,8 @@ pub struct CronTask {
     pub timeout_secs: u64,
     #[serde(rename = "templateId")]
     pub template_id: Option<String>,
+    #[serde(rename = "wecomNotification", alias = "wecom_notification", default)]
+    pub wecom_notification: Option<CronWecomNotification>,
     #[serde(rename = "triggerType", default = "default_trigger_type")]
     pub trigger_type: String,
     #[serde(rename = "parentTaskId", default)]
@@ -56,12 +59,26 @@ pub struct CronTask {
     pub updated_at: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct CronWecomNotification {
+    #[serde(rename = "botId", alias = "bot_id", default)]
+    pub bot_id: Option<String>,
+    #[serde(rename = "peerId", alias = "peer_id", default)]
+    pub peer_id: Option<String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
 fn default_trigger_type() -> String {
     "schedule".to_string()
 }
 
 fn default_execution_profile() -> String {
     "conservative".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -433,6 +450,82 @@ fn format_cron_notification(task: &CronTask, run: &CronTaskRun) -> String {
     }
 
     lines.join("\n")
+}
+
+fn normalize_wecom_peer_id(
+    target_type: Option<&WecomTaskBindingTargetType>,
+    peer_id: &str,
+) -> String {
+    let peer = peer_id.trim();
+    if peer.starts_with("single:") || peer.starts_with("group:") {
+        return peer.to_string();
+    }
+
+    match target_type {
+        Some(WecomTaskBindingTargetType::Group) => format!("group:{peer}"),
+        _ => format!("single:{peer}"),
+    }
+}
+
+fn resolve_cron_wecom_notification_target(task: &CronTask) -> Option<(String, String)> {
+    let notification = task.wecom_notification.as_ref()?;
+    if !notification.enabled {
+        return None;
+    }
+
+    let explicit_bot_id = notification
+        .bot_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let explicit_peer_id = notification
+        .peer_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    if let (Some(bot_id), Some(peer_id)) = (explicit_bot_id, explicit_peer_id) {
+        return Some((bot_id.to_string(), normalize_wecom_peer_id(None, peer_id)));
+    }
+
+    let settings = read_wecom_settings().ok()?;
+    if !settings.enabled {
+        return None;
+    }
+
+    settings
+        .bots
+        .iter()
+        .filter(|bot| bot.enabled)
+        .filter(|bot| explicit_bot_id.is_none_or(|id| id == bot.bot_id || id == bot.id))
+        .find_map(|bot| {
+            let peer_id = explicit_peer_id.or(bot.task_binding_default_peer_id.as_deref())?;
+            Some((
+                bot.bot_id.clone(),
+                normalize_wecom_peer_id(bot.task_binding_default_target_type.as_ref(), peer_id),
+            ))
+        })
+}
+
+fn send_cron_wecom_notification(app: &AppHandle, task: &CronTask, run: &CronTaskRun) {
+    let Some((bot_id, peer_id)) = resolve_cron_wecom_notification_target(task) else {
+        return;
+    };
+    let Some(manager) = app.try_state::<Arc<WecomBridgeManager>>() else {
+        eprintln!(
+            "WeCom cron notification warning: WeCom bridge manager is not available for task {}",
+            task.id
+        );
+        return;
+    };
+
+    let message = format_cron_notification(task, run);
+    if let Err(error) = manager.send_markdown_message(Some(&bot_id), &peer_id, &message) {
+        eprintln!(
+            "WeCom cron notification warning for task {} run {}: {}",
+            task.id, run.id, error
+        );
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -850,6 +943,7 @@ fn execute_task(
     };
     let _ = app.emit(event_name, &finished_run);
     let _ = telegram::send_configured_message(&format_cron_notification(&task, &finished_run));
+    send_cron_wecom_notification(&app, &task, &finished_run);
 }
 
 // ============================================================================
@@ -1012,6 +1106,7 @@ pub fn add_cron_task(
     disallowed_tools: Option<Vec<String>>,
     timeout_secs: Option<u64>,
     template_id: Option<String>,
+    wecom_notification: Option<CronWecomNotification>,
 ) -> Result<CronTask, String> {
     // Validate cron expression (must be 5 fields)
     let fields: Vec<&str> = cron_expression.split_whitespace().collect();
@@ -1040,6 +1135,7 @@ pub fn add_cron_task(
         enabled: true,
         timeout_secs: timeout_secs.unwrap_or(300),
         template_id,
+        wecom_notification,
         trigger_type: "schedule".to_string(),
         parent_task_id: None,
         created_at: now.clone(),
@@ -1268,9 +1364,11 @@ pub fn generate_cron_task_stream(app: AppHandle, query: String) {
 mod tests {
     use super::{
         build_cron_claude_command, build_cron_launch_provenance, build_cron_user_path,
-        expand_cron_working_dir, normalize_execution_profile, resolve_cron_env_name,
-        resolve_execution_profile, resolve_task_tool_policy, CronTask, ResolvedToolPolicy,
+        expand_cron_working_dir, normalize_execution_profile, normalize_wecom_peer_id,
+        resolve_cron_env_name, resolve_cron_wecom_notification_target, resolve_execution_profile,
+        resolve_task_tool_policy, CronTask, CronWecomNotification, ResolvedToolPolicy,
     };
+    use crate::wecom::WecomTaskBindingTargetType;
     use std::collections::HashMap;
     use std::ffi::OsStr;
     use std::path::PathBuf;
@@ -1321,6 +1419,7 @@ mod tests {
             enabled: true,
             timeout_secs: 300,
             template_id: None,
+            wecom_notification: None,
             trigger_type: "schedule".to_string(),
             parent_task_id: None,
             created_at: "2026-03-08T00:00:00Z".to_string(),
@@ -1396,6 +1495,7 @@ mod tests {
             enabled: true,
             timeout_secs: 300,
             template_id: None,
+            wecom_notification: None,
             trigger_type: "schedule".to_string(),
             parent_task_id: None,
             created_at: "2026-03-08T00:00:00Z".to_string(),
@@ -1428,6 +1528,7 @@ mod tests {
             enabled: true,
             timeout_secs: 300,
             template_id: None,
+            wecom_notification: None,
             trigger_type: "schedule".to_string(),
             parent_task_id: None,
             created_at: "2026-03-08T00:00:00Z".to_string(),
@@ -1491,6 +1592,110 @@ mod tests {
         assert_eq!(
             envs.get("ANTHROPIC_AUTH_TOKEN"),
             Some(&Some("token".to_string()))
+        );
+    }
+
+    #[test]
+    fn cron_wecom_notification_loads_from_optional_task_field() {
+        let task: CronTask = serde_json::from_str(
+            r#"{
+                "id": "cron-1",
+                "name": "Report",
+                "cronExpression": "0 9 * * *",
+                "prompt": "Report status",
+                "workingDir": "/tmp",
+                "envName": null,
+                "executionProfile": "standard",
+                "maxBudgetUsd": null,
+                "allowedTools": [],
+                "disallowedTools": [],
+                "enabled": true,
+                "timeoutSecs": 300,
+                "templateId": null,
+                "triggerType": "schedule",
+                "parentTaskId": null,
+                "createdAt": "2026-03-08T00:00:00Z",
+                "updatedAt": "2026-03-08T00:00:00Z"
+            }"#,
+        )
+        .expect("legacy task should deserialize");
+        assert_eq!(task.wecom_notification, None);
+
+        let task: CronTask = serde_json::from_str(
+            r#"{
+                "id": "cron-1",
+                "name": "Report",
+                "cronExpression": "0 9 * * *",
+                "prompt": "Report status",
+                "workingDir": "/tmp",
+                "envName": null,
+                "executionProfile": "standard",
+                "maxBudgetUsd": null,
+                "allowedTools": [],
+                "disallowedTools": [],
+                "enabled": true,
+                "timeoutSecs": 300,
+                "templateId": null,
+                "wecom_notification": {
+                  "bot_id": "aibot-1",
+                  "peer_id": "single:iveswen"
+                },
+                "triggerType": "schedule",
+                "parentTaskId": null,
+                "createdAt": "2026-03-08T00:00:00Z",
+                "updatedAt": "2026-03-08T00:00:00Z"
+            }"#,
+        )
+        .expect("task with WeCom notification should deserialize");
+
+        assert_eq!(
+            task.wecom_notification,
+            Some(CronWecomNotification {
+                bot_id: Some("aibot-1".to_string()),
+                peer_id: Some("single:iveswen".to_string()),
+                enabled: true,
+            })
+        );
+    }
+
+    #[test]
+    fn cron_wecom_notification_resolves_explicit_target_and_normalizes_peer() {
+        let task = CronTask {
+            id: "cron-1".to_string(),
+            name: "Example".to_string(),
+            cron_expression: "0 9 * * *".to_string(),
+            prompt: "Do work".to_string(),
+            working_dir: "/tmp".to_string(),
+            env_name: None,
+            execution_profile: "standard".to_string(),
+            max_budget_usd: None,
+            allowed_tools: Vec::new(),
+            disallowed_tools: Vec::new(),
+            enabled: true,
+            timeout_secs: 300,
+            template_id: None,
+            wecom_notification: Some(CronWecomNotification {
+                bot_id: Some("aibot-1".to_string()),
+                peer_id: Some("iveswen".to_string()),
+                enabled: true,
+            }),
+            trigger_type: "schedule".to_string(),
+            parent_task_id: None,
+            created_at: "2026-03-08T00:00:00Z".to_string(),
+            updated_at: "2026-03-08T00:00:00Z".to_string(),
+        };
+
+        assert_eq!(
+            resolve_cron_wecom_notification_target(&task),
+            Some(("aibot-1".to_string(), "single:iveswen".to_string()))
+        );
+        assert_eq!(
+            normalize_wecom_peer_id(Some(&WecomTaskBindingTargetType::Group), "chat-1"),
+            "group:chat-1"
+        );
+        assert_eq!(
+            normalize_wecom_peer_id(Some(&WecomTaskBindingTargetType::User), "single:iveswen"),
+            "single:iveswen"
         );
     }
 }

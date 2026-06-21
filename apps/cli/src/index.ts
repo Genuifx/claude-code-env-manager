@@ -1019,6 +1019,9 @@ cronCmd
   .option('--disallowed-tools <items>', 'Comma-separated or JSON array of disallowed tools')
   .option('--timeout-secs <seconds>', 'Task timeout in seconds')
   .option('--template-id <id>', 'Optional template id')
+  .option('--wecom-result', 'Send cron result summary to the configured WeCom default target')
+  .option('--wecom-bot-id <id>', 'WeCom bot id for cron result notifications')
+  .option('--wecom-peer-id <id>', 'WeCom peer id for cron result notifications')
   .option('--disabled', 'Create task disabled')
   .option('--json', 'Output as JSON')
   .action((options) => {
@@ -1038,6 +1041,14 @@ cronCmd
             enabled: options.disabled ? false : true,
             timeoutSecs: options.timeoutSecs === undefined ? null : Number(options.timeoutSecs),
             templateId: options.templateId,
+            wecomNotification:
+              options.wecomResult || options.wecomBotId || options.wecomPeerId
+                ? {
+                    botId: options.wecomBotId ?? null,
+                    peerId: options.wecomPeerId ?? null,
+                    enabled: true,
+                  }
+                : null,
           };
 
       const task = createCronTask(input);
