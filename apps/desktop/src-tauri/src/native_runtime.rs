@@ -1944,9 +1944,9 @@ mod tests {
         clear_terminal_launches, drain_helper_output_lines, is_retryable_native_child_write_error,
         merge_helper_env_path, merge_path_values_with_separator,
         native_session_allows_dangerously_skip_permissions, reactivate_record_for_reconnect,
-        read_native_runtime_state_from, take_terminal_launches, HelperInputCommand,
-        NativeProvider, NativeRuntimeManager, NativeSessionHandle, NativeSessionOptions,
-        NativeSessionRecord, NativeTransport, PromptImage,
+        read_native_runtime_state_from, take_terminal_launches, HelperInputCommand, NativeProvider,
+        NativeRuntimeManager, NativeSessionHandle, NativeSessionOptions, NativeSessionRecord,
+        NativeTransport, PromptImage,
     };
     use crate::event_bus::{SessionEventPayload, SessionStore};
     use crate::native_event_log::NativeEventLog;

@@ -97,10 +97,14 @@ pub fn set_pet_window_content_visible(app: AppHandle, visible: bool) -> Result<(
             .set_ignore_cursor_events(!visible)
             .map_err(|e| format!("pet window cursor passthrough: {e}"))?;
         if visible {
-            window.show().map_err(|e| format!("show pet window content: {e}"))?;
+            window
+                .show()
+                .map_err(|e| format!("show pet window content: {e}"))?;
             apply_pet_window_after_show(&window)?;
         } else {
-            window.hide().map_err(|e| format!("hide pet window content: {e}"))?;
+            window
+                .hide()
+                .map_err(|e| format!("hide pet window content: {e}"))?;
         }
     }
     Ok(())
@@ -258,11 +262,7 @@ fn position_pet_window(window: &WebviewWindow) -> Result<(), String> {
 
 fn pet_window_size(width: f64, height: f64) -> tauri::LogicalSize<f64> {
     tauri::LogicalSize {
-        width: clamp_pet_window_dimension(
-            width,
-            PET_WINDOW_INITIAL_WIDTH,
-            PET_WINDOW_MAX_WIDTH,
-        ),
+        width: clamp_pet_window_dimension(width, PET_WINDOW_INITIAL_WIDTH, PET_WINDOW_MAX_WIDTH),
         height: clamp_pet_window_dimension(
             height,
             PET_WINDOW_INITIAL_HEIGHT,
@@ -308,8 +308,7 @@ fn position_pet_window_for_size(
     let size = monitor.size();
     let scale = monitor.scale_factor();
     let x = position.x as f64 + (size.width as f64 / scale) - window_width - PET_WINDOW_MARGIN;
-    let y =
-        position.y as f64 + (size.height as f64 / scale) - window_height - PET_WINDOW_MARGIN;
+    let y = position.y as f64 + (size.height as f64 / scale) - window_height - PET_WINDOW_MARGIN;
 
     window
         .set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }))
@@ -372,14 +371,8 @@ mod size_tests {
 
     #[test]
     fn pet_window_position_preserves_bottom_right_anchor_after_manual_move() {
-        let position = pet_window_position_preserving_anchor(
-            100.0,
-            200.0,
-            486.0,
-            144.0,
-            520.0,
-            180.0,
-        );
+        let position =
+            pet_window_position_preserving_anchor(100.0, 200.0, 486.0, 144.0, 520.0, 180.0);
 
         assert_eq!(position.x, 66.0);
         assert_eq!(position.y, 164.0);

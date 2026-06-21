@@ -201,7 +201,10 @@ fn update_progress_snapshot(
 }
 
 fn read_progress_snapshot(progress: &Arc<Mutex<(u64, Option<u64>)>>) -> (u64, Option<u64>) {
-    progress.lock().map(|guard| (guard.0, guard.1)).unwrap_or((0, None))
+    progress
+        .lock()
+        .map(|guard| (guard.0, guard.1))
+        .unwrap_or((0, None))
 }
 
 #[cfg(test)]

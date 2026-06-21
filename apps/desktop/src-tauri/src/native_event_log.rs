@@ -127,9 +127,7 @@ impl NativeEventLog {
                     [runtime_id],
                     |row| row.get::<_, Option<i64>>(0),
                 )
-                .map_err(|error| {
-                    format!("Failed to query newest native event seq: {}", error)
-                })?;
+                .map_err(|error| format!("Failed to query newest native event seq: {}", error))?;
             Ok(seq.and_then(non_negative_i64_to_u64))
         })
     }
