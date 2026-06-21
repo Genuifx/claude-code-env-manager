@@ -1,5 +1,24 @@
 # ccem
 
+## 2.27.0
+
+### Minor Changes
+
+- Minor release v2.27.0 — desktop UX hardening, wecom cron delivery, and token crypto upgrade.
+
+  - feat(crypto): upgrade token encryption to install-bound AES-256-GCM
+  - feat(workspace): add collapse button next to Load More in project tree
+  - feat(desktop): add cron wecom notification controls
+  - feat(desktop): send cron results to wecom
+  - fix(desktop): stabilize external actions hover menu and popover flicker
+  - fix(desktop): prevent leaked Tauri listeners on fast unmount
+  - fix(desktop): relay bound sessions to wecom
+  - fix(desktop): stabilize composer image previews
+  - fix(remote): separate access key from encryption secret
+  - fix(runtime): clean up Codex image temp files after turn end
+  - fix(runtime): respect network permission in Codex sandbox policy
+  - style(desktop): apply rustfmt to tauri sources
+
 ## 2.26.0
 
 ### Minor Changes
