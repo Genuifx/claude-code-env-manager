@@ -21,6 +21,7 @@ import {
   Image as ImageIcon,
   ListChecks,
   LoaderCircle,
+  MessageSquareQuote,
   Paperclip,
   Plus,
   X,
@@ -595,7 +596,7 @@ function ComposerQueueDock({
     <div className="px-0.5 py-0.5">
       <div className="flex items-center gap-2.5">
         <div className="rounded-lg bg-primary/10 p-1.5 text-primary">
-          <ArrowUp className="h-3 w-3" />
+          <MessageSquareQuote className="h-3 w-3" />
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-semibold leading-4 text-foreground">
@@ -603,6 +604,9 @@ function ComposerQueueDock({
           </p>
           <p className="text-[10px] leading-4 text-muted-foreground">
             {t('workspace.composerQueuedCount').replace('{count}', String(messages.length))}
+          </p>
+          <p className="text-[10px] leading-4 text-muted-foreground/85">
+            {t(canFlush ? 'workspace.composerQueuedReady' : 'workspace.composerQueuedWaiting')}
           </p>
         </div>
         {onFlush ? (
@@ -613,7 +617,7 @@ function ComposerQueueDock({
             disabled={!canFlush}
             onClick={() => void onFlush()}
           >
-            {t('workspace.composerQueuedSendAll')}
+            {t(canFlush ? 'workspace.composerQueuedSendAll' : 'workspace.composerQueuedWaitAction')}
           </Button>
         ) : null}
       </div>

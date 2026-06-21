@@ -132,6 +132,23 @@ type InteractivePromptReplyPayload =
       approved: boolean;
     };
 
+type QueuedGuidanceMessage = {
+  id: string;
+  text: string;
+  displayText?: string;
+  planMode: boolean;
+  attachments: ComposerAttachment[];
+};
+
+type QueuedGuidanceState = {
+  runtimeId: string;
+  messages: QueuedGuidanceMessage[];
+};
+
+type QueuedGuidanceMessagesUpdate =
+  | QueuedGuidanceMessage[]
+  | ((previous: QueuedGuidanceMessage[]) => QueuedGuidanceMessage[]);
+
 interface WorkspaceNativeSessionViewProps {
   session: NativeSessionSummary;
   initialPrompt?: string | null;
@@ -156,6 +173,136 @@ const CACHE_FLUSH_INTERVAL_MS = 1500;
 const INITIAL_EVENT_REPLAY_LIMIT = 1200;
 const NATIVE_EVENT_CACHE_KEY_PREFIX = 'ccem-workspace-native-events:';
 const NATIVE_EVENT_CACHE_LIMIT = 8000;
+const GUIDANCE_QUEUE_STORAGE_PREFIX = 'ccem:workspace-native-guidance-queue:v1:';
+
+function guidanceQueueStorageKey(runtimeId: string): string {
+  return `${GUIDANCE_QUEUE_STORAGE_PREFIX}${runtimeId}`;
+}
+
+function makePersistableAttachment(attachment: ComposerAttachment): ComposerAttachment {
+  if (attachment.kind !== 'image') {
+    return attachment;
+  }
+
+  return {
+    ...attachment,
+    objectUrl: null,
+  };
+}
+
+function makePersistableGuidanceMessage(message: QueuedGuidanceMessage): QueuedGuidanceMessage {
+  return {
+    ...message,
+    attachments: message.attachments.map(makePersistableAttachment),
+  };
+}
+
+function isStoredComposerAttachment(value: unknown): value is ComposerAttachment {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const attachment = value as Record<string, unknown>;
+  if (
+    typeof attachment.id !== 'string'
+    || typeof attachment.name !== 'string'
+    || typeof attachment.source !== 'string'
+  ) {
+    return false;
+  }
+
+  if (attachment.kind === 'file') {
+    return typeof attachment.absolutePath === 'string'
+      && (typeof attachment.relativePath === 'string' || attachment.relativePath === null)
+      && typeof attachment.displayPath === 'string'
+      && typeof attachment.isOutsideWorkspace === 'boolean';
+  }
+
+  if (attachment.kind === 'text') {
+    return typeof attachment.content === 'string'
+      && typeof attachment.lineCount === 'number'
+      && typeof attachment.charCount === 'number';
+  }
+
+  if (attachment.kind === 'image') {
+    return typeof attachment.placeholder === 'string'
+      && typeof attachment.mediaType === 'string'
+      && typeof attachment.base64Data === 'string'
+      && typeof attachment.byteSize === 'number';
+  }
+
+  return false;
+}
+
+function normalizeStoredGuidanceQueue(value: unknown): QueuedGuidanceMessage[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') {
+      return [];
+    }
+
+    const candidate = item as Partial<QueuedGuidanceMessage>;
+    if (
+      typeof candidate.id !== 'string'
+      || typeof candidate.text !== 'string'
+      || typeof candidate.planMode !== 'boolean'
+      || !Array.isArray(candidate.attachments)
+    ) {
+      return [];
+    }
+
+    return [{
+      id: candidate.id,
+      text: candidate.text,
+      displayText: typeof candidate.displayText === 'string' ? candidate.displayText : undefined,
+      planMode: candidate.planMode,
+      attachments: candidate.attachments
+        .filter(isStoredComposerAttachment)
+        .map(makePersistableAttachment),
+    }];
+  });
+}
+
+function readStoredGuidanceQueue(runtimeId: string): QueuedGuidanceMessage[] {
+  try {
+    const stored = window.sessionStorage.getItem(guidanceQueueStorageKey(runtimeId));
+    if (!stored) {
+      return [];
+    }
+
+    return normalizeStoredGuidanceQueue(JSON.parse(stored));
+  } catch (error) {
+    console.warn('Failed to read native guidance queue:', error);
+    return [];
+  }
+}
+
+function writeStoredGuidanceQueue(runtimeId: string, messages: QueuedGuidanceMessage[]) {
+  try {
+    const key = guidanceQueueStorageKey(runtimeId);
+    if (messages.length === 0) {
+      window.sessionStorage.removeItem(key);
+      return;
+    }
+
+    window.sessionStorage.setItem(
+      key,
+      JSON.stringify(messages.map(makePersistableGuidanceMessage)),
+    );
+  } catch (error) {
+    console.warn('Failed to persist native guidance queue:', error);
+  }
+}
+
+function resolveGuidanceMessagesUpdate(
+  update: QueuedGuidanceMessagesUpdate,
+  previous: QueuedGuidanceMessage[],
+): QueuedGuidanceMessage[] {
+  return typeof update === 'function' ? update(previous) : update;
+}
 
 function isTerminalStatus(status: string) {
   return status === 'stopped' || status === 'error' || status === 'handoff';
@@ -1012,13 +1159,23 @@ export function WorkspaceNativeSessionView({
   const [locallyDismissedPromptIds, setLocallyDismissedPromptIds] = useState<Set<string>>(
     () => new Set(),
   );
-  const [queuedMessages, setQueuedMessages] = useState<Array<{
-    id: string;
-    text: string;
-    displayText?: string;
-    planMode: boolean;
-    attachments: ComposerAttachment[];
-  }>>([]);
+  const [queuedState, setQueuedState] = useState<QueuedGuidanceState>(() => ({
+    runtimeId: session.runtime_id,
+    messages: readStoredGuidanceQueue(session.runtime_id),
+  }));
+  const queuedMessages = queuedState.runtimeId === session.runtime_id ? queuedState.messages : [];
+  const setQueuedMessages = useCallback((update: QueuedGuidanceMessagesUpdate) => {
+    setQueuedState((previousState) => {
+      const previousMessages = previousState.runtimeId === session.runtime_id
+        ? previousState.messages
+        : readStoredGuidanceQueue(session.runtime_id);
+
+      return {
+        runtimeId: session.runtime_id,
+        messages: resolveGuidanceMessagesUpdate(update, previousMessages),
+      };
+    });
+  }, [session.runtime_id]);
   const isHandoffPending = session.status === 'handoff_pending';
   const lastSeenSeqRef = useRef<number | null>(latestEventSeq(events));
   const latestEventsRef = useRef<SessionEventRecord[]>(events);
@@ -1550,9 +1707,7 @@ export function WorkspaceNativeSessionView({
     ].join('\n');
   }, [buildDispatchText]);
 
-  const sendPromptBatch = useCallback(async (
-    prompts: Array<{ id: string; text: string; displayText?: string; planMode: boolean; attachments: ComposerAttachment[] }>,
-  ) => {
+  const sendPromptBatch = useCallback(async (prompts: QueuedGuidanceMessage[]) => {
     const allAttachments = prompts.flatMap((p) => p.attachments);
     const images = extractComposerImagePayloads(allAttachments);
     const payload = buildQueuedBatchText(prompts.map((prompt) => ({
@@ -1884,13 +2039,13 @@ export function WorkspaceNativeSessionView({
     const promptText = cronAgentPrompt?.prompt ?? text;
     const promptDisplayText = cronAgentPrompt?.displayPrompt ?? displayText;
 
-    const nextPrompt = {
+    const nextPrompt = makePersistableGuidanceMessage({
       id: `user-${Date.now()}`,
       text: promptText,
       displayText: promptDisplayText,
       planMode: isCronCommand ? false : composerPlanModeEnabled,
       attachments: isCronCommand ? [] : attachments,
-    };
+    });
     setComposerText('');
     setComposerPlanModeEnabled(sessionRuntimePermMode === 'plan');
 
@@ -1932,6 +2087,19 @@ export function WorkspaceNativeSessionView({
       return true;
     }
 
+    if (queuedMessages.length > 0 && !hasBlockingAttention) {
+      const pendingBatch = [...queuedMessages, nextPrompt];
+      setQueuedMessages([]);
+      try {
+        await sendPromptBatch(pendingBatch);
+        return true;
+      } catch (error) {
+        setQueuedMessages(pendingBatch);
+        toast.error(t('workspace.nativeSendFailed'));
+        return false;
+      }
+    }
+
     try {
       await sendPromptBatch([nextPrompt]);
       return true;
@@ -1943,10 +2111,12 @@ export function WorkspaceNativeSessionView({
     composerPlanModeEnabled,
     composerText,
     hasHardBlockingAttention,
+    hasBlockingAttention,
     hasQuickReplyPrompt,
     isProcessingTurn,
     isSending,
     planExitApprovalPrompt,
+    queuedMessages,
     sendPromptBatch,
     sendInteractivePromptReply,
     session.project_dir,
@@ -1955,7 +2125,13 @@ export function WorkspaceNativeSessionView({
   ]);
 
   const flushQueuedMessages = useCallback(async () => {
-    if (queuedMessages.length === 0 || isSending || isProcessingTurn || hasBlockingAttention) {
+    if (
+      queuedMessages.length === 0
+      || isSending
+      || isProcessingTurn
+      || hasBlockingAttention
+      || isTerminalStatus(session.status)
+    ) {
       return;
     }
 
@@ -1974,8 +2150,30 @@ export function WorkspaceNativeSessionView({
     isSending,
     queuedMessages,
     sendPromptBatch,
+    session.status,
     t,
   ]);
+
+  useEffect(() => {
+    setQueuedState((previousState) => {
+      if (previousState.runtimeId === session.runtime_id) {
+        return previousState;
+      }
+
+      return {
+        runtimeId: session.runtime_id,
+        messages: readStoredGuidanceQueue(session.runtime_id),
+      };
+    });
+  }, [session.runtime_id]);
+
+  useEffect(() => {
+    if (queuedState.runtimeId !== session.runtime_id) {
+      return;
+    }
+
+    writeStoredGuidanceQueue(queuedState.runtimeId, queuedState.messages);
+  }, [queuedState, session.runtime_id]);
 
   const handlePermission = useCallback(async (requestId: string, approved: boolean) => {
     setRespondingRequestId(requestId);
@@ -2049,6 +2247,11 @@ export function WorkspaceNativeSessionView({
     session.status,
   ]);
 
+  const hasComposerDraft = composerText.trim().length > 0;
+  const shouldGuideModel = !isTerminalStatus(session.status)
+    && hasComposerDraft
+    && (isProcessingTurn || hasHardBlockingAttention);
+
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <WorkspaceReviewDrawer
@@ -2108,28 +2311,32 @@ export function WorkspaceNativeSessionView({
         primaryActionLabel={
           isTerminalStatus(session.status)
             ? t('workspace.newSession')
-            : !composerText.trim() && isProcessingTurn
+            : !hasComposerDraft && isProcessingTurn
               ? t('workspace.nativeStop')
-              : t('workspace.composeSend')
+              : shouldGuideModel
+                ? t('workspace.composerGuideModel')
+                : t('workspace.composeSend')
         }
         primaryActionIcon={
           isTerminalStatus(session.status)
             ? <SquarePen className="h-4 w-4" />
-            : !composerText.trim() && isProcessingTurn
+            : !hasComposerDraft && isProcessingTurn
               ? <ProcessingActionIcon stopping={isStopping} />
-              : <ArrowUp className="h-4 w-4" />
+              : shouldGuideModel
+                ? <MessageSquareQuote className="h-4 w-4" />
+                : <ArrowUp className="h-4 w-4" />
         }
         primaryActionDisabled={
           isTerminalStatus(session.status)
             ? false
-            : !composerText.trim() && isProcessingTurn
+            : !hasComposerDraft && isProcessingTurn
               ? isStopping
               : undefined
         }
         onPrimaryAction={
           isTerminalStatus(session.status)
             ? onStartNew
-            : !composerText.trim() && isProcessingTurn
+            : !hasComposerDraft && isProcessingTurn
               ? () => void handleStop()
               : undefined
         }
@@ -2162,7 +2369,7 @@ export function WorkspaceNativeSessionView({
         onRemoveQueuedMessage={(id) => {
           setQueuedMessages((previous) => previous.filter((message) => message.id !== id));
         }}
-        queueCanFlush={!isSending && !isProcessingTurn && !hasBlockingAttention}
+        queueCanFlush={!isSending && !isProcessingTurn && !hasBlockingAttention && !isTerminalStatus(session.status)}
         aboveComposer={hasAttentionPanel ? (
           <WorkspaceAttentionPanel
             provider={session.provider}
