@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Moon, Sun, MonitorSmartphone, Lightbulb, Terminal, CheckCircle2, XCircle, Copy, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search, FolderOpen, X, Sparkles, Clock, Image, BellRing, RefreshCw, Download, RotateCw, Palette, AppWindow, Info } from 'lucide-react';
+import { Moon, Sun, MonitorSmartphone, Lightbulb, Terminal, CheckCircle2, XCircle, Copy, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search, FolderOpen, X, Sparkles, Clock, Image, BellRing, RefreshCw, Download, RotateCw, Palette, AppWindow, Info, Bot } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { useAppStore } from '@/store';
@@ -14,7 +14,7 @@ import { setPerformancePreference as applyPerformancePreference, type Performanc
 import { scheduleAfterFirstPaint } from '@/lib/idle';
 import { useAppUpdate } from '@/components/app-update/appUpdateContext';
 import { shallow } from 'zustand/shallow';
-import type { PlatformCapabilities } from '@/lib/tauri-ipc';
+import type { CcemAgentSkillStatus, PlatformCapabilities } from '@/lib/tauri-ipc';
 
 const MODE_DISPLAY_NAMES: Record<PermissionModeName, string> = {
   yolo: 'YOLO',
@@ -45,7 +45,7 @@ interface InstallStatusState {
   tmux: boolean | null;
 }
 
-type SectionId = 'appearance' | 'application' | 'notifications' | 'ai' | 'permission' | 'about';
+type SectionId = 'appearance' | 'application' | 'notifications' | 'agentSkill' | 'ai' | 'permission' | 'about';
 
 const CCEM_REPO_URL = 'https://github.com/Genuifx/claude-code-env-manager';
 
@@ -109,6 +109,9 @@ export function Settings() {
   const [webkitVersion, setWebkitVersion] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [platformCapabilities, setPlatformCapabilities] = useState<PlatformCapabilities | null>(null);
+  const [agentSkillStatus, setAgentSkillStatus] = useState<CcemAgentSkillStatus | null>(null);
+  const [isAgentSkillLoading, setIsAgentSkillLoading] = useState(true);
+  const [isAgentSkillInstalling, setIsAgentSkillInstalling] = useState(false);
   const [activeSection, setActiveSection] = useState<SectionId>('appearance');
   const loaded = useRef(false);
   const updateStatus = updateState.status;
@@ -180,6 +183,34 @@ export function Settings() {
     };
 
     void loadAppVersion();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAgentSkillStatus = async () => {
+      setIsAgentSkillLoading(true);
+      try {
+        const status = await invoke<CcemAgentSkillStatus>('get_ccem_agent_skill_status');
+        if (!cancelled) {
+          setAgentSkillStatus(status);
+        }
+      } catch {
+        if (!cancelled) {
+          setAgentSkillStatus(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsAgentSkillLoading(false);
+        }
+      }
+    };
+
+    void loadAgentSkillStatus();
 
     return () => {
       cancelled = true;
@@ -290,6 +321,20 @@ export function Settings() {
     await restartForUpdate();
   };
 
+  const handleInstallAgentSkill = async () => {
+    setIsAgentSkillInstalling(true);
+    try {
+      const status = await invoke<CcemAgentSkillStatus>('install_ccem_agent_skill');
+      setAgentSkillStatus(status);
+      toast.success(t('settings.agentSkillInstallSuccess'));
+    } catch (error) {
+      toast.error(formatMessage(t('settings.agentSkillInstallFailed'), { error: String(error) }));
+    } finally {
+      setIsAgentSkillInstalling(false);
+      setIsAgentSkillLoading(false);
+    }
+  };
+
   // Auto-save whenever settings change (skip initial load)
   useEffect(() => {
     if (!loaded.current) return;
@@ -348,6 +393,7 @@ export function Settings() {
     { id: 'appearance', icon: Palette, label: t('settings.appearance') },
     { id: 'application', icon: AppWindow, label: t('settings.application') },
     { id: 'notifications', icon: BellRing, label: t('settings.notifications') },
+    { id: 'agentSkill', icon: Bot, label: t('settings.agentSkill') },
     { id: 'ai', icon: Sparkles, label: t('settings.aiEnhancement') },
     { id: 'permission', icon: Shield, label: t('settings.defaultPermission') },
     { id: 'about', icon: Info, label: t('settings.about') },
@@ -528,6 +574,67 @@ export function Settings() {
       </div>
     </div>
   );
+
+  const renderAgentSkillSection = () => {
+    const overallState = isAgentSkillLoading
+      ? 'loading'
+      : agentSkillStatus?.upToDate
+        ? 'current'
+        : agentSkillStatus?.installed
+          ? 'update'
+          : 'missing';
+    const installLabel = isAgentSkillInstalling
+      ? t('settings.agentSkillInstalling')
+      : agentSkillStatus?.upToDate
+        ? t('settings.agentSkillReinstall')
+        : agentSkillStatus?.installed
+          ? t('settings.agentSkillUpdate')
+          : t('settings.agentSkillInstall');
+
+    return (
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-foreground">{t('settings.agentSkillTitle')}</div>
+            <div className="text-sm text-muted-foreground mt-0.5">{t('settings.agentSkillDesc')}</div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <AgentSkillStatusBadge state={overallState} />
+            <Button
+              variant="outline"
+              size="sm"
+              className="active:scale-[0.97] transition-transform"
+              disabled={isAgentSkillInstalling || isAgentSkillLoading}
+              onClick={handleInstallAgentSkill}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isAgentSkillInstalling ? 'animate-spin' : ''}`} />
+              {installLabel}
+            </Button>
+          </div>
+        </div>
+
+        <div className="border-t border-border-subtle" />
+
+        <div className="space-y-3">
+          {(agentSkillStatus?.targets ?? []).map((target) => {
+            const targetState = target.upToDate ? 'current' : target.installed ? 'update' : 'missing';
+            return (
+              <div key={target.agent} className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-foreground">{target.agent}</div>
+                  <div className="text-xs text-muted-foreground font-mono truncate">{target.path}</div>
+                </div>
+                <AgentSkillStatusBadge state={targetState} />
+              </div>
+            );
+          })}
+          {!isAgentSkillLoading && !agentSkillStatus && (
+            <div className="text-sm text-muted-foreground">{t('settings.agentSkillStatusUnavailable')}</div>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   const renderAiSection = () => (
     <div className="space-y-5">
@@ -840,6 +947,8 @@ export function Settings() {
         return renderApplicationSection();
       case 'notifications':
         return renderNotificationsSection();
+      case 'agentSkill':
+        return renderAgentSkillSection();
       case 'ai':
         return renderAiSection();
       case 'permission':
@@ -915,6 +1024,39 @@ function InstallStatusBadge({ status, unsupported = false }: { status: boolean |
     <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
       <XCircle className="w-3.5 h-3.5" />
       {t('settings.cliNotInstalled')}
+    </span>
+  );
+}
+
+function AgentSkillStatusBadge({ state }: { state: 'loading' | 'current' | 'update' | 'missing' }) {
+  const { t } = useLocale();
+
+  if (state === 'loading') {
+    return <span className="text-xs text-muted-foreground">...</span>;
+  }
+
+  if (state === 'current') {
+    return (
+      <span className="flex items-center gap-1.5 text-sm font-medium text-success shrink-0">
+        <CheckCircle2 className="w-3.5 h-3.5" />
+        {t('settings.agentSkillCurrent')}
+      </span>
+    );
+  }
+
+  if (state === 'update') {
+    return (
+      <span className="flex items-center gap-1.5 text-sm font-medium text-primary shrink-0">
+        <RefreshCw className="w-3.5 h-3.5" />
+        {t('settings.agentSkillUpdateAvailable')}
+      </span>
+    );
+  }
+
+  return (
+    <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground shrink-0">
+      <XCircle className="w-3.5 h-3.5" />
+      {t('settings.agentSkillMissing')}
     </span>
   );
 }

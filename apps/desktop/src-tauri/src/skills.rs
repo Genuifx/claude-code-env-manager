@@ -63,6 +63,24 @@ pub struct CuratedSkill {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct CcemAgentSkillTarget {
+    pub agent: String,
+    pub path: String,
+    pub installed: bool,
+    pub up_to_date: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CcemAgentSkillStatus {
+    pub name: String,
+    pub installed: bool,
+    pub up_to_date: bool,
+    pub targets: Vec<CcemAgentSkillTarget>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct SelectedSkillContent {
     pub skill_file: String,
     pub directory: String,
@@ -111,6 +129,9 @@ struct SkillScanState {
 
 const MAX_SKILL_SCAN_DEPTH: usize = 6;
 const MAX_SKILL_SCAN_DIRS: usize = 2000;
+const CCEM_AGENT_SKILL_NAME: &str = "ccem";
+const CCEM_AGENT_SKILL_CONTENT: &str =
+    include_str!("../../../../packages/agent-skills/ccem/SKILL.md");
 const SKILL_SCAN_SKIP_DIR_NAMES: &[&str] = &[
     ".git",
     "node_modules",
@@ -1323,9 +1344,85 @@ fn scan_plugin_skills() -> Vec<InstalledSkill> {
         .unwrap_or_default()
 }
 
+fn ccem_agent_skill_file_targets(home: &Path) -> Vec<(String, PathBuf)> {
+    vec![
+        (
+            "Codex".to_string(),
+            home.join(".codex")
+                .join("skills")
+                .join(CCEM_AGENT_SKILL_NAME)
+                .join("SKILL.md"),
+        ),
+        (
+            "Claude Code".to_string(),
+            home.join(".claude")
+                .join("skills")
+                .join(CCEM_AGENT_SKILL_NAME)
+                .join("SKILL.md"),
+        ),
+    ]
+}
+
+fn get_ccem_agent_skill_status_for_home(home: &Path) -> Result<CcemAgentSkillStatus, String> {
+    let targets: Vec<CcemAgentSkillTarget> = ccem_agent_skill_file_targets(home)
+        .into_iter()
+        .map(|(agent, path)| {
+            let content = std::fs::read_to_string(&path).ok();
+            let installed = content.is_some();
+            let up_to_date = content.as_deref() == Some(CCEM_AGENT_SKILL_CONTENT);
+            CcemAgentSkillTarget {
+                agent,
+                path: path.to_string_lossy().to_string(),
+                installed,
+                up_to_date,
+            }
+        })
+        .collect();
+    let installed = targets.iter().all(|target| target.installed);
+    let up_to_date = targets.iter().all(|target| target.up_to_date);
+
+    Ok(CcemAgentSkillStatus {
+        name: CCEM_AGENT_SKILL_NAME.to_string(),
+        installed,
+        up_to_date,
+        targets,
+    })
+}
+
+fn install_ccem_agent_skill_for_home(home: &Path) -> Result<CcemAgentSkillStatus, String> {
+    for (_, path) in ccem_agent_skill_file_targets(home) {
+        let Some(parent) = path.parent() else {
+            return Err(format!(
+                "Invalid CCEM agent skill target: {}",
+                path.to_string_lossy()
+            ));
+        };
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("Failed to create {}: {}", parent.display(), error))?;
+        std::fs::write(&path, CCEM_AGENT_SKILL_CONTENT)
+            .map_err(|error| format!("Failed to write {}: {}", path.display(), error))?;
+    }
+
+    get_ccem_agent_skill_status_for_home(home)
+}
+
 // ============================================
 // Tauri Commands
 // ============================================
+
+#[tauri::command]
+pub fn get_ccem_agent_skill_status() -> Result<CcemAgentSkillStatus, String> {
+    let home =
+        dirs::home_dir().ok_or_else(|| "Failed to resolve user home directory".to_string())?;
+    get_ccem_agent_skill_status_for_home(&home)
+}
+
+#[tauri::command]
+pub fn install_ccem_agent_skill() -> Result<CcemAgentSkillStatus, String> {
+    let home =
+        dirs::home_dir().ok_or_else(|| "Failed to resolve user home directory".to_string())?;
+    install_ccem_agent_skill_for_home(&home)
+}
 
 /// Stream skill search results via Claude CLI subprocess.
 /// Emits "skill-search-stream" events for each line, then "skill-search-done".
@@ -2304,6 +2401,67 @@ Some content here.
         assert_eq!(skills[0].scope, "system");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_ccem_agent_skill_status_reports_missing_targets() {
+        let home = std::env::temp_dir().join("ccem-test-agent-skill-missing");
+        let _ = fs::remove_dir_all(&home);
+        fs::create_dir_all(&home).unwrap();
+
+        let status = get_ccem_agent_skill_status_for_home(&home).unwrap();
+
+        assert_eq!(status.name, "ccem");
+        assert!(!status.installed);
+        assert!(!status.up_to_date);
+        assert_eq!(status.targets.len(), 2);
+        assert!(status.targets.iter().any(|target| target.agent == "Codex"
+            && target.path.ends_with(".codex/skills/ccem/SKILL.md")
+            && !target.installed
+            && !target.up_to_date));
+        assert!(status
+            .targets
+            .iter()
+            .any(|target| target.agent == "Claude Code"
+                && target.path.ends_with(".claude/skills/ccem/SKILL.md")
+                && !target.installed
+                && !target.up_to_date));
+
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn test_install_ccem_agent_skill_writes_codex_and_claude_targets() {
+        let home = std::env::temp_dir().join("ccem-test-agent-skill-install");
+        let _ = fs::remove_dir_all(&home);
+        fs::create_dir_all(&home).unwrap();
+
+        let status = install_ccem_agent_skill_for_home(&home).unwrap();
+
+        assert!(status.installed);
+        assert!(status.up_to_date);
+        assert!(status.targets.iter().all(|target| target.installed));
+        assert!(status.targets.iter().all(|target| target.up_to_date));
+
+        let codex_skill = home
+            .join(".codex")
+            .join("skills")
+            .join("ccem")
+            .join("SKILL.md");
+        let claude_skill = home
+            .join(".claude")
+            .join("skills")
+            .join("ccem")
+            .join("SKILL.md");
+        let codex_content = fs::read_to_string(codex_skill).unwrap();
+        let claude_content = fs::read_to_string(claude_skill).unwrap();
+
+        assert_eq!(codex_content, CCEM_AGENT_SKILL_CONTENT);
+        assert_eq!(claude_content, CCEM_AGENT_SKILL_CONTENT);
+        assert!(codex_content.contains("ccem desktop health --json"));
+        assert!(codex_content.contains("ccem desktop create"));
+
+        let _ = fs::remove_dir_all(&home);
     }
 
     #[test]

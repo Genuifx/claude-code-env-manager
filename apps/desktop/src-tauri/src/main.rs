@@ -4178,6 +4178,8 @@ fn main() {
             skills::list_installed_skills,
             skills::list_workspace_skills,
             skills::read_skill_files,
+            skills::get_ccem_agent_skill_status,
+            skills::install_ccem_agent_skill,
             skills::get_curated_skills,
             skills::install_skill,
             skills::uninstall_skill,

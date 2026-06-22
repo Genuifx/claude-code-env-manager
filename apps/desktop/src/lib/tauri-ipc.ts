@@ -399,6 +399,8 @@ export interface TauriCommands {
     WorkspaceCommand[]
   ];
   read_skill_files: [{ skillFiles: string[] }, SelectedSkillContent[]];
+  get_ccem_agent_skill_status: [void, CcemAgentSkillStatus];
+  install_ccem_agent_skill: [void, CcemAgentSkillStatus];
   install_skill: [{ packageId: string; global: boolean }, void];  // 修正：后端参数是 package_id + global
   uninstall_skill: [{ name: string }, void];
 
@@ -1235,6 +1237,20 @@ export interface SelectedSkillContent {
   content: string;
   resourceHints: string[];
   diagnostics: string[];
+}
+
+export interface CcemAgentSkillTarget {
+  agent: string;
+  path: string;
+  installed: boolean;
+  upToDate: boolean;
+}
+
+export interface CcemAgentSkillStatus {
+  name: string;
+  installed: boolean;
+  upToDate: boolean;
+  targets: CcemAgentSkillTarget[];
 }
 
 export interface CronTask {
