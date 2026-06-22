@@ -10,17 +10,144 @@ const config = new Conf({
 });
 
 /**
- * AES-256-CBC 解密（与 server 端加密对应）
+ * Remote response encryption envelope.
+ *
+ * Two versions are supported:
+ *   v2 (current):  base64(JSON{v:2,nonce,ciphertext,tag}) — AES-256-GCM,
+ *                  authenticated. Tampering with tag/ciphertext MUST throw.
+ *   v1 (legacy):   base64(iv(16) + AES-256-CBC ciphertext) — unauthenticated.
+ *                  Kept only so older servers can still serve this client.
+ *
+ * Security rules:
+ *   - If the envelope declares v:2, we NEVER fall back to v1 on auth failure.
+ *     Falling back would let an attacker strip authentication by downgrading.
+ *   - Malformed v2 envelopes throw — we do not try to interpret them as v1.
+ *   - v1 is detected purely by failing to parse as v2 (no JSON / wrong shape).
  */
-const decryptWithSecret = (encryptedBase64: string, secret: string): string => {
-  const key = crypto.scryptSync(secret, 'ccem-salt', 32);
+
+const REMOTE_CRYPTO_ALGORITHM_V2 = 'aes-256-gcm';
+const REMOTE_CRYPTO_ALGORITHM_V1 = 'aes-256-cbc';
+
+interface RemoteEnvelopeV2 {
+  v: 2;
+  nonce: string;
+  ciphertext: string;
+  tag: string;
+}
+
+const isEnvelopeV2 = (value: unknown): value is RemoteEnvelopeV2 => {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    v.v === 2 &&
+    typeof v.nonce === 'string' &&
+    typeof v.ciphertext === 'string' &&
+    typeof v.tag === 'string'
+  );
+};
+
+const deriveRemoteKey = (secret: string): Buffer =>
+  crypto.scryptSync(secret, 'ccem-salt', 32);
+
+/**
+ * Decrypt an AES-256-GCM v2 envelope. Throws on ANY authentication or
+ * structural failure — callers must surface this as a hard error.
+ */
+const decryptV2Envelope = (
+  envelope: RemoteEnvelopeV2,
+  key: Buffer,
+): string => {
+  const nonce = Buffer.from(envelope.nonce, 'base64');
+  const ciphertext = Buffer.from(envelope.ciphertext, 'base64');
+  const tag = Buffer.from(envelope.tag, 'base64');
+
+  if (nonce.length === 0 || ciphertext.length === 0 || tag.length === 0) {
+    throw new Error('v2 envelope has empty nonce/ciphertext/tag');
+  }
+
+  const decipher = crypto.createDecipheriv(
+    REMOTE_CRYPTO_ALGORITHM_V2,
+    key,
+    nonce,
+  );
+  decipher.setAuthTag(tag);
+  let decrypted = decipher.update(ciphertext);
+  decrypted = Buffer.concat([decrypted, decipher.final()]);
+  return decrypted.toString('utf8');
+};
+
+/**
+ * Decrypt the legacy v1 format: base64(iv(16) + AES-256-CBC ciphertext).
+ * Unauthenticated; kept only for backward compatibility with older servers.
+ */
+const decryptV1Legacy = (encryptedBase64: string, key: Buffer): string => {
   const combined = Buffer.from(encryptedBase64, 'base64');
+  if (combined.length < 16) {
+    throw new Error('v1 payload too short');
+  }
   const iv = combined.subarray(0, 16);
   const encryptedHex = combined.subarray(16).toString('hex');
-  const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+  const decipher = crypto.createDecipheriv(REMOTE_CRYPTO_ALGORITHM_V1, key, iv);
   let decrypted = decipher.update(encryptedHex, 'hex', 'utf8');
   decrypted += decipher.final('utf8');
   return decrypted;
+};
+
+/**
+ * Decrypt a remote response payload. Auto-detects v2 (preferred) vs v1
+ * (legacy fallback). v2 failures are fail-closed: we never silently drop
+ * to v1 or return plaintext on tampering.
+ *
+ * Detection is split into two phases so that v2 authentication errors can
+ * never be swallowed by the legacy fallback:
+ *   Phase 1 (inside try/catch): only JSON parsing + shape detection. Any
+ *     failure here means "this is not a v2 envelope" and falls through to v1.
+ *   Phase 2 (outside try/catch): we have committed to v2. GCM decryption runs
+ *     unguarded; auth tag failure propagates as a hard error.
+ */
+const decryptWithSecret = (encryptedBase64: string, secret: string): string => {
+  const key = deriveRemoteKey(secret);
+
+  // Phase 1: detect envelope. Confined to JSON parsing — if anything throws
+  // here (base64 fail, JSON syntax error), the payload is treated as legacy
+  // v1 raw bytes, which is the expected shape for old servers.
+  let envelopeV2: RemoteEnvelopeV2 | null = null;
+  try {
+    const jsonStr = Buffer.from(encryptedBase64, 'base64').toString('utf8');
+    const parsed = JSON.parse(jsonStr);
+    if (isEnvelopeV2(parsed)) {
+      envelopeV2 = parsed;
+    } else if (
+      parsed &&
+      typeof parsed === 'object' &&
+      'v' in parsed &&
+      (parsed as { v: unknown }).v !== 2
+    ) {
+      // Looks envelope-shaped but declares a version we don't support.
+      // Fail closed rather than guessing it might be v1.
+      const declared = (parsed as { v: unknown }).v;
+      throw new Error(`Unsupported remote envelope version: ${declared}`);
+    }
+    // else: parsed JSON without a `v` field — almost certainly not an
+    // envelope; fall through to v1.
+  } catch (err) {
+    // Re-throw version-mismatch errors — we've committed to a shape.
+    if (
+      err instanceof Error &&
+      err.message.startsWith('Unsupported remote envelope version')
+    ) {
+      throw err;
+    }
+    // JSON/base64 failure → treat as legacy v1 payload.
+    envelopeV2 = null;
+  }
+
+  if (envelopeV2) {
+    // Phase 2: committed to v2. Auth failure throws; no v1 retry.
+    return decryptV2Envelope(envelopeV2, key);
+  }
+
+  return decryptV1Legacy(encryptedBase64, key);
 };
 
 /**

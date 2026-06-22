@@ -236,12 +236,14 @@ ccem load https://your-server.com/api/env --key YOUR_KEY --secret YOUR_SECRET
 ccem load https://your-server.com/api/env?key=YOUR_KEY --secret YOUR_SECRET
 ```
 
-**Key 与 Secret 的区别：** **访问密钥**（`--key`）用于服务器认证（对照 `keys.json`）；**解密密钥**（`--secret`）用于 AES-256-CBC 解密响应体。两者是不同的值——key 在 `keys.json` 中配置，secret 在服务器 `.secret` 文件中自动生成。
+**Key 与 Secret 的区别：** **访问密钥**（`--key`）用于服务器认证（对照 `keys.json`）；**解密密钥**（`--secret`）用于解密响应体。两者是不同的值——key 在 `keys.json` 中配置，secret 在服务器 `.secret` 文件中自动生成。
+
+**响应加密（v2，带认证）：** 自 v2.28 起，服务器使用 **AES-256-GCM** 加密响应，封装在带认证标签的 envelope 中（`{v:2,nonce,ciphertext,tag}`，base64 编码后放入响应的 `encrypted` 字段）。CLI 在接收前会校验 GCM tag——密文或 tag 被篡改时**失败即关闭**（fail closed），命令直接中止。旧的 **AES-256-CBC** 格式（`base64(iv+ciphertext)`）仍被 CLI 作为兼容回退接受，以便迁移期间旧版服务器继续可用；未来某次主版本升级时会移除。若需强制服务器输出 v1（过渡期），启动时设置 `CCEM_REMOTE_ENCRYPTION=v1`。
 
 <details>
 <summary><b>服务端部署</b></summary>
 
-服务端代码在 `server/` 目录。配置 `keys.json`（访问密钥）和 `environments.json`（环境变量），跑 `node index.js` 启动。AES-256-CBC 加密、Rate Limiting、热加载。生产环境推荐 PM2。
+服务端代码在 `server/` 目录。配置 `keys.json`（访问密钥）和 `environments.json`（环境变量），跑 `node index.js` 启动。支持 AES-256-GCM（v2）加密并兼容旧版 AES-256-CBC、Rate Limiting、热加载。生产环境推荐 PM2。
 
 </details>
 
