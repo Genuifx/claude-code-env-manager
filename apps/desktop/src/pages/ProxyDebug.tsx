@@ -69,16 +69,26 @@ function tryParseJson(text: string): unknown | null {
   } catch { return null; }
 }
 
+const REDACTED_MARKER = '[REDACTED]';
+
 function HeaderMapView({ data }: { data: Record<string, string> }) {
   const entries = Object.entries(data);
   if (entries.length === 0) return <div className="text-[14px] text-[#86868b] dark:text-[#a1a1a6]">-</div>;
   return (
     <div className="max-h-48 space-y-1 overflow-auto rounded-lg border border-[#e0e0e0] bg-[#f5f5f7] p-3 dark:border-[#3a3a3c] dark:bg-[#1c1c1e]">
-      {entries.map(([key, value]) => (
-        <div key={key} className="font-mono text-xs break-all leading-5 text-[#86868b] dark:text-[#a1a1a6]">
-          <span className="text-[#1d1d1f] dark:text-[#f5f5f7]">{key}</span>: {value}
-        </div>
-      ))}
+      {entries.map(([key, value]) => {
+        const isRedacted = value === REDACTED_MARKER;
+        return (
+          <div key={key} className="font-mono text-xs break-all leading-5 text-[#86868b] dark:text-[#a1a1a6]">
+            <span className="text-[#1d1d1f] dark:text-[#f5f5f7]">{key}</span>:{' '}
+            {isRedacted ? (
+              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                redacted
+              </span>
+            ) : value}
+          </div>
+        );
+      })}
     </div>
   );
 }

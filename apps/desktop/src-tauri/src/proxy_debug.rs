@@ -587,14 +587,17 @@ impl ProxyDebugManager {
 
         // Request body should stay complete for JSON-friendly debug rendering.
         // Response body can be much larger (especially SSE), keep a safety cap.
-        let request_body = read_body_preview(record.request_body_file.as_deref(), None)?;
-        let response_body = read_body_preview(record.response_body_file.as_deref(), Some(200_000))?;
+        let request_body = read_body_preview(record.request_body_file.as_deref(), None)?
+            .map(|raw| redact_body_text(&raw));
+        let response_body =
+            read_body_preview(record.response_body_file.as_deref(), Some(200_000))?
+                .map(|raw| redact_body_text(&raw));
         let reduced = recompute_reduced_detail(&record)?;
 
         Ok(ProxyTrafficDetail {
             item: record.to_item(),
-            request_headers: record.request_headers.clone(),
-            response_headers: record.response_headers.clone(),
+            request_headers: redact_headers(&record.request_headers),
+            response_headers: redact_headers(&record.response_headers),
             request_body,
             response_body,
             reduced,
@@ -725,7 +728,8 @@ impl ProxyDebugManager {
         if config.record_mode == RecordMode::Full {
             let relative = format!("bodies/{}-req.bin", request_id);
             let full = proxy_debug_dir().join(&relative);
-            if fs::write(&full, &req.body).is_ok() {
+            let redacted_body = redact_body_bytes(&req.body);
+            if fs::write(&full, &redacted_body).is_ok() {
                 apply_private_file_permissions(&full);
                 request_body_file = Some(relative);
             }
@@ -833,8 +837,8 @@ impl ProxyDebugManager {
             method: req.method,
             path: parsed.upstream_path,
             query: query.map(|q| q.to_string()),
-            request_headers: req.headers,
-            response_headers,
+            request_headers: redact_headers(&req.headers),
+            response_headers: redact_headers(&response_headers),
             request_body_size: req.body.len() as u64,
             request_body_file,
             response_file_tmp,
@@ -1492,6 +1496,84 @@ fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
     output
 }
 
+const REDACTED_MARKER: &str = "[REDACTED]";
+const SENSITIVE_HEADER_NAMES: &[&str] = &[
+    "authorization",
+    "x-api-key",
+    "anthropic-api-key",
+    "anthropic-authorization",
+    "api-key",
+    "cookie",
+    "set-cookie",
+    "proxy-authorization",
+];
+
+const SENSITIVE_BODY_KEYS: &[&str] = &[
+    "api_key",
+    "apikey",
+    "token",
+    "authorization",
+    "key",
+    "api-key",
+    "secret",
+    "password",
+    "access_token",
+    "refresh_token",
+];
+
+fn redact_headers(headers: &HashMap<String, String>) -> HashMap<String, String> {
+    let mut out = HashMap::with_capacity(headers.len());
+    for (name, value) in headers {
+        if SENSITIVE_HEADER_NAMES
+            .iter()
+            .any(|sensitive| name.eq_ignore_ascii_case(sensitive))
+        {
+            out.insert(name.clone(), REDACTED_MARKER.to_string());
+        } else {
+            out.insert(name.clone(), value.clone());
+        }
+    }
+    out
+}
+
+fn redact_body_bytes(body: &[u8]) -> Vec<u8> {
+    // Try parse as JSON; if ok, walk and redact known sensitive keys.
+    // Otherwise return original bytes (annotated is caller's responsibility).
+    let Ok(value) = serde_json::from_slice::<Value>(body) else {
+        return body.to_vec();
+    };
+    let redacted = redact_json_value(&value);
+    serde_json::to_vec(&redacted).unwrap_or_else(|_| body.to_vec())
+}
+
+fn redact_body_text(body: &str) -> String {
+    let redacted_bytes = redact_body_bytes(body.as_bytes());
+    String::from_utf8(redacted_bytes).unwrap_or_else(|_| body.to_string())
+}
+
+fn redact_json_value(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut out = serde_json::Map::with_capacity(map.len());
+            for (key, val) in map {
+                if SENSITIVE_BODY_KEYS
+                    .iter()
+                    .any(|sensitive| key.eq_ignore_ascii_case(sensitive))
+                {
+                    out.insert(key.clone(), Value::String(REDACTED_MARKER.to_string()));
+                } else {
+                    out.insert(key.clone(), redact_json_value(val));
+                }
+            }
+            Value::Object(out)
+        }
+        Value::Array(items) => {
+            Value::Array(items.iter().map(redact_json_value).collect())
+        }
+        _ => value.clone(),
+    }
+}
+
 fn is_chunked_request(headers: &HashMap<String, String>) -> bool {
     headers
         .get("transfer-encoding")
@@ -2105,7 +2187,8 @@ fn generate_request_id() -> String {
 mod tests {
     use super::{
         build_sse_reduced, compose_upstream_url, parse_proxy_path, read_http_request,
-        recompute_reduced_detail, validate_upstream_url, ReducedStreamLog, TrafficRecord,
+        recompute_reduced_detail, redact_body_bytes, redact_body_text, redact_headers,
+        redact_json_value, validate_upstream_url, ReducedStreamLog, TrafficRecord, REDACTED_MARKER,
     };
     use std::collections::{HashMap, VecDeque};
     use std::io::{self, ErrorKind, Read};
@@ -2334,5 +2417,125 @@ mod tests {
         let result = recompute_reduced_detail(&record).unwrap();
 
         assert_eq!(result.unwrap().final_text, reduced.final_text);
+    }
+
+    // --- Redaction tests ---
+
+    #[test]
+    fn redact_headers_masks_authorization() {
+        let mut input = HashMap::new();
+        input.insert("Authorization".to_string(), "Bearer sk-ant-123".to_string());
+        input.insert("content-type".to_string(), "application/json".to_string());
+
+        let out = redact_headers(&input);
+        assert_eq!(out.get("Authorization").unwrap(), REDACTED_MARKER);
+        assert_eq!(
+            out.get("content-type").unwrap(),
+            "application/json",
+            "non-sensitive header should be preserved"
+        );
+    }
+
+    #[test]
+    fn redact_headers_is_case_insensitive() {
+        let mut input = HashMap::new();
+        input.insert("AUTHORIZATION".to_string(), "Bearer abc".to_string());
+        input.insert("X-API-KEY".to_string(), "sk-test".to_string());
+        input.insert("x-api-key".to_string(), "sk-lower".to_string());
+        input.insert("Cookie".to_string(), "session=xyz".to_string());
+        input.insert("set-cookie".to_string(), "token=abc".to_string());
+
+        let out = redact_headers(&input);
+        assert_eq!(out.get("AUTHORIZATION").unwrap(), REDACTED_MARKER);
+        assert_eq!(out.get("X-API-KEY").unwrap(), REDACTED_MARKER);
+        assert_eq!(out.get("x-api-key").unwrap(), REDACTED_MARKER);
+        assert_eq!(out.get("Cookie").unwrap(), REDACTED_MARKER);
+        assert_eq!(out.get("set-cookie").unwrap(), REDACTED_MARKER);
+    }
+
+    #[test]
+    fn redact_headers_preserves_safe_headers() {
+        let mut input = HashMap::new();
+        input.insert("user-agent".to_string(), "ccem/1.0".to_string());
+        input.insert("accept".to_string(), "application/json".to_string());
+
+        let out = redact_headers(&input);
+        assert_eq!(out.get("user-agent").unwrap(), "ccem/1.0");
+        assert_eq!(out.get("accept").unwrap(), "application/json");
+    }
+
+    #[test]
+    fn redact_body_masks_api_key_fields() {
+        let body = r#"{"api_key":"sk-secret","model":"claude-3","input":"hello"}"#;
+        let redacted = redact_body_text(body);
+        let parsed: serde_json::Value = serde_json::from_str(&redacted).unwrap();
+        assert_eq!(parsed["api_key"], REDACTED_MARKER);
+        assert_eq!(parsed["model"], "claude-3");
+        assert_eq!(parsed["input"], "hello");
+    }
+
+    #[test]
+    fn redact_body_is_case_insensitive_for_keys() {
+        let body = r#"{"API_Key":"secret","Authorization":"Bearer xyz"}"#;
+        let redacted = redact_body_text(body);
+        let parsed: serde_json::Value = serde_json::from_str(&redacted).unwrap();
+        assert_eq!(parsed["API_Key"], REDACTED_MARKER);
+        assert_eq!(parsed["Authorization"], REDACTED_MARKER);
+    }
+
+    #[test]
+    fn redact_body_redacts_nested_keys() {
+        let body = r#"{"messages":[{"content":"hi"}],"metadata":{"token":"abc123"}}"#;
+        let redacted = redact_body_text(body);
+        let parsed: serde_json::Value = serde_json::from_str(&redacted).unwrap();
+        assert_eq!(parsed["metadata"]["token"], REDACTED_MARKER);
+        assert_eq!(parsed["messages"][0]["content"], "hi");
+    }
+
+    #[test]
+    fn redact_body_redacts_array_items() {
+        let body = r#"[{"key":"secret","label":"ok"},{"key":"another","label":"fine"}]"#;
+        let redacted = redact_body_text(body);
+        let parsed: serde_json::Value = serde_json::from_str(&redacted).unwrap();
+        assert_eq!(parsed[0]["key"], REDACTED_MARKER);
+        assert_eq!(parsed[1]["key"], REDACTED_MARKER);
+        assert_eq!(parsed[0]["label"], "ok");
+        assert_eq!(parsed[1]["label"], "fine");
+    }
+
+    #[test]
+    fn redact_body_handles_malformed_json_gracefully() {
+        let body = b"not valid json {{{";
+        let redacted = redact_body_bytes(body);
+        assert_eq!(
+            redacted,
+            body.to_vec(),
+            "malformed JSON should be returned as-is"
+        );
+    }
+
+    #[test]
+    fn redact_body_preserves_non_sensitive_json_intact() {
+        let body = r#"{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}"#;
+        let redacted = redact_body_text(body);
+        let parsed: serde_json::Value = serde_json::from_str(&redacted).unwrap();
+        assert_eq!(parsed["model"], "claude-3");
+        assert_eq!(parsed["messages"][0]["content"], "hello");
+    }
+
+    #[test]
+    fn redact_json_value_handles_primitives() {
+        assert_eq!(redact_json_value(&serde_json::json!(42)), serde_json::json!(42));
+        assert_eq!(
+            redact_json_value(&serde_json::json!("hello")),
+            serde_json::json!("hello")
+        );
+        assert_eq!(redact_json_value(&serde_json::json!(null)), serde_json::json!(null));
+    }
+
+    #[test]
+    fn redact_body_bytes_preserves_empty_input() {
+        let redacted = redact_body_bytes(b"");
+        assert!(redacted.is_empty());
     }
 }
