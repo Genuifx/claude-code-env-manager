@@ -1,15 +1,23 @@
 import { memo, useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import type { DragEvent } from 'react';
-import { Check, ChevronRight, ChevronsUp, FolderOpen, FolderClosed, MessageSquare, Pin, RefreshCw, SquarePen, X, Plus } from 'lucide-react';
+import { Check, ChevronRight, ChevronsUp, Copy, FolderOpen, FolderClosed, Link, MessageSquare, Pin, RefreshCw, SquarePen, X, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { getHistorySessionDisplay } from '@/components/history/historySession';
 import { useLocale } from '@/locales';
 import type { Environment } from '@/store';
 import type { HistorySessionItem, SessionStickerId, SessionTaskStage } from '@/features/conversations/types';
 import { SessionTreeItemIcon, resolveSessionClient } from './sessionTreeIcons';
+import { buildCcemSessionLinkForHistorySession } from './sessionLinks';
 import type { WorkspaceSessionDecoration } from './useWorkspaceSessionDecorations';
 import {
   SESSION_STICKERS,
@@ -438,6 +446,7 @@ export const ProjectTree = memo(function ProjectTree({
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [pinnedSessionKeys, setPinnedSessionKeys] = useState(readPinnedSessionKeys);
+  const [contextMenuKey, setContextMenuKey] = useState<string | null>(null);
 
   const processingKeysRef = useRef<Set<string>>(new Set());
   const [freshDotKeys, setFreshDotKeys] = useState<Set<string>>(new Set());
@@ -523,6 +532,14 @@ export const ProjectTree = memo(function ProjectTree({
       }
       return [key, ...previous.filter((pinnedKey) => pinnedKey !== key)];
     });
+  }, []);
+
+  const copyText = useCallback(async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (error) {
+      console.error('Failed to copy workspace session value:', error);
+    }
   }, []);
 
   // Drag-to-reorder state for pinned sessions
@@ -749,7 +766,8 @@ export const ProjectTree = memo(function ProjectTree({
       );
     }
 
-    return (
+    const sessionLink = buildCcemSessionLinkForHistorySession(session);
+    const row = (
       <div
         key={key}
         role="button"
@@ -763,6 +781,10 @@ export const ProjectTree = memo(function ProjectTree({
         onDoubleClick={() => {
           setEditingKey(key);
           setEditValue(getHistorySessionDisplay(session, ''));
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          setContextMenuKey(key);
         }}
         onKeyDown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') {
@@ -861,6 +883,35 @@ export const ProjectTree = memo(function ProjectTree({
           </TooltipContent>
         </Tooltip>
       </div>
+    );
+
+    return (
+      <DropdownMenu
+        key={key}
+        open={contextMenuKey === key}
+        onOpenChange={(open) => setContextMenuKey(open ? key : null)}
+      >
+        <DropdownMenuTrigger asChild>{row}</DropdownMenuTrigger>
+        <DropdownMenuContent align="start" side="right" className="w-52">
+          <DropdownMenuItem
+            onClick={() => {
+              void copyText(session.id);
+            }}
+          >
+            <Copy className="mr-2 h-3.5 w-3.5" />
+            {t('workspace.copySessionId')}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onClick={() => {
+              void copyText(sessionLink);
+            }}
+          >
+            <Link className="mr-2 h-3.5 w-3.5" />
+            {t('workspace.copySessionLink')}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     );
   };
 

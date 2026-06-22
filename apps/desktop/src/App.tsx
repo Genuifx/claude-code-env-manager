@@ -20,6 +20,11 @@ import { StartupSplash } from '@/components/layout/StartupSplash';
 import type { PetOpenSessionRequest } from '@/types/pet';
 import { AppUpdateProvider } from '@/components/app-update/AppUpdateProvider';
 
+interface CcemControlRequest {
+  kind?: string;
+  link?: string;
+}
+
 const AnalyticsPage = lazy(async () =>
   import('@/pages/Analytics').then((m) => ({ default: m.Analytics }))
 );
@@ -85,6 +90,7 @@ function App() {
   const [pendingDeleteEnv, setPendingDeleteEnv] = useState<string | null>(null);
   const [startupReady, setStartupReady] = useState(false);
   const [petOpenRequest, setPetOpenRequest] = useState<PetOpenSessionRequest | null>(null);
+  const [workspaceSessionLinkRequest, setWorkspaceSessionLinkRequest] = useState<{ id: number; link: string } | null>(null);
   const [workspaceComposeSeed, setWorkspaceComposeSeed] = useState<{ id: number; value: string } | null>(null);
   const lastFocusSyncAtRef = useRef(0);
   const launchInFlightRef = useRef<Set<string>>(new Set());
@@ -270,6 +276,19 @@ function App() {
           return;
         }
         unlisteners.push(listener5);
+
+        const listener6 = await listen<CcemControlRequest>('ccem-control-request', (event) => {
+          if (event.payload?.kind !== 'openSession' || typeof event.payload.link !== 'string') {
+            return;
+          }
+          setWorkspaceSessionLinkRequest({ id: Date.now(), link: event.payload.link });
+          navigateToTab('workspace');
+        });
+        if (cancelled) {
+          listener6();
+          return;
+        }
+        unlisteners.push(listener6);
       } catch (err) {
         console.error('Failed to setup tray event listeners:', err);
       }
@@ -678,6 +697,8 @@ function App() {
                     composeSeed={workspaceComposeSeed}
                     petOpenRequest={petOpenRequest}
                     onPetOpenHandled={() => setPetOpenRequest(null)}
+                    sessionLinkRequest={workspaceSessionLinkRequest}
+                    onSessionLinkHandled={() => setWorkspaceSessionLinkRequest(null)}
                   />
                 </div>
 

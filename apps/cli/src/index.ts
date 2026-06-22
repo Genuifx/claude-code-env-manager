@@ -75,6 +75,7 @@ import {
   parseStringList,
   readCronTasks,
 } from './cron.js';
+import { printJson, requestDesktopControl } from './desktopControl.js';
 
 const program = new Command();
 
@@ -147,6 +148,35 @@ const config = new Conf({
     defaultMode: null as string | null
   }
 });
+
+type DesktopCommandJsonOption = {
+  json?: boolean;
+};
+
+function outputDesktopResult(value: unknown, options: DesktopCommandJsonOption): void {
+  if (options.json) {
+    printJson(value);
+    return;
+  }
+  console.log(JSON.stringify(value, null, 2));
+}
+
+function parseOptionalBoolean(value: unknown): boolean | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'y'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'n'].includes(normalized)) {
+    return false;
+  }
+  return undefined;
+}
 
 const recoverRegistriesFromLegacy = (
   registries: Record<string, EnvConfig>
@@ -1434,6 +1464,122 @@ program
       resumeSessionId: opts.resumeSession,
       silent: true,
     });
+  });
+
+const desktopCmd = program
+  .command('desktop')
+  .description('Control the running CCEM Desktop app');
+
+desktopCmd
+  .command('health')
+  .description('Check the running CCEM Desktop control endpoint')
+  .option('--json', 'Output JSON')
+  .action(async function(this: any) {
+    const opts = this.opts();
+    const result = await requestDesktopControl('ccem.health');
+    outputDesktopResult(result, opts);
+  });
+
+desktopCmd
+  .command('create')
+  .description('Create a workspace session in the running CCEM Desktop app')
+  .requiredOption('--provider <provider>', 'Agent provider: claude or codex')
+  .requiredOption('--cwd <path>', 'Working directory')
+  .requiredOption('--prompt <text>', 'Initial prompt')
+  .option('--env <name>', 'Environment name')
+  .option('--perm <mode>', 'Permission mode')
+  .option('--runtime-perm <mode>', 'Runtime permission mode')
+  .option('--provider-session-id <id>', 'Provider session id to continue')
+  .option('--effort <level>', 'Codex effort level')
+  .option('--open <value>', 'Open the created session in Desktop (true/false)')
+  .option('--json', 'Output JSON')
+  .action(async function(this: any) {
+    const opts = this.opts();
+    const provider = String(opts.provider).trim().toLowerCase();
+    if (provider !== 'claude' && provider !== 'codex') {
+      throw new Error("Unsupported provider. Use 'claude' or 'codex'.");
+    }
+    const result = await requestDesktopControl('ccem.workspace.createSession', {
+      provider,
+      cwd: opts.cwd,
+      prompt: opts.prompt,
+      envName: opts.env ?? null,
+      permissionMode: opts.perm ?? null,
+      runtimePermissionMode: opts.runtimePerm ?? null,
+      providerSessionId: opts.providerSessionId ?? null,
+      effort: opts.effort ?? null,
+      open: parseOptionalBoolean(opts.open),
+    });
+    outputDesktopResult(result, opts);
+  });
+
+desktopCmd
+  .command('sessions')
+  .description('List CCEM Desktop workspace sessions')
+  .option('--cwd <path>', 'Filter by working directory')
+  .option('--provider <provider>', 'Filter by provider')
+  .option('--status <status>', 'Filter by status')
+  .option('--json', 'Output JSON')
+  .action(async function(this: any) {
+    const opts = this.opts();
+    const result = await requestDesktopControl('ccem.workspace.listSessions', {
+      cwd: opts.cwd ?? null,
+      provider: opts.provider ?? null,
+      status: opts.status ?? null,
+    });
+    outputDesktopResult(result, opts);
+  });
+
+desktopCmd
+  .command('status <runtimeId>')
+  .description('Get one CCEM Desktop workspace session')
+  .option('--json', 'Output JSON')
+  .action(async function(this: any, runtimeId: string) {
+    const opts = this.opts();
+    const result = await requestDesktopControl('ccem.workspace.getSession', { runtimeId });
+    outputDesktopResult(result, opts);
+  });
+
+desktopCmd
+  .command('events <runtimeId>')
+  .description('Read CCEM Desktop workspace session events')
+  .option('--since <seq>', 'First event sequence after this value')
+  .option('--limit <count>', 'Maximum events to return')
+  .option('--json', 'Output JSON')
+  .action(async function(this: any, runtimeId: string) {
+    const opts = this.opts();
+    const result = await requestDesktopControl('ccem.workspace.getEvents', {
+      runtimeId,
+      sinceSeq: opts.since ? Number(opts.since) : null,
+      limit: opts.limit ? Number(opts.limit) : null,
+    });
+    outputDesktopResult(result, opts);
+  });
+
+desktopCmd
+  .command('send <runtimeId>')
+  .description('Send input to a CCEM Desktop workspace session')
+  .requiredOption('--text <text>', 'Text to send')
+  .option('--display-text <text>', 'Text to show in Desktop')
+  .option('--json', 'Output JSON')
+  .action(async function(this: any, runtimeId: string) {
+    const opts = this.opts();
+    const result = await requestDesktopControl('ccem.workspace.sendInput', {
+      runtimeId,
+      text: opts.text,
+      displayText: opts.displayText ?? null,
+    });
+    outputDesktopResult(result, opts);
+  });
+
+desktopCmd
+  .command('open <link>')
+  .description('Open a ccem:// workspace session link in Desktop')
+  .option('--json', 'Output JSON')
+  .action(async function(this: any, link: string) {
+    const opts = this.opts();
+    const result = await requestDesktopControl('ccem.workspace.openSession', { link });
+    outputDesktopResult(result, opts);
   });
 
 // usage 命令 - 显示使用统计并刷新缓存

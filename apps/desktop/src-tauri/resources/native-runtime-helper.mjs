@@ -16142,9 +16142,6 @@ var Codex = class {
 
 // src/index.ts
 import { createInterface } from "node:readline";
-import fs3 from "node:fs";
-import os4 from "node:os";
-import path5 from "node:path";
 import process3 from "node:process";
 
 // src/claudeEnv.ts
@@ -16236,18 +16233,28 @@ function normalizeCodexSandboxMode(permMode) {
   if (permMode === "yolo" || permMode === "danger-full-access") {
     return {
       sandboxMode: "danger-full-access",
-      approvalPolicy: "never"
+      approvalPolicy: "never",
+      networkAccessEnabled: true
     };
   }
-  if (permMode === "readonly" || permMode === "audit" || permMode === "ci" || permMode === "plan" || permMode === "read-only") {
+  if (permMode === "readonly" || permMode === "audit" || permMode === "plan" || permMode === "read-only") {
     return {
       sandboxMode: "read-only",
-      approvalPolicy: "never"
+      approvalPolicy: "never",
+      networkAccessEnabled: false
+    };
+  }
+  if (permMode === "safe" || permMode === "ci") {
+    return {
+      sandboxMode: "workspace-write",
+      approvalPolicy: "on-request",
+      networkAccessEnabled: false
     };
   }
   return {
     sandboxMode: "workspace-write",
-    approvalPolicy: "on-request"
+    approvalPolicy: "on-request",
+    networkAccessEnabled: true
   };
 }
 
@@ -16408,10 +16415,58 @@ function buildPromptContentParts(text, images) {
   return parts;
 }
 
+// src/imageInputs.ts
+import fs2 from "fs";
+import os3 from "os";
+import path4 from "path";
+var MAX_SINGLE_IMAGE_BYTES = 30 * 1024 * 1024;
+var MAX_TOTAL_IMAGE_BYTES = 300 * 1024 * 1024;
+function createLocalImageInputs(parts) {
+  const tempDir = path4.join(os3.tmpdir(), "ccem-images");
+  fs2.mkdirSync(tempDir, { recursive: true });
+  const inputs = [];
+  const tempFiles = [];
+  let totalSize = 0;
+  try {
+    for (const part of parts) {
+      if (part.type === "text") {
+        inputs.push({ type: "text", text: part.text });
+        continue;
+      }
+      const data = Buffer.from(part.image.base64Data, "base64");
+      if (data.length > MAX_SINGLE_IMAGE_BYTES) {
+        throw new Error(`Image exceeds max size of ${MAX_SINGLE_IMAGE_BYTES / 1024 / 1024}MB`);
+      }
+      totalSize += data.length;
+      if (totalSize > MAX_TOTAL_IMAGE_BYTES) {
+        throw new Error(`Total image size exceeds limit of ${MAX_TOTAL_IMAGE_BYTES / 1024 / 1024}MB`);
+      }
+      const ext = part.image.mediaType.split("/")[1] || "png";
+      const filename = `paste-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+      const filePath = path4.join(tempDir, filename);
+      fs2.writeFileSync(filePath, data);
+      tempFiles.push(filePath);
+      inputs.push({ type: "local_image", path: filePath });
+    }
+  } catch (error) {
+    cleanupTempFiles(tempFiles);
+    throw error;
+  }
+  return { inputs, tempFiles };
+}
+function cleanupTempFiles(files) {
+  for (const file of files) {
+    try {
+      fs2.unlinkSync(file);
+    } catch {
+    }
+  }
+}
+
 // src/codexContextUsage.ts
-import fs2 from "node:fs";
-import os3 from "node:os";
-import path4 from "node:path";
+import fs3 from "node:fs";
+import os4 from "node:os";
+import path5 from "node:path";
 var TAIL_BYTES = 512 * 1024;
 function asRecord2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
@@ -16464,8 +16519,8 @@ function buildCodexContextUsageFromTokenCount(payload, fallbackModel = "codex") 
   };
 }
 function resolveCodexSessionsRoot(env = process.env) {
-  const codexHome = env.CODEX_HOME?.trim() || path4.join(os3.homedir(), ".codex");
-  return path4.join(codexHome, "sessions");
+  const codexHome = env.CODEX_HOME?.trim() || path5.join(os4.homedir(), ".codex");
+  return path5.join(codexHome, "sessions");
 }
 function looksLikeUuid(value) {
   return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(value);
@@ -16473,12 +16528,12 @@ function looksLikeUuid(value) {
 function scanDirectoryForSessionFile(dir, sessionId, recursive) {
   let entries;
   try {
-    entries = fs2.readdirSync(dir, { withFileTypes: true });
+    entries = fs3.readdirSync(dir, { withFileTypes: true });
   } catch {
     return null;
   }
   for (const entry of entries) {
-    const entryPath = path4.join(dir, entry.name);
+    const entryPath = path5.join(dir, entry.name);
     if (entry.isFile() && entry.name.endsWith(".jsonl") && entry.name.includes(sessionId)) {
       return entryPath;
     }
@@ -16490,7 +16545,7 @@ function scanDirectoryForSessionFile(dir, sessionId, recursive) {
     if (!entry.isDirectory()) {
       continue;
     }
-    const match = scanDirectoryForSessionFile(path4.join(dir, entry.name), sessionId, true);
+    const match = scanDirectoryForSessionFile(path5.join(dir, entry.name), sessionId, true);
     if (match) {
       return match;
     }
@@ -16504,7 +16559,7 @@ function recentSessionDirs(root, days = 7) {
     const yyyy = String(date.getFullYear());
     const mm = String(date.getMonth() + 1).padStart(2, "0");
     const dd = String(date.getDate()).padStart(2, "0");
-    dirs.push(path4.join(root, yyyy, mm, dd));
+    dirs.push(path5.join(root, yyyy, mm, dd));
   }
   return dirs;
 }
@@ -16522,18 +16577,18 @@ function findCodexSessionFile(sessionId, sessionsRoot = resolveCodexSessionsRoot
   return scanDirectoryForSessionFile(sessionsRoot, trimmed, true);
 }
 function readTailLines(filePath) {
-  const stat = fs2.statSync(filePath);
+  const stat = fs3.statSync(filePath);
   const length = Math.min(stat.size, TAIL_BYTES);
   const start = Math.max(0, stat.size - length);
-  const fd2 = fs2.openSync(filePath, "r");
+  const fd2 = fs3.openSync(filePath, "r");
   try {
     const buffer = Buffer.alloc(length);
-    fs2.readSync(fd2, buffer, 0, length, start);
+    fs3.readSync(fd2, buffer, 0, length, start);
     const text = buffer.toString("utf8");
     const lines = text.split(/\r?\n/).filter((line) => line.trim());
     return start > 0 ? lines.slice(1) : lines;
   } finally {
-    fs2.closeSync(fd2);
+    fs3.closeSync(fd2);
   }
 }
 function readLatestCodexContextUsageFromSessionFile(filePath) {
@@ -17756,9 +17811,10 @@ async function ensureCodexThread() {
     const sandbox = normalizeCodexSandboxMode(initCommand.perm_mode);
     const threadOptions = {
       workingDirectory: initCommand.working_dir,
-      networkAccessEnabled: true,
+      networkAccessEnabled: sandbox.networkAccessEnabled,
       skipGitRepoCheck: true,
-      ...sandbox,
+      sandboxMode: sandbox.sandboxMode,
+      approvalPolicy: sandbox.approvalPolicy,
       ...initCommand.effort ? { modelReasoningEffort: initCommand.effort } : {}
     };
     codexThread = currentProviderSessionId ? codexClient.resumeThread(currentProviderSessionId, threadOptions) : codexClient.startThread(threadOptions);
@@ -17775,147 +17831,146 @@ async function runCodexTurn(text, images) {
   let input;
   const parts = buildPromptContentParts(text, images);
   const hasImages = parts.some((part) => part.type === "image");
+  let tempFiles = [];
   if (hasImages) {
-    const tempDir = path5.join(os4.tmpdir(), "ccem-images");
-    fs3.mkdirSync(tempDir, { recursive: true });
-    const inputParts = [];
-    for (const part of parts) {
-      if (part.type === "text") {
-        inputParts.push({ type: "text", text: part.text });
-        continue;
-      }
-      const ext = part.image.mediaType.split("/")[1] || "png";
-      const filename = `paste-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
-      const filePath = path5.join(tempDir, filename);
-      fs3.writeFileSync(filePath, Buffer.from(part.image.base64Data, "base64"));
-      inputParts.push({ type: "local_image", path: filePath });
+    try {
+      const result = createLocalImageInputs(parts);
+      input = result.inputs;
+      tempFiles = result.tempFiles;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      emitEvent({ type: "stderr_line", line: message });
+      throw error;
     }
-    input = inputParts;
   } else {
     input = text.trim();
   }
-  const streamed = await thread.runStreamed(input, {
-    signal: currentAbortController.signal
-  });
-  const seenTextByItem = /* @__PURE__ */ new Map();
-  const seenReasoningByItem = /* @__PURE__ */ new Map();
-  for await (const event of streamed.events) {
-    const rawEvent = event;
-    if (rawEvent.type === "event_msg") {
-      const payload = rawEvent.payload;
-      if (payload?.type === "token_count") {
-        emitCodexContextUsageFromTokenCount(payload);
+  try {
+    const streamed = await thread.runStreamed(input, {
+      signal: currentAbortController.signal
+    });
+    const seenTextByItem = /* @__PURE__ */ new Map();
+    const seenReasoningByItem = /* @__PURE__ */ new Map();
+    for await (const event of streamed.events) {
+      const rawEvent = event;
+      if (rawEvent.type === "event_msg") {
+        const payload = rawEvent.payload;
+        if (payload?.type === "token_count") {
+          emitCodexContextUsageFromTokenCount(payload);
+        }
+        continue;
       }
-      continue;
-    }
-    if (event.type === "thread.started") {
-      emitSessionMeta(event.thread_id);
-      await emitCodexContextUsageFromSessionFile(event.thread_id);
-      continue;
-    }
-    if (event.type === "turn.started") {
-      emitEvent({
-        type: "lifecycle",
-        stage: "turn_started",
-        detail: "Codex is thinking\u2026"
-      });
-      continue;
-    }
-    if (event.type === "turn.completed") {
-      const outputTokens = event.usage.output_tokens ?? 0;
-      emitEvent({
-        type: "lifecycle",
-        stage: "turn_completed",
-        detail: `Turn completed \xB7 output ${outputTokens} tokens`
-      });
-      emitEvent({
-        type: "token_usage",
-        provider: "codex",
-        input_tokens: event.usage.input_tokens ?? 0,
-        output_tokens: outputTokens,
-        cache_read_tokens: event.usage.cached_input_tokens ?? 0,
-        cache_creation_tokens: 0
-      });
-      await emitCodexContextUsageFromSessionFile(currentProviderSessionId, 10);
-      continue;
-    }
-    if (event.type === "turn.failed") {
-      emitEvent({
-        type: "session_completed",
-        reason: event.error.message
-      });
-      continue;
-    }
-    if (event.type === "error") {
-      emitEvent({
-        type: "stderr_line",
-        line: event.message
-      });
-      continue;
-    }
-    const item = event.item;
-    if (item.type === "agent_message") {
-      const nextText = typeof item.text === "string" ? item.text : "";
-      const previousText = seenTextByItem.get(String(item.id)) || "";
-      if (nextText.startsWith(previousText)) {
-        const delta = nextText.slice(previousText.length);
-        if (delta) {
+      if (event.type === "thread.started") {
+        emitSessionMeta(event.thread_id);
+        await emitCodexContextUsageFromSessionFile(event.thread_id);
+        continue;
+      }
+      if (event.type === "turn.started") {
+        emitEvent({
+          type: "lifecycle",
+          stage: "turn_started",
+          detail: "Codex is thinking\u2026"
+        });
+        continue;
+      }
+      if (event.type === "turn.completed") {
+        const outputTokens = event.usage.output_tokens ?? 0;
+        emitEvent({
+          type: "lifecycle",
+          stage: "turn_completed",
+          detail: `Turn completed \xB7 output ${outputTokens} tokens`
+        });
+        emitEvent({
+          type: "token_usage",
+          provider: "codex",
+          input_tokens: event.usage.input_tokens ?? 0,
+          output_tokens: outputTokens,
+          cache_read_tokens: event.usage.cached_input_tokens ?? 0,
+          cache_creation_tokens: 0
+        });
+        await emitCodexContextUsageFromSessionFile(currentProviderSessionId, 10);
+        continue;
+      }
+      if (event.type === "turn.failed") {
+        emitEvent({
+          type: "session_completed",
+          reason: event.error.message
+        });
+        continue;
+      }
+      if (event.type === "error") {
+        emitEvent({
+          type: "stderr_line",
+          line: event.message
+        });
+        continue;
+      }
+      const item = event.item;
+      if (item.type === "agent_message") {
+        const nextText = typeof item.text === "string" ? item.text : "";
+        const previousText = seenTextByItem.get(String(item.id)) || "";
+        if (nextText.startsWith(previousText)) {
+          const delta = nextText.slice(previousText.length);
+          if (delta) {
+            emitEvent({
+              type: "assistant_chunk",
+              text: delta
+            });
+          }
+        } else if (nextText) {
           emitEvent({
             type: "assistant_chunk",
-            text: delta
+            text: nextText
           });
         }
-      } else if (nextText) {
-        emitEvent({
-          type: "assistant_chunk",
-          text: nextText
-        });
+        seenTextByItem.set(String(item.id), nextText);
+        continue;
       }
-      seenTextByItem.set(String(item.id), nextText);
-      continue;
-    }
-    if (item.type === "reasoning") {
-      const itemId = String(item.id || "reasoning");
-      const nextText = typeof item.text === "string" ? item.text : "";
-      const previousText = seenReasoningByItem.get(itemId) || "";
-      if (nextText.startsWith(previousText)) {
-        const delta = nextText.slice(previousText.length);
-        if (delta) {
+      if (item.type === "reasoning") {
+        const itemId = String(item.id || "reasoning");
+        const nextText = typeof item.text === "string" ? item.text : "";
+        const previousText = seenReasoningByItem.get(itemId) || "";
+        if (nextText.startsWith(previousText)) {
+          const delta = nextText.slice(previousText.length);
+          if (delta) {
+            emitEvent({
+              type: "system_message",
+              message: delta
+            });
+          }
+        } else if (nextText) {
           emitEvent({
             type: "system_message",
-            message: delta
+            message: nextText
           });
         }
-      } else if (nextText) {
-        emitEvent({
-          type: "system_message",
-          message: nextText
-        });
+        seenReasoningByItem.set(itemId, nextText);
+        continue;
       }
-      seenReasoningByItem.set(itemId, nextText);
-      continue;
+      if (event.type === "item.started") {
+        emitEvent({
+          type: "tool_use_started",
+          tool_use_id: String(item.id || `${item.type}-${Date.now()}`),
+          category: codexCategoryForItem(item),
+          raw_name: String(item.type || "item"),
+          input_summary: summarizeCodexItem(item),
+          needs_response: false
+        });
+        continue;
+      }
+      if (event.type === "item.completed") {
+        emitEvent({
+          type: "tool_use_completed",
+          tool_use_id: String(item.id || `${item.type}-${Date.now()}`),
+          raw_name: String(item.type || "item"),
+          result_summary: summarizeCodexItem(item),
+          success: item.status !== "failed"
+        });
+        continue;
+      }
     }
-    if (event.type === "item.started") {
-      emitEvent({
-        type: "tool_use_started",
-        tool_use_id: String(item.id || `${item.type}-${Date.now()}`),
-        category: codexCategoryForItem(item),
-        raw_name: String(item.type || "item"),
-        input_summary: summarizeCodexItem(item),
-        needs_response: false
-      });
-      continue;
-    }
-    if (event.type === "item.completed") {
-      emitEvent({
-        type: "tool_use_completed",
-        tool_use_id: String(item.id || `${item.type}-${Date.now()}`),
-        raw_name: String(item.type || "item"),
-        result_summary: summarizeCodexItem(item),
-        success: item.status !== "failed"
-      });
-      continue;
-    }
+  } finally {
+    cleanupTempFiles(tempFiles);
   }
 }
 async function runQueuedTurns() {
