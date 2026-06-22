@@ -13,6 +13,7 @@ mod cron;
 mod crypto;
 mod event_bus;
 mod event_dispatcher;
+mod external_control;
 mod history;
 mod interactive_runtime;
 mod jsonl_watcher;
@@ -62,6 +63,7 @@ use config::{
 };
 use cron::{start_cron_scheduler, CronScheduler};
 use event_dispatcher::EventDispatcher;
+use external_control::ExternalControlManager;
 use history::{
     get_conversation_history, get_conversation_messages, get_conversation_segments,
     get_session_subagents,
@@ -3971,6 +3973,8 @@ fn main() {
     let interactive_runtime_manager = Arc::new(InteractiveRuntimeManager::default());
     let headless_runtime_manager = Arc::new(HeadlessRuntimeManager::default());
     let native_runtime_manager = Arc::new(NativeRuntimeManager::default());
+    let external_control_manager =
+        Arc::new(ExternalControlManager::new(native_runtime_manager.clone()));
     let event_dispatcher = Arc::new(EventDispatcher::default());
     let unified_session_manager = Arc::new(UnifiedSessionManager::new(
         headless_runtime_manager.clone(),
@@ -3986,6 +3990,8 @@ fn main() {
     let session_manager_for_setup = session_manager.clone();
     let proxy_manager_for_setup = proxy_debug_manager.clone();
     let proxy_manager_for_run = proxy_debug_manager.clone();
+    let external_control_manager_for_setup = external_control_manager.clone();
+    let external_control_manager_for_run = external_control_manager.clone();
     let interactive_manager_for_setup = interactive_runtime_manager.clone();
     let interactive_manager_for_run = interactive_runtime_manager.clone();
     let headless_manager_for_run = headless_runtime_manager.clone();
@@ -4022,6 +4028,7 @@ fn main() {
         .manage(interactive_runtime_manager.clone())
         .manage(headless_runtime_manager.clone())
         .manage(native_runtime_manager.clone())
+        .manage(external_control_manager.clone())
         .manage(event_dispatcher.clone())
         .manage(unified_session_manager.clone())
         .manage(telegram_bridge_manager.clone())
@@ -4283,6 +4290,9 @@ fn main() {
             }
 
             proxy_manager_for_setup.set_app_handle(app.handle().clone());
+            if let Err(error) = external_control_manager_for_setup.start(app.handle().clone()) {
+                eprintln!("External control startup warning: {}", error);
+            }
 
             // Auto-migrate configuration if needed
             if let Err(e) = config::migrate_if_needed() {
@@ -4452,6 +4462,7 @@ fn main() {
                 tauri::async_runtime::block_on(async move {
                     proxy_for_shutdown.shutdown().await;
                 });
+                external_control_manager_for_run.shutdown();
             }
         });
 }

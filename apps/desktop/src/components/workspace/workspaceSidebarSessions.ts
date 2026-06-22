@@ -70,7 +70,7 @@ export function toLiveHistorySessionItem(
     project,
     projectName: basename(project),
     envName: entry.session.env_name,
-    configSource: 'ccem',
+    configSource: entry.session.provider_session_id?.trim() ? 'ccem' : 'native',
   };
 }
 

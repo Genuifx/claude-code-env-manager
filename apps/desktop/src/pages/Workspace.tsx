@@ -85,6 +85,7 @@ import {
   isWorkspaceCronCommand,
 } from '@/components/workspace/workspaceCronCommand';
 import { trimSeedMessagesBeforeFirstUserPrompt } from '@/components/workspace/workspaceEventTranscript';
+import { parseCcemSessionLink } from '@/components/workspace/sessionLinks';
 import { buildPetNotificationId } from '@/lib/petNotifications';
 import type { PetOpenSessionRequest } from '@/types/pet';
 
@@ -155,6 +156,8 @@ interface WorkspaceProps {
   composeSeed?: { id: number; value: string } | null;
   petOpenRequest?: PetOpenSessionRequest | null;
   onPetOpenHandled?: () => void;
+  sessionLinkRequest?: { id: number; link: string } | null;
+  onSessionLinkHandled?: () => void;
 }
 
 export function Workspace({
@@ -163,6 +166,8 @@ export function Workspace({
   composeSeed = null,
   petOpenRequest = null,
   onPetOpenHandled,
+  sessionLinkRequest = null,
+  onSessionLinkHandled,
 }: WorkspaceProps) {
   const { t } = useLocale();
   const {
@@ -1228,6 +1233,130 @@ export function Workspace({
     },
     [ensureLiveEntryForSession, loadConversation, markPetNotificationReadForSession, setSelectedWorkingDir]
   );
+
+  const selectNativeSessionSummary = useCallback((session: NativeSessionSummary) => {
+    const existingEntry = liveSessionsByRuntimeIdRef.current[session.runtime_id];
+    upsertLiveSessionEntry(session, {
+      initialPrompt: existingEntry?.initialPrompt ?? null,
+      initialImages: existingEntry?.initialImages ?? null,
+      seedMessages: existingEntry?.seedMessages ?? [],
+    });
+
+    const liveItem = toLiveHistorySessionItem({
+      session,
+      initialPrompt: existingEntry?.initialPrompt ?? null,
+      generatedTitle: existingEntry?.generatedTitle ?? null,
+    });
+    if (liveItem) {
+      const nextKey = toSessionKey(liveItem);
+      selectedKeyRef.current = nextKey;
+      setSelectedKey(nextKey);
+    }
+
+    setActiveLiveRuntimeId(session.runtime_id);
+    setComposeDir(session.project_dir);
+    setSelectedWorkingDir(session.project_dir);
+    setWorkspaceMode('live');
+  }, [setSelectedWorkingDir, upsertLiveSessionEntry]);
+
+  const openCcemSessionLink = useCallback(async (link: string) => {
+    const parsed = parseCcemSessionLink(link);
+    if (!parsed) {
+      toast.error(t('workspace.sessionLinkInvalid'));
+      return;
+    }
+
+    const targetRuntimeId = parsed.runtimeId || (parsed.idKind === 'runtime' ? parsed.id : null);
+    const targetProviderSessionId = parsed.providerSessionId || (parsed.idKind === 'provider' ? parsed.id : null);
+
+    if (targetRuntimeId) {
+      const liveEntry = liveSessionsByRuntimeIdRef.current[targetRuntimeId];
+      if (liveEntry && canRestoreWorkspaceLiveSession(liveEntry.session)) {
+        selectNativeSessionSummary(liveEntry.session);
+        return;
+      }
+    }
+
+    if (targetRuntimeId || targetProviderSessionId) {
+      const nativeSessions = await listNativeSessions().catch((error) => {
+        console.error('Failed to list native sessions for ccem link:', error);
+        return [] as NativeSessionSummary[];
+      });
+      const matchingNativeSession = nativeSessions
+        .filter((session) => session.provider === parsed.source)
+        .find((session) => {
+          if (targetRuntimeId && session.runtime_id === targetRuntimeId) {
+            return true;
+          }
+          if (targetProviderSessionId && session.provider_session_id === targetProviderSessionId) {
+            return true;
+          }
+          return false;
+        });
+      if (matchingNativeSession && canRestoreWorkspaceLiveSession(matchingNativeSession)) {
+        selectNativeSessionSummary(matchingNativeSession);
+        return;
+      }
+    }
+
+    const matchesParsedSession = (session: HistorySessionItem) => {
+      if (session.source !== parsed.source) {
+        return false;
+      }
+      if (session.id === parsed.id) {
+        return true;
+      }
+      if (targetProviderSessionId && session.id === targetProviderSessionId) {
+        return true;
+      }
+      if (targetRuntimeId && session.id === targetRuntimeId) {
+        return true;
+      }
+      return false;
+    };
+
+    const matchingSession = sidebarSessions.find(matchesParsedSession);
+    if (matchingSession) {
+      await handleSelect(matchingSession);
+      return;
+    }
+
+    const refreshedSessions = await refreshWorkspaceData({
+      force: true,
+      silent: true,
+      includeSelectedConversation: false,
+    });
+    const refreshedMatchingSession = refreshedSessions?.find(matchesParsedSession);
+    if (refreshedMatchingSession) {
+      await handleSelect(refreshedMatchingSession);
+      return;
+    }
+
+    toast.error(t('workspace.sessionLinkNotFound'));
+  }, [
+    handleSelect,
+    listNativeSessions,
+    refreshWorkspaceData,
+    selectNativeSessionSummary,
+    sidebarSessions,
+    t,
+  ]);
+
+  useEffect(() => {
+    if (!isActive || !sessionLinkRequest) {
+      return;
+    }
+
+    void openCcemSessionLink(sessionLinkRequest.link)
+      .finally(() => {
+        onSessionLinkHandled?.();
+      });
+  }, [
+    isActive,
+    onSessionLinkHandled,
+    openCcemSessionLink,
+    sessionLinkRequest,
+  ]);
 
   useEffect(() => {
     if (!isActive || !petOpenRequest) {
