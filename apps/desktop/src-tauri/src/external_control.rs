@@ -208,6 +208,33 @@ impl ExternalControlManager {
         if request.method != "POST" || request.path != "/rpc" {
             return HttpResponse::plain(404, "Not found");
         }
+
+        // Host header must be loopback to prevent DNS rebinding attacks.
+        if let Some(host_header) = request.headers.get("host") {
+            if !is_loopback_host_header(host_header) {
+                return HttpResponse::plain(403, "Forbidden: non-loopback Host header");
+            }
+        } else {
+            // HTTP/1.1 requires a Host header; reject if missing.
+            return HttpResponse::plain(400, "Bad Request: missing Host header");
+        }
+
+        // Origin (if present) must be a loopback origin. Non-browser clients
+        // (like the ccem CLI) typically omit Origin, so only enforce when set.
+        if let Some(origin) = request.headers.get("origin") {
+            if !is_loopback_origin(origin) {
+                return HttpResponse::plain(403, "Forbidden: non-loopback Origin header");
+            }
+        }
+
+        // Content-Type must be application/json for POST /rpc.
+        if !is_json_content_type(request.headers.get("content-type").map(String::as_str)) {
+            return HttpResponse::plain(
+                415,
+                "Unsupported Media Type: Content-Type must be application/json",
+            );
+        }
+
         let expected_auth = format!("Bearer {}", self.token);
         if request.headers.get("authorization").map(String::as_str) != Some(expected_auth.as_str())
         {
@@ -226,6 +253,17 @@ impl ExternalControlManager {
             }
         };
         let id = rpc.id.clone();
+
+        // Method allowlist: reject unknown JSON-RPC methods with -32601.
+        if !is_allowed_method(&rpc.method) {
+            return HttpResponse::json_error(
+                200,
+                id,
+                -32601,
+                &format!("Method not found: {}", rpc.method),
+            );
+        }
+
         match self.handle_rpc(app, rpc) {
             Ok(result) => HttpResponse::json_result(id, result),
             Err(error) => HttpResponse::json_error(200, id, -32000, &error),
@@ -824,4 +862,230 @@ fn now_rfc3339() -> String {
         .map(|duration| duration.as_secs())
         .unwrap_or_default();
     format!("{}", timestamp)
+}
+
+// ---------------------------------------------------------------------------
+// HTTP boundary validation helpers (pure functions — testable without a server)
+// ---------------------------------------------------------------------------
+
+/// Returns true when the Host header value points at a loopback address.
+/// Accepts `127.0.0.1:port`, `localhost:port`, `[::1]:port`, and bare
+/// `127.0.0.1` / `localhost` / `::1`.
+pub fn is_loopback_host_header(host: &str) -> bool {
+    let trimmed = host.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // IPv6 bracketed form: `[::1]:port` or `[::1]`
+    if trimmed.starts_with('[') {
+        let close = match trimmed.find(']') {
+            Some(idx) => idx,
+            None => return false,
+        };
+        let inner = &trimmed[1..close];
+        return is_loopback_ipv6_literal(inner);
+    }
+
+    // Strip the port (last colon that is not part of an IPv6 address).
+    // After the bracket check above, we're only dealing with IPv4/host:port.
+    let host_part = match trimmed.rsplit_once(':') {
+        Some((left, right)) if right.chars().all(|c| c.is_ascii_digit()) => left,
+        _ => trimmed,
+    };
+
+    is_loopback_host_name(host_part)
+}
+
+/// Returns true when an Origin header value is a loopback origin.
+/// Accepts `http://127.0.0.1:*`, `http://localhost:*`, `http://[::1]:*`.
+pub fn is_loopback_origin(origin: &str) -> bool {
+    let trimmed = origin.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    // Strip scheme
+    let without_scheme = trimmed
+        .strip_prefix("http://")
+        .or_else(|| trimmed.strip_prefix("https://"))
+        .unwrap_or(trimmed);
+
+    // Strip path
+    let authority = without_scheme.split('/').next().unwrap_or(without_scheme);
+    // Extract host:port — careful with IPv6
+    if authority.starts_with('[') {
+        let close = match authority.find(']') {
+            Some(idx) => idx,
+            None => return false,
+        };
+        let inner = &authority[1..close];
+        return is_loopback_ipv6_literal(inner);
+    }
+    let host_part = match authority.rsplit_once(':') {
+        Some((left, right)) if right.chars().all(|c| c.is_ascii_digit()) => left,
+        _ => authority,
+    };
+    is_loopback_host_name(host_part)
+}
+
+/// Returns true for `application/json` and `application/json; charset=utf-8`.
+pub fn is_json_content_type(content_type: Option<&str>) -> bool {
+    let value = match content_type {
+        Some(value) => value.trim().to_lowercase(),
+        None => return false,
+    };
+    // Strip parameters like ; charset=utf-8
+    let mime = value.split(';').next().unwrap_or("").trim();
+    mime == "application/json"
+}
+
+/// Allowlist of JSON-RPC method names accepted by the external control server.
+/// Any method not in this list is rejected with -32601 before dispatch.
+pub fn is_allowed_method(method: &str) -> bool {
+    matches!(
+        method,
+        "ccem.health"
+            | "ccem.workspace.listSessions"
+            | "ccem.workspace.getSession"
+            | "ccem.workspace.getEvents"
+            | "ccem.workspace.sendInput"
+            | "ccem.workspace.openSession"
+            | "ccem.workspace.createSession"
+    )
+}
+
+fn is_loopback_host_name(host: &str) -> bool {
+    let normalized = host.to_lowercase();
+    if normalized == "localhost" {
+        return true;
+    }
+    // 127.0.0.0/8 loopback range
+    if normalized.starts_with("127.") {
+        // Quick sanity check: IPv4 dotted quad
+        let parts: Vec<&str> = normalized.split('.').collect();
+        if parts.len() == 4 && parts.iter().all(|p| p.parse::<u8>().is_ok()) {
+            return true;
+        }
+    }
+    // Bare IPv6 ::1
+    is_loopback_ipv6_literal(&normalized)
+}
+
+fn is_loopback_ipv6_literal(literal: &str) -> bool {
+    let lower = literal.to_lowercase();
+    lower == "::1"
+        || lower == "0:0:0:0:0:0:0:1"
+        || lower == "[::1]"
+        || lower == "[0:0:0:0:0:0:0:1]"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- Host header validation -------------------------------------------
+
+    #[test]
+    fn test_loopback_host_ipv4_with_port() {
+        assert!(is_loopback_host_header("127.0.0.1:9123"));
+        assert!(is_loopback_host_header("127.0.0.1:80"));
+        assert!(is_loopback_host_header("127.0.0.1:65535"));
+    }
+
+    #[test]
+    fn test_loopback_host_localhost_with_port() {
+        assert!(is_loopback_host_header("localhost:9123"));
+        assert!(is_loopback_host_header("localhost:80"));
+    }
+
+    #[test]
+    fn test_loopback_host_bare() {
+        assert!(is_loopback_host_header("127.0.0.1"));
+        assert!(is_loopback_host_header("localhost"));
+        assert!(is_loopback_host_header("127.1.2.3"));
+    }
+
+    #[test]
+    fn test_loopback_host_ipv6_bracketed() {
+        assert!(is_loopback_host_header("[::1]:9123"));
+        assert!(is_loopback_host_header("[::1]"));
+        assert!(is_loopback_host_header("[0:0:0:0:0:0:0:1]:9123"));
+    }
+
+    #[test]
+    fn test_non_loopback_host_rejected() {
+        assert!(!is_loopback_host_header("example.com:9123"));
+        assert!(!is_loopback_host_header("example.com"));
+        assert!(!is_loopback_host_header("192.168.1.1:9123"));
+        assert!(!is_loopback_host_header("10.0.0.1"));
+        assert!(!is_loopback_host_header("0.0.0.0:9123"));
+        assert!(!is_loopback_host_header("evil.com"));
+    }
+
+    #[test]
+    fn test_empty_host_rejected() {
+        assert!(!is_loopback_host_header(""));
+        assert!(!is_loopback_host_header("   "));
+    }
+
+    // --- Origin validation ------------------------------------------------
+
+    #[test]
+    fn test_loopback_origin_http() {
+        assert!(is_loopback_origin("http://127.0.0.1:9123"));
+        assert!(is_loopback_origin("http://localhost:9123"));
+        assert!(is_loopback_origin("http://[::1]:9123"));
+    }
+
+    #[test]
+    fn test_non_loopback_origin_rejected() {
+        assert!(!is_loopback_origin("https://evil.com"));
+        assert!(!is_loopback_origin("http://192.168.1.1:9123"));
+        assert!(!is_loopback_origin("http://example.com:9123"));
+    }
+
+    // --- Content-Type validation ------------------------------------------
+
+    #[test]
+    fn test_json_content_type_accept() {
+        assert!(is_json_content_type(Some("application/json")));
+        assert!(is_json_content_type(Some("application/json; charset=utf-8")));
+        assert!(is_json_content_type(Some("APPLICATION/JSON")));
+        assert!(is_json_content_type(Some("  application/json  ")));
+    }
+
+    #[test]
+    fn test_json_content_type_reject() {
+        assert!(!is_json_content_type(None));
+        assert!(!is_json_content_type(Some("text/plain")));
+        assert!(!is_json_content_type(Some("application/x-www-form-urlencoded")));
+        assert!(!is_json_content_type(Some("multipart/form-data; boundary=xyz")));
+        assert!(!is_json_content_type(Some("")));
+    }
+
+    // --- Method allowlist -------------------------------------------------
+
+    #[test]
+    fn test_allowed_methods() {
+        for method in [
+            "ccem.health",
+            "ccem.workspace.listSessions",
+            "ccem.workspace.getSession",
+            "ccem.workspace.getEvents",
+            "ccem.workspace.sendInput",
+            "ccem.workspace.openSession",
+            "ccem.workspace.createSession",
+        ] {
+            assert!(is_allowed_method(method), "{} should be allowed", method);
+        }
+    }
+
+    #[test]
+    fn test_disallowed_methods() {
+        assert!(!is_allowed_method("ccem.evil"));
+        assert!(!is_allowed_method("session/list"));
+        assert!(!is_allowed_method(""));
+        assert!(!is_allowed_method("admin.shutdown"));
+        assert!(!is_allowed_method("system.execute"));
+    }
 }

@@ -75,7 +75,7 @@ import {
   parseStringList,
   readCronTasks,
 } from './cron.js';
-import { printJson, requestDesktopControl } from './desktopControl.js';
+import { parseLimitOption, parseSinceOption, printJson, requestDesktopControl } from './desktopControl.js';
 
 const program = new Command();
 
@@ -1548,10 +1548,12 @@ desktopCmd
   .option('--json', 'Output JSON')
   .action(async function(this: any, runtimeId: string) {
     const opts = this.opts();
+    const sinceSeq = parseSinceOption(opts.since);
+    const limit = parseLimitOption(opts.limit);
     const result = await requestDesktopControl('ccem.workspace.getEvents', {
       runtimeId,
-      sinceSeq: opts.since ? Number(opts.since) : null,
-      limit: opts.limit ? Number(opts.limit) : null,
+      sinceSeq,
+      limit,
     });
     outputDesktopResult(result, opts);
   });
