@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { createPortal } from 'react-dom';
-import { open } from '@tauri-apps/plugin-shell';
+import { invoke } from '@tauri-apps/api/core';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -64,13 +64,6 @@ interface WorkspaceReviewDrawerProps {
 const MAIN_WIDTH = 440;
 const FILES_MIN_WIDTH = 560;
 const DEFAULT_FILES_WIDTH = 820;
-
-function resolveWorkspacePath(projectDir: string, filePath: string) {
-  if (/^([a-zA-Z]:[\\/]|\/)/.test(filePath)) {
-    return filePath;
-  }
-  return `${projectDir.replace(/[\\/]+$/, '')}/${filePath.replace(/^\.?[\\/]/, '')}`;
-}
 
 function basename(path: string) {
   const parts = path.replace(/[\\/]+$/, '').split(/[\\/]/);
@@ -996,9 +989,20 @@ export function WorkspaceReviewDrawer({
 
   const openInEditor = async (path: string) => {
     try {
-      await open(resolveWorkspacePath(session.project_dir, path));
+      await invoke<boolean>('open_file_in_workspace', {
+        workingDir: session.project_dir,
+        filePath: path,
+      });
     } catch (error) {
-      toast.error(`打开失败：${String(error)}`);
+      const message = String(error);
+      // Rust guard rejections carry the phrase "escapes working dir" — surface
+      // a workspace-boundary message instead of the raw IPC error so users
+      // understand the path was blocked by policy, not by a missing editor.
+      if (message.includes('escapes working dir')) {
+        toast.error('路径超出工作区范围，已拒绝打开');
+      } else {
+        toast.error(`打开失败：${message}`);
+      }
     }
   };
 

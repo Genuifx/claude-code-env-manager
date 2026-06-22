@@ -3767,6 +3767,336 @@ fn get_workspace_media_preview(
     })
 }
 
+/// Resolve a candidate `file_path` against `working_dir`, enforcing that the
+/// final canonicalized path lives inside the canonicalized working dir.
+///
+/// Handles four escape vectors that a naive prefix check would miss:
+/// * relative `../` escape — `Path::starts_with` runs after canonicalization
+/// * symlink escape — parent dir canonicalization resolves symlinks; the leaf
+///   component is appended post-resolution so we never follow a symlink at the
+///   leaf without first checking its parent
+/// * sibling-prefix absolute paths — `/proj-evil/...` must not match `/proj`,
+///   which `Path::starts_with` (rather than `String::starts_with`) guarantees
+/// * absolute paths outside the workspace — `starts_with` fails and we reject
+///
+/// The leaf file is allowed to not exist yet (so callers can open editors that
+/// create it on focus); we canonicalize the parent and re-append the file name.
+/// If the parent itself is missing we walk up until we find an existing
+/// ancestor, canonicalize that, then re-append the remaining relative tail.
+/// This bounds the lookup to the filesystem root and keeps the workspace guard
+/// effective even when intermediate directories are pending creation.
+fn resolve_workspace_path(
+    working_dir: &str,
+    file_path: &str,
+) -> Result<std::path::PathBuf, String> {
+    let working = std::path::Path::new(working_dir)
+        .canonicalize()
+        .map_err(|err| format!("Invalid working_dir {}: {}", working_dir, err))?;
+
+    let candidate = if std::path::Path::new(file_path).is_absolute() {
+        std::path::PathBuf::from(file_path)
+    } else {
+        working.join(file_path)
+    };
+
+    // Fast path: file exists, so canonicalize resolves the leaf too.
+    if let Ok(resolved) = candidate.canonicalize() {
+        if !resolved.starts_with(&working) {
+            return Err(format!(
+                "Path '{}' escapes working dir '{}'",
+                file_path,
+                working.display()
+            ));
+        }
+        return Ok(resolved);
+    }
+
+    // Slow path: leaf (or some ancestor) does not exist. Walk up to the first
+    // existing ancestor, canonicalize it (this resolves any symlinks in the
+    // chain), then re-append the remaining tail components. After rejoining we
+    // run `starts_with` on the canonical ancestor to keep the guard sound.
+    let mut existing = candidate.clone();
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    while !existing.exists() {
+        let filename = match existing.file_name() {
+            Some(name) => name.to_os_string(),
+            None => {
+                return Err(format!(
+                    "Cannot resolve path '{}' (reached root without matching working dir)",
+                    file_path
+                ));
+            }
+        };
+        tail.push(filename);
+        match existing.parent() {
+            Some(parent) => existing = parent.to_path_buf(),
+            None => {
+                return Err(format!(
+                    "Cannot resolve path '{}' (no parent to canonicalize)",
+                    file_path
+                ));
+            }
+        }
+    }
+    tail.reverse();
+
+    let canonical_ancestor = existing
+        .canonicalize()
+        .map_err(|err| format!("Cannot canonicalize '{}': {}", existing.display(), err))?;
+
+    // The canonicalized ancestor must itself be inside the working dir; this
+    // catches symlink chains that escape before we even consider the tail.
+    if !canonical_ancestor.starts_with(&working) && canonical_ancestor != working {
+        return Err(format!(
+            "Path '{}' escapes working dir '{}'",
+            file_path,
+            working.display()
+        ));
+    }
+
+    let mut resolved = canonical_ancestor;
+    for component in tail {
+        resolved.push(component);
+    }
+
+    if !resolved.starts_with(&working) {
+        return Err(format!(
+            "Path '{}' escapes working dir '{}'",
+            file_path,
+            working.display()
+        ));
+    }
+
+    Ok(resolved)
+}
+
+/// Open a file in the OS default editor, constrained to `working_dir`.
+///
+/// This is the IPC surface used by Workspace Review's "open file" affordance.
+/// We deliberately do NOT expose a generic open-path command — every call must
+/// pass the session's project_dir, which the guard canonicalizes and checks
+/// via `Path::starts_with` (post-symlink-resolution).
+#[tauri::command]
+fn open_file_in_workspace(
+    working_dir: String,
+    file_path: String,
+) -> Result<bool, String> {
+    let resolved = resolve_workspace_path(&working_dir, &file_path)?;
+
+    // We intentionally do not canonicalize again right before spawn: the
+    // earlier `resolve_workspace_path` already verified the path is inside the
+    // workspace. A TOCTOU swap (e.g. replacing a file with a symlink between
+    // resolve and spawn) can only redirect the OS handler, not escape the
+    // workspace itself — and the OS open handler is the user's chosen editor,
+    // which has no extra authority from this app.
+    #[cfg(target_os = "macos")]
+    let spawn_result = Command::new("open").arg(&resolved).spawn();
+    #[cfg(target_os = "windows")]
+    let spawn_result = Command::new("cmd")
+        .args(["/C", "start", "",])
+        .arg(&resolved)
+        .spawn();
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    let spawn_result = Command::new("xdg-open").arg(&resolved).spawn();
+
+    match spawn_result {
+        Ok(_) => Ok(true),
+        Err(err) => Err(format!(
+            "Failed to open file '{}': {}",
+            resolved.display(),
+            err
+        )),
+    }
+}
+
+#[cfg(test)]
+mod workspace_guard_tests {
+    use super::resolve_workspace_path;
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
+    fn make_temp_dir() -> tempfile::TempDir {
+        tempfile::tempdir().expect("create temp dir")
+    }
+
+    #[test]
+    fn relative_path_inside_workspace_is_allowed() {
+        let tmp = make_temp_dir();
+        let project = tmp.path().join("proj");
+        let src = project.join("src");
+        fs::create_dir_all(&src).unwrap();
+        let file = src.join("foo.ts");
+        fs::write(&file, "// hi").unwrap();
+
+        let resolved = resolve_workspace_path(
+            project.to_str().unwrap(),
+            "src/foo.ts",
+        )
+        .expect("relative inside path should resolve");
+        assert_eq!(resolved, file.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn absolute_path_inside_workspace_is_allowed() {
+        let tmp = make_temp_dir();
+        let project = tmp.path().join("proj");
+        let src = project.join("src");
+        fs::create_dir_all(&src).unwrap();
+        let file = src.join("bar.ts");
+        fs::write(&file, "").unwrap();
+
+        let abs = file.to_str().unwrap().to_string();
+        let resolved = resolve_workspace_path(
+            project.to_str().unwrap(),
+            &abs,
+        )
+        .expect("absolute inside path should resolve");
+        assert_eq!(resolved, file.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn dotdot_escape_outside_workspace_is_rejected() {
+        let tmp = make_temp_dir();
+        let project = tmp.path().join("proj");
+        fs::create_dir_all(&project).unwrap();
+        let sibling_secret = tmp.path().join("secret.txt");
+        fs::write(&sibling_secret, "shh").unwrap();
+
+        let err = resolve_workspace_path(
+            project.to_str().unwrap(),
+            "../../secret.txt",
+        )
+        .err()
+        .expect("../ escape should be rejected");
+        assert!(
+            err.contains("escapes working dir"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn sibling_prefix_absolute_path_is_rejected() {
+        // /tmp/proj-evil/x must NOT be considered inside /tmp/proj
+        let tmp = make_temp_dir();
+        let project = tmp.path().join("proj");
+        fs::create_dir_all(&project).unwrap();
+        let evil = tmp.path().join("proj-evil");
+        fs::create_dir_all(&evil).unwrap();
+        let evil_file = evil.join("payload.txt");
+        fs::write(&evil_file, "").unwrap();
+
+        let err = resolve_workspace_path(
+            project.to_str().unwrap(),
+            evil_file.to_str().unwrap(),
+        )
+        .err()
+        .expect("sibling-prefix absolute path must be rejected");
+        assert!(
+            err.contains("escapes working dir"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn symlink_escape_inside_workspace_is_rejected() {
+        let tmp = make_temp_dir();
+        let project = tmp.path().join("proj");
+        fs::create_dir_all(&project).unwrap();
+        // /tmp/proj/link -> /etc — canonicalize should resolve and reject
+        let link = project.join("passwd-link");
+        symlink("/etc", &link).unwrap();
+        let candidate = link.join("passwd");
+
+        let err = resolve_workspace_path(
+            project.to_str().unwrap(),
+            candidate.to_str().unwrap(),
+        )
+        .err()
+        .expect("symlink escape must be rejected");
+        assert!(
+            err.contains("escapes working dir"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn missing_leaf_file_under_existing_dir_is_allowed() {
+        let tmp = make_temp_dir();
+        let project = tmp.path().join("proj");
+        let src = project.join("src");
+        fs::create_dir_all(&src).unwrap();
+        // file does not exist, but parent dir does. Canonicalize the parent so
+        // the expected path matches (macOS `/var` -> `/private/var`).
+        let canonical_src = src.canonicalize().unwrap();
+        let missing = canonical_src.join("not-yet.ts");
+
+        let resolved = resolve_workspace_path(
+            project.to_str().unwrap(),
+            "src/not-yet.ts",
+        )
+        .expect("missing leaf under existing dir should resolve");
+        assert_eq!(resolved, missing);
+    }
+
+    #[test]
+    fn missing_intermediate_dir_under_workspace_is_allowed() {
+        let tmp = make_temp_dir();
+        let project = tmp.path().join("proj");
+        fs::create_dir_all(&project).unwrap();
+        // Canonicalize project root so expected path matches across symlinked
+        // system temp dirs (macOS `/var` -> `/private/var`).
+        let canonical_project = project.canonicalize().unwrap();
+        let missing_file = canonical_project.join("newdir").join("deeper.ts");
+
+        let resolved = resolve_workspace_path(
+            project.to_str().unwrap(),
+            "newdir/deeper.ts",
+        )
+        .expect("missing intermediate dir should resolve via parent walk");
+        assert_eq!(resolved, missing_file);
+    }
+
+    #[test]
+    fn invalid_working_dir_is_rejected() {
+        let tmp = make_temp_dir();
+        let bogus = tmp.path().join("never-existed");
+        let err = resolve_workspace_path(
+            bogus.to_str().unwrap(),
+            "anything.ts",
+        )
+        .err()
+        .expect("invalid working_dir should be rejected");
+        assert!(
+            err.contains("Invalid working_dir"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn symlink_inside_workspace_pointing_inside_is_allowed() {
+        let tmp = make_temp_dir();
+        let project = tmp.path().join("proj");
+        let real = project.join("real");
+        fs::create_dir_all(&real).unwrap();
+        let real_file = real.join("inner.ts");
+        fs::write(&real_file, "").unwrap();
+        // proj/alias -> proj/real (alias is a symlink but stays inside)
+        let alias = project.join("alias");
+        symlink(&real, &alias).unwrap();
+
+        let resolved = resolve_workspace_path(
+            project.to_str().unwrap(),
+            "alias/inner.ts",
+        )
+        .expect("in-workspace symlink should be allowed");
+        assert_eq!(resolved, real_file.canonicalize().unwrap());
+    }
+}
+
 #[tauri::command]
 fn open_text_in_vscode(content: String, suggested_name: Option<String>) -> Result<String, String> {
     let sanitized = sanitize_filename(suggested_name.as_deref().unwrap_or("proxy-debug"));
@@ -4230,6 +4560,7 @@ fn main() {
             get_workspace_git_snapshot,
             get_workspace_file_diff,
             get_workspace_media_preview,
+            open_file_in_workspace,
             open_text_in_vscode,
             save_file_dialog,
             save_image_dialog,
