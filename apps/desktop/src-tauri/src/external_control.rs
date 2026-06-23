@@ -359,12 +359,21 @@ impl ExternalControlManager {
             .filter(|value| !value.is_empty())
             .or_else(resolve_current_env)
             .unwrap_or_else(|| "official".to_string());
-        let working_dir = resolve_working_dir(params.cwd);
-        let perm_mode = resolve_effective_perm_mode(params.permission_mode);
+        let working_dir = resolve_working_dir(params.cwd)?;
+        let perm_mode = resolve_effective_perm_mode(params.permission_mode)?;
         let runtime_perm_mode = params
             .runtime_permission_mode
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty() && value != &perm_mode);
+        if let Some(ref rpm) = runtime_perm_mode {
+            if !is_known_perm_mode(rpm) {
+                return Err(format!(
+                    "Invalid runtime_permission_mode '{}': expected one of {}",
+                    rpm,
+                    KNOWN_PERM_MODES.join(", ")
+                ));
+            }
+        }
 
         let options = match provider {
             NativeProvider::Claude => {
@@ -756,12 +765,36 @@ fn resolve_current_env() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn resolve_working_dir(cwd: Option<String>) -> String {
-    cwd.map(|dir| dir.trim().to_string())
-        .filter(|dir| !dir.is_empty())
-        .or_else(config::get_default_working_dir)
-        .or_else(|| dirs::home_dir().map(|path| path.to_string_lossy().to_string()))
-        .unwrap_or_else(|| ".".to_string())
+/// Known permission mode names accepted by external control.
+const KNOWN_PERM_MODES: &[&str] = &["yolo", "dev", "readonly", "safe", "ci", "audit"];
+
+fn is_known_perm_mode(mode: &str) -> bool {
+    KNOWN_PERM_MODES.iter().any(|known| known.eq_ignore_ascii_case(mode))
+}
+
+/// Validate and resolve the working directory for external control.
+/// - If `cwd` is `None` or empty: falls back to config default → home → ".".
+/// - If `cwd` is provided: must be an absolute path; relative paths are rejected.
+fn resolve_working_dir(cwd: Option<String>) -> Result<String, String> {
+    let trimmed = cwd
+        .map(|dir| dir.trim().to_string())
+        .filter(|dir| !dir.is_empty());
+
+    match trimmed {
+        Some(dir) => {
+            let path = std::path::Path::new(&dir);
+            if !path.is_absolute() {
+                return Err(format!(
+                    "Invalid cwd '{}': external control requires an absolute path",
+                    dir
+                ));
+            }
+            Ok(dir)
+        }
+        None => Ok(config::get_default_working_dir()
+            .or_else(|| dirs::home_dir().map(|path| path.to_string_lossy().to_string()))
+            .unwrap_or_else(|| ".".to_string())),
+    }
 }
 
 fn resolve_default_perm_mode() -> String {
@@ -773,11 +806,27 @@ fn resolve_default_perm_mode() -> String {
         .unwrap_or_else(|| "dev".to_string())
 }
 
-fn resolve_effective_perm_mode(perm_mode: Option<String>) -> String {
-    perm_mode
+/// Validate and resolve permission mode for external control.
+/// - If `perm_mode` is `None` or empty: falls back to config default → "dev".
+/// - If provided: must be one of [`yolo`, `dev`, `readonly`, `safe`, `ci`, `audit`].
+fn resolve_effective_perm_mode(perm_mode: Option<String>) -> Result<String, String> {
+    let trimmed = perm_mode
         .map(|mode| mode.trim().to_string())
-        .filter(|mode| !mode.is_empty())
-        .unwrap_or_else(resolve_default_perm_mode)
+        .filter(|mode| !mode.is_empty());
+
+    match trimmed {
+        Some(mode) => {
+            if !is_known_perm_mode(&mode) {
+                return Err(format!(
+                    "Invalid permission_mode '{}': expected one of {}",
+                    mode,
+                    KNOWN_PERM_MODES.join(", ")
+                ));
+            }
+            Ok(mode)
+        }
+        None => Ok(resolve_default_perm_mode()),
+    }
 }
 
 fn build_runtime_link(summary: &NativeSessionSummary) -> String {
@@ -1087,5 +1136,77 @@ mod tests {
         assert!(!is_allowed_method(""));
         assert!(!is_allowed_method("admin.shutdown"));
         assert!(!is_allowed_method("system.execute"));
+    }
+
+    // --- Permission mode validation --------------------------------------
+
+    #[test]
+    fn test_known_perm_modes_accepted() {
+        for mode in ["yolo", "dev", "readonly", "safe", "ci", "audit"] {
+            assert!(is_known_perm_mode(mode), "{} should be known", mode);
+        }
+        // Case-insensitive
+        assert!(is_known_perm_mode("YOLO"));
+        assert!(is_known_perm_mode("ReadOnly"));
+    }
+
+    #[test]
+    fn test_unknown_perm_mode_rejected() {
+        assert!(!is_known_perm_mode("unrestricted"));
+        assert!(!is_known_perm_mode("admin"));
+        assert!(!is_known_perm_mode(""));
+        assert!(!is_known_perm_mode("default"));
+    }
+
+    #[test]
+    fn test_resolve_perm_mode_valid() {
+        assert_eq!(
+            resolve_effective_perm_mode(Some("safe".to_string())).unwrap(),
+            "safe"
+        );
+        assert_eq!(
+            resolve_effective_perm_mode(Some("AUDIT".to_string())).unwrap(),
+            "AUDIT"
+        );
+    }
+
+    #[test]
+    fn test_resolve_perm_mode_invalid() {
+        assert!(resolve_effective_perm_mode(Some("evil".to_string())).is_err());
+        assert!(resolve_effective_perm_mode(Some("root".to_string())).is_err());
+        assert!(
+            resolve_effective_perm_mode(Some("yolo2".to_string())).is_err(),
+            "prefix match should not pass"
+        );
+    }
+
+    #[test]
+    fn test_resolve_perm_mode_empty_falls_back() {
+        // None and empty string both fall back to default (no error).
+        assert!(resolve_effective_perm_mode(None).is_ok());
+        assert!(resolve_effective_perm_mode(Some("   ".to_string())).is_ok());
+    }
+
+    // --- Working directory validation ------------------------------------
+
+    #[test]
+    fn test_resolve_working_dir_absolute_accepted() {
+        let result = resolve_working_dir(Some("/tmp/some/path".to_string()));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "/tmp/some/path");
+    }
+
+    #[test]
+    fn test_resolve_working_dir_relative_rejected() {
+        assert!(resolve_working_dir(Some("relative/path".to_string())).is_err());
+        assert!(resolve_working_dir(Some("./here".to_string())).is_err());
+        assert!(resolve_working_dir(Some("../parent".to_string())).is_err());
+    }
+
+    #[test]
+    fn test_resolve_working_dir_empty_falls_back() {
+        // None and empty string both fall back to default.
+        assert!(resolve_working_dir(None).is_ok());
+        assert!(resolve_working_dir(Some("   ".to_string())).is_ok());
     }
 }
