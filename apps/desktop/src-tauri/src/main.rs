@@ -3913,6 +3913,7 @@ fn open_file_in_workspace(
 mod workspace_guard_tests {
     use super::resolve_workspace_path;
     use std::fs;
+    #[cfg(unix)]
     use std::os::unix::fs::symlink;
 
     fn make_temp_dir() -> tempfile::TempDir {
@@ -3999,6 +4000,7 @@ mod workspace_guard_tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn symlink_escape_inside_workspace_is_rejected() {
         let tmp = make_temp_dir();
@@ -4076,6 +4078,7 @@ mod workspace_guard_tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn symlink_inside_workspace_pointing_inside_is_allowed() {
         let tmp = make_temp_dir();
