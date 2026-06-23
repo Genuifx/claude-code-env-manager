@@ -15,11 +15,12 @@ Start every desktop-control workflow by checking the live desktop bridge:
 ccem desktop health --json
 ```
 
-If `ccem desktop health` reports a stale descriptor (for example
-`StaleDesktopControlDescriptorError`, "process N is no longer running", or
-"endpoint refused the connection"), the CLI has already removed the stale
-default descriptor. Restart CCEM Desktop and rerun the command instead of
-poking at `~/.ccem/control.json` yourself.
+If `ccem desktop health` reports a stale descriptor, use the CLI message as
+the source of truth and do not inspect `~/.ccem/control.json` yourself. A
+dead-pid descriptor at the default path is removed automatically; restart CCEM
+Desktop and rerun the command. If the message says the endpoint refused the
+connection or timed out while the publishing process is still running, restart
+CCEM Desktop so it republishes a fresh endpoint.
 
 ### Development builds and the control descriptor
 

@@ -285,22 +285,51 @@ describe('desktop control client', () => {
     expect(fs.existsSync(process.env.CCEM_CONTROL_FILE!)).toBe(true);
   });
 
-  it('keeps default descriptors when a live pid has an unreachable endpoint', async () => {
+  it('keeps the default descriptor when the owning pid is alive but endpoint is unreachable', async () => {
     mockedCcemConfigDir = tempDir;
     delete process.env.CCEM_CONTROL_FILE;
     const defaultPath = path.join(tempDir, 'control.json');
-    writeDescriptor(defaultPath);
-    vi.stubGlobal('fetch', vi.fn(async () => {
+    writeDescriptor(defaultPath, { pid: process.pid });
+
+    const fetchMock = vi.fn(async () => {
       const error = new TypeError('fetch failed');
       (error as NodeJS.ErrnoException).cause = { code: 'ECONNREFUSED' };
       throw error;
-    }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
     const caught = await requestDesktopControl('ccem.health').catch((error) => error);
     expect(caught).toBeInstanceOf(StaleDesktopControlDescriptorError);
     expect((caught as InstanceType<typeof StaleDesktopControlDescriptorError>).reason).toBe('endpoint-unreachable');
     expect((caught as InstanceType<typeof StaleDesktopControlDescriptorError>).cleanedUp).toBe(false);
     expect(fs.existsSync(defaultPath)).toBe(true);
+  });
+
+  it('aborts the request after the configured timeout and marks the descriptor stale', async () => {
+    writeDescriptor(process.env.CCEM_CONTROL_FILE!, { pid: process.pid });
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => {
+          const error = new Error('The operation was aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const caught = await requestDesktopControl(
+      'ccem.health',
+      undefined,
+      { fetchTimeoutMs: 20 },
+    ).catch((error) => error);
+    expect(caught).toBeInstanceOf(StaleDesktopControlDescriptorError);
+    expect((caught as InstanceType<typeof StaleDesktopControlDescriptorError>).reason).toBe('request-timeout');
+    expect((caught as Error).message).toContain('20ms');
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      signal: expect.any(AbortSignal),
+    });
+    expect(String((caught as Error).message)).not.toContain('secret');
   });
 
   it('keeps default descriptors when a live pid times out', async () => {
@@ -324,6 +353,7 @@ describe('desktop control client', () => {
     expect((caught as InstanceType<typeof StaleDesktopControlDescriptorError>).reason).toBe('request-timeout');
     expect((caught as InstanceType<typeof StaleDesktopControlDescriptorError>).cleanedUp).toBe(false);
     expect(String((caught as Error).message)).toContain('20ms');
+    expect(String((caught as Error).message)).not.toContain('secret');
     expect(fs.existsSync(defaultPath)).toBe(true);
   });
 

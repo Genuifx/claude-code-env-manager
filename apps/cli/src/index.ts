@@ -75,7 +75,13 @@ import {
   parseStringList,
   readCronTasks,
 } from './cron.js';
-import { parseLimitOption, parseSinceOption, printJson, requestDesktopControl } from './desktopControl.js';
+import {
+  parseLimitOption,
+  parseSinceOption,
+  printJson,
+  requestDesktopControl,
+  StaleDesktopControlDescriptorError,
+} from './desktopControl.js';
 
 const program = new Command();
 
@@ -1835,4 +1841,19 @@ program
     }
   });
 
-program.parse(process.argv);
+function handleCliError(error: unknown): void {
+  if (error instanceof StaleDesktopControlDescriptorError) {
+    console.error(chalk.red(error.message));
+    process.exit(1);
+  }
+
+  if (error instanceof Error) {
+    console.error(chalk.red(error.message));
+    process.exit(1);
+  }
+
+  console.error(chalk.red(String(error)));
+  process.exit(1);
+}
+
+await program.parseAsync(process.argv).catch(handleCliError);
