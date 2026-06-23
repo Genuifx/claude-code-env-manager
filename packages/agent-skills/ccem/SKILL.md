@@ -15,6 +15,27 @@ Start every desktop-control workflow by checking the live desktop bridge:
 ccem desktop health --json
 ```
 
+If `ccem desktop health` reports a stale descriptor (for example
+`StaleDesktopControlDescriptorError`, "process N is no longer running", or
+"endpoint refused the connection"), the CLI has already removed the stale
+default descriptor. Restart CCEM Desktop and rerun the command instead of
+poking at `~/.ccem/control.json` yourself.
+
+### Development builds and the control descriptor
+
+`pnpm tauri dev` (and other debug builds) does **not** publish the global
+`~/.ccem/control.json` descriptor by default, so `ccem desktop health` from
+another terminal will keep using the last release app's descriptor. Run the
+dev build with the opt-in flag when you need the CLI/skill to talk to it:
+
+```bash
+CCEM_DESKTOP_PUBLISH_CONTROL_DESCRIPTOR=1 pnpm tauri dev
+```
+
+Release builds always publish the descriptor. Do not edit or read
+`~/.ccem/control.json` directly — let the CLI wrapper negotiate the
+descriptor for you.
+
 If it is healthy, create sessions through the desktop CLI wrapper:
 
 ```bash
