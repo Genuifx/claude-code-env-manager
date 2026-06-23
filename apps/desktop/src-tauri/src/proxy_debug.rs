@@ -9,7 +9,6 @@ use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -26,6 +25,10 @@ const HEADER_READ_LIMIT: usize = 8 * 1024 * 1024;
 const BODY_READ_LIMIT: usize = 64 * 1024 * 1024;
 const LIST_LIMIT_MAX: usize = 200;
 const LOG_SAMPLE_LIMIT_BYTES: usize = 2 * 1024 * 1024;
+
+/// Maximum response body to buffer in memory for redaction before writing to disk.
+/// Bodies exceeding this are marked partial — excess bytes are not persisted.
+const RESPONSE_BUFFER_LIMIT: usize = 50 * 1024 * 1024;
 const SOCKET_IO_TIMEOUT: Duration = Duration::from_secs(30);
 const SOCKET_RETRY_SLEEP: Duration = Duration::from_millis(10);
 
@@ -267,11 +270,6 @@ struct LogSpoolState {
     response_bytes: AtomicU64,
 }
 
-#[derive(Default)]
-struct WriterOutcome {
-    error: Option<String>,
-}
-
 struct ForwardMeta {
     id: String,
     timestamp: i64,
@@ -285,7 +283,6 @@ struct ForwardMeta {
     response_headers: HashMap<String, String>,
     request_body_size: u64,
     request_body_file: Option<String>,
-    response_file_tmp: Option<PathBuf>,
     response_file_final: Option<PathBuf>,
     start: Instant,
     status: u16,
@@ -587,14 +584,17 @@ impl ProxyDebugManager {
 
         // Request body should stay complete for JSON-friendly debug rendering.
         // Response body can be much larger (especially SSE), keep a safety cap.
-        let request_body = read_body_preview(record.request_body_file.as_deref(), None)?;
-        let response_body = read_body_preview(record.response_body_file.as_deref(), Some(200_000))?;
+        let request_body = read_body_preview(record.request_body_file.as_deref(), None)?
+            .map(|raw| redact_body_text(&raw));
+        let response_body =
+            read_body_preview(record.response_body_file.as_deref(), Some(200_000))?
+                .map(|raw| redact_body_text(&raw));
         let reduced = recompute_reduced_detail(&record)?;
 
         Ok(ProxyTrafficDetail {
             item: record.to_item(),
-            request_headers: record.request_headers.clone(),
-            response_headers: record.response_headers.clone(),
+            request_headers: redact_headers(&record.request_headers),
+            response_headers: redact_headers(&record.response_headers),
             request_body,
             response_body,
             reduced,
@@ -719,13 +719,14 @@ impl ProxyDebugManager {
         let timestamp = now_ms();
         let request_id = generate_request_id();
 
-        let prompt_preview = extract_prompt_preview(&route.client, &req.body);
+        let redacted_body = redact_body_bytes(&req.body);
+        let prompt_preview = extract_prompt_preview(&route.client, &redacted_body);
 
         let mut request_body_file = None;
         if config.record_mode == RecordMode::Full {
             let relative = format!("bodies/{}-req.bin", request_id);
             let full = proxy_debug_dir().join(&relative);
-            if fs::write(&full, &req.body).is_ok() {
+            if fs::write(&full, &redacted_body).is_ok() {
                 apply_private_file_permissions(&full);
                 request_body_file = Some(relative);
             }
@@ -785,29 +786,18 @@ impl ProxyDebugManager {
             .map(|value| value.contains("text/event-stream"))
             .unwrap_or(false);
 
-        let (response_file_tmp, response_file_final, writer_tx, writer_handle, spool_state, sample) =
+        let (response_file_final, spool_state, sample) =
             if config.record_mode == RecordMode::Full {
-                let tmp_relative = format!("bodies/{}-res.tmp", request_id);
                 let final_relative = format!("bodies/{}-res.bin", request_id);
-                let tmp_path = proxy_debug_dir().join(&tmp_relative);
                 let final_path = proxy_debug_dir().join(&final_relative);
                 let spool_state = Arc::new(LogSpoolState::default());
-                let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(128);
-                let spool_state_writer = Arc::clone(&spool_state);
-                let writer_tmp_path = tmp_path.clone();
-                let writer_handle =
-                    thread::spawn(move || writer_loop(writer_tmp_path, rx, spool_state_writer));
-
                 (
-                    Some(tmp_path),
                     Some(final_path),
-                    Some(tx),
-                    Some(writer_handle),
                     Some(spool_state),
                     Some(Arc::new(Mutex::new(Vec::new()))),
                 )
             } else {
-                (None, None, None, None, None, None)
+                (None, None, None)
             };
 
         if let Err(err) = write_response_headers(
@@ -833,11 +823,10 @@ impl ProxyDebugManager {
             method: req.method,
             path: parsed.upstream_path,
             query: query.map(|q| q.to_string()),
-            request_headers: req.headers,
-            response_headers,
+            request_headers: redact_headers(&req.headers),
+            response_headers: redact_headers(&response_headers),
             request_body_size: req.body.len() as u64,
             request_body_file,
-            response_file_tmp,
             response_file_final,
             start,
             status: status_code,
@@ -848,8 +837,6 @@ impl ProxyDebugManager {
         self.forward_response_stream(
             &mut stream,
             &mut upstream_response,
-            writer_tx,
-            writer_handle,
             spool_state,
             sample,
             meta,
@@ -860,14 +847,13 @@ impl ProxyDebugManager {
         &self,
         stream: &mut TcpStream,
         upstream_response: &mut reqwest::blocking::Response,
-        writer_tx: Option<SyncSender<Vec<u8>>>,
-        writer_handle: Option<thread::JoinHandle<WriterOutcome>>,
         spool_state: Option<Arc<LogSpoolState>>,
         sample: Option<Arc<Mutex<Vec<u8>>>>,
         meta: ForwardMeta,
     ) {
-        let mut writer_tx = writer_tx;
-        let mut writer_error = None;
+        // Buffer the full response body in memory. No data touches disk until
+        // the complete body is redacted — there is no temp file to leak from.
+        let mut response_buffer: Vec<u8> = Vec::new();
         let mut response_incomplete = false;
         let mut client_cancelled = false;
         let mut upstream_error = false;
@@ -907,23 +893,21 @@ impl ProxyDebugManager {
                     .fetch_add(chunk.len() as u64, Ordering::Relaxed);
             }
 
-            if let Some(tx) = &writer_tx {
-                if let Some(spool_state) = &spool_state {
-                    match tx.try_send(chunk.to_vec()) {
-                        Ok(_) => {}
-                        Err(mpsc::TrySendError::Full(dropped_chunk)) => {
-                            spool_state.partial.store(true, Ordering::Relaxed);
-                            spool_state
-                                .dropped_bytes
-                                .fetch_add(dropped_chunk.len() as u64, Ordering::Relaxed);
-                        }
-                        Err(mpsc::TrySendError::Disconnected(dropped_chunk)) => {
-                            spool_state.dropped.store(true, Ordering::Relaxed);
-                            spool_state
-                                .dropped_bytes
-                                .fetch_add(dropped_chunk.len() as u64, Ordering::Relaxed);
-                        }
+            if let Some(spool_state) = &spool_state {
+                // Accumulate response body in memory for post-stream redaction.
+                // No data touches disk until the complete body is redacted.
+                if response_buffer.len() + chunk.len() <= RESPONSE_BUFFER_LIMIT {
+                    response_buffer.extend_from_slice(chunk);
+                } else {
+                    let remaining = RESPONSE_BUFFER_LIMIT.saturating_sub(response_buffer.len());
+                    if remaining > 0 {
+                        response_buffer.extend_from_slice(&chunk[..remaining]);
                     }
+                    let dropped = chunk.len().saturating_sub(remaining);
+                    spool_state.partial.store(true, Ordering::Relaxed);
+                    spool_state
+                        .dropped_bytes
+                        .fetch_add(dropped as u64, Ordering::Relaxed);
                 }
             }
 
@@ -938,19 +922,10 @@ impl ProxyDebugManager {
         let _ = write_chunk_end(stream);
         let _ = stream.flush();
 
-        drop(writer_tx.take());
-
-        if let Some(handle) = writer_handle {
-            match handle.join() {
-                Ok(outcome) => writer_error = outcome.error,
-                Err(_) => writer_error = Some("writer thread panic".to_string()),
-            }
-        }
-
         let (log_dropped, log_partial, log_dropped_bytes, response_body_size) =
-            if let Some(spool_state) = spool_state {
+            if let Some(ref spool_state) = spool_state {
                 (
-                    spool_state.dropped.load(Ordering::Relaxed) || writer_error.is_some(),
+                    spool_state.dropped.load(Ordering::Relaxed),
                     spool_state.partial.load(Ordering::Relaxed),
                     spool_state.dropped_bytes.load(Ordering::Relaxed),
                     spool_state.response_bytes.load(Ordering::Relaxed),
@@ -974,23 +949,39 @@ impl ProxyDebugManager {
             None
         };
 
-        let response_file_relative = match (&meta.response_file_tmp, &meta.response_file_final) {
-            (Some(tmp), Some(final_path)) => {
-                if writer_error.is_none() && !response_incomplete {
-                    if fs::rename(tmp, final_path).is_ok() {
+        // Redact the complete response body and write once to the final file.
+        // No temp file with raw data ever exists on disk — the file is created
+        // atomically with already-redacted content.
+        //
+        // Skip writing when the buffer may be malformed (truncated JSON/SSE):
+        //   - response_incomplete: upstream error or client disconnect mid-stream
+        //   - log_partial: buffer exceeded RESPONSE_BUFFER_LIMIT and was truncated
+        // In these cases redact_body_bytes cannot reliably parse the body, so a
+        // partial secret like {"token":"sk-secret... could pass through unredacted.
+        // The metadata record (headers, status, timing, flags) is still preserved.
+        let body_unsafe = response_incomplete || log_partial;
+        let response_file_relative = if !body_unsafe {
+            if let Some(final_path) = &meta.response_file_final {
+                let redacted = redact_body_bytes(&response_buffer);
+                match fs::write(final_path, &redacted) {
+                    Ok(_) => {
                         apply_private_file_permissions(final_path);
                         final_path
                             .file_name()
                             .map(|name| format!("bodies/{}", name.to_string_lossy()))
-                    } else {
+                    }
+                    Err(_) => {
+                        if let Some(ref spool_state) = spool_state {
+                            spool_state.dropped.store(true, Ordering::Relaxed);
+                        }
                         None
                     }
-                } else {
-                    tmp.file_name()
-                        .map(|name| format!("bodies/{}", name.to_string_lossy()))
                 }
+            } else {
+                None
             }
-            _ => None,
+        } else {
+            None
         };
 
         let duration_ms = meta.start.elapsed().as_millis() as u64;
@@ -1064,47 +1055,6 @@ impl ProxyDebugManager {
         drop(metrics);
         self.emit_status();
     }
-}
-
-fn writer_loop(
-    path: PathBuf,
-    rx: Receiver<Vec<u8>>,
-    spool_state: Arc<LogSpoolState>,
-) -> WriterOutcome {
-    let mut file = match OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&path)
-    {
-        Ok(file) => file,
-        Err(err) => {
-            spool_state.dropped.store(true, Ordering::Relaxed);
-            return WriterOutcome {
-                error: Some(err.to_string()),
-            };
-        }
-    };
-
-    apply_private_file_permissions(&path);
-
-    while let Ok(chunk) = rx.recv() {
-        if let Err(err) = file.write_all(&chunk) {
-            spool_state.dropped.store(true, Ordering::Relaxed);
-            return WriterOutcome {
-                error: Some(err.to_string()),
-            };
-        }
-    }
-
-    if let Err(err) = file.flush() {
-        spool_state.dropped.store(true, Ordering::Relaxed);
-        return WriterOutcome {
-            error: Some(err.to_string()),
-        };
-    }
-
-    WriterOutcome::default()
 }
 
 fn write_response_headers(
@@ -1490,6 +1440,107 @@ fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
         );
     }
     output
+}
+
+const REDACTED_MARKER: &str = "[REDACTED]";
+const SENSITIVE_HEADER_NAMES: &[&str] = &[
+    "authorization",
+    "x-api-key",
+    "anthropic-api-key",
+    "anthropic-authorization",
+    "api-key",
+    "cookie",
+    "set-cookie",
+    "proxy-authorization",
+];
+
+const SENSITIVE_BODY_KEYS: &[&str] = &[
+    "api_key",
+    "apikey",
+    "token",
+    "authorization",
+    "key",
+    "api-key",
+    "secret",
+    "password",
+    "access_token",
+    "refresh_token",
+];
+
+fn redact_headers(headers: &HashMap<String, String>) -> HashMap<String, String> {
+    let mut out = HashMap::with_capacity(headers.len());
+    for (name, value) in headers {
+        if SENSITIVE_HEADER_NAMES
+            .iter()
+            .any(|sensitive| name.eq_ignore_ascii_case(sensitive))
+        {
+            out.insert(name.clone(), REDACTED_MARKER.to_string());
+        } else {
+            out.insert(name.clone(), value.clone());
+        }
+    }
+    out
+}
+
+fn redact_body_bytes(body: &[u8]) -> Vec<u8> {
+    // Try parse as complete JSON; if ok, walk and redact known sensitive keys.
+    let Ok(value) = serde_json::from_slice::<Value>(body) else {
+        // Not a single JSON document — check if it's an SSE stream
+        // (multiple `data: {json}` events separated by blank lines).
+        let text = String::from_utf8_lossy(body);
+        if text.contains("\ndata:") || text.starts_with("data:") {
+            return redact_sse_stream(&text).into_bytes();
+        }
+        return body.to_vec();
+    };
+    let redacted = redact_json_value(&value);
+    serde_json::to_vec(&redacted).unwrap_or_else(|_| body.to_vec())
+}
+
+/// Redact sensitive fields in each SSE event without breaking stream framing.
+fn redact_sse_stream(text: &str) -> String {
+    text.split("\n\n")
+        .map(|chunk| {
+            if let Some(json_str) = chunk.strip_prefix("data: ") {
+                let json_str = json_str.trim();
+                if let Ok(value) = serde_json::from_str::<Value>(json_str) {
+                    let redacted = redact_json_value(&value);
+                    let redacted_str = serde_json::to_string(&redacted).unwrap_or_else(|_| json_str.to_string());
+                    return format!("data: {}", redacted_str);
+                }
+            }
+            chunk.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn redact_body_text(body: &str) -> String {
+    let redacted_bytes = redact_body_bytes(body.as_bytes());
+    String::from_utf8(redacted_bytes).unwrap_or_else(|_| body.to_string())
+}
+
+fn redact_json_value(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut out = serde_json::Map::with_capacity(map.len());
+            for (key, val) in map {
+                if SENSITIVE_BODY_KEYS
+                    .iter()
+                    .any(|sensitive| key.eq_ignore_ascii_case(sensitive))
+                {
+                    out.insert(key.clone(), Value::String(REDACTED_MARKER.to_string()));
+                } else {
+                    out.insert(key.clone(), redact_json_value(val));
+                }
+            }
+            Value::Object(out)
+        }
+        Value::Array(items) => {
+            Value::Array(items.iter().map(redact_json_value).collect())
+        }
+        _ => value.clone(),
+    }
 }
 
 fn is_chunked_request(headers: &HashMap<String, String>) -> bool {
@@ -2104,8 +2155,10 @@ fn generate_request_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_sse_reduced, compose_upstream_url, parse_proxy_path, read_http_request,
-        recompute_reduced_detail, validate_upstream_url, ReducedStreamLog, TrafficRecord,
+        build_sse_reduced, compose_upstream_url, extract_prompt_preview, parse_proxy_path,
+        read_http_request, recompute_reduced_detail, redact_body_bytes, redact_body_text,
+        redact_headers, redact_json_value, validate_upstream_url, ReducedStreamLog, TrafficRecord,
+        REDACTED_MARKER,
     };
     use std::collections::{HashMap, VecDeque};
     use std::io::{self, ErrorKind, Read};
@@ -2334,5 +2387,223 @@ mod tests {
         let result = recompute_reduced_detail(&record).unwrap();
 
         assert_eq!(result.unwrap().final_text, reduced.final_text);
+    }
+
+    // --- Redaction tests ---
+
+    #[test]
+    fn redact_headers_masks_authorization() {
+        let mut input = HashMap::new();
+        input.insert("Authorization".to_string(), "Bearer sk-ant-123".to_string());
+        input.insert("content-type".to_string(), "application/json".to_string());
+
+        let out = redact_headers(&input);
+        assert_eq!(out.get("Authorization").unwrap(), REDACTED_MARKER);
+        assert_eq!(
+            out.get("content-type").unwrap(),
+            "application/json",
+            "non-sensitive header should be preserved"
+        );
+    }
+
+    #[test]
+    fn redact_headers_is_case_insensitive() {
+        let mut input = HashMap::new();
+        input.insert("AUTHORIZATION".to_string(), "Bearer abc".to_string());
+        input.insert("X-API-KEY".to_string(), "sk-test".to_string());
+        input.insert("x-api-key".to_string(), "sk-lower".to_string());
+        input.insert("Cookie".to_string(), "session=xyz".to_string());
+        input.insert("set-cookie".to_string(), "token=abc".to_string());
+
+        let out = redact_headers(&input);
+        assert_eq!(out.get("AUTHORIZATION").unwrap(), REDACTED_MARKER);
+        assert_eq!(out.get("X-API-KEY").unwrap(), REDACTED_MARKER);
+        assert_eq!(out.get("x-api-key").unwrap(), REDACTED_MARKER);
+        assert_eq!(out.get("Cookie").unwrap(), REDACTED_MARKER);
+        assert_eq!(out.get("set-cookie").unwrap(), REDACTED_MARKER);
+    }
+
+    #[test]
+    fn redact_headers_preserves_safe_headers() {
+        let mut input = HashMap::new();
+        input.insert("user-agent".to_string(), "ccem/1.0".to_string());
+        input.insert("accept".to_string(), "application/json".to_string());
+
+        let out = redact_headers(&input);
+        assert_eq!(out.get("user-agent").unwrap(), "ccem/1.0");
+        assert_eq!(out.get("accept").unwrap(), "application/json");
+    }
+
+    #[test]
+    fn redact_body_masks_api_key_fields() {
+        let body = r#"{"api_key":"sk-secret","model":"claude-3","input":"hello"}"#;
+        let redacted = redact_body_text(body);
+        let parsed: serde_json::Value = serde_json::from_str(&redacted).unwrap();
+        assert_eq!(parsed["api_key"], REDACTED_MARKER);
+        assert_eq!(parsed["model"], "claude-3");
+        assert_eq!(parsed["input"], "hello");
+    }
+
+    #[test]
+    fn redact_body_is_case_insensitive_for_keys() {
+        let body = r#"{"API_Key":"secret","Authorization":"Bearer xyz"}"#;
+        let redacted = redact_body_text(body);
+        let parsed: serde_json::Value = serde_json::from_str(&redacted).unwrap();
+        assert_eq!(parsed["API_Key"], REDACTED_MARKER);
+        assert_eq!(parsed["Authorization"], REDACTED_MARKER);
+    }
+
+    #[test]
+    fn redact_body_redacts_nested_keys() {
+        let body = r#"{"messages":[{"content":"hi"}],"metadata":{"token":"abc123"}}"#;
+        let redacted = redact_body_text(body);
+        let parsed: serde_json::Value = serde_json::from_str(&redacted).unwrap();
+        assert_eq!(parsed["metadata"]["token"], REDACTED_MARKER);
+        assert_eq!(parsed["messages"][0]["content"], "hi");
+    }
+
+    #[test]
+    fn redact_body_redacts_array_items() {
+        let body = r#"[{"key":"secret","label":"ok"},{"key":"another","label":"fine"}]"#;
+        let redacted = redact_body_text(body);
+        let parsed: serde_json::Value = serde_json::from_str(&redacted).unwrap();
+        assert_eq!(parsed[0]["key"], REDACTED_MARKER);
+        assert_eq!(parsed[1]["key"], REDACTED_MARKER);
+        assert_eq!(parsed[0]["label"], "ok");
+        assert_eq!(parsed[1]["label"], "fine");
+    }
+
+    #[test]
+    fn redact_body_handles_malformed_json_gracefully() {
+        let body = b"not valid json {{{";
+        let redacted = redact_body_bytes(body);
+        assert_eq!(
+            redacted,
+            body.to_vec(),
+            "malformed JSON should be returned as-is"
+        );
+    }
+
+    #[test]
+    fn redact_body_preserves_non_sensitive_json_intact() {
+        let body = r#"{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}"#;
+        let redacted = redact_body_text(body);
+        let parsed: serde_json::Value = serde_json::from_str(&redacted).unwrap();
+        assert_eq!(parsed["model"], "claude-3");
+        assert_eq!(parsed["messages"][0]["content"], "hello");
+    }
+
+    #[test]
+    fn redact_json_value_handles_primitives() {
+        assert_eq!(redact_json_value(&serde_json::json!(42)), serde_json::json!(42));
+        assert_eq!(
+            redact_json_value(&serde_json::json!("hello")),
+            serde_json::json!("hello")
+        );
+        assert_eq!(redact_json_value(&serde_json::json!(null)), serde_json::json!(null));
+    }
+
+    #[test]
+    fn redact_body_bytes_preserves_empty_input() {
+        let redacted = redact_body_bytes(b"");
+        assert!(redacted.is_empty());
+    }
+
+    #[test]
+    fn prompt_preview_from_redacted_body_excludes_sensitive_fields() {
+        // Request body has a sensitive api_key alongside the user prompt.
+        let raw = br#"{"api_key":"sk-secret123","messages":[{"role":"user","content":"hello"}]}"#;
+        let redacted = redact_body_bytes(raw);
+        let preview = extract_prompt_preview("claude", &redacted);
+        // Preview should contain the prompt text but NOT the secret.
+        assert!(preview.is_some());
+        let text = preview.unwrap();
+        assert!(text.contains("hello"));
+        assert!(!text.contains("sk-secret123"));
+    }
+
+    #[test]
+    fn redact_body_bytes_masks_response_shaped_json() {
+        // Response body may echo sensitive fields in nested structures.
+        let raw = br#"{"type":"message","metadata":{"api_key":"sk-resp-secret","authorization":"Bearer tok-xyz"}}"#;
+        let redacted = redact_body_bytes(raw);
+        let text = String::from_utf8(redacted).unwrap();
+        assert!(!text.contains("sk-resp-secret"));
+        assert!(!text.contains("tok-xyz"));
+        assert!(text.contains(REDACTED_MARKER));
+    }
+
+    #[test]
+    fn redact_body_bytes_masks_sse_stream_sensitive_fields() {
+        // SSE response chunks may contain sensitive fields per-event.
+        let raw = b"data: {\"type\":\"message\",\"api_key\":\"sk-leak\"}\n\ndata: {\"type\":\"content\",\"text\":\"ok\"}\n\n";
+        let redacted = redact_body_bytes(raw);
+        let text = String::from_utf8(redacted).unwrap();
+        assert!(!text.contains("sk-leak"));
+        assert!(text.contains(REDACTED_MARKER));
+        // Non-sensitive content is preserved.
+        assert!(text.contains("ok"));
+    }
+
+    #[test]
+    fn redact_body_bytes_masks_single_sse_chunk_with_api_key() {
+        // Simulates a single chunk read from upstream containing one SSE event
+        // with a sensitive field. The response body is accumulated in memory and
+        // redacted as a complete document after streaming.
+        let chunk = b"data: {\"type\":\"error\",\"error\":{\"api_key\":\"sk-chunk-leak\"}}\n\n";
+        let redacted = redact_body_bytes(chunk);
+        let text = String::from_utf8(redacted).unwrap();
+        assert!(!text.contains("sk-chunk-leak"));
+        assert!(text.contains(REDACTED_MARKER));
+    }
+
+    #[test]
+    fn redact_body_bytes_masks_non_sse_json_chunk_with_token() {
+        // Simulates a single JSON chunk (non-SSE error response) with a token.
+        let chunk = br#"{"error":{"message":"unauthorized","token":"tok-xyz-123"}}"#;
+        let redacted = redact_body_bytes(chunk);
+        let text = String::from_utf8(redacted).unwrap();
+        assert!(!text.contains("tok-xyz-123"));
+        assert!(text.contains(REDACTED_MARKER));
+    }
+
+    #[test]
+    fn redact_body_bytes_masks_assembled_buffer_crossing_chunk_boundaries() {
+        // Simulates the architectural guarantee: the response body is accumulated
+        // in memory across multiple reads, then redacted as a complete document.
+        // A sensitive field that would be split across chunk boundaries (and thus
+        // missed by per-chunk redaction) IS caught because the complete body is
+        // redacted as a unit.
+        let chunk_a = b"data: {\"type\":\"error\",\"error\":{\"api_k";
+        let chunk_b = b"ey\":\"sk-split-secret\"}}\n\n";
+        // Simulate accumulation: concatenate chunks before redacting.
+        let mut assembled = Vec::new();
+        assembled.extend_from_slice(chunk_a);
+        assembled.extend_from_slice(chunk_b);
+        let redacted = redact_body_bytes(&assembled);
+        let text = String::from_utf8(redacted).unwrap();
+        assert!(!text.contains("sk-split-secret"));
+        assert!(text.contains(REDACTED_MARKER));
+    }
+
+    #[test]
+    fn redact_body_bytes_returns_truncated_json_unchanged() {
+        // Root cause proof: when the response is incomplete (upstream error,
+        // client disconnect, or buffer truncation), the assembled buffer may be
+        // malformed JSON. redact_body_bytes cannot parse it, so the raw bytes —
+        // including any partial secret value — pass through unchanged.
+        //
+        // This is why forward_response_stream skips writing the response body
+        // file when response_incomplete || log_partial is true.
+        let truncated = br#"{"type":"error","error":{"token":"sk-trunc-secret","data":"som"#;
+        let redacted = redact_body_bytes(truncated);
+        // The truncated JSON is NOT parseable, so it comes back as-is.
+        assert_eq!(redacted, truncated.to_vec());
+        // The raw token value IS present in the output — proving the vulnerability.
+        let text = String::from_utf8(redacted).unwrap();
+        assert!(
+            text.contains("sk-trunc-secret"),
+            "truncated JSON should pass through unchanged — this proves why we skip writing"
+        );
     }
 }
