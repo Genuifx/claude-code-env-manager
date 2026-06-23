@@ -43,16 +43,62 @@ const loadJsonFile = (filePath) => {
   }
 };
 
-// AES-256-CBC 加密
-const encrypt = (text, secret) => {
-  const key = crypto.scryptSync(secret, 'ccem-salt', 32);
+// ============ 加密 ============
+// Envelope versioning:
+//   v1 (legacy): base64(iv(16) + AES-256-CBC ciphertext) — no integrity tag.
+//   v2 (current, default): AES-256-GCM with random 12-byte nonce.
+//     The JSON envelope {v:2,nonce,ciphertext,tag} is base64-encoded and
+//     stuffed into the existing `encrypted` field so the HTTP response shape
+//     ({ encrypted: string }) stays unchanged for middleware/proxies.
+//
+// Clients MUST prefer v2 and fail-closed on GCM tag mismatch (no silent
+// downgrade). v1 remains only as a fallback for older clients; a future
+// release will remove it once all clients are upgraded.
+
+const ENVELOPE_VERSION = 2;
+const ENCRYPTION_ALGORITHM_V2 = 'aes-256-gcm';
+const ENCRYPTION_ALGORITHM_V1 = 'aes-256-cbc';
+const GCM_NONCE_BYTES = 12;
+
+// Allow operators to force v1 output during a migration window.
+// Set CCEM_REMOTE_ENCRYPTION=v1 in the server environment to enable.
+const FORCE_LEGACY_ENCRYPTION = process.env.CCEM_REMOTE_ENCRYPTION === 'v1';
+
+const deriveKey = (secret) => crypto.scryptSync(secret, 'ccem-salt', 32);
+
+// v2: authenticated AES-256-GCM. Returns base64(JSON envelope).
+const encryptV2 = (text, secret) => {
+  const key = deriveKey(secret);
+  const nonce = crypto.randomBytes(GCM_NONCE_BYTES);
+  const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM_V2, key, nonce);
+  const ciphertext = Buffer.concat([
+    cipher.update(text, 'utf8'),
+    cipher.final(),
+  ]);
+  const tag = cipher.getAuthTag();
+  const envelope = {
+    v: ENVELOPE_VERSION,
+    nonce: nonce.toString('base64'),
+    ciphertext: ciphertext.toString('base64'),
+    tag: tag.toString('base64'),
+  };
+  return Buffer.from(JSON.stringify(envelope), 'utf8').toString('base64');
+};
+
+// v1 (legacy): AES-256-CBC, no authentication. Kept only for backward compat.
+const encryptV1 = (text, secret) => {
+  const key = deriveKey(secret);
   const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+  const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM_V1, key, iv);
   let encrypted = cipher.update(text, 'utf8', 'hex');
   encrypted += cipher.final('hex');
-  // 返回 base64(iv + ciphertext)
   const combined = Buffer.concat([iv, Buffer.from(encrypted, 'hex')]);
   return combined.toString('base64');
+};
+
+const encrypt = (text, secret) => {
+  if (FORCE_LEGACY_ENCRYPTION) return encryptV1(text, secret);
+  return encryptV2(text, secret);
 };
 
 // ============ 初始化 ============

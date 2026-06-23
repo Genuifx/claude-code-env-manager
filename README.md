@@ -237,12 +237,14 @@ ccem load https://your-server.com/api/env --key YOUR_KEY --secret YOUR_SECRET
 ccem load https://your-server.com/api/env?key=YOUR_KEY --secret YOUR_SECRET
 ```
 
-**Key vs Secret:** The **access key** (`--key`) authenticates your request against `keys.json` on the server. The **encryption secret** (`--secret`) decrypts the AES-256-CBC response payload. These are separate values — the key is configured in `keys.json`, the secret is auto-generated in `.secret` on the server.
+**Key vs Secret:** The **access key** (`--key`) authenticates your request against `keys.json` on the server. The **encryption secret** (`--secret`) decrypts the response payload. These are separate values — the key is configured in `keys.json`, the secret is auto-generated in `.secret` on the server.
+
+**Response encryption (v2, authenticated):** Since v2.28 the server encrypts responses with **AES-256-GCM** in an authenticated envelope (`{v:2,nonce,ciphertext,tag}`, base64-encoded inside the `encrypted` response field). The CLI verifies the GCM tag before accepting the payload — tampered ciphertext or tag fails closed and the command aborts. The legacy **AES-256-CBC** format (`base64(iv+ciphertext)`) is still accepted by the CLI as a fallback so older servers keep working during the migration window; it will be removed in a future major release. To force a server to emit v1 during the transition, start it with `CCEM_REMOTE_ENCRYPTION=v1`.
 
 <details>
 <summary><b>Server deployment</b></summary>
 
-Server code lives in `server/`. Configure `keys.json` (access keys) and `environments.json` (env vars), then run `node index.js`. Features AES-256-CBC encryption, rate limiting, and hot-reload. PM2 recommended for production.
+Server code lives in `server/`. Configure `keys.json` (access keys) and `environments.json` (env vars), then run `node index.js`. Features AES-256-GCM (v2) encryption with legacy AES-256-CBC fallback, rate limiting, and hot-reload. PM2 recommended for production.
 
 </details>
 
