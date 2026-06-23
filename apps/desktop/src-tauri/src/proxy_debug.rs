@@ -722,13 +722,13 @@ impl ProxyDebugManager {
         let timestamp = now_ms();
         let request_id = generate_request_id();
 
-        let prompt_preview = extract_prompt_preview(&route.client, &req.body);
+        let redacted_body = redact_body_bytes(&req.body);
+        let prompt_preview = extract_prompt_preview(&route.client, &redacted_body);
 
         let mut request_body_file = None;
         if config.record_mode == RecordMode::Full {
             let relative = format!("bodies/{}-req.bin", request_id);
             let full = proxy_debug_dir().join(&relative);
-            let redacted_body = redact_body_bytes(&req.body);
             if fs::write(&full, &redacted_body).is_ok() {
                 apply_private_file_permissions(&full);
                 request_body_file = Some(relative);
@@ -981,6 +981,12 @@ impl ProxyDebugManager {
         let response_file_relative = match (&meta.response_file_tmp, &meta.response_file_final) {
             (Some(tmp), Some(final_path)) => {
                 if writer_error.is_none() && !response_incomplete {
+                    // Redact the response body on disk before promoting temp → final,
+                    // so the persisted file never contains raw sensitive field values.
+                    if let Ok(raw) = fs::read(tmp) {
+                        let redacted = redact_body_bytes(&raw);
+                        let _ = fs::write(tmp, &redacted);
+                    }
                     if fs::rename(tmp, final_path).is_ok() {
                         apply_private_file_permissions(final_path);
                         final_path
@@ -1537,13 +1543,36 @@ fn redact_headers(headers: &HashMap<String, String>) -> HashMap<String, String> 
 }
 
 fn redact_body_bytes(body: &[u8]) -> Vec<u8> {
-    // Try parse as JSON; if ok, walk and redact known sensitive keys.
-    // Otherwise return original bytes (annotated is caller's responsibility).
+    // Try parse as complete JSON; if ok, walk and redact known sensitive keys.
     let Ok(value) = serde_json::from_slice::<Value>(body) else {
+        // Not a single JSON document — check if it's an SSE stream
+        // (multiple `data: {json}` events separated by blank lines).
+        let text = String::from_utf8_lossy(body);
+        if text.contains("\ndata:") || text.starts_with("data:") {
+            return redact_sse_stream(&text).into_bytes();
+        }
         return body.to_vec();
     };
     let redacted = redact_json_value(&value);
     serde_json::to_vec(&redacted).unwrap_or_else(|_| body.to_vec())
+}
+
+/// Redact sensitive fields in each SSE event without breaking stream framing.
+fn redact_sse_stream(text: &str) -> String {
+    text.split("\n\n")
+        .map(|chunk| {
+            if let Some(json_str) = chunk.strip_prefix("data: ") {
+                let json_str = json_str.trim();
+                if let Ok(value) = serde_json::from_str::<Value>(json_str) {
+                    let redacted = redact_json_value(&value);
+                    let redacted_str = serde_json::to_string(&redacted).unwrap_or_else(|_| json_str.to_string());
+                    return format!("data: {}", redacted_str);
+                }
+            }
+            chunk.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 fn redact_body_text(body: &str) -> String {
@@ -2186,9 +2215,10 @@ fn generate_request_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_sse_reduced, compose_upstream_url, parse_proxy_path, read_http_request,
-        recompute_reduced_detail, redact_body_bytes, redact_body_text, redact_headers,
-        redact_json_value, validate_upstream_url, ReducedStreamLog, TrafficRecord, REDACTED_MARKER,
+        build_sse_reduced, compose_upstream_url, extract_prompt_preview, parse_proxy_path,
+        read_http_request, recompute_reduced_detail, redact_body_bytes, redact_body_text,
+        redact_headers, redact_json_value, validate_upstream_url, ReducedStreamLog, TrafficRecord,
+        REDACTED_MARKER,
     };
     use std::collections::{HashMap, VecDeque};
     use std::io::{self, ErrorKind, Read};
@@ -2537,5 +2567,41 @@ mod tests {
     fn redact_body_bytes_preserves_empty_input() {
         let redacted = redact_body_bytes(b"");
         assert!(redacted.is_empty());
+    }
+
+    #[test]
+    fn prompt_preview_from_redacted_body_excludes_sensitive_fields() {
+        // Request body has a sensitive api_key alongside the user prompt.
+        let raw = br#"{"api_key":"sk-secret123","messages":[{"role":"user","content":"hello"}]}"#;
+        let redacted = redact_body_bytes(raw);
+        let preview = extract_prompt_preview("claude", &redacted);
+        // Preview should contain the prompt text but NOT the secret.
+        assert!(preview.is_some());
+        let text = preview.unwrap();
+        assert!(text.contains("hello"));
+        assert!(!text.contains("sk-secret123"));
+    }
+
+    #[test]
+    fn redact_body_bytes_masks_response_shaped_json() {
+        // Response body may echo sensitive fields in nested structures.
+        let raw = br#"{"type":"message","metadata":{"api_key":"sk-resp-secret","authorization":"Bearer tok-xyz"}}"#;
+        let redacted = redact_body_bytes(raw);
+        let text = String::from_utf8(redacted).unwrap();
+        assert!(!text.contains("sk-resp-secret"));
+        assert!(!text.contains("tok-xyz"));
+        assert!(text.contains(REDACTED_MARKER));
+    }
+
+    #[test]
+    fn redact_body_bytes_masks_sse_stream_sensitive_fields() {
+        // SSE response chunks may contain sensitive fields per-event.
+        let raw = b"data: {\"type\":\"message\",\"api_key\":\"sk-leak\"}\n\ndata: {\"type\":\"content\",\"text\":\"ok\"}\n\n";
+        let redacted = redact_body_bytes(raw);
+        let text = String::from_utf8(redacted).unwrap();
+        assert!(!text.contains("sk-leak"));
+        assert!(text.contains(REDACTED_MARKER));
+        // Non-sensitive content is preserved.
+        assert!(text.contains("ok"));
     }
 }
