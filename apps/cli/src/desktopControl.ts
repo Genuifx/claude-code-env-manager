@@ -42,6 +42,7 @@ export interface StaleDesktopControlDescriptorDetails {
   descriptorPath: string;
   pid: number | null;
   cleanedUp: boolean;
+  timeoutMs?: number;
   cause?: unknown;
 }
 
@@ -67,10 +68,12 @@ export class StaleDesktopControlDescriptorError extends Error {
       ? `${subject} is no longer running`
       : details.reason === 'endpoint-unreachable'
         ? 'the control endpoint refused the connection'
-        : `the control request timed out after ${DEFAULT_REQUEST_TIMEOUT_MS}ms`;
+        : `the control request timed out after ${details.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS}ms`;
     const remedy = details.cleanedUp
       ? 'The stale descriptor was removed automatically; start CCEM Desktop and rerun the command.'
-      : 'Restart CCEM Desktop to refresh the descriptor, or remove the stale file manually if it is no longer managed.';
+      : details.pid !== null
+        ? 'Restart CCEM Desktop so it republishes a fresh control endpoint.'
+        : 'Restart CCEM Desktop to refresh the descriptor, or remove the stale file manually if it is no longer managed.';
     super(
       `CCEM Desktop control descriptor at ${details.descriptorPath} is stale: ${symptom}. ${remedy}`,
     );
@@ -203,24 +206,23 @@ export async function requestDesktopControl<T = unknown>(
     clearTimeout(timeoutHandle);
 
     if (controller.signal.aborted) {
-      const cleanedUp = safeRemoveStaleDescriptor(descriptorPath);
       throw new StaleDesktopControlDescriptorError({
         reason: 'request-timeout',
         descriptorPath,
         pid,
-        cleanedUp,
+        cleanedUp: false,
+        timeoutMs: fetchTimeoutMs,
         cause: error,
       });
     }
 
     const code = readErrnoCode(error);
     if (code && ENDPOINT_UNREACHABLE_CODES.has(code)) {
-      const cleanedUp = safeRemoveStaleDescriptor(descriptorPath);
       throw new StaleDesktopControlDescriptorError({
         reason: 'endpoint-unreachable',
         descriptorPath,
         pid,
-        cleanedUp,
+        cleanedUp: false,
         cause: error,
       });
     }
