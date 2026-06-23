@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -25,7 +25,7 @@ const BODY_READ_LIMIT: usize = 4 * 1024 * 1024;
 const SOCKET_IO_TIMEOUT: Duration = Duration::from_secs(10);
 const SOCKET_RETRY_SLEEP: Duration = Duration::from_millis(10);
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalControlDescriptor {
     pub endpoint: String,
@@ -39,6 +39,13 @@ struct ExternalControlRuntime {
     port: u16,
     shutdown_flag: Arc<AtomicBool>,
     join_handle: Option<thread::JoinHandle<()>>,
+    published_descriptor: Option<PublishedControlDescriptor>,
+}
+
+#[derive(Debug)]
+struct PublishedControlDescriptor {
+    path: PathBuf,
+    descriptor: ExternalControlDescriptor,
 }
 
 pub struct ExternalControlManager {
@@ -135,12 +142,22 @@ impl ExternalControlManager {
             .port();
 
         let endpoint = format!("http://127.0.0.1:{}/rpc", port);
-        write_descriptor(&ExternalControlDescriptor {
+        let descriptor = ExternalControlDescriptor {
             endpoint,
             token: self.token.clone(),
             pid: std::process::id(),
             created_at: now_rfc3339(),
-        })?;
+        };
+        let published_descriptor = if should_publish_control_descriptor() {
+            let path = control_descriptor_path();
+            write_descriptor_at(&path, &descriptor)?;
+            Some(PublishedControlDescriptor {
+                path,
+                descriptor: descriptor.clone(),
+            })
+        } else {
+            None
+        };
 
         let shutdown_flag = Arc::new(AtomicBool::new(false));
         let shutdown_for_thread = Arc::clone(&shutdown_flag);
@@ -170,6 +187,7 @@ impl ExternalControlManager {
             port,
             shutdown_flag,
             join_handle: Some(join_handle),
+            published_descriptor,
         });
 
         Ok(port)
@@ -177,13 +195,17 @@ impl ExternalControlManager {
 
     pub fn shutdown(&self) {
         let runtime = self.runtime.lock().unwrap().take();
+        let mut published_descriptor = None;
         if let Some(mut runtime) = runtime {
             runtime.shutdown_flag.store(true, Ordering::Relaxed);
             if let Some(handle) = runtime.join_handle.take() {
                 let _ = handle.join();
             }
+            published_descriptor = runtime.published_descriptor.take();
         }
-        let _ = fs::remove_file(control_descriptor_path());
+        if let Some(published) = published_descriptor {
+            remove_descriptor_if_owned(&published.path, &published.descriptor);
+        }
     }
 
     pub fn current_port(&self) -> Option<u16> {
@@ -848,8 +870,31 @@ fn control_descriptor_path() -> PathBuf {
     config::get_ccem_dir().join("control.json")
 }
 
-fn write_descriptor(descriptor: &ExternalControlDescriptor) -> Result<(), String> {
-    let path = control_descriptor_path();
+fn should_publish_control_descriptor() -> bool {
+    let override_value = std::env::var("CCEM_DESKTOP_PUBLISH_CONTROL_DESCRIPTOR").ok();
+    should_publish_control_descriptor_for_env(cfg!(debug_assertions), override_value.as_deref())
+}
+
+// Debug builds include `pnpm tauri dev`; keep them from overwriting the release
+// app's global discovery descriptor unless a developer opts in explicitly.
+fn should_publish_control_descriptor_for_env(
+    debug_assertions: bool,
+    override_value: Option<&str>,
+) -> bool {
+    if !debug_assertions {
+        return true;
+    }
+    override_value
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn write_descriptor_at(path: &Path, descriptor: &ExternalControlDescriptor) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|error| format!("Failed to create CCEM config directory: {}", error))?;
@@ -860,12 +905,12 @@ fn write_descriptor(descriptor: &ExternalControlDescriptor) -> Result<(), String
     write_private_file(&temp_path, &content)?;
     fs::rename(&temp_path, &path)
         .map_err(|error| format!("Failed to publish control descriptor: {}", error))?;
-    apply_private_file_permissions(&path);
+    apply_private_file_permissions(path);
     Ok(())
 }
 
 #[cfg(unix)]
-fn write_private_file(path: &PathBuf, content: &[u8]) -> Result<(), String> {
+fn write_private_file(path: &Path, content: &[u8]) -> Result<(), String> {
     use std::os::unix::fs::OpenOptionsExt;
     let mut file = OpenOptions::new()
         .create(true)
@@ -879,13 +924,13 @@ fn write_private_file(path: &PathBuf, content: &[u8]) -> Result<(), String> {
 }
 
 #[cfg(not(unix))]
-fn write_private_file(path: &PathBuf, content: &[u8]) -> Result<(), String> {
+fn write_private_file(path: &Path, content: &[u8]) -> Result<(), String> {
     fs::write(path, content)
         .map_err(|error| format!("Failed to write control descriptor: {}", error))
 }
 
 #[cfg(unix)]
-fn apply_private_file_permissions(path: &PathBuf) {
+fn apply_private_file_permissions(path: &Path) {
     use std::os::unix::fs::PermissionsExt;
     if let Ok(metadata) = fs::metadata(path) {
         let mut permissions = metadata.permissions();
@@ -895,7 +940,28 @@ fn apply_private_file_permissions(path: &PathBuf) {
 }
 
 #[cfg(not(unix))]
-fn apply_private_file_permissions(_path: &PathBuf) {}
+fn apply_private_file_permissions(_path: &Path) {}
+
+fn remove_descriptor_if_owned(path: &Path, expected: &ExternalControlDescriptor) {
+    let Ok(content) = fs::read_to_string(path) else {
+        return;
+    };
+    let Ok(current) = serde_json::from_str::<ExternalControlDescriptor>(&content) else {
+        return;
+    };
+    if descriptor_owned_by_runtime(&current, expected) {
+        let _ = fs::remove_file(path);
+    }
+}
+
+fn descriptor_owned_by_runtime(
+    current: &ExternalControlDescriptor,
+    expected: &ExternalControlDescriptor,
+) -> bool {
+    current.endpoint == expected.endpoint
+        && current.pid == expected.pid
+        && current.token == expected.token
+}
 
 fn generate_token() -> String {
     rand::thread_rng()
@@ -1208,5 +1274,100 @@ mod tests {
         // None and empty string both fall back to default.
         assert!(resolve_working_dir(None).is_ok());
         assert!(resolve_working_dir(Some("   ".to_string())).is_ok());
+    }
+
+    // --- Control descriptor publication ----------------------------------
+
+    fn test_descriptor(endpoint: &str, token: &str, pid: u32) -> ExternalControlDescriptor {
+        ExternalControlDescriptor {
+            endpoint: endpoint.to_string(),
+            token: token.to_string(),
+            pid,
+            created_at: "1234567890".to_string(),
+        }
+    }
+
+    fn temp_control_path(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        std::env::temp_dir().join(format!(
+            "ccem-external-control-{name}-{}-{unique}.json",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn debug_build_does_not_publish_descriptor_without_override() {
+        assert!(!should_publish_control_descriptor_for_env(true, None));
+        assert!(!should_publish_control_descriptor_for_env(true, Some("")));
+        assert!(!should_publish_control_descriptor_for_env(true, Some("0")));
+        assert!(!should_publish_control_descriptor_for_env(
+            true,
+            Some("false")
+        ));
+    }
+
+    #[test]
+    fn debug_build_allows_explicit_descriptor_publish_override() {
+        assert!(should_publish_control_descriptor_for_env(true, Some("1")));
+        assert!(should_publish_control_descriptor_for_env(
+            true,
+            Some("true")
+        ));
+        assert!(should_publish_control_descriptor_for_env(
+            true,
+            Some(" YES ")
+        ));
+        assert!(should_publish_control_descriptor_for_env(true, Some("on")));
+    }
+
+    #[test]
+    fn release_build_publishes_descriptor_by_default() {
+        assert!(should_publish_control_descriptor_for_env(false, None));
+        assert!(should_publish_control_descriptor_for_env(false, Some("0")));
+    }
+
+    #[test]
+    fn descriptor_ownership_requires_endpoint_pid_and_token() {
+        let expected = test_descriptor("http://127.0.0.1:1234/rpc", "token-a", 111);
+        assert!(descriptor_owned_by_runtime(&expected, &expected));
+        assert!(!descriptor_owned_by_runtime(
+            &test_descriptor("http://127.0.0.1:5678/rpc", "token-a", 111),
+            &expected
+        ));
+        assert!(!descriptor_owned_by_runtime(
+            &test_descriptor("http://127.0.0.1:1234/rpc", "token-b", 111),
+            &expected
+        ));
+        assert!(!descriptor_owned_by_runtime(
+            &test_descriptor("http://127.0.0.1:1234/rpc", "token-a", 222),
+            &expected
+        ));
+    }
+
+    #[test]
+    fn remove_descriptor_if_owned_deletes_matching_descriptor() {
+        let path = temp_control_path("owned");
+        let descriptor = test_descriptor("http://127.0.0.1:1234/rpc", "token-a", 111);
+        write_descriptor_at(&path, &descriptor).unwrap();
+
+        remove_descriptor_if_owned(&path, &descriptor);
+
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn remove_descriptor_if_owned_keeps_other_runtime_descriptor() {
+        let path = temp_control_path("other-runtime");
+        let expected = test_descriptor("http://127.0.0.1:1234/rpc", "token-a", 111);
+        let other_runtime = test_descriptor("http://127.0.0.1:5678/rpc", "token-b", 222);
+        write_descriptor_at(&path, &other_runtime).unwrap();
+
+        remove_descriptor_if_owned(&path, &expected);
+
+        assert!(path.exists());
+        let _ = fs::remove_file(path);
     }
 }

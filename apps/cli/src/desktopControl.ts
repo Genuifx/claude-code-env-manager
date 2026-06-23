@@ -20,12 +20,123 @@ export interface DesktopCreateSessionInput {
   open?: boolean;
 }
 
-const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
+export interface RequestDesktopControlOptions {
+  /** AbortSignal provided by the caller. */
+  signal?: AbortSignal;
+  /** Per-request timeout in milliseconds. Defaults to 5000ms. */
+  timeoutMs?: number;
+  /** Backward-compatible alias for timeoutMs. */
+  fetchTimeoutMs?: number;
+}
+
+export type DesktopControlRequestOptions = RequestDesktopControlOptions;
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 5_000;
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+const ENDPOINT_UNREACHABLE_CODES = new Set([
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ENOTCONN',
+  'EHOSTUNREACH',
+  'ECONNABORTED',
+]);
+
+type StaleDescriptorReason = 'dead-pid' | 'endpoint-unreachable' | 'request-timeout';
+
+export interface StaleDesktopControlDescriptorDetails {
+  reason: StaleDescriptorReason;
+  descriptorPath: string;
+  pid: number | null;
+  cleanedUp: boolean;
+  timeoutMs?: number;
+  cause?: unknown;
+}
+
+/**
+ * Raised when the desktop control descriptor points at a dead process or an
+ * unreachable endpoint. The message intentionally omits the bearer token and
+ * the descriptor body; only the descriptor path, pid, and a remediation hint
+ * are exposed.
+ */
+export class StaleDesktopControlDescriptorError extends Error {
+  override readonly name = 'StaleDesktopControlDescriptorError';
+  readonly reason: StaleDescriptorReason;
+  readonly descriptorPath: string;
+  readonly pid: number | null;
+  readonly cleanedUp: boolean;
+  readonly cause?: unknown;
+
+  constructor(details: StaleDesktopControlDescriptorDetails) {
+    const subject = details.pid !== null
+      ? `process ${details.pid}`
+      : 'the publishing process';
+    const symptom = details.reason === 'dead-pid'
+      ? `${subject} is no longer running`
+      : details.reason === 'endpoint-unreachable'
+        ? 'the control endpoint refused the connection'
+        : `the control request timed out after ${details.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS}ms`;
+    const remedy = details.cleanedUp
+      ? 'The stale descriptor was removed automatically; start CCEM Desktop and rerun the command.'
+      : details.pid !== null
+        ? 'Restart CCEM Desktop so it republishes a fresh control endpoint.'
+        : 'Restart CCEM Desktop to refresh the descriptor, or remove the stale file manually if it is no longer managed.';
+    super(
+      `CCEM Desktop control descriptor at ${details.descriptorPath} is stale: ${symptom}. ${remedy}`,
+    );
+    this.reason = details.reason;
+    this.descriptorPath = details.descriptorPath;
+    this.pid = details.pid;
+    this.cleanedUp = details.cleanedUp;
+    if (details.cause !== undefined) {
+      this.cause = details.cause;
+    }
+  }
+}
 
 export function getDesktopControlDescriptorPath(): string {
   return process.env.CCEM_CONTROL_FILE?.trim()
-    || path.join(getCcemConfigDir(), 'control.json');
+    || getDefaultControlDescriptorPath();
+}
+
+function getDefaultControlDescriptorPath(): string {
+  return path.join(getCcemConfigDir(), 'control.json');
+}
+
+/**
+ * Returns true when the descriptor path is the global default that CCEM Desktop
+ * owns. Only the default path is safe to auto-clean; paths overridden via
+ * `CCEM_CONTROL_FILE` are caller-managed and must not be touched.
+ */
+function isDefaultDescriptorPath(descriptorPath: string): boolean {
+  try {
+    return path.resolve(descriptorPath) === path.resolve(getDefaultControlDescriptorPath());
+  } catch {
+    return false;
+  }
+}
+
+function safeRemoveStaleDescriptor(descriptorPath: string): boolean {
+  if (!isDefaultDescriptorPath(descriptorPath)) {
+    return false;
+  }
+  try {
+    fs.rmSync(descriptorPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readErrnoCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const candidate = error as { code?: string; cause?: { code?: string } };
+  return candidate.code ?? candidate.cause?.code;
+}
+
+function readPid(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? value
+    : null;
 }
 
 /**
@@ -115,6 +226,15 @@ function redactEndpoint(endpoint: string): string {
   }
 }
 
+function isDescriptor(value: unknown): value is DesktopControlDescriptor {
+  return Boolean(
+    value
+    && typeof value === 'object'
+    && typeof (value as DesktopControlDescriptor).endpoint === 'string'
+    && typeof (value as DesktopControlDescriptor).token === 'string',
+  );
+}
+
 export function resolveDesktopControlDescriptor(
   descriptorPath = getDesktopControlDescriptorPath(),
 ): DesktopControlDescriptor {
@@ -132,34 +252,52 @@ export function resolveDesktopControlDescriptor(
   // Reject non-loopback endpoints before touching the network
   validateLoopbackEndpoint(endpoint);
 
-  // Verify desktop process is still alive (prevents stale descriptors)
-  const pid = typeof parsed.pid === 'number' ? parsed.pid : null;
+  // Verify desktop process is still alive (prevents stale descriptors).
+  const pid = readPid(parsed.pid);
   if (pid !== null && !isPidAlive(pid)) {
-    throw new Error(
-      `CCEM Desktop process (pid ${pid}) is not running. The control descriptor at ${descriptorPath} is stale. ` +
-      `Start CCEM Desktop again, or remove ${descriptorPath} if it was left behind.`,
-    );
+    const cleanedUp = safeRemoveStaleDescriptor(descriptorPath);
+    throw new StaleDesktopControlDescriptorError({
+      reason: 'dead-pid',
+      descriptorPath,
+      pid,
+      cleanedUp,
+    });
   }
 
   return { endpoint, token, pid };
 }
 
-export interface RequestDesktopControlOptions {
-  /** AbortSignal provided by the caller (takes precedence over timeoutMs). */
-  signal?: AbortSignal;
-  /** Per-request timeout in milliseconds. Defaults to 5000ms. */
-  timeoutMs?: number;
-}
-
 export async function requestDesktopControl<T = unknown>(
   method: string,
   params?: unknown,
-  descriptor = resolveDesktopControlDescriptor(),
-  options: RequestDesktopControlOptions = {},
+  descriptorOrOptions?: DesktopControlDescriptor | RequestDesktopControlOptions,
+  maybeOptions: RequestDesktopControlOptions = {},
 ): Promise<T> {
+  const descriptorPath = getDesktopControlDescriptorPath();
+  const hasInjectedDescriptor = isDescriptor(descriptorOrOptions);
+  const descriptor = hasInjectedDescriptor
+    ? descriptorOrOptions
+    : resolveDesktopControlDescriptor(descriptorPath);
+  const options = hasInjectedDescriptor
+    ? maybeOptions
+    : ((descriptorOrOptions as RequestDesktopControlOptions | undefined) ?? maybeOptions ?? {});
+  const timeoutMs = options.timeoutMs ?? options.fetchTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const pid = readPid(descriptor.pid);
+
+  validateLoopbackEndpoint(descriptor.endpoint);
+
+  if (pid !== null && !isPidAlive(pid)) {
+    const cleanedUp = hasInjectedDescriptor ? false : safeRemoveStaleDescriptor(descriptorPath);
+    throw new StaleDesktopControlDescriptorError({
+      reason: 'dead-pid',
+      descriptorPath,
+      pid,
+      cleanedUp,
+    });
+  }
+
   const id = `ccem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-  const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   // If the caller provided their own signal, propagate its abort.
@@ -192,14 +330,28 @@ export async function requestDesktopControl<T = unknown>(
     });
   } catch (error) {
     if (controller.signal.aborted) {
-      throw new Error(
-        `CCEM Desktop control request to '${method}' timed out after ${timeoutMs}ms. ` +
-        `Ensure CCEM Desktop is responsive at ${redactEndpoint(descriptor.endpoint)}.`,
-      );
+      throw new StaleDesktopControlDescriptorError({
+        reason: 'request-timeout',
+        descriptorPath,
+        pid,
+        cleanedUp: false,
+        timeoutMs,
+        cause: error,
+      });
     }
-    throw new Error(
-      `CCEM Desktop control request to '${method}' failed: ${(error as Error).message}`,
-    );
+
+    const code = readErrnoCode(error);
+    if (code && ENDPOINT_UNREACHABLE_CODES.has(code)) {
+      throw new StaleDesktopControlDescriptorError({
+        reason: 'endpoint-unreachable',
+        descriptorPath,
+        pid,
+        cleanedUp: false,
+        cause: error,
+      });
+    }
+
+    throw error;
   } finally {
     clearTimeout(timer);
     if (externalSignal) {

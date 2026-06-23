@@ -1,5 +1,17 @@
 # ccem
 
+## 2.30.0
+
+### Minor Changes
+
+- External control hardening, authenticated remote envelope, and proxy debug redaction.
+
+  - **external-control**: validate cwd and permission_mode schema; harden CLI/HTTP boundaries; document dev-build descriptor opt-in (`CCEM_DESKTOP_PUBLISH_CONTROL_DESCRIPTOR=1`)
+  - **remote**: add authenticated v2 encryption envelope; fail closed on malformed v2 envelope
+  - **proxy-debug**: redact sensitive data at all egress points (response body spool, prompt preview, truncated/incomplete responses, error temp files)
+  - **workspace**: confine review file opens to project dir; gate unix-only symlink tests for Windows CI
+  - **server**: remove tracked remote credentials
+
 ## 2.29.0
 
 ### Minor Changes
