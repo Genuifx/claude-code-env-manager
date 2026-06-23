@@ -9,7 +9,6 @@ use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -26,6 +25,10 @@ const HEADER_READ_LIMIT: usize = 8 * 1024 * 1024;
 const BODY_READ_LIMIT: usize = 64 * 1024 * 1024;
 const LIST_LIMIT_MAX: usize = 200;
 const LOG_SAMPLE_LIMIT_BYTES: usize = 2 * 1024 * 1024;
+
+/// Maximum response body to buffer in memory for redaction before writing to disk.
+/// Bodies exceeding this are marked partial — excess bytes are not persisted.
+const RESPONSE_BUFFER_LIMIT: usize = 50 * 1024 * 1024;
 const SOCKET_IO_TIMEOUT: Duration = Duration::from_secs(30);
 const SOCKET_RETRY_SLEEP: Duration = Duration::from_millis(10);
 
@@ -267,11 +270,6 @@ struct LogSpoolState {
     response_bytes: AtomicU64,
 }
 
-#[derive(Default)]
-struct WriterOutcome {
-    error: Option<String>,
-}
-
 struct ForwardMeta {
     id: String,
     timestamp: i64,
@@ -285,7 +283,6 @@ struct ForwardMeta {
     response_headers: HashMap<String, String>,
     request_body_size: u64,
     request_body_file: Option<String>,
-    response_file_tmp: Option<PathBuf>,
     response_file_final: Option<PathBuf>,
     start: Instant,
     status: u16,
@@ -789,29 +786,18 @@ impl ProxyDebugManager {
             .map(|value| value.contains("text/event-stream"))
             .unwrap_or(false);
 
-        let (response_file_tmp, response_file_final, writer_tx, writer_handle, spool_state, sample) =
+        let (response_file_final, spool_state, sample) =
             if config.record_mode == RecordMode::Full {
-                let tmp_relative = format!("bodies/{}-res.tmp", request_id);
                 let final_relative = format!("bodies/{}-res.bin", request_id);
-                let tmp_path = proxy_debug_dir().join(&tmp_relative);
                 let final_path = proxy_debug_dir().join(&final_relative);
                 let spool_state = Arc::new(LogSpoolState::default());
-                let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(128);
-                let spool_state_writer = Arc::clone(&spool_state);
-                let writer_tmp_path = tmp_path.clone();
-                let writer_handle =
-                    thread::spawn(move || writer_loop(writer_tmp_path, rx, spool_state_writer));
-
                 (
-                    Some(tmp_path),
                     Some(final_path),
-                    Some(tx),
-                    Some(writer_handle),
                     Some(spool_state),
                     Some(Arc::new(Mutex::new(Vec::new()))),
                 )
             } else {
-                (None, None, None, None, None, None)
+                (None, None, None)
             };
 
         if let Err(err) = write_response_headers(
@@ -841,7 +827,6 @@ impl ProxyDebugManager {
             response_headers: redact_headers(&response_headers),
             request_body_size: req.body.len() as u64,
             request_body_file,
-            response_file_tmp,
             response_file_final,
             start,
             status: status_code,
@@ -852,8 +837,6 @@ impl ProxyDebugManager {
         self.forward_response_stream(
             &mut stream,
             &mut upstream_response,
-            writer_tx,
-            writer_handle,
             spool_state,
             sample,
             meta,
@@ -864,14 +847,13 @@ impl ProxyDebugManager {
         &self,
         stream: &mut TcpStream,
         upstream_response: &mut reqwest::blocking::Response,
-        writer_tx: Option<SyncSender<Vec<u8>>>,
-        writer_handle: Option<thread::JoinHandle<WriterOutcome>>,
         spool_state: Option<Arc<LogSpoolState>>,
         sample: Option<Arc<Mutex<Vec<u8>>>>,
         meta: ForwardMeta,
     ) {
-        let mut writer_tx = writer_tx;
-        let mut writer_error = None;
+        // Buffer the full response body in memory. No data touches disk until
+        // the complete body is redacted — there is no temp file to leak from.
+        let mut response_buffer: Vec<u8> = Vec::new();
         let mut response_incomplete = false;
         let mut client_cancelled = false;
         let mut upstream_error = false;
@@ -911,27 +893,21 @@ impl ProxyDebugManager {
                     .fetch_add(chunk.len() as u64, Ordering::Relaxed);
             }
 
-            if let Some(tx) = &writer_tx {
-                if let Some(spool_state) = &spool_state {
-                    // Redact before sending to the writer thread so the temp file
-                    // never receives raw sensitive field values, even if the process
-                    // crashes mid-stream.
-                    let redacted_chunk = redact_body_bytes(chunk);
-                    match tx.try_send(redacted_chunk) {
-                        Ok(_) => {}
-                        Err(mpsc::TrySendError::Full(dropped_chunk)) => {
-                            spool_state.partial.store(true, Ordering::Relaxed);
-                            spool_state
-                                .dropped_bytes
-                                .fetch_add(dropped_chunk.len() as u64, Ordering::Relaxed);
-                        }
-                        Err(mpsc::TrySendError::Disconnected(dropped_chunk)) => {
-                            spool_state.dropped.store(true, Ordering::Relaxed);
-                            spool_state
-                                .dropped_bytes
-                                .fetch_add(dropped_chunk.len() as u64, Ordering::Relaxed);
-                        }
+            if let Some(spool_state) = &spool_state {
+                // Accumulate response body in memory for post-stream redaction.
+                // No data touches disk until the complete body is redacted.
+                if response_buffer.len() + chunk.len() <= RESPONSE_BUFFER_LIMIT {
+                    response_buffer.extend_from_slice(chunk);
+                } else {
+                    let remaining = RESPONSE_BUFFER_LIMIT.saturating_sub(response_buffer.len());
+                    if remaining > 0 {
+                        response_buffer.extend_from_slice(&chunk[..remaining]);
                     }
+                    let dropped = chunk.len().saturating_sub(remaining);
+                    spool_state.partial.store(true, Ordering::Relaxed);
+                    spool_state
+                        .dropped_bytes
+                        .fetch_add(dropped as u64, Ordering::Relaxed);
                 }
             }
 
@@ -946,19 +922,10 @@ impl ProxyDebugManager {
         let _ = write_chunk_end(stream);
         let _ = stream.flush();
 
-        drop(writer_tx.take());
-
-        if let Some(handle) = writer_handle {
-            match handle.join() {
-                Ok(outcome) => writer_error = outcome.error,
-                Err(_) => writer_error = Some("writer thread panic".to_string()),
-            }
-        }
-
         let (log_dropped, log_partial, log_dropped_bytes, response_body_size) =
-            if let Some(spool_state) = spool_state {
+            if let Some(ref spool_state) = spool_state {
                 (
-                    spool_state.dropped.load(Ordering::Relaxed) || writer_error.is_some(),
+                    spool_state.dropped.load(Ordering::Relaxed),
                     spool_state.partial.load(Ordering::Relaxed),
                     spool_state.dropped_bytes.load(Ordering::Relaxed),
                     spool_state.response_bytes.load(Ordering::Relaxed),
@@ -982,31 +949,27 @@ impl ProxyDebugManager {
             None
         };
 
-        let response_file_relative = match (&meta.response_file_tmp, &meta.response_file_final) {
-            (Some(tmp), Some(final_path)) => {
-                // Defense-in-depth: chunks are already redacted before sending to
-                // the writer thread. This full-file pass catches anything per-chunk
-                // redaction missed (e.g. a complete JSON response assembled from
-                // multiple chunks that individually failed to parse).
-                if let Ok(raw) = fs::read(tmp) {
-                    let redacted = redact_body_bytes(&raw);
-                    let _ = fs::write(tmp, &redacted);
-                }
-                if writer_error.is_none() && !response_incomplete {
-                    if fs::rename(tmp, final_path).is_ok() {
-                        apply_private_file_permissions(final_path);
-                        final_path
-                            .file_name()
-                            .map(|name| format!("bodies/{}", name.to_string_lossy()))
-                    } else {
-                        None
-                    }
-                } else {
-                    tmp.file_name()
+        // Redact the complete response body and write once to the final file.
+        // No temp file with raw data ever exists on disk — the file is created
+        // atomically with already-redacted content.
+        let response_file_relative = if let Some(final_path) = &meta.response_file_final {
+            let redacted = redact_body_bytes(&response_buffer);
+            match fs::write(final_path, &redacted) {
+                Ok(_) => {
+                    apply_private_file_permissions(final_path);
+                    final_path
+                        .file_name()
                         .map(|name| format!("bodies/{}", name.to_string_lossy()))
                 }
+                Err(_) => {
+                    if let Some(ref spool_state) = spool_state {
+                        spool_state.dropped.store(true, Ordering::Relaxed);
+                    }
+                    None
+                }
             }
-            _ => None,
+        } else {
+            None
         };
 
         let duration_ms = meta.start.elapsed().as_millis() as u64;
@@ -1080,47 +1043,6 @@ impl ProxyDebugManager {
         drop(metrics);
         self.emit_status();
     }
-}
-
-fn writer_loop(
-    path: PathBuf,
-    rx: Receiver<Vec<u8>>,
-    spool_state: Arc<LogSpoolState>,
-) -> WriterOutcome {
-    let mut file = match OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&path)
-    {
-        Ok(file) => file,
-        Err(err) => {
-            spool_state.dropped.store(true, Ordering::Relaxed);
-            return WriterOutcome {
-                error: Some(err.to_string()),
-            };
-        }
-    };
-
-    apply_private_file_permissions(&path);
-
-    while let Ok(chunk) = rx.recv() {
-        if let Err(err) = file.write_all(&chunk) {
-            spool_state.dropped.store(true, Ordering::Relaxed);
-            return WriterOutcome {
-                error: Some(err.to_string()),
-            };
-        }
-    }
-
-    if let Err(err) = file.flush() {
-        spool_state.dropped.store(true, Ordering::Relaxed);
-        return WriterOutcome {
-            error: Some(err.to_string()),
-        };
-    }
-
-    WriterOutcome::default()
 }
 
 fn write_response_headers(
@@ -2614,8 +2536,8 @@ mod tests {
     #[test]
     fn redact_body_bytes_masks_single_sse_chunk_with_api_key() {
         // Simulates a single chunk read from upstream containing one SSE event
-        // with a sensitive field. This verifies the per-chunk redaction that
-        // runs before tx.try_send in forward_response_stream.
+        // with a sensitive field. The response body is accumulated in memory and
+        // redacted as a complete document after streaming.
         let chunk = b"data: {\"type\":\"error\",\"error\":{\"api_key\":\"sk-chunk-leak\"}}\n\n";
         let redacted = redact_body_bytes(chunk);
         let text = String::from_utf8(redacted).unwrap();
@@ -2630,6 +2552,25 @@ mod tests {
         let redacted = redact_body_bytes(chunk);
         let text = String::from_utf8(redacted).unwrap();
         assert!(!text.contains("tok-xyz-123"));
+        assert!(text.contains(REDACTED_MARKER));
+    }
+
+    #[test]
+    fn redact_body_bytes_masks_assembled_buffer_crossing_chunk_boundaries() {
+        // Simulates the architectural guarantee: the response body is accumulated
+        // in memory across multiple reads, then redacted as a complete document.
+        // A sensitive field that would be split across chunk boundaries (and thus
+        // missed by per-chunk redaction) IS caught because the complete body is
+        // redacted as a unit.
+        let chunk_a = b"data: {\"type\":\"error\",\"error\":{\"api_k";
+        let chunk_b = b"ey\":\"sk-split-secret\"}}\n\n";
+        // Simulate accumulation: concatenate chunks before redacting.
+        let mut assembled = Vec::new();
+        assembled.extend_from_slice(chunk_a);
+        assembled.extend_from_slice(chunk_b);
+        let redacted = redact_body_bytes(&assembled);
+        let text = String::from_utf8(redacted).unwrap();
+        assert!(!text.contains("sk-split-secret"));
         assert!(text.contains(REDACTED_MARKER));
     }
 }
