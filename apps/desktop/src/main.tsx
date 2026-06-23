@@ -4,9 +4,11 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import App from './App';
 import { PetOverlay } from './pages/PetOverlay';
 import { initPerformanceMode } from './lib/performance';
+import { initPerfLog } from './lib/perf-log';
 import './index.css';
 
 initPerformanceMode();
+initPerfLog();
 
 function resolveRoot() {
   try {

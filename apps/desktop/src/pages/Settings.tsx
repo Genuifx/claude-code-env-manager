@@ -13,6 +13,13 @@ import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { setPerformancePreference as applyPerformancePreference, type PerformancePreference } from '@/lib/performance';
 import { scheduleAfterFirstPaint } from '@/lib/idle';
 import { useAppUpdate } from '@/components/app-update/appUpdateContext';
+import {
+  exportDoctorReportAsJson,
+  getPerfSummary,
+  clearPerfLog,
+  recordPerfMark,
+  type PerfSummary,
+} from '@/lib/perf-log';
 import { shallow } from 'zustand/shallow';
 import type { CcemAgentSkillStatus, PlatformCapabilities } from '@/lib/tauri-ipc';
 
@@ -918,6 +925,8 @@ export function Settings() {
         </p>
       )}
       <div className="border-t border-border-subtle" />
+      <DiagnosticsPanel active={activeSection === 'about'} />
+      <div className="border-t border-border-subtle" />
       <div className="flex flex-wrap gap-2">
         <Button
           variant="outline"
@@ -1058,6 +1067,135 @@ function AgentSkillStatusBadge({ state }: { state: 'loading' | 'current' | 'upda
       <XCircle className="w-3.5 h-3.5" />
       {t('settings.agentSkillMissing')}
     </span>
+  );
+}
+
+function DiagnosticsPanel({ active }: { active: boolean }) {
+  const { t } = useLocale();
+  const [summary, setSummary] = useState<PerfSummary>(() => getPerfSummary());
+  const [isExporting, setIsExporting] = useState(false);
+
+  // Auto-refresh while the About section is visible so the user can see
+  // events accumulate without manually clicking Refresh.
+  useEffect(() => {
+    if (!active) return;
+    setSummary(getPerfSummary());
+    const id = window.setInterval(() => {
+      setSummary(getPerfSummary());
+    }, 3000);
+    return () => {
+      window.clearInterval(id);
+    };
+  }, [active]);
+
+  const handleExport = async () => {
+    setIsExporting(true);
+    recordPerfMark('doctor:export-start');
+
+    try {
+      let backendReport: unknown;
+      let backendError: string | undefined;
+
+      try {
+        backendReport = await invoke<unknown>('collect_doctor_report');
+      } catch (error) {
+        backendError = String(error);
+      }
+
+      const json = exportDoctorReportAsJson({
+        backend: backendReport,
+        backendError,
+      });
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const saved = await invoke<boolean>('save_file_dialog', {
+        content: json,
+        defaultName: `ccem-doctor-${stamp}.json`,
+      });
+
+      if (saved) {
+        recordPerfMark('doctor:exported', backendError ? { backendError } : undefined);
+        toast.success(t('settings.diagnosticsExported'));
+      }
+    } catch (error) {
+      toast.error(t('settings.diagnosticsExportFailed').replace('{error}', String(error)));
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleClear = () => {
+    clearPerfLog();
+    setSummary(getPerfSummary());
+    toast.success(t('settings.diagnosticsCleared'));
+  };
+
+  const formatDuration = (value: number | undefined) => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+    return `${Math.round(value)}ms`;
+  };
+
+  const rows: { type: keyof PerfSummary; label: string }[] = [
+    { type: 'longtask', label: t('settings.diagnosticsLongtask') },
+    { type: 'ipc', label: t('settings.diagnosticsIpcSlow') },
+    { type: 'ipc-error', label: t('settings.diagnosticsIpcError') },
+    { type: 'frame-drop', label: t('settings.diagnosticsFrameDrop') },
+    { type: 'lcp', label: t('settings.diagnosticsLcp') },
+    { type: 'error', label: t('settings.diagnosticsError') },
+  ];
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <div className="text-sm font-medium text-foreground">
+          {t('settings.diagnosticsTitle')}
+        </div>
+        <p className="text-sm text-muted-foreground mt-0.5">
+          {t('settings.diagnosticsDesc')}
+        </p>
+      </div>
+      <div className="rounded-lg border border-border-subtle bg-muted/30 px-3 py-2 space-y-1.5">
+        {rows.map(({ type, label }) => {
+          const entry = summary[type];
+          const count = entry?.count ?? 0;
+          return (
+            <div
+              key={type}
+              className="flex items-center justify-between text-xs text-muted-foreground"
+            >
+              <span>{label}</span>
+              <span className="font-mono text-foreground tabular-nums">
+                {count}
+                {entry?.avgMs !== undefined && (
+                  <span className="text-muted-foreground ml-2">
+                    avg {formatDuration(entry.avgMs)} · max {formatDuration(entry.maxMs)}
+                  </span>
+                )}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="active:scale-[0.97] transition-transform"
+          disabled={isExporting}
+          onClick={handleExport}
+        >
+          <Download className="w-3.5 h-3.5 mr-1.5" />
+          {t('settings.diagnosticsExport')}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="active:scale-[0.97] transition-transform"
+          onClick={handleClear}
+        >
+          {t('settings.diagnosticsClear')}
+        </Button>
+      </div>
+    </div>
   );
 }
 

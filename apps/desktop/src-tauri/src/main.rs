@@ -11,6 +11,7 @@ mod companion;
 mod config;
 mod cron;
 mod crypto;
+mod doctor;
 mod event_bus;
 mod event_dispatcher;
 mod external_control;
@@ -4072,6 +4073,7 @@ fn main() {
             app_updates::check_app_update,
             app_updates::install_app_update,
             app_updates::restart_app,
+            doctor::collect_doctor_report,
             greet,
             get_system_username,
             get_environments,
