@@ -6,12 +6,12 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { getHistorySessionDisplay } from '@/components/history/historySession';
 import { useLocale } from '@/locales';
 import type { Environment } from '@/store';
@@ -446,7 +446,6 @@ export const ProjectTree = memo(function ProjectTree({
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [pinnedSessionKeys, setPinnedSessionKeys] = useState(readPinnedSessionKeys);
-  const [contextMenuKey, setContextMenuKey] = useState<string | null>(null);
 
   const processingKeysRef = useRef<Set<string>>(new Set());
   const [freshDotKeys, setFreshDotKeys] = useState<Set<string>>(new Set());
@@ -782,10 +781,6 @@ export const ProjectTree = memo(function ProjectTree({
           setEditingKey(key);
           setEditValue(getHistorySessionDisplay(session, ''));
         }}
-        onContextMenu={(event) => {
-          event.preventDefault();
-          setContextMenuKey(key);
-        }}
         onKeyDown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
@@ -886,32 +881,28 @@ export const ProjectTree = memo(function ProjectTree({
     );
 
     return (
-      <DropdownMenu
-        key={key}
-        open={contextMenuKey === key}
-        onOpenChange={(open) => setContextMenuKey(open ? key : null)}
-      >
-        <DropdownMenuTrigger asChild>{row}</DropdownMenuTrigger>
-        <DropdownMenuContent align="start" side="right" className="w-52">
-          <DropdownMenuItem
+      <ContextMenu key={key}>
+        <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+        <ContextMenuContent className="w-52">
+          <ContextMenuItem
             onClick={() => {
               void copyText(session.id);
             }}
           >
             <Copy className="mr-2 h-3.5 w-3.5" />
             {t('workspace.copySessionId')}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem
             onClick={() => {
               void copyText(sessionLink);
             }}
           >
             <Link className="mr-2 h-3.5 w-3.5" />
             {t('workspace.copySessionLink')}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
     );
   };
 
