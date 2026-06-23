@@ -980,13 +980,14 @@ impl ProxyDebugManager {
 
         let response_file_relative = match (&meta.response_file_tmp, &meta.response_file_final) {
             (Some(tmp), Some(final_path)) => {
+                // Redact the temp file on disk regardless of outcome — the persisted
+                // file must never contain raw sensitive field values, whether it ends
+                // up as the final response body or stays as a partial/error temp.
+                if let Ok(raw) = fs::read(tmp) {
+                    let redacted = redact_body_bytes(&raw);
+                    let _ = fs::write(tmp, &redacted);
+                }
                 if writer_error.is_none() && !response_incomplete {
-                    // Redact the response body on disk before promoting temp → final,
-                    // so the persisted file never contains raw sensitive field values.
-                    if let Ok(raw) = fs::read(tmp) {
-                        let redacted = redact_body_bytes(&raw);
-                        let _ = fs::write(tmp, &redacted);
-                    }
                     if fs::rename(tmp, final_path).is_ok() {
                         apply_private_file_permissions(final_path);
                         final_path
