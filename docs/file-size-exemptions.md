@@ -6,6 +6,7 @@ The file-size CI gate blocks new source files over 1000 lines unless they are do
 - `apps/desktop/src-tauri/src/analytics.rs`: Analytics aggregation and reporting logic has not been split yet.
 - `apps/desktop/src-tauri/src/config.rs`: Configuration migration, recovery, and runtime resolution still share one module.
 - `apps/desktop/src-tauri/src/cron.rs`: Cron scheduling and execution orchestration is still a large legacy module.
+- `apps/desktop/src-tauri/src/external_control.rs`: Desktop external-control server, descriptor publishing, security boundary checks, and unit coverage remain centralized during the control API hardening.
 - `apps/desktop/src-tauri/src/history.rs`: History parsing and projection code is still coupled in one file.
 - `apps/desktop/src-tauri/src/main.rs`: Tauri command wiring and app bootstrap remain centralized in the entrypoint.
 - `apps/desktop/src-tauri/src/native_runtime.rs`: Native SDK runtime lifecycle, event replay, and helper orchestration are still centralized.
@@ -26,6 +27,7 @@ The file-size CI gate blocks new source files over 1000 lines unless they are do
 - `apps/desktop/src/components/workspace/WorkspaceSessionComposer.tsx`: Workspace composer state, image attachment handling, and model/provider controls remain concentrated during the workspace redesign.
 - `apps/desktop/src/components/workspace/WorkspaceNativeSessionView.tsx`: Native workspace transcript, attention handling, and composer orchestration remain concentrated during the workspace redesign.
 - `apps/desktop/src/pages/CronTasks.tsx`: Cron task list, run timeline, and editor orchestration are still centralized during the scheduler surface redesign.
+- `apps/desktop/src/pages/Settings.tsx`: Desktop settings, agent skills, desktop control, and update controls remain centralized while those app surfaces are still being split.
 - `apps/desktop/src/pages/Workspace.tsx`: Workspace navigation, history, compose, and live-session coordination remain centralized during the workspace redesign.
 - `apps/desktop/src/hooks/useTauriCommands.ts`: Tauri IPC wrappers are still exposed from one large hook.
 - `apps/desktop/src/lib/tauri-ipc.ts`: Frontend IPC payload types are still centralized while native session events and workspace commands continue to evolve together.
