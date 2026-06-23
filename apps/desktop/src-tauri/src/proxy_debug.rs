@@ -913,7 +913,11 @@ impl ProxyDebugManager {
 
             if let Some(tx) = &writer_tx {
                 if let Some(spool_state) = &spool_state {
-                    match tx.try_send(chunk.to_vec()) {
+                    // Redact before sending to the writer thread so the temp file
+                    // never receives raw sensitive field values, even if the process
+                    // crashes mid-stream.
+                    let redacted_chunk = redact_body_bytes(chunk);
+                    match tx.try_send(redacted_chunk) {
                         Ok(_) => {}
                         Err(mpsc::TrySendError::Full(dropped_chunk)) => {
                             spool_state.partial.store(true, Ordering::Relaxed);
@@ -980,9 +984,10 @@ impl ProxyDebugManager {
 
         let response_file_relative = match (&meta.response_file_tmp, &meta.response_file_final) {
             (Some(tmp), Some(final_path)) => {
-                // Redact the temp file on disk regardless of outcome — the persisted
-                // file must never contain raw sensitive field values, whether it ends
-                // up as the final response body or stays as a partial/error temp.
+                // Defense-in-depth: chunks are already redacted before sending to
+                // the writer thread. This full-file pass catches anything per-chunk
+                // redaction missed (e.g. a complete JSON response assembled from
+                // multiple chunks that individually failed to parse).
                 if let Ok(raw) = fs::read(tmp) {
                     let redacted = redact_body_bytes(&raw);
                     let _ = fs::write(tmp, &redacted);
@@ -2604,5 +2609,27 @@ mod tests {
         assert!(text.contains(REDACTED_MARKER));
         // Non-sensitive content is preserved.
         assert!(text.contains("ok"));
+    }
+
+    #[test]
+    fn redact_body_bytes_masks_single_sse_chunk_with_api_key() {
+        // Simulates a single chunk read from upstream containing one SSE event
+        // with a sensitive field. This verifies the per-chunk redaction that
+        // runs before tx.try_send in forward_response_stream.
+        let chunk = b"data: {\"type\":\"error\",\"error\":{\"api_key\":\"sk-chunk-leak\"}}\n\n";
+        let redacted = redact_body_bytes(chunk);
+        let text = String::from_utf8(redacted).unwrap();
+        assert!(!text.contains("sk-chunk-leak"));
+        assert!(text.contains(REDACTED_MARKER));
+    }
+
+    #[test]
+    fn redact_body_bytes_masks_non_sse_json_chunk_with_token() {
+        // Simulates a single JSON chunk (non-SSE error response) with a token.
+        let chunk = br#"{"error":{"message":"unauthorized","token":"tok-xyz-123"}}"#;
+        let redacted = redact_body_bytes(chunk);
+        let text = String::from_utf8(redacted).unwrap();
+        assert!(!text.contains("tok-xyz-123"));
+        assert!(text.contains(REDACTED_MARKER));
     }
 }
