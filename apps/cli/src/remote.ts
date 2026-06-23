@@ -100,50 +100,45 @@ const decryptV1Legacy = (encryptedBase64: string, key: Buffer): string => {
  *
  * Detection is split into two phases so that v2 authentication errors can
  * never be swallowed by the legacy fallback:
- *   Phase 1 (inside try/catch): only JSON parsing + shape detection. Any
- *     failure here means "this is not a v2 envelope" and falls through to v1.
- *   Phase 2 (outside try/catch): we have committed to v2. GCM decryption runs
- *     unguarded; auth tag failure propagates as a hard error.
+ *   Phase 1 (inside try/catch): only JSON + base64 parsing. If this fails,
+ *     the payload is treated as legacy v1 raw bytes.
+ *   Phase 2 (outside try/catch): version/shape decisions. Any object with a
+ *     `v` field is validated fail-closed — no fallthrough to v1.
+ *   Phase 3 (outside try/catch): GCM decryption runs unguarded; auth tag
+ *     failure propagates as a hard error.
  */
-const decryptWithSecret = (encryptedBase64: string, secret: string): string => {
+export const decryptWithSecret = (encryptedBase64: string, secret: string): string => {
   const key = deriveRemoteKey(secret);
 
-  // Phase 1: detect envelope. Confined to JSON parsing — if anything throws
-  // here (base64 fail, JSON syntax error), the payload is treated as legacy
-  // v1 raw bytes, which is the expected shape for old servers.
-  let envelopeV2: RemoteEnvelopeV2 | null = null;
+  // Phase 1: try to parse as JSON. If base64 or JSON fails, this is legacy v1.
+  let parsedObj: unknown = null;
   try {
     const jsonStr = Buffer.from(encryptedBase64, 'base64').toString('utf8');
-    const parsed = JSON.parse(jsonStr);
-    if (isEnvelopeV2(parsed)) {
-      envelopeV2 = parsed;
-    } else if (
-      parsed &&
-      typeof parsed === 'object' &&
-      'v' in parsed &&
-      (parsed as { v: unknown }).v !== 2
-    ) {
-      // Looks envelope-shaped but declares a version we don't support.
-      // Fail closed rather than guessing it might be v1.
-      const declared = (parsed as { v: unknown }).v;
-      throw new Error(`Unsupported remote envelope version: ${declared}`);
+    parsedObj = JSON.parse(jsonStr);
+  } catch {
+    // Not valid JSON/base64 → treat as legacy v1 payload.
+  }
+
+  // Phase 2: version/shape decisions — all fail-closed, no v1 fallthrough.
+  let envelopeV2: RemoteEnvelopeV2 | null = null;
+  if (parsedObj !== null) {
+    if (isEnvelopeV2(parsedObj)) {
+      envelopeV2 = parsedObj;
+    } else if (parsedObj && typeof parsedObj === 'object' && 'v' in parsedObj) {
+      const version = (parsedObj as { v: unknown }).v;
+      if (version === 2) {
+        // v:2 declared but required fields missing → fail closed.
+        throw new Error(
+          'Malformed v2 envelope: missing required fields (nonce, ciphertext, tag)',
+        );
+      }
+      throw new Error(`Unsupported remote envelope version: ${version}`);
     }
-    // else: parsed JSON without a `v` field — almost certainly not an
-    // envelope; fall through to v1.
-  } catch (err) {
-    // Re-throw version-mismatch errors — we've committed to a shape.
-    if (
-      err instanceof Error &&
-      err.message.startsWith('Unsupported remote envelope version')
-    ) {
-      throw err;
-    }
-    // JSON/base64 failure → treat as legacy v1 payload.
-    envelopeV2 = null;
+    // else: parsed JSON without a `v` field — not an envelope; fall to v1.
   }
 
   if (envelopeV2) {
-    // Phase 2: committed to v2. Auth failure throws; no v1 retry.
+    // Phase 3: committed to v2. Auth failure throws; no v1 retry.
     return decryptV2Envelope(envelopeV2, key);
   }
 

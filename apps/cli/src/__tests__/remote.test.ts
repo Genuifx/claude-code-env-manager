@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import crypto from 'crypto';
 import { getCcemConfigDir } from '@ccem/core';
 import Conf from 'conf';
+import { decryptWithSecret as realDecryptWithSecret } from '../remote';
 
 // Test the decryption logic that remote.ts uses
 describe('remote', () => {
@@ -424,6 +425,71 @@ describe('remote', () => {
       // 验证配置路径包含预期的目录
       expect(testConfig.path).toContain('.ccem');
       expect(testConfig.path).toContain('config.json');
+    });
+  });
+
+  // -----------------------------------------------------------------
+  // Real implementation tests — import and exercise the actual
+  // decryptWithSecret from remote.ts. These catch regressions that
+  // the mirrored copies above cannot.
+  // -----------------------------------------------------------------
+  describe('real decryptWithSecret (from remote.ts)', () => {
+    const encryptV2 = (text: string, secret: string): string => {
+      const key = crypto.scryptSync(secret, 'ccem-salt', 32);
+      const nonce = crypto.randomBytes(12);
+      const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce);
+      const ciphertext = Buffer.concat([
+        cipher.update(text, 'utf8'),
+        cipher.final(),
+      ]);
+      const envelope = {
+        v: 2,
+        nonce: nonce.toString('base64'),
+        ciphertext: ciphertext.toString('base64'),
+        tag: cipher.getAuthTag().toString('base64'),
+      };
+      return Buffer.from(JSON.stringify(envelope), 'utf8').toString('base64');
+    };
+
+    it('decrypts a valid v2 envelope', () => {
+      const secret = 'real-impl-test-secret';
+      const payload = JSON.stringify({ environments: { test: { ANTHROPIC_API_KEY: 'k' } } });
+      const encrypted = encryptV2(payload, secret);
+      expect(realDecryptWithSecret(encrypted, secret)).toBe(payload);
+    });
+
+    it('throws on malformed v2 envelope (v:2 with missing fields)', () => {
+      const malformed = Buffer.from(
+        JSON.stringify({ v: 2, nonce: 'AAA' }),
+        'utf8',
+      ).toString('base64');
+      expect(() => realDecryptWithSecret(malformed, 'any-secret')).toThrow(
+        /Malformed v2 envelope/,
+      );
+    });
+
+    it('throws on unsupported envelope version', () => {
+      const future = Buffer.from(
+        JSON.stringify({ v: 99, nonce: 'A', ciphertext: 'A', tag: 'A' }),
+        'utf8',
+      ).toString('base64');
+      expect(() => realDecryptWithSecret(future, 'any-secret')).toThrow(
+        /Unsupported remote envelope version/,
+      );
+    });
+
+    it('throws on tampered v2 auth tag (fail closed)', () => {
+      const secret = 'tamper-test-secret';
+      const encrypted = encryptV2('{"test":true}', secret);
+      // Parse the envelope, corrupt the tag, re-serialize.
+      const json = Buffer.from(encrypted, 'base64').toString('utf8');
+      const envelope = JSON.parse(json);
+      const tamperedTag = envelope.tag === 'AAAA' ? 'BBBB' : 'AAAA';
+      const tampered = Buffer.from(
+        JSON.stringify({ ...envelope, tag: tamperedTag }),
+        'utf8',
+      ).toString('base64');
+      expect(() => realDecryptWithSecret(tampered, secret)).toThrow();
     });
   });
 });
