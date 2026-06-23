@@ -1,0 +1,10 @@
+{
+  "ccem_k1_REPLACE_WITH_RANDOM_ID": {
+    "environments": ["glm", "deepseek"],
+    "note": "Example entry — replace the key id with a random ccem_k1_ prefixed identifier and list environment names that match environments.json"
+  },
+  "ccem_k2_REPLACE_WITH_RANDOM_ID": {
+    "environments": ["kimi"],
+    "note": "Example entry — every top-level key id maps to a list of allowed environment names"
+  }
+}

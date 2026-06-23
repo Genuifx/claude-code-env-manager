@@ -170,7 +170,7 @@ const HOST = process.env.HOST || '127.0.0.1';
 app.listen(PORT, HOST, () => {
   console.log('================================');
   console.log(`Server started on ${HOST}:${PORT}`);
-  console.log(`Secret: ${SECRET}`);
-  console.log('(Save this for ccem load --secret)');
+  console.log(`Auth: configured (secret stored at ${SECRET_FILE})`);
+  console.log('To view the secret: cat server/.secret');
   console.log('================================');
 });

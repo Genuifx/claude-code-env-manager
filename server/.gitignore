@@ -1,3 +1,8 @@
 .secret
 node_modules/
 logs/
+
+# Remote credentials — never track real secrets.
+# Example files (*.example.json) are intentionally tracked.
+keys.json
+environments.json

@@ -1,0 +1,23 @@
+{
+  "glm": {
+    "ANTHROPIC_BASE_URL": "https://your-glm-endpoint.example.com/api",
+    "ANTHROPIC_AUTH_TOKEN": "sk-placeholder-do-not-use",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-4-opus-placeholder",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-4-sonnet-placeholder",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-4-haiku-placeholder"
+  },
+  "kimi": {
+    "ANTHROPIC_BASE_URL": "https://your-kimi-endpoint.example.com/api",
+    "ANTHROPIC_AUTH_TOKEN": "sk-placeholder-do-not-use",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "moonshot-opus-placeholder",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "moonshot-sonnet-placeholder",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "moonshot-haiku-placeholder"
+  },
+  "deepseek": {
+    "ANTHROPIC_BASE_URL": "https://your-deepseek-endpoint.example.com/api",
+    "ANTHROPIC_AUTH_TOKEN": "sk-placeholder-do-not-use",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-opus-placeholder",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-sonnet-placeholder",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-haiku-placeholder"
+  }
+}
