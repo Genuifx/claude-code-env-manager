@@ -1,5 +1,16 @@
 # ccem
 
+## 2.29.0
+
+### Minor Changes
+
+- Minor release with desktop diagnostics and performance improvements:
+
+  - feat(desktop): add perf log capture + export in Settings
+  - feat(desktop): add doctor diagnostics export
+  - fix(desktop): restore session row context menu behavior
+  - chore(desktop): address review (typo, refresh interval, fallback)
+
 ## 2.27.0
 
 ### Minor Changes
