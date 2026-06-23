@@ -952,21 +952,33 @@ impl ProxyDebugManager {
         // Redact the complete response body and write once to the final file.
         // No temp file with raw data ever exists on disk — the file is created
         // atomically with already-redacted content.
-        let response_file_relative = if let Some(final_path) = &meta.response_file_final {
-            let redacted = redact_body_bytes(&response_buffer);
-            match fs::write(final_path, &redacted) {
-                Ok(_) => {
-                    apply_private_file_permissions(final_path);
-                    final_path
-                        .file_name()
-                        .map(|name| format!("bodies/{}", name.to_string_lossy()))
-                }
-                Err(_) => {
-                    if let Some(ref spool_state) = spool_state {
-                        spool_state.dropped.store(true, Ordering::Relaxed);
+        //
+        // Skip writing when the buffer may be malformed (truncated JSON/SSE):
+        //   - response_incomplete: upstream error or client disconnect mid-stream
+        //   - log_partial: buffer exceeded RESPONSE_BUFFER_LIMIT and was truncated
+        // In these cases redact_body_bytes cannot reliably parse the body, so a
+        // partial secret like {"token":"sk-secret... could pass through unredacted.
+        // The metadata record (headers, status, timing, flags) is still preserved.
+        let body_unsafe = response_incomplete || log_partial;
+        let response_file_relative = if !body_unsafe {
+            if let Some(final_path) = &meta.response_file_final {
+                let redacted = redact_body_bytes(&response_buffer);
+                match fs::write(final_path, &redacted) {
+                    Ok(_) => {
+                        apply_private_file_permissions(final_path);
+                        final_path
+                            .file_name()
+                            .map(|name| format!("bodies/{}", name.to_string_lossy()))
                     }
-                    None
+                    Err(_) => {
+                        if let Some(ref spool_state) = spool_state {
+                            spool_state.dropped.store(true, Ordering::Relaxed);
+                        }
+                        None
+                    }
                 }
+            } else {
+                None
             }
         } else {
             None
@@ -2572,5 +2584,26 @@ mod tests {
         let text = String::from_utf8(redacted).unwrap();
         assert!(!text.contains("sk-split-secret"));
         assert!(text.contains(REDACTED_MARKER));
+    }
+
+    #[test]
+    fn redact_body_bytes_returns_truncated_json_unchanged() {
+        // Root cause proof: when the response is incomplete (upstream error,
+        // client disconnect, or buffer truncation), the assembled buffer may be
+        // malformed JSON. redact_body_bytes cannot parse it, so the raw bytes —
+        // including any partial secret value — pass through unchanged.
+        //
+        // This is why forward_response_stream skips writing the response body
+        // file when response_incomplete || log_partial is true.
+        let truncated = br#"{"type":"error","error":{"token":"sk-trunc-secret","data":"som"#;
+        let redacted = redact_body_bytes(truncated);
+        // The truncated JSON is NOT parseable, so it comes back as-is.
+        assert_eq!(redacted, truncated.to_vec());
+        // The raw token value IS present in the output — proving the vulnerability.
+        let text = String::from_utf8(redacted).unwrap();
+        assert!(
+            text.contains("sk-trunc-secret"),
+            "truncated JSON should pass through unchanged — this proves why we skip writing"
+        );
     }
 }
