@@ -15,7 +15,11 @@ import {
   SessionLauncherPopover,
 } from '@/components/sessions';
 import { resolveSessionCloseAction } from '@/components/sessions/sessionCloseActions';
-import { launchSingleSession } from '@/components/sessions/sessionLaunchAction';
+import {
+  formatSessionLaunchError,
+  isLaunchAlreadyInProgressError,
+  launchSingleSession,
+} from '@/components/sessions/sessionLaunchAction';
 import { useAppStore, type ArrangeLayout, type Session, type UnifiedSession } from '@/store';
 import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
@@ -462,6 +466,17 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
     launchedTimerRef.current = setTimeout(() => setLaunched(false), 1200);
   }, []);
 
+  const showLaunchError = useCallback((err: unknown) => {
+    if (isLaunchAlreadyInProgressError(err)) {
+      toast.error(t('sessions.launchAlreadyInProgress'));
+      return;
+    }
+
+    toast.error(
+      t('sessions.launchFailed').replace('{error}', formatSessionLaunchError(err))
+    );
+  }, [t]);
+
   // Browse directory and launch single session
   const handleBrowseAndLaunch = useCallback(async () => {
     if (isLaunching) return;
@@ -479,10 +494,11 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
       markLaunchSuccess();
     } catch (err) {
       console.error('Launch failed:', err);
+      showLaunchError(err);
     } finally {
       setIsLaunching(false);
     }
-  }, [isLaunching, openDirectoryPicker, onLaunch, onLaunchWithDir, markLaunchSuccess]);
+  }, [isLaunching, openDirectoryPicker, onLaunch, onLaunchWithDir, markLaunchSuccess, showLaunchError]);
 
   // Single launch with pending/success/failure state
   const handleLaunchClick = useCallback(async () => {
@@ -497,10 +513,11 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
       markLaunchSuccess();
     } catch (err) {
       console.error('Launch failed:', err);
+      showLaunchError(err);
     } finally {
       setIsLaunching(false);
     }
-  }, [isLaunching, selectedWorkingDir, onLaunch, onLaunchWithDir, markLaunchSuccess]);
+  }, [isLaunching, selectedWorkingDir, onLaunch, onLaunchWithDir, markLaunchSuccess, showLaunchError]);
 
   // Select directory for launch
   const handleSelectDirectory = useCallback(async () => {

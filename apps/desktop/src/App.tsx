@@ -19,6 +19,7 @@ import { EnvironmentsSkeleton } from '@/components/ui/skeleton-states';
 import { StartupSplash } from '@/components/layout/StartupSplash';
 import type { PetOpenSessionRequest } from '@/types/pet';
 import { AppUpdateProvider } from '@/components/app-update/AppUpdateProvider';
+import { runExclusiveLaunch } from '@/components/sessions/sessionLaunchAction';
 
 interface CcemControlRequest {
   kind?: string;
@@ -538,18 +539,11 @@ function App() {
   }, [activeTab, loadEnvironments, loadCurrentEnv, loadSessions, dialogOpen]);
 
   const runLaunchOnce = useCallback(async (key: string, launch: () => Promise<void>) => {
-    if (launchInFlightRef.current.has(key)) {
-      return;
-    }
-
-    launchInFlightRef.current.add(key);
     try {
-      await launch();
+      await runExclusiveLaunch(launchInFlightRef.current, key, launch);
     } catch (err) {
       console.error('Launch failed:', err);
       throw err;
-    } finally {
-      launchInFlightRef.current.delete(key);
     }
   }, []);
 

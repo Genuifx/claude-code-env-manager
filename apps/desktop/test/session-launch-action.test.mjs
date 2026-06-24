@@ -88,3 +88,48 @@ test('rejects when onLaunchWithDir rejects', async () => {
     { message: 'dir-boom' },
   );
 });
+
+test('rejects duplicate in-flight launch instead of reporting success', async () => {
+  const { runExclusiveLaunch } = await importSessionLaunchAction();
+  const inFlight = new Set();
+  let releaseFirstLaunch;
+
+  const firstLaunch = runExclusiveLaunch(inFlight, 'dir:claude:/tmp/project', async () => {
+    await new Promise((resolve) => {
+      releaseFirstLaunch = resolve;
+    });
+  });
+
+  await assert.rejects(
+    runExclusiveLaunch(inFlight, 'dir:claude:/tmp/project', async () => {
+      throw new Error('should not run duplicate launch');
+    }),
+    {
+      name: 'LaunchAlreadyInProgressError',
+      message: 'Session launch is already in progress for this target.',
+    },
+  );
+
+  releaseFirstLaunch();
+  await firstLaunch;
+});
+
+test('clears in-flight launch key after failure', async () => {
+  const { runExclusiveLaunch } = await importSessionLaunchAction();
+  const inFlight = new Set();
+  const calls = [];
+
+  await assert.rejects(
+    runExclusiveLaunch(inFlight, 'default:claude', async () => {
+      calls.push('failed');
+      throw new Error('launch failed');
+    }),
+    { message: 'launch failed' },
+  );
+
+  await runExclusiveLaunch(inFlight, 'default:claude', async () => {
+    calls.push('retried');
+  });
+
+  assert.deepEqual(calls, ['failed', 'retried']);
+});

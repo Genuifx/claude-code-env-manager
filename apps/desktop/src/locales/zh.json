@@ -371,6 +371,8 @@
     "selectDirs": "已选 ({count})",
     "launchCount": "启动 {count} 个会话",
     "launching": "正在启动...",
+    "launchFailed": "启动会话失败: {error}",
+    "launchAlreadyInProgress": "已有新会话正在启动，请稍等；如果长时间无响应，请重启 CCEM Desktop 后再试。",
     "multiLaunchSuccess": "成功启动 {count} 个会话并排列",
     "multiLaunchPartial": "成功启动 {success}/{total} 个会话",
     "noRecentProjects": "暂无最近项目",
