@@ -1,4 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { Mock } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -10,16 +12,24 @@ import {
   parseGitHubUrl,
   getSkillsDir,
   ensureSkillsDir,
+  downloadSkillWithGit,
+  installFromPluginMarketplace,
   listInstalledSkills,
   removeSkill,
 } from '../skills.js';
 
+vi.mock('node:child_process', () => ({
+  execFileSync: vi.fn(),
+}));
+
 describe('skills', () => {
   let tempDir: string;
+  const execFileSyncMock = execFileSync as unknown as Mock;
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccem-skills-test-'));
     vi.spyOn(process, 'cwd').mockReturnValue(tempDir);
+    execFileSyncMock.mockReset();
   });
 
   afterEach(() => {
@@ -131,6 +141,23 @@ describe('skills', () => {
       const result = parseGitHubUrl('https://github.com/owner/repo.git');
       expect(result?.repo).toBe('repo');
     });
+
+    it('should reject URLs that only contain github.com in an unsafe host or path', () => {
+      expect(parseGitHubUrl('https://evil.test/github.com/owner/repo')).toBeNull();
+      expect(parseGitHubUrl('https://github.com.evil.test/owner/repo')).toBeNull();
+    });
+
+    it('should reject shell metacharacters and whitespace in GitHub URL parts', () => {
+      expect(parseGitHubUrl('https://github.com/owner/repo;touch')).toBeNull();
+      expect(parseGitHubUrl('https://github.com/owner/repo/tree/main;rm/skills/foo')).toBeNull();
+      expect(parseGitHubUrl('owner/repo name')).toBeNull();
+    });
+
+    it('should reject unsafe repository paths', () => {
+      expect(parseGitHubUrl('https://github.com/owner/repo/tree/main/../secret')).toBeNull();
+      expect(parseGitHubUrl('https://github.com/owner/repo/tree/main//secret')).toBeNull();
+      expect(parseGitHubUrl('https://github.com/owner/repo/tree/main//')).toBeNull();
+    });
   });
 
   describe('getSkillsDir', () => {
@@ -214,6 +241,80 @@ describe('skills', () => {
       const result = removeSkill('test-skill');
       expect(result).toBe(true);
       expect(fs.existsSync(skillPath)).toBe(false);
+    });
+  });
+
+  describe('downloadSkillWithGit', () => {
+    it('should call git with argv arrays and safe branch/path values', () => {
+      const result = downloadSkillWithGit(
+        'owner',
+        'repo',
+        'feature/safe-branch',
+        'skills/test-skill',
+        'test-skill'
+      );
+
+      expect(result).toBe(false);
+      expect(execFileSyncMock).toHaveBeenCalledWith(
+        'git',
+        ['init'],
+        expect.objectContaining({ stdio: 'pipe' })
+      );
+      expect(execFileSyncMock).toHaveBeenCalledWith(
+        'git',
+        ['remote', 'add', 'origin', 'https://github.com/owner/repo.git'],
+        expect.objectContaining({ stdio: 'pipe' })
+      );
+      expect(execFileSyncMock).toHaveBeenCalledWith(
+        'git',
+        ['pull', '--depth=1', 'origin', 'feature/safe-branch'],
+        expect.objectContaining({ stdio: 'pipe' })
+      );
+      for (const call of execFileSyncMock.mock.calls) {
+        expect(call[0]).toBe('git');
+        expect(Array.isArray(call[1])).toBe(true);
+      }
+    });
+
+    it('should reject unsafe git parameters before running a process', () => {
+      expect(downloadSkillWithGit('owner', 'repo', 'main;rm -rf /', 'skills/foo', 'foo')).toBe(false);
+      expect(downloadSkillWithGit('owner', 'repo', 'main', '../secret', 'foo')).toBe(false);
+      expect(downloadSkillWithGit('owner', 'repo', 'main', 'skills/foo', '../foo')).toBe(false);
+
+      expect(execFileSyncMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('installFromPluginMarketplace', () => {
+    it('should call claude with argv arrays for marketplace installation', () => {
+      const result = installFromPluginMarketplace(
+        'obra/superpowers-marketplace',
+        'superpowers@superpowers-marketplace'
+      );
+
+      expect(result).toBe(true);
+      expect(execFileSyncMock).toHaveBeenCalledWith(
+        'claude',
+        ['plugin', 'marketplace', 'add', 'obra/superpowers-marketplace'],
+        { stdio: 'inherit' }
+      );
+      expect(execFileSyncMock).toHaveBeenCalledWith(
+        'claude',
+        ['plugin', 'install', 'superpowers@superpowers-marketplace'],
+        { stdio: 'inherit' }
+      );
+      for (const call of execFileSyncMock.mock.calls) {
+        expect(call[0]).toBe('claude');
+        expect(Array.isArray(call[1])).toBe(true);
+      }
+    });
+
+    it('should reject unsafe marketplace and package values before running a process', () => {
+      expect(installFromPluginMarketplace('obra/superpowers-marketplace;rm', 'superpowers')).toBe(false);
+      expect(installFromPluginMarketplace('obra/superpowers-marketplace', '../superpowers')).toBe(false);
+      expect(installFromPluginMarketplace('/absolute/marketplace', 'superpowers')).toBe(false);
+
+      expect(execFileSyncMock).not.toHaveBeenCalled();
     });
   });
 });

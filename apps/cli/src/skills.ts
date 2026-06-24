@@ -2,7 +2,7 @@
  * Skills 管理模块
  * 支持从 GitHub 仓库下载 skills 到当前目录的 .claude/skills/
  */
-import { execSync } from 'child_process';
+import { execFileSync } from 'node:child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import chalk from 'chalk';
@@ -28,6 +28,75 @@ export interface SkillPreset {
   description: string;
   group: SkillGroup;
   install: InstallMethod;
+}
+
+const SAFE_GITHUB_PART_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const SAFE_PATH_PART_RE = /^[A-Za-z0-9._-]+$/;
+const SAFE_GIT_REF_RE = /^[A-Za-z0-9._/-]+$/;
+const SAFE_PLUGIN_PACKAGE_RE = /^[A-Za-z0-9._@-]+$/;
+
+function isSafeGitHubPart(value: string): boolean {
+  return SAFE_GITHUB_PART_RE.test(value) && value !== '.' && value !== '..';
+}
+
+function isSafePathPart(value: string): boolean {
+  return SAFE_PATH_PART_RE.test(value) && value !== '.' && value !== '..';
+}
+
+function isSafeRepoPath(value: string): boolean {
+  if (!value) return true;
+  if (value.startsWith('/') || value.includes('\\')) return false;
+
+  const parts = value.split('/');
+  if (parts.some(part => !part || !isSafePathPart(part))) return false;
+
+  return true;
+}
+
+function isSafeGitRef(value: string): boolean {
+  if (!value || !SAFE_GIT_REF_RE.test(value)) return false;
+  if (value.startsWith('/') || value.endsWith('/') || value.includes('//')) return false;
+  if (value.includes('..') || value.includes('@{')) return false;
+  if (value.split('/').some(part => part === '.' || part === '..' || part.endsWith('.lock'))) {
+    return false;
+  }
+  return true;
+}
+
+function isSafeTargetName(value: string): boolean {
+  return isSafePathPart(value) && !value.startsWith('.');
+}
+
+function isSafeMarketplace(value: string): boolean {
+  return isSafeRepoPath(value);
+}
+
+function isSafePluginPackage(value: string): boolean {
+  return SAFE_PLUGIN_PACKAGE_RE.test(value) && !value.includes('..');
+}
+
+function validateGitHubInstallParts(
+  owner: string,
+  repo: string,
+  branch: string,
+  repoPath: string,
+  targetName: string
+): void {
+  if (!isSafeGitHubPart(owner)) {
+    throw new Error(`Invalid GitHub owner: ${owner}`);
+  }
+  if (!isSafeGitHubPart(repo)) {
+    throw new Error(`Invalid GitHub repo: ${repo}`);
+  }
+  if (!isSafeGitRef(branch)) {
+    throw new Error(`Invalid Git branch: ${branch}`);
+  }
+  if (!isSafeRepoPath(repoPath)) {
+    throw new Error(`Invalid repository path: ${repoPath}`);
+  }
+  if (!isSafeTargetName(targetName)) {
+    throw new Error(`Invalid skill name: ${targetName}`);
+  }
 }
 
 // Skills 预设列表（按分组）
@@ -199,26 +268,53 @@ export function parseGitHubUrl(url: string): {
   branch: string;
   path: string;
 } | null {
+  if (url !== url.trim()) return null;
+  if (/(?:^|\/)\.{1,2}(?:\/|$)/.test(url) || /%2e|%2f/i.test(url)) return null;
+
   // 处理简短格式 owner/repo
-  if (/^[\w-]+\/[\w-]+$/.test(url)) {
+  if (/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(url)) {
     const [owner, repo] = url.split('/');
+    if (!isSafeGitHubPart(owner) || !isSafeGitHubPart(repo)) return null;
     return { owner, repo, branch: 'main', path: '' };
   }
 
-  // 处理完整 GitHub URL
-  const match = url.match(
-    /github\.com\/([^/]+)\/([^/]+)(?:\/tree\/([^/]+)(?:\/(.*))?)?/
-  );
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' || parsed.hostname !== 'github.com') {
+      return null;
+    }
+    if (parsed.search || parsed.hash || parsed.username || parsed.password) {
+      return null;
+    }
 
-  if (!match) return null;
+    const parts = parsed.pathname.split('/');
+    if (parts.shift() !== '') return null;
 
-  const [, owner, repo, branch = 'main', repoPath = ''] = match;
-  return {
-    owner,
-    repo: repo.replace(/\.git$/, ''),
-    branch,
-    path: repoPath,
-  };
+    const [owner, rawRepo, ...rest] = parts;
+    if (!owner || !rawRepo) return null;
+
+    const repo = rawRepo.replace(/\.git$/, '');
+    let branch = 'main';
+    let repoPath = '';
+
+    if (rest.length > 0) {
+      if (rest[0] !== 'tree' || !rest[1]) return null;
+      branch = rest[1];
+      repoPath = rest.slice(2).join('/');
+    }
+
+    validateGitHubInstallParts(
+      owner,
+      repo,
+      branch,
+      repoPath,
+      repoPath ? path.basename(repoPath) : repo
+    );
+
+    return { owner, repo, branch, path: repoPath };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -269,33 +365,41 @@ export function downloadSkillWithGit(
   repoPath: string,
   targetName: string
 ): boolean {
-  const skillsDir = ensureSkillsDir();
-  const targetDir = path.join(skillsDir, targetName);
-
-  // 检查是否已存在
-  if (fs.existsSync(targetDir)) {
-    console.log(chalk.yellow(`Skill "${targetName}" already exists. Updating...`));
-    fs.rmSync(targetDir, { recursive: true });
-  }
-
-  const repoUrl = `https://github.com/${owner}/${repo}.git`;
-  const tempDir = path.join(skillsDir, `.tmp-${Date.now()}`);
+  let tempDir: string | null = null;
 
   try {
+    validateGitHubInstallParts(owner, repo, branch, repoPath, targetName);
+
+    const skillsDir = ensureSkillsDir();
+    const targetDir = path.join(skillsDir, targetName);
+
+    // 检查是否已存在
+    if (fs.existsSync(targetDir)) {
+      console.log(chalk.yellow(`Skill "${targetName}" already exists. Updating...`));
+      fs.rmSync(targetDir, { recursive: true });
+    }
+
+    const repoUrl = `https://github.com/${owner}/${repo}.git`;
+    tempDir = path.join(skillsDir, `.tmp-${Date.now()}`);
+
     // 创建临时目录并初始化 sparse-checkout
     fs.mkdirSync(tempDir, { recursive: true });
 
     // 使用 git sparse-checkout 只下载指定目录
-    execSync(`git init`, { cwd: tempDir, stdio: 'pipe' });
-    execSync(`git remote add origin ${repoUrl}`, { cwd: tempDir, stdio: 'pipe' });
-    execSync(`git config core.sparseCheckout true`, { cwd: tempDir, stdio: 'pipe' });
+    execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+    execFileSync('git', ['remote', 'add', 'origin', repoUrl], { cwd: tempDir, stdio: 'pipe' });
+    execFileSync('git', ['config', 'core.sparseCheckout', 'true'], { cwd: tempDir, stdio: 'pipe' });
 
     // 配置 sparse-checkout
     const sparseFile = path.join(tempDir, '.git', 'info', 'sparse-checkout');
+    fs.mkdirSync(path.dirname(sparseFile), { recursive: true });
     fs.writeFileSync(sparseFile, repoPath ? `${repoPath}/\n` : '*\n');
 
     // 拉取指定分支
-    execSync(`git pull --depth=1 origin ${branch}`, { cwd: tempDir, stdio: 'pipe' });
+    execFileSync('git', ['pull', '--depth=1', 'origin', branch], {
+      cwd: tempDir,
+      stdio: 'pipe',
+    });
 
     // 移动目标目录到 skills
     const sourceDir = repoPath ? path.join(tempDir, repoPath) : tempDir;
@@ -315,7 +419,7 @@ export function downloadSkillWithGit(
     return false;
   } finally {
     // 清理临时目录
-    if (fs.existsSync(tempDir)) {
+    if (tempDir && fs.existsSync(tempDir)) {
       fs.rmSync(tempDir, { recursive: true });
     }
   }
@@ -456,11 +560,22 @@ export function installFromPluginMarketplace(
   packageName: string
 ): boolean {
   try {
+    if (!isSafeMarketplace(marketplace)) {
+      throw new Error(`Invalid marketplace: ${marketplace}`);
+    }
+    if (!isSafePluginPackage(packageName)) {
+      throw new Error(`Invalid package name: ${packageName}`);
+    }
+
     console.log(chalk.cyan(`Adding marketplace: ${marketplace}...`));
-    execSync(`claude plugin marketplace add ${marketplace}`, { stdio: 'inherit' });
+    execFileSync('claude', ['plugin', 'marketplace', 'add', marketplace], {
+      stdio: 'inherit',
+    });
 
     console.log(chalk.cyan(`Installing package: ${packageName}...`));
-    execSync(`claude plugin install ${packageName}`, { stdio: 'inherit' });
+    execFileSync('claude', ['plugin', 'install', packageName], {
+      stdio: 'inherit',
+    });
 
     console.log(chalk.green(`Successfully installed ${packageName}`));
     return true;
