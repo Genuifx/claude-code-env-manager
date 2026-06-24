@@ -754,6 +754,7 @@
     "updateGlobalReadyLabel": "Update downloaded, click to restart",
     "updateReadyTitle": "Update ready",
     "feedback": "Report Issue",
+    "openExternalFailed": "Failed to open link: {error}",
     "diagnosticsTitle": "Doctor diagnostics",
     "diagnosticsDesc": "Export a local support report with performance events, platform details, tool paths, and config-file presence. API keys and config contents are not included.",
     "diagnosticsLongtask": "Long task (>50ms blocking)",
