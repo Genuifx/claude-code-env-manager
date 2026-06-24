@@ -1,5 +1,19 @@
 # ccem
 
+## 2.31.0
+
+### Minor Changes
+
+- Minor release bundling desktop session-launch fixes, CLI skill hardening, and proxy performance work since v2.30.0.
+
+  - fix(desktop): pass tmux environment into session launches
+  - fix(desktop): surface duplicate session launches
+  - fix(desktop): bound external control socket reads
+  - perf(desktop): page proxy debug traffic from index
+  - fix(cli): constrain skill removal paths
+  - fix(cli): harden skill install commands
+  - chore(ci): gate high production advisories
+
 ## 2.30.0
 
 ### Minor Changes
