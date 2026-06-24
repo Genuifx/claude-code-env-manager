@@ -446,6 +446,29 @@ function copyDir(src: string, dest: string): void {
   }
 }
 
+function isSafeSkillName(name: string): boolean {
+  return (
+    name.trim().length > 0 &&
+    name !== '.' &&
+    name !== '..' &&
+    !name.startsWith('.') &&
+    !path.isAbsolute(name) &&
+    !name.includes('/') &&
+    !name.includes('\\') &&
+    !name.includes('\0')
+  );
+}
+
+function isPathInside(childPath: string, parentPath: string): boolean {
+  const relativePath = path.relative(parentPath, childPath);
+  return (
+    relativePath === '' ||
+    (relativePath.length > 0 &&
+      !relativePath.startsWith('..') &&
+      !path.isAbsolute(relativePath))
+  );
+}
+
 /**
  * 从 GitHub 添加 skill
  */
@@ -539,11 +562,24 @@ export function listInstalledSkills(): { name: string; path: string }[] {
  * 删除已安装的 skill
  */
 export function removeSkill(name: string): boolean {
+  if (!isSafeSkillName(name)) {
+    console.error(chalk.red(`Invalid skill name "${name}"`));
+    return false;
+  }
+
   const skillsDir = getSkillsDir();
-  const targetDir = path.join(skillsDir, name);
+  const targetDir = path.resolve(skillsDir, name);
 
   if (!fs.existsSync(targetDir)) {
     console.error(chalk.red(`Skill "${name}" not found`));
+    return false;
+  }
+
+  const canonicalSkillsDir = fs.realpathSync(skillsDir);
+  const canonicalTargetDir = fs.realpathSync(targetDir);
+
+  if (!isPathInside(canonicalTargetDir, canonicalSkillsDir)) {
+    console.error(chalk.red(`Refusing to remove skill outside skills directory: "${name}"`));
     return false;
   }
 

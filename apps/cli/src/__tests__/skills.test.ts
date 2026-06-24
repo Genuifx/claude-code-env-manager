@@ -224,6 +224,11 @@ describe('skills', () => {
   });
 
   describe('removeSkill', () => {
+    beforeEach(() => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+    });
+
     it('should return false for non-existent skill', () => {
       const skillsDir = path.join(tempDir, '.claude', 'skills');
       fs.mkdirSync(skillsDir, { recursive: true });
@@ -241,6 +246,78 @@ describe('skills', () => {
       const result = removeSkill('test-skill');
       expect(result).toBe(true);
       expect(fs.existsSync(skillPath)).toBe(false);
+    });
+
+    it('should reject path traversal without deleting outside skills dir', () => {
+      const outsidePath = path.join(tempDir, '.claude', 'outside-skill');
+      fs.mkdirSync(outsidePath, { recursive: true });
+      fs.writeFileSync(path.join(outsidePath, 'skill.md'), 'content');
+
+      const result = removeSkill('../outside-skill');
+
+      expect(result).toBe(false);
+      expect(fs.existsSync(outsidePath)).toBe(true);
+    });
+
+    it('should reject absolute paths without deleting outside skills dir', () => {
+      const outsidePath = path.join(tempDir, 'outside-skill');
+      fs.mkdirSync(outsidePath, { recursive: true });
+      fs.writeFileSync(path.join(outsidePath, 'skill.md'), 'content');
+
+      const result = removeSkill(outsidePath);
+
+      expect(result).toBe(false);
+      expect(fs.existsSync(outsidePath)).toBe(true);
+    });
+
+    it('should reject names with path separators', () => {
+      const skillsDir = path.join(tempDir, '.claude', 'skills');
+      const slashPath = path.join(skillsDir, 'parent', 'child');
+      fs.mkdirSync(slashPath, { recursive: true });
+
+      const slashResult = removeSkill('parent/child');
+      const backslashResult = removeSkill('parent\\child');
+
+      expect(slashResult).toBe(false);
+      expect(backslashResult).toBe(false);
+      expect(fs.existsSync(slashPath)).toBe(true);
+    });
+
+    it('should reject blank skill names', () => {
+      const result = removeSkill('   ');
+
+      expect(result).toBe(false);
+    });
+
+    it('should reject hidden directory names without deleting them', () => {
+      const skillsDir = path.join(tempDir, '.claude', 'skills');
+      const hiddenPath = path.join(skillsDir, '.hidden-skill');
+      fs.mkdirSync(hiddenPath, { recursive: true });
+
+      const result = removeSkill('.hidden-skill');
+
+      expect(result).toBe(false);
+      expect(fs.existsSync(hiddenPath)).toBe(true);
+    });
+
+    it('should reject symlinks that resolve outside skills dir', () => {
+      const skillsDir = path.join(tempDir, '.claude', 'skills');
+      const outsidePath = path.join(tempDir, 'outside-target');
+      const linkPath = path.join(skillsDir, 'linked-skill');
+      fs.mkdirSync(skillsDir, { recursive: true });
+      fs.mkdirSync(outsidePath, { recursive: true });
+
+      try {
+        fs.symlinkSync(outsidePath, linkPath, process.platform === 'win32' ? 'junction' : 'dir');
+      } catch {
+        return;
+      }
+
+      const result = removeSkill('linked-skill');
+
+      expect(result).toBe(false);
+      expect(fs.existsSync(linkPath)).toBe(true);
+      expect(fs.existsSync(outsidePath)).toBe(true);
     });
   });
 
