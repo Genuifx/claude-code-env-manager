@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -148,6 +148,13 @@ struct TrafficRecord {
     log_partial: bool,
     log_dropped_bytes: u64,
     reduced: Option<ReducedStreamLog>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TrafficIndexEntry {
+    timestamp: i64,
+    id: String,
+    offset: u64,
 }
 
 impl TrafficRecord {
@@ -545,42 +552,11 @@ impl ProxyDebugManager {
         limit: u32,
         cursor: Option<String>,
     ) -> Result<ProxyTrafficPage, String> {
-        let mut records = read_all_records()?;
-        records.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| b.id.cmp(&a.id)));
-
-        if let Some(cursor) = cursor {
-            if let Some((cursor_ts, cursor_id)) = parse_cursor(&cursor) {
-                records.retain(|record| {
-                    record.timestamp < cursor_ts
-                        || (record.timestamp == cursor_ts
-                            && record.id.as_str() < cursor_id.as_str())
-                });
-            }
-        }
-
-        let limit = (limit as usize).clamp(1, LIST_LIMIT_MAX);
-        let has_more = records.len() > limit;
-        records.truncate(limit);
-
-        let next_cursor = if has_more {
-            records
-                .last()
-                .map(|record| format!("{}:{}", record.timestamp, record.id))
-        } else {
-            None
-        };
-
-        Ok(ProxyTrafficPage {
-            items: records.into_iter().map(|record| record.to_item()).collect(),
-            next_cursor,
-        })
+        list_traffic_records(limit, cursor)
     }
 
     pub fn get_traffic_detail(&self, id: String) -> Result<ProxyTrafficDetail, String> {
-        let record = read_all_records()?
-            .into_iter()
-            .find(|record| record.id == id)
-            .ok_or_else(|| "Traffic record not found".to_string())?;
+        let record = read_record_by_id(&id)?;
 
         // Request body should stay complete for JSON-friendly debug rendering.
         // Response body can be much larger (especially SSE), keep a safety cap.
@@ -1929,6 +1905,287 @@ fn read_all_records() -> Result<Vec<TrafficRecord>, String> {
     Ok(records)
 }
 
+fn list_traffic_records(limit: u32, cursor: Option<String>) -> Result<ProxyTrafficPage, String> {
+    let limit = (limit as usize).clamp(1, LIST_LIMIT_MAX);
+    let cursor = cursor.as_deref().and_then(parse_cursor);
+
+    match read_index_entries_reverse()? {
+        IndexReadResult::Missing => list_traffic_from_records(read_all_records()?, limit, cursor),
+        IndexReadResult::Present {
+            mut entries,
+            malformed_lines,
+            byte_len,
+        } => {
+            if entries.is_empty() {
+                if should_fallback_to_jsonl(byte_len, malformed_lines) {
+                    return list_traffic_from_records(read_all_records()?, limit, cursor);
+                }
+                return Ok(ProxyTrafficPage {
+                    items: Vec::new(),
+                    next_cursor: None,
+                });
+            }
+
+            entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| b.id.cmp(&a.id)));
+
+            let mut items = Vec::with_capacity(limit);
+            let mut has_more = false;
+
+            for entry in entries
+                .into_iter()
+                .filter(|entry| cursor_allows_entry(entry, cursor.as_ref()))
+            {
+                let record = read_record_at_index_entry(&entry)?;
+                if items.len() == limit {
+                    has_more = true;
+                    break;
+                }
+                items.push(record.to_item());
+            }
+
+            let next_cursor = if has_more {
+                items
+                    .last()
+                    .map(|record| format!("{}:{}", record.timestamp, record.id))
+            } else {
+                None
+            };
+
+            Ok(ProxyTrafficPage { items, next_cursor })
+        }
+    }
+}
+
+fn list_traffic_from_records(
+    mut records: Vec<TrafficRecord>,
+    limit: usize,
+    cursor: Option<(i64, String)>,
+) -> Result<ProxyTrafficPage, String> {
+    records.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| b.id.cmp(&a.id)));
+
+    if let Some(cursor) = cursor {
+        records.retain(|record| cursor_allows_pair(record.timestamp, &record.id, &cursor));
+    }
+
+    let has_more = records.len() > limit;
+    records.truncate(limit);
+
+    let next_cursor = if has_more {
+        records
+            .last()
+            .map(|record| format!("{}:{}", record.timestamp, record.id))
+    } else {
+        None
+    };
+
+    Ok(ProxyTrafficPage {
+        items: records.into_iter().map(|record| record.to_item()).collect(),
+        next_cursor,
+    })
+}
+
+fn read_record_by_id(id: &str) -> Result<TrafficRecord, String> {
+    match read_index_entries_reverse()? {
+        IndexReadResult::Missing => read_record_by_id_from_jsonl(id),
+        IndexReadResult::Present {
+            entries,
+            malformed_lines,
+            byte_len,
+        } => {
+            if entries.is_empty() && should_fallback_to_jsonl(byte_len, malformed_lines) {
+                return read_record_by_id_from_jsonl(id);
+            }
+
+            let Some(entry) = entries.into_iter().find(|entry| entry.id == id) else {
+                return Err("Traffic record not found".to_string());
+            };
+
+            read_record_at_index_entry(&entry)
+        }
+    }
+}
+
+fn read_record_by_id_from_jsonl(id: &str) -> Result<TrafficRecord, String> {
+    read_all_records()?
+        .into_iter()
+        .find(|record| record.id == id)
+        .ok_or_else(|| "Traffic record not found".to_string())
+}
+
+enum IndexReadResult {
+    Missing,
+    Present {
+        entries: Vec<TrafficIndexEntry>,
+        malformed_lines: usize,
+        byte_len: u64,
+    },
+}
+
+fn read_index_entries_reverse() -> Result<IndexReadResult, String> {
+    let idx_path = traffic_idx_path();
+    let mut file = match File::open(&idx_path) {
+        Ok(file) => file,
+        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(IndexReadResult::Missing),
+        Err(err) => {
+            return Err(format!(
+                "Failed to open traffic index file '{}': {}",
+                idx_path.display(),
+                err
+            ))
+        }
+    };
+
+    let byte_len = file
+        .metadata()
+        .map_err(|e| format!("Failed to read traffic index metadata: {}", e))?
+        .len();
+    let lines = read_lines_reverse(&mut file, byte_len)?;
+    let mut entries = Vec::new();
+    let mut malformed_lines = 0usize;
+
+    for line in lines {
+        if line.trim().is_empty() {
+            continue;
+        }
+        match parse_index_line(&line) {
+            Some(entry) => entries.push(entry),
+            None => malformed_lines += 1,
+        }
+    }
+
+    Ok(IndexReadResult::Present {
+        entries,
+        malformed_lines,
+        byte_len,
+    })
+}
+
+fn read_lines_reverse(file: &mut File, byte_len: u64) -> Result<Vec<String>, String> {
+    const CHUNK_SIZE: u64 = 64 * 1024;
+
+    let mut cursor = byte_len;
+    let mut pending = Vec::<u8>::new();
+    let mut lines = Vec::new();
+
+    while cursor > 0 {
+        let read_size = cursor.min(CHUNK_SIZE);
+        cursor -= read_size;
+        file.seek(SeekFrom::Start(cursor))
+            .map_err(|e| format!("Failed to seek traffic index: {}", e))?;
+
+        let mut buf = vec![0u8; read_size as usize];
+        file.read_exact(&mut buf)
+            .map_err(|e| format!("Failed to read traffic index chunk: {}", e))?;
+
+        let mut end = buf.len();
+        for idx in (0..buf.len()).rev() {
+            if buf[idx] == b'\n' {
+                let mut line = buf[idx + 1..end].to_vec();
+                if !pending.is_empty() {
+                    line.extend_from_slice(&pending);
+                    pending.clear();
+                }
+                if !line.is_empty() {
+                    lines.push(String::from_utf8_lossy(trim_trailing_cr(&line)).to_string());
+                }
+                end = idx;
+            }
+        }
+
+        let mut prefix = buf[..end].to_vec();
+        if !pending.is_empty() {
+            prefix.extend_from_slice(&pending);
+        }
+        pending = prefix;
+    }
+
+    if !pending.is_empty() {
+        lines.push(String::from_utf8_lossy(trim_trailing_cr(&pending)).to_string());
+    }
+
+    Ok(lines)
+}
+
+fn trim_trailing_cr(bytes: &[u8]) -> &[u8] {
+    bytes.strip_suffix(b"\r").unwrap_or(bytes)
+}
+
+fn parse_index_line(line: &str) -> Option<TrafficIndexEntry> {
+    let (timestamp_raw, rest) = line.split_once(',')?;
+    let (id, offset_raw) = rest.rsplit_once(',')?;
+    if id.is_empty() {
+        return None;
+    }
+
+    Some(TrafficIndexEntry {
+        timestamp: timestamp_raw.parse::<i64>().ok()?,
+        id: id.to_string(),
+        offset: offset_raw.parse::<u64>().ok()?,
+    })
+}
+
+fn read_record_at_index_entry(entry: &TrafficIndexEntry) -> Result<TrafficRecord, String> {
+    let traffic_path = traffic_jsonl_path();
+    let mut file = File::open(&traffic_path).map_err(|e| {
+        format!(
+            "Failed to open traffic log file '{}': {}",
+            traffic_path.display(),
+            e
+        )
+    })?;
+    file.seek(SeekFrom::Start(entry.offset)).map_err(|e| {
+        format!(
+            "Traffic index is inconsistent for id '{}' at offset {}: {}",
+            entry.id, entry.offset, e
+        )
+    })?;
+
+    let mut reader = BufReader::new(file);
+    let mut line = String::new();
+    let bytes = reader.read_line(&mut line).map_err(|e| {
+        format!(
+            "Traffic index is inconsistent for id '{}' at offset {}: {}",
+            entry.id, entry.offset, e
+        )
+    })?;
+    if bytes == 0 {
+        return Err(format!(
+            "Traffic index points past the traffic log for id '{}' at offset {}",
+            entry.id, entry.offset
+        ));
+    }
+
+    let record = serde_json::from_str::<TrafficRecord>(&line).map_err(|e| {
+        format!(
+            "Traffic index points to an invalid traffic record for id '{}' at offset {}: {}",
+            entry.id, entry.offset, e
+        )
+    })?;
+
+    if record.id != entry.id || record.timestamp != entry.timestamp {
+        return Err(format!(
+            "Traffic index mismatch for id '{}' at offset {}: found '{}:{}'",
+            entry.id, entry.offset, record.timestamp, record.id
+        ));
+    }
+
+    Ok(record)
+}
+
+fn should_fallback_to_jsonl(byte_len: u64, malformed_lines: usize) -> bool {
+    byte_len == 0 || malformed_lines > 0
+}
+
+fn cursor_allows_entry(entry: &TrafficIndexEntry, cursor: Option<&(i64, String)>) -> bool {
+    cursor
+        .map(|cursor| cursor_allows_pair(entry.timestamp, &entry.id, cursor))
+        .unwrap_or(true)
+}
+
+fn cursor_allows_pair(timestamp: i64, id: &str, cursor: &(i64, String)) -> bool {
+    timestamp < cursor.0 || (timestamp == cursor.0 && id < cursor.1.as_str())
+}
+
 fn parse_cursor(cursor: &str) -> Option<(i64, String)> {
     let (timestamp, id) = cursor.split_once(':')?;
     let timestamp = timestamp.parse::<i64>().ok()?;
@@ -2155,13 +2412,77 @@ fn generate_request_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_sse_reduced, compose_upstream_url, extract_prompt_preview, parse_proxy_path,
-        read_http_request, recompute_reduced_detail, redact_body_bytes, redact_body_text,
-        redact_headers, redact_json_value, validate_upstream_url, ReducedStreamLog, TrafficRecord,
-        REDACTED_MARKER,
+        append_record, bodies_dir, build_sse_reduced, compose_upstream_url, dir_size,
+        enforce_log_retention, extract_prompt_preview, list_traffic_records, parse_proxy_path,
+        proxy_debug_dir, read_http_request, read_record_by_id, recompute_reduced_detail,
+        redact_body_bytes, redact_body_text, redact_headers, redact_json_value, traffic_idx_path,
+        validate_upstream_url, ReducedStreamLog, TrafficRecord, REDACTED_MARKER,
     };
     use std::collections::{HashMap, VecDeque};
+    use std::fs;
     use std::io::{self, ErrorKind, Read};
+    use std::path::Path;
+    use std::sync::{Mutex, OnceLock};
+
+    struct HomeEnvGuard {
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl HomeEnvGuard {
+        fn set(path: &Path) -> Self {
+            let previous = std::env::var_os("HOME");
+            std::env::set_var("HOME", path);
+            Self { previous }
+        }
+    }
+
+    impl Drop for HomeEnvGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = self.previous.take() {
+                std::env::set_var("HOME", previous);
+            } else {
+                std::env::remove_var("HOME");
+            }
+        }
+    }
+
+    fn with_temp_proxy_home<T>(f: impl FnOnce() -> T) -> T {
+        static HOME_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        let _lock = HOME_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+        let temp = tempfile::tempdir().expect("create temp home");
+        let _home = HomeEnvGuard::set(temp.path());
+        f()
+    }
+
+    fn sample_traffic_record(index: usize, timestamp: i64) -> TrafficRecord {
+        TrafficRecord {
+            id: format!("req-{index:04}"),
+            timestamp,
+            client: "codex".to_string(),
+            session_id: "session-1".to_string(),
+            env_name: "default".to_string(),
+            method: "POST".to_string(),
+            path: format!("/v1/responses/{index}"),
+            query: None,
+            status: 200,
+            duration_ms: index as u64,
+            request_headers: HashMap::new(),
+            response_headers: HashMap::from([(
+                "content-type".to_string(),
+                "application/json".to_string(),
+            )]),
+            request_body_size: 0,
+            response_body_size: 0,
+            request_body_file: None,
+            response_body_file: None,
+            prompt_preview: Some(format!("prompt-{index}")),
+            log_dropped: false,
+            response_incomplete: false,
+            log_partial: false,
+            log_dropped_bytes: 0,
+            reduced: None,
+        }
+    }
 
     #[test]
     fn parse_proxy_path_extracts_components() {
@@ -2229,6 +2550,133 @@ mod tests {
     fn upstream_url_validation_rejects_non_http_scheme() {
         assert!(validate_upstream_url("ftp://example.com").is_err());
         assert!(validate_upstream_url("https://api.openai.com/v1").is_ok());
+    }
+
+    #[test]
+    fn traffic_index_pages_many_records_with_timestamp_cursor() {
+        with_temp_proxy_home(|| {
+            for index in 0..250 {
+                append_record(&sample_traffic_record(index, 1_000 + index as i64))
+                    .expect("append record");
+            }
+
+            let first = list_traffic_records(50, None).expect("first page");
+            assert_eq!(first.items.len(), 50);
+            assert_eq!(first.items.first().unwrap().id, "req-0249");
+            assert_eq!(first.items.last().unwrap().id, "req-0200");
+            assert_eq!(first.next_cursor.as_deref(), Some("1200:req-0200"));
+
+            let second = list_traffic_records(50, first.next_cursor.clone()).expect("second page");
+            assert_eq!(second.items.len(), 50);
+            assert_eq!(second.items.first().unwrap().id, "req-0199");
+            assert_eq!(second.items.last().unwrap().id, "req-0150");
+            assert_eq!(second.next_cursor.as_deref(), Some("1150:req-0150"));
+        });
+    }
+
+    #[test]
+    fn traffic_detail_uses_index_offset_for_id_lookup() {
+        with_temp_proxy_home(|| {
+            for index in 0..25 {
+                append_record(&sample_traffic_record(index, 2_000 + index as i64))
+                    .expect("append record");
+            }
+
+            let record = read_record_by_id("req-0017").expect("lookup record by index");
+            assert_eq!(record.id, "req-0017");
+            assert_eq!(record.timestamp, 2_017);
+            assert_eq!(record.path, "/v1/responses/17");
+            assert_eq!(record.prompt_preview.as_deref(), Some("prompt-17"));
+        });
+    }
+
+    #[test]
+    fn traffic_index_bad_lines_fall_back_to_jsonl_when_unusable() {
+        with_temp_proxy_home(|| {
+            append_record(&sample_traffic_record(1, 3_001)).expect("append first");
+            append_record(&sample_traffic_record(2, 3_002)).expect("append second");
+            fs::write(traffic_idx_path(), "not,a,valid,offset\nalso bad\n").expect("corrupt index");
+
+            let page = list_traffic_records(10, None).expect("fallback list");
+            assert_eq!(
+                page.items
+                    .iter()
+                    .map(|item| item.id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["req-0002", "req-0001"]
+            );
+
+            let record = read_record_by_id("req-0001").expect("fallback detail");
+            assert_eq!(record.timestamp, 3_001);
+        });
+    }
+
+    #[test]
+    fn traffic_index_missing_file_falls_back_to_jsonl() {
+        with_temp_proxy_home(|| {
+            append_record(&sample_traffic_record(1, 3_101)).expect("append first");
+            append_record(&sample_traffic_record(2, 3_102)).expect("append second");
+            fs::remove_file(traffic_idx_path()).expect("remove index");
+
+            let page = list_traffic_records(10, None).expect("fallback list");
+            assert_eq!(
+                page.items
+                    .iter()
+                    .map(|item| item.id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["req-0002", "req-0001"]
+            );
+
+            let record = read_record_by_id("req-0002").expect("fallback detail");
+            assert_eq!(record.timestamp, 3_102);
+        });
+    }
+
+    #[test]
+    fn traffic_index_offset_mismatch_returns_clear_error() {
+        with_temp_proxy_home(|| {
+            append_record(&sample_traffic_record(1, 3_201)).expect("append first");
+            append_record(&sample_traffic_record(2, 3_202)).expect("append second");
+            fs::write(traffic_idx_path(), "3202,req-0002,0\n").expect("write stale index");
+
+            let list_err = list_traffic_records(10, None).expect_err("list should reject mismatch");
+            assert!(list_err.contains("Traffic index mismatch"));
+
+            let detail_err =
+                read_record_by_id("req-0002").expect_err("detail should reject mismatch");
+            assert!(detail_err.contains("Traffic index mismatch"));
+        });
+    }
+
+    #[test]
+    fn traffic_retention_rewrites_index_offsets_consistently() {
+        with_temp_proxy_home(|| {
+            for index in 0..40 {
+                let mut record = sample_traffic_record(index, 4_000 + index as i64);
+                let body_file = format!("bodies/req-{index:04}-res.bin");
+                fs::create_dir_all(bodies_dir()).expect("create bodies dir");
+                fs::write(proxy_debug_dir().join(&body_file), vec![b'x'; 2048])
+                    .expect("write response body");
+                record.response_body_file = Some(body_file);
+                append_record(&record).expect("append record");
+            }
+
+            let before = dir_size(proxy_debug_dir()).expect("measure proxy debug dir");
+            enforce_log_retention(before / 2).expect("apply retention");
+
+            let page = list_traffic_records(200, None).expect("list after retention");
+            assert!(
+                !page.items.is_empty() && page.items.len() < 40,
+                "retention should keep a suffix of records"
+            );
+            assert_eq!(page.items.first().unwrap().id, "req-0039");
+
+            for item in &page.items {
+                let record = read_record_by_id(&item.id).expect("lookup retained record");
+                assert_eq!(record.id, item.id);
+                assert_eq!(record.timestamp, item.timestamp);
+            }
+        });
     }
 
     #[test]
