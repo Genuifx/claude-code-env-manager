@@ -11,19 +11,20 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 
 const HEADER_READ_LIMIT: usize = 1024 * 1024;
 const BODY_READ_LIMIT: usize = 4 * 1024 * 1024;
 const SOCKET_IO_TIMEOUT: Duration = Duration::from_secs(10);
 const SOCKET_RETRY_SLEEP: Duration = Duration::from_millis(10);
+const MIN_SOCKET_READ_TIMEOUT: Duration = Duration::from_millis(1);
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -649,11 +650,19 @@ impl HttpResponse {
 }
 
 fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest, String> {
+    read_http_request_with_deadline(stream, SOCKET_IO_TIMEOUT)
+}
+
+fn read_http_request_with_deadline(
+    stream: &mut TcpStream,
+    total_timeout: Duration,
+) -> Result<HttpRequest, String> {
+    let deadline = Instant::now() + total_timeout;
     let mut buffer = Vec::new();
     let header_end = loop {
         let mut chunk = [0_u8; 4096];
-        match stream.read(&mut chunk) {
-            Ok(0) => return Err("Connection closed before headers".to_string()),
+        match read_with_deadline(stream, &mut chunk, deadline, "request headers") {
+            Ok(0) => return Err("Connection closed before complete request headers".to_string()),
             Ok(size) => {
                 buffer.extend_from_slice(&chunk[..size]);
                 if buffer.len() > HEADER_READ_LIMIT {
@@ -663,15 +672,7 @@ fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest, String> {
                     break pos;
                 }
             }
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                ) =>
-            {
-                thread::sleep(SOCKET_RETRY_SLEEP);
-            }
-            Err(error) => return Err(format!("Failed to read request: {}", error)),
+            Err(error) => return Err(error),
         }
     };
 
@@ -702,18 +703,10 @@ fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest, String> {
     let mut body = buffer.get(body_start..).unwrap_or_default().to_vec();
     while body.len() < content_length {
         let mut chunk = [0_u8; 4096];
-        match stream.read(&mut chunk) {
-            Ok(0) => break,
+        match read_with_deadline(stream, &mut chunk, deadline, "request body") {
+            Ok(0) => return Err("Connection closed before complete request body".to_string()),
             Ok(size) => body.extend_from_slice(&chunk[..size]),
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                ) =>
-            {
-                thread::sleep(SOCKET_RETRY_SLEEP);
-            }
-            Err(error) => return Err(format!("Failed to read request body: {}", error)),
+            Err(error) => return Err(error),
         }
     }
     body.truncate(content_length);
@@ -724,6 +717,47 @@ fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest, String> {
         headers,
         body,
     })
+}
+
+fn read_with_deadline(
+    stream: &mut TcpStream,
+    buf: &mut [u8],
+    deadline: Instant,
+    context: &str,
+) -> Result<usize, String> {
+    loop {
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            return Err(format!("Timed out reading {}", context));
+        };
+        let read_timeout = if remaining < SOCKET_IO_TIMEOUT {
+            remaining.max(MIN_SOCKET_READ_TIMEOUT)
+        } else {
+            SOCKET_IO_TIMEOUT
+        };
+        let _ = stream.set_read_timeout(Some(read_timeout));
+
+        match stream.read(buf) {
+            Ok(size) => return Ok(size),
+            Err(error) if error.kind() == ErrorKind::Interrupted => continue,
+            Err(error) if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
+                if deadline.checked_duration_since(Instant::now()).is_none() {
+                    return Err(format!("Timed out reading {}", context));
+                }
+                let remaining = deadline
+                    .checked_duration_since(Instant::now())
+                    .unwrap_or_default();
+                let sleep_for = if remaining < SOCKET_RETRY_SLEEP {
+                    remaining
+                } else {
+                    SOCKET_RETRY_SLEEP
+                };
+                if !sleep_for.is_zero() {
+                    thread::sleep(sleep_for);
+                }
+            }
+            Err(error) => return Err(format!("Failed reading {}: {}", context, error)),
+        }
+    }
 }
 
 fn find_header_end(buffer: &[u8]) -> Option<usize> {
@@ -1097,6 +1131,67 @@ fn is_loopback_ipv6_literal(literal: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn loopback_stream_pair() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = TcpStream::connect(addr).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        (client, server)
+    }
+
+    #[test]
+    fn read_http_request_times_out_partial_headers() {
+        let (mut client, mut server) = loopback_stream_pair();
+        client
+            .write_all(b"POST /rpc HTTP/1.1\r\nHost: 127.0.0.1\r\n")
+            .unwrap();
+
+        let error = match read_http_request_with_deadline(&mut server, Duration::from_millis(50)) {
+            Ok(_) => panic!("partial headers should time out"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error, "Timed out reading request headers");
+    }
+
+    #[test]
+    fn read_http_request_times_out_partial_body() {
+        let (mut client, mut server) = loopback_stream_pair();
+        client
+            .write_all(b"POST /rpc HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 5\r\n\r\nhe")
+            .unwrap();
+
+        let error = match read_http_request_with_deadline(&mut server, Duration::from_millis(50)) {
+            Ok(_) => panic!("partial body should time out"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error, "Timed out reading request body");
+    }
+
+    #[test]
+    fn read_http_request_accepts_complete_request_before_deadline() {
+        let (mut client, mut server) = loopback_stream_pair();
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"ccem.health"}"#;
+        let request = format!(
+            "POST /rpc HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            String::from_utf8_lossy(body)
+        );
+        client.write_all(request.as_bytes()).unwrap();
+
+        let parsed =
+            read_http_request_with_deadline(&mut server, Duration::from_millis(250)).unwrap();
+
+        assert_eq!(parsed.method, "POST");
+        assert_eq!(parsed.path, "/rpc");
+        assert_eq!(
+            parsed.headers.get("content-type").map(String::as_str),
+            Some("application/json")
+        );
+        assert_eq!(parsed.body, body);
+    }
 
     // --- Host header validation -------------------------------------------
 
