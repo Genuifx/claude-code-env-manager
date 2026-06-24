@@ -910,18 +910,20 @@ export const ProjectTree = memo(function ProjectTree({
     <div className="flex w-[clamp(220px,30vw,280px)] shrink-0 flex-col bg-sidebar backdrop-blur-xl">
       {/* Header: New session + pinned conversations */}
       <div className="shrink-0 p-2 flex flex-col gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={onNewSession}
             className={cn(
-              'flex flex-1 items-center justify-center gap-1.5 h-8 rounded-md',
-              'text-muted-foreground hover:text-foreground hover:bg-muted/50',
-              'text-xs font-medium transition-colors',
+              'group flex flex-1 items-center justify-center gap-1.5 h-8 rounded-md',
+              'bg-primary/10 text-primary hover:bg-primary/15',
+              'text-xs font-medium',
+              'active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25',
+              'transition-all',
               'disabled:pointer-events-none disabled:opacity-50'
             )}
           >
-            <Plus className="h-3.5 w-3.5" />
+            <Plus className="h-3.5 w-3.5 transition-transform duration-200 group-hover:scale-110" />
             {t('workspace.newSession')}
           </button>
           <button
@@ -931,10 +933,12 @@ export const ProjectTree = memo(function ProjectTree({
             aria-label={isRefreshing ? t('workspace.refreshing') : t('workspace.refresh')}
             title={isRefreshing ? t('workspace.refreshing') : t('workspace.refresh')}
             className={cn(
-              'h-8 w-8 shrink-0 rounded-md bg-surface-raised/75',
-              'flex items-center justify-center text-muted-foreground transition-colors',
-              'hover:text-foreground hover:bg-primary/5',
-              'disabled:cursor-default disabled:opacity-70'
+              'h-8 w-8 shrink-0 rounded-md',
+              'bg-surface-raised/75 hover:bg-surface-raised',
+              'flex items-center justify-center text-muted-foreground hover:text-foreground',
+              'active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25',
+              'disabled:cursor-default disabled:opacity-60',
+              'transition-all'
             )}
           >
             <RefreshCw className={cn('w-3.5 h-3.5', isRefreshing && 'animate-spin')} />
