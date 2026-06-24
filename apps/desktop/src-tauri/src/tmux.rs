@@ -92,8 +92,10 @@ impl TmuxManager {
                 working_dir.display()
             )
         })?;
-        let launch_spec = build_tmux_launch_spec(client, client_args, env_vars);
         let target = format!("{}:{}", session_name, window_name);
+        let tmux_binary = resolve_tmux_binary()?.to_string();
+        let launch_spec =
+            build_tmux_launch_spec(client, client_args, env_vars, &target, &tmux_binary);
         let mut create_args = vec![
             "new-session".to_string(),
             "-d".to_string(),
@@ -908,13 +910,22 @@ fn build_tmux_launch_command(
     client_args: &[String],
     env_vars: &HashMap<String, String>,
 ) -> String {
-    build_tmux_launch_spec(client, client_args, env_vars).command
+    build_tmux_launch_spec(
+        client,
+        client_args,
+        env_vars,
+        &format!("{DEFAULT_TMUX_SESSION}:{DEFAULT_TMUX_WINDOW}"),
+        "tmux",
+    )
+    .command
 }
 
 fn build_tmux_launch_spec(
     client: &str,
     client_args: &[String],
     env_vars: &HashMap<String, String>,
+    target: &str,
+    tmux_binary: &str,
 ) -> TmuxLaunchSpec {
     let client_binary = match client {
         "codex" => resolve_codex_path().unwrap_or_else(|| "codex".to_string()),
@@ -922,20 +933,50 @@ fn build_tmux_launch_spec(
         _ => resolve_claude_path().unwrap_or_else(|| "claude".to_string()),
     };
     let mut environment = vec![format!("PATH={}", get_user_path())];
+    let mut environment_keys = vec!["PATH".to_string()];
 
     let mut env_entries = env_vars.iter().collect::<Vec<_>>();
     env_entries.sort_by(|left, right| left.0.cmp(right.0));
     for (key, value) in env_entries {
         environment.push(format!("{}={}", key, value));
+        environment_keys.push(key.clone());
     }
 
     let mut command_parts = vec![shell_quote(&client_binary)];
     command_parts.extend(client_args.iter().map(|arg| shell_quote(arg)));
 
+    let environment_loader = build_tmux_environment_loader(&environment_keys, target, tmux_binary);
+
     TmuxLaunchSpec {
-        command: format!("unset CLAUDECODE; exec {}", command_parts.join(" ")),
+        command: format!(
+            "{} unset CLAUDECODE; exec {}",
+            environment_loader,
+            command_parts.join(" ")
+        ),
         environment,
     }
+}
+
+fn build_tmux_environment_loader(
+    environment_keys: &[String],
+    target: &str,
+    tmux_binary: &str,
+) -> String {
+    let key_list = environment_keys
+        .iter()
+        .map(|key| shell_quote(key))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    format!(
+        "__ccem_tmux={}; __ccem_target={}; for __ccem_key in {}; do \
+         __ccem_line=\"$(\"$__ccem_tmux\" show-environment -t \"$__ccem_target\" \"$__ccem_key\" 2>/dev/null || true)\"; \
+         case \"$__ccem_line\" in \"$__ccem_key=\"*) export \"$__ccem_line\" ;; esac; \
+         done; unset __ccem_key __ccem_line __ccem_tmux __ccem_target;",
+        shell_quote(tmux_binary),
+        shell_quote(target),
+        key_list
+    )
 }
 
 fn should_use_paste_buffer(text: &str) -> bool {
@@ -1050,16 +1091,18 @@ fn is_tmux_session_create_race_error(error: &str) -> bool {
 mod tests {
     use super::{
         attach_target_candidates_for_runtime, build_status_left_format, build_status_right_format,
-        build_tmux_launch_command, build_tmux_launch_spec, compact_model_label,
-        detect_state_from_capture, is_managed_session_name, is_missing_tmux_session_error,
-        is_tmux_session_create_race_error, merge_path_entries, orphaned_managed_tmux_targets,
-        parse_target_line, parse_window_line, session_name_for_runtime,
-        target_candidates_for_runtime, tmux_command, tmux_integration_test_lock,
-        window_name_for_runtime, ClaudeTerminalState, ManagedTmuxTargetAction, TmuxManager,
-        TmuxWindowInfo,
+        build_tmux_environment_loader, build_tmux_launch_command, build_tmux_launch_spec,
+        compact_model_label, detect_state_from_capture, is_managed_session_name,
+        is_missing_tmux_session_error, is_tmux_session_create_race_error, merge_path_entries,
+        orphaned_managed_tmux_targets, parse_target_line, parse_window_line, resolve_tmux_binary,
+        session_name_for_runtime, shell_quote, target_candidates_for_runtime, tmux_command,
+        tmux_integration_test_lock, window_name_for_runtime, ClaudeTerminalState,
+        ManagedTmuxTargetAction, TmuxManager, TmuxWindowInfo,
     };
     use std::collections::HashMap;
     use std::process::Stdio;
+    use std::thread;
+    use std::time::Duration;
 
     #[test]
     fn detect_state_flags_waiting_approval() {
@@ -1352,14 +1395,116 @@ mod tests {
             "sk-ant-secret-value".to_string(),
         );
 
-        let spec = build_tmux_launch_spec("claude", &[], &env_vars);
+        let spec = build_tmux_launch_spec(
+            "claude",
+            &[],
+            &env_vars,
+            "ccem-session123:main",
+            "/opt/homebrew/bin/tmux",
+        );
 
         assert!(!spec.command.contains("sk-ant-secret-value"));
-        assert!(!spec.command.contains("ANTHROPIC_AUTH_TOKEN"));
+        assert!(spec.command.contains("show-environment"));
+        assert!(spec.command.contains("ANTHROPIC_AUTH_TOKEN"));
         assert!(spec
             .environment
             .iter()
             .any(|entry| entry == "ANTHROPIC_AUTH_TOKEN=sk-ant-secret-value"));
+    }
+
+    #[test]
+    fn launch_environment_loader_exports_tmux_session_path_to_pane_process() {
+        let _tmux_guard = tmux_integration_test_lock();
+
+        if TmuxManager::check_tmux_installed().is_err() {
+            return;
+        }
+
+        let session_name = format!("ccem-env-test-{}", std::process::id());
+        let target = format!("{session_name}:main");
+        let output_path =
+            std::env::temp_dir().join(format!("ccem-tmux-env-{}.txt", std::process::id()));
+        let injected_path = "/tmp/ccem-node-bin:/usr/bin:/bin:/usr/sbin:/sbin";
+
+        let _ = std::fs::remove_file(&output_path);
+        let _ = tmux_command().and_then(|mut command| {
+            command
+                .args(["kill-session", "-t", &session_name])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map(|_| ())
+                .map_err(|error| {
+                    format!(
+                        "Failed to clean stale test tmux session {}: {}",
+                        session_name, error
+                    )
+                })
+        });
+
+        struct TestCleanup {
+            session_name: String,
+            output_path: std::path::PathBuf,
+        }
+
+        impl Drop for TestCleanup {
+            fn drop(&mut self) {
+                let _ = tmux_command().and_then(|mut command| {
+                    command
+                        .args(["kill-session", "-t", &self.session_name])
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .status()
+                        .map(|_| ())
+                        .map_err(|error| {
+                            format!(
+                                "Failed to clean test tmux session {}: {}",
+                                self.session_name, error
+                            )
+                        })
+                });
+                let _ = std::fs::remove_file(&self.output_path);
+            }
+        }
+
+        let _cleanup = TestCleanup {
+            session_name: session_name.clone(),
+            output_path: output_path.clone(),
+        };
+
+        let tmux_binary = resolve_tmux_binary().expect("tmux binary should resolve");
+        let environment_keys = vec!["PATH".to_string()];
+        let environment_loader =
+            build_tmux_environment_loader(&environment_keys, &target, tmux_binary);
+        let command = format!(
+            "{} printf '%s' \"$PATH\" > {}; /bin/sleep 2",
+            environment_loader,
+            shell_quote(output_path.to_string_lossy().as_ref())
+        );
+
+        let status = tmux_command()
+            .expect("tmux command should be available")
+            .args([
+                "new-session",
+                "-d",
+                "-s",
+                &session_name,
+                "-n",
+                "main",
+                "-e",
+                &format!("PATH={injected_path}"),
+                &command,
+            ])
+            .status()
+            .expect("test tmux session should be created");
+        assert!(status.success());
+
+        thread::sleep(Duration::from_millis(250));
+        let captured_path =
+            std::fs::read_to_string(&output_path).expect("pane should write captured PATH");
+        assert_eq!(captured_path, injected_path);
     }
 
     #[test]
