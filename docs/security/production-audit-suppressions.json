@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "description": "Short-term accepted high/critical production audit findings for scripts/ci/check-prod-audit.mjs.",
+  "suppressions": []
+}
