@@ -816,11 +816,17 @@ pub fn read_telegram_settings() -> Result<TelegramSettings, String> {
 
     let content = fs::read_to_string(&path)
         .map_err(|error| format!("Failed to read telegram settings: {}", error))?;
-    let mut settings: TelegramSettings = serde_json::from_str(&content)
+    let settings: TelegramSettings = serde_json::from_str(&content)
         .map_err(|error| format!("Failed to parse telegram settings: {}", error))?;
+    decrypt_telegram_settings(settings)
+}
+
+fn decrypt_telegram_settings(mut settings: TelegramSettings) -> Result<TelegramSettings, String> {
     settings.bot_token = settings
         .bot_token
-        .map(|token| crypto::decrypt(&token).unwrap_or(token));
+        .as_deref()
+        .map(|token| crypto::decrypt_local_secret("Telegram bot token", token))
+        .transpose()?;
     Ok(settings)
 }
 
@@ -5799,14 +5805,15 @@ mod tests {
         active_choice_question, advance_active_choice_prompt, build_chat_about_this_steps,
         build_command_registrations, build_multi_select_submit_steps,
         build_multi_select_text_entry_steps, build_plan_exit_question, canonical_thread_id,
-        command_scopes_to_clear, ensure_chat_about_this_option, ensure_text_entry_option,
-        expand_home_dir, format_active_choice_text, format_new_topic_welcome_message,
-        format_tool_completed_message, format_topic_binding_success_message,
-        is_chat_about_this_option, is_chat_allowed, is_sender_allowed, is_vscode_text_entry_option,
-        normalize_command_text, parse_bind_command, parse_interactive_tool_cancel_callback_data,
-        parse_interactive_tool_select_callback_data, parse_interactive_tool_submit_callback_data,
-        parse_new_topic_command, parse_permission_callback_data, remove_topic_binding,
-        selection_submit_options, summarize_interactive_prompt_resolution, upsert_topic_binding,
+        command_scopes_to_clear, decrypt_telegram_settings, ensure_chat_about_this_option,
+        ensure_text_entry_option, expand_home_dir, format_active_choice_text,
+        format_new_topic_welcome_message, format_tool_completed_message,
+        format_topic_binding_success_message, is_chat_about_this_option, is_chat_allowed,
+        is_sender_allowed, is_vscode_text_entry_option, normalize_command_text, parse_bind_command,
+        parse_interactive_tool_cancel_callback_data, parse_interactive_tool_select_callback_data,
+        parse_interactive_tool_submit_callback_data, parse_new_topic_command,
+        parse_permission_callback_data, remove_topic_binding, selection_submit_options,
+        summarize_interactive_prompt_resolution, upsert_topic_binding,
         ActiveInteractiveChoicePrompt, InteractiveChoiceSubmitMode, PendingInteractiveAction,
         TelegramBotCommandScope, TelegramBridgeManager, TelegramSettings, TelegramTopicBinding,
         TELEGRAM_FULL_GROUP_COMMANDS, TELEGRAM_MINIMAL_GROUP_COMMANDS, TELEGRAM_PRIVATE_COMMANDS,
@@ -5821,6 +5828,23 @@ mod tests {
         assert_eq!(
             normalize_command_text("/new@ccem_bot hello world", Some("ccem_bot")),
             "/new hello world"
+        );
+    }
+
+    #[test]
+    fn read_telegram_settings_rejects_tampered_v2_token_without_exposing_value() {
+        let tampered = "enc:v2:000000000000000000000000:00:00000000000000000000000000000000";
+        let settings = TelegramSettings {
+            enabled: true,
+            bot_token: Some(tampered.to_string()),
+            ..TelegramSettings::default()
+        };
+
+        let error = decrypt_telegram_settings(settings).expect_err("tampered v2 token should fail");
+
+        assert!(
+            !error.contains(tampered),
+            "Error should not include encrypted token material"
         );
     }
 

@@ -72,10 +72,7 @@ pub fn encrypt(plaintext: &str) -> String {
     let nonce: [u8; 12] = rand::thread_rng().gen();
 
     let ciphertext = cipher
-        .encrypt(
-            aes_gcm::Nonce::from_slice(&nonce),
-            plaintext.as_bytes(),
-        )
+        .encrypt(aes_gcm::Nonce::from_slice(&nonce), plaintext.as_bytes())
         .map_err(|e| format!("Encryption failed: {}", e))
         .unwrap_or_default();
 
@@ -103,7 +100,7 @@ pub fn decrypt(ciphertext: &str) -> Result<String, String> {
     if ciphertext.starts_with("enc:v2:") {
         let parts: Vec<&str> = ciphertext.split(':').collect();
         if parts.len() != 5 {
-            return Ok(ciphertext.to_string());
+            return Err("Invalid v2 encrypted format".to_string());
         }
 
         let nonce_bytes = hex::decode(parts[2]).map_err(|e| format!("Invalid nonce: {}", e))?;
@@ -130,6 +127,11 @@ pub fn decrypt(ciphertext: &str) -> Result<String, String> {
         // Legacy format: enc:iv_hex:ciphertext_hex (AES-256-CBC with hardcoded key)
         decrypt_legacy(ciphertext)
     }
+}
+
+/// Decrypt a locally stored secret value with sanitized field context.
+pub fn decrypt_local_secret(field_name: &str, value: &str) -> Result<String, String> {
+    decrypt(value).map_err(|error| format!("Failed to decrypt {}: {}", field_name, error))
 }
 
 /// Decrypt legacy "enc:iv_hex:ciphertext_hex" format (AES-256-CBC).
@@ -237,7 +239,8 @@ mod tests {
         let encrypted = encrypt("test-secret-key");
         assert!(encrypted.starts_with("enc:v2:"));
         let parts: Vec<&str> = encrypted.split(':').collect();
-        assert_eq!(parts.len(), 5); // enc, v2, nonce, ciphertext, tag
+        // enc, v2, nonce, ciphertext, tag
+        assert_eq!(parts.len(), 5);
         // nonce: 12 bytes = 24 hex chars
         assert_eq!(parts[2].len(), 24);
         // tag: 16 bytes = 32 hex chars
@@ -264,7 +267,24 @@ mod tests {
         );
 
         let result = decrypt(&tampered_full);
-        assert!(result.is_err(), "Tampered ciphertext should fail decryption");
+        assert!(
+            result.is_err(),
+            "Tampered ciphertext should fail decryption"
+        );
+    }
+
+    #[test]
+    fn test_decrypt_malformed_v2_fails_closed() {
+        let malformed = "enc:v2:not-enough-fields";
+
+        let result = decrypt(malformed);
+
+        assert!(result.is_err(), "Malformed v2 ciphertext should fail");
+        let error = result.unwrap_err();
+        assert!(
+            !error.contains(malformed),
+            "Error should not include encrypted secret material"
+        );
     }
 
     #[test]

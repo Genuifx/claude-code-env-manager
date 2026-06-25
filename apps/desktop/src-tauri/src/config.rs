@@ -550,19 +550,20 @@ pub fn write_app_config(config: &AppConfig) -> Result<(), String> {
 }
 
 /// Get environment config with decrypted auth token
-pub fn get_env_with_decrypted_key(env: &EnvConfig) -> EnvConfig {
-    EnvConfig {
+pub fn get_env_with_decrypted_key(env: &EnvConfig) -> Result<EnvConfig, String> {
+    Ok(EnvConfig {
         base_url: env.base_url.clone(),
         auth_token: env
             .auth_token
-            .as_ref()
-            .map(|k| crypto::decrypt(k).unwrap_or_else(|_| k.clone())),
+            .as_deref()
+            .map(|k| crypto::decrypt_local_secret("local auth token", k))
+            .transpose()?,
         default_opus_model: env.default_opus_model.clone(),
         default_sonnet_model: env.default_sonnet_model.clone(),
         default_haiku_model: env.default_haiku_model.clone(),
         model: env.model.clone(),
         subagent_model: env.subagent_model.clone(),
-    }
+    })
 }
 
 pub fn build_claude_env_vars(env: &EnvConfig) -> HashMap<String, String> {
@@ -606,7 +607,7 @@ pub fn resolve_claude_env(env_name: &str) -> Result<ResolvedClaudeEnv, String> {
         .registries
         .get(env_name)
         .ok_or_else(|| format!("Environment '{}' does not exist", env_name))?;
-    let env = get_env_with_decrypted_key(env_config);
+    let env = get_env_with_decrypted_key(env_config)?;
     let (env_vars, upstream_base_url) = env_config_to_process_env(&env);
 
     Ok(ResolvedClaudeEnv {
@@ -630,7 +631,7 @@ pub fn resolve_opencode_runtime(env_name: &str) -> Result<ResolvedOpenCodeRuntim
         .registries
         .get(env_name)
         .ok_or_else(|| format!("Environment '{}' does not exist", env_name))?;
-    let env = get_env_with_decrypted_key(env_config);
+    let env = get_env_with_decrypted_key(env_config)?;
 
     if let Some(config_content) = build_opencode_config_content(&env) {
         let mut env_vars = HashMap::new();
@@ -933,8 +934,14 @@ pub fn inject_ai_env(cmd: &mut std::process::Command) {
     };
     if let Some(name) = env_name {
         if let Some(env) = cfg.registries.get(name) {
-            let decrypted = get_env_with_decrypted_key(env);
             clear_managed_claude_env(cmd);
+            let decrypted = match get_env_with_decrypted_key(env) {
+                Ok(env) => env,
+                Err(error) => {
+                    eprintln!("Failed to decrypt AI environment '{}': {}", name, error);
+                    return;
+                }
+            };
             for (key, value) in build_claude_env_vars(&decrypted) {
                 cmd.env(key, value);
             }
@@ -968,11 +975,50 @@ pub fn create_env_with_encrypted_key(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_opencode_config_content, env_config_to_process_env, recover_config_from_legacy,
-        resolve_opencode_primary_model, resolve_opencode_runtime, CcemConfig, EnvConfig,
-        OPENCODE_NATIVE_ENV_NAME,
+        build_opencode_config_content, env_config_to_process_env, get_env_with_decrypted_key,
+        inject_ai_env, recover_config_from_legacy, resolve_opencode_primary_model,
+        resolve_opencode_runtime, write_config, CcemConfig, EnvConfig, OPENCODE_NATIVE_ENV_NAME,
     };
     use std::collections::HashMap;
+    use std::env;
+    use std::ffi::OsStr;
+    use std::process::Command;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    fn test_home_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct TestHome {
+        _lock: MutexGuard<'static, ()>,
+        previous_home: Option<String>,
+        _temp: tempfile::TempDir,
+    }
+
+    impl TestHome {
+        fn new() -> Self {
+            let lock = test_home_lock().lock().expect("lock test home");
+            let temp = tempfile::tempdir().expect("create temp home");
+            let previous_home = env::var("HOME").ok();
+            env::set_var("HOME", temp.path());
+            Self {
+                _lock: lock,
+                previous_home,
+                _temp: temp,
+            }
+        }
+    }
+
+    impl Drop for TestHome {
+        fn drop(&mut self) {
+            if let Some(previous_home) = &self.previous_home {
+                env::set_var("HOME", previous_home);
+            } else {
+                env::remove_var("HOME");
+            }
+        }
+    }
 
     #[test]
     fn process_env_includes_auth_token_when_present() {
@@ -1018,6 +1064,66 @@ mod tests {
                 .get("CLAUDE_CODE_SUBAGENT_MODEL")
                 .map(String::as_str),
             Some("claude-subagent-test")
+        );
+    }
+
+    #[test]
+    fn env_decryption_rejects_tampered_v2_token_without_exposing_value() {
+        let tampered = "enc:v2:000000000000000000000000:00:00000000000000000000000000000000";
+        let env = EnvConfig {
+            base_url: Some("https://example.com/anthropic".to_string()),
+            auth_token: Some(tampered.to_string()),
+            default_opus_model: None,
+            default_sonnet_model: None,
+            default_haiku_model: None,
+            model: Some("opus".to_string()),
+            subagent_model: None,
+        };
+
+        let error = get_env_with_decrypted_key(&env).expect_err("tampered v2 token should fail");
+
+        assert!(
+            !error.contains(tampered),
+            "Error should not include encrypted token material"
+        );
+    }
+
+    #[test]
+    fn inject_ai_env_clears_managed_env_when_decryption_fails() {
+        let _home = TestHome::new();
+        let tampered = "enc:v2:000000000000000000000000:00:00000000000000000000000000000000";
+        let mut registries = HashMap::new();
+        registries.insert(
+            "bad".to_string(),
+            EnvConfig {
+                base_url: Some("https://example.com/anthropic".to_string()),
+                auth_token: Some(tampered.to_string()),
+                default_opus_model: None,
+                default_sonnet_model: None,
+                default_haiku_model: None,
+                model: Some("opus".to_string()),
+                subagent_model: None,
+            },
+        );
+        write_config(&CcemConfig {
+            registries,
+            current: Some("bad".to_string()),
+            default_mode: Some("dev".to_string()),
+        })
+        .expect("write temp config");
+        let mut command = Command::new("env");
+        command.env("ANTHROPIC_AUTH_TOKEN", "parent-token");
+
+        inject_ai_env(&mut command);
+
+        let managed_value = command
+            .get_envs()
+            .find(|(key, _)| *key == OsStr::new("ANTHROPIC_AUTH_TOKEN"))
+            .map(|(_, value)| value);
+        assert_eq!(
+            managed_value,
+            Some(None),
+            "decrypt failure should prevent managed token inheritance"
         );
     }
 

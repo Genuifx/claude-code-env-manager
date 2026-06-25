@@ -1070,13 +1070,18 @@ pub fn read_wecom_settings() -> Result<WecomSettings, String> {
     }
     let content = fs::read_to_string(&path)
         .map_err(|error| format!("Failed to read WeCom settings: {}", error))?;
-    let mut settings: WecomSettings = serde_json::from_str(&content)
+    let settings: WecomSettings = serde_json::from_str(&content)
         .map_err(|error| format!("Failed to parse WeCom settings: {}", error))?;
+    decrypt_wecom_settings(settings)
+}
+
+fn decrypt_wecom_settings(mut settings: WecomSettings) -> Result<WecomSettings, String> {
     for bot in &mut settings.bots {
         bot.secret = bot
             .secret
-            .clone()
-            .map(|value| crypto::decrypt(&value).unwrap_or(value));
+            .as_deref()
+            .map(|value| crypto::decrypt_local_secret("WeCom bot secret", value))
+            .transpose()?;
         if bot.id.trim().is_empty() {
             bot.id = generate_req_id("bot");
         }
@@ -1793,6 +1798,29 @@ fn generate_req_id(prefix: &str) -> String {
 mod tests {
     use super::*;
     use crate::bot_binding::{BotBindingOutboxFrame, BotBindingOutboxFrameKind};
+
+    #[test]
+    fn read_wecom_settings_rejects_tampered_v2_secret_without_exposing_value() {
+        let tampered = "enc:v2:000000000000000000000000:00:00000000000000000000000000000000";
+        let settings = WecomSettings {
+            enabled: true,
+            bots: vec![WecomBotConfig {
+                id: "bot-1".to_string(),
+                name: "test bot".to_string(),
+                bot_id: "ww-bot".to_string(),
+                secret: Some(tampered.to_string()),
+                workspace_dir: "/tmp".to_string(),
+                ..WecomBotConfig::default()
+            }],
+        };
+
+        let error = decrypt_wecom_settings(settings).expect_err("tampered v2 secret should fail");
+
+        assert!(
+            !error.contains(tampered),
+            "Error should not include encrypted secret material"
+        );
+    }
 
     #[test]
     fn wecom_chatid_from_peer_id_strips_internal_scope_prefixes() {

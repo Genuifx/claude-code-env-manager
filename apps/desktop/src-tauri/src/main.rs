@@ -248,8 +248,10 @@ async fn get_environments() -> Result<HashMap<String, EnvConfig>, String> {
         let decrypted: HashMap<String, EnvConfig> = cfg
             .registries
             .iter()
-            .map(|(k, v)| (k.clone(), config::get_env_with_decrypted_key(v)))
-            .collect();
+            .map(|(k, v)| {
+                config::get_env_with_decrypted_key(v).map(|env| (k.clone(), env))
+            })
+            .collect::<Result<_, String>>()?;
 
         #[cfg(debug_assertions)]
         {
