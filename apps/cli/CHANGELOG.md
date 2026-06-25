@@ -1,5 +1,22 @@
 # ccem
 
+## 2.32.0
+
+### Minor Changes
+
+- v2.32.0 release
+
+  Highlights since v2.31.0:
+
+  - feat(workspace): hide project session count by default, reveal on hover
+  - feat(desktop): craft workspace sidebar buttons
+  - fix(desktop): wire About buttons to Tauri shell open
+  - fix(server): include remote config in workspace gates
+  - fix(server): harden remote config auth
+  - fix(desktop): fail closed on local decrypt errors
+  - fix(desktop): preserve runtime permission on native handoff
+  - refactor(desktop): split sessions page actions
+
 ## 2.31.0
 
 ### Minor Changes
