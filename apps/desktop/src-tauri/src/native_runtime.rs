@@ -238,6 +238,13 @@ fn is_bypass_permission_mode(mode: &str) -> bool {
     matches!(mode, "yolo" | "bypassPermissions")
 }
 
+fn effective_native_perm_mode<'a>(
+    perm_mode: &'a str,
+    runtime_perm_mode: Option<&'a str>,
+) -> &'a str {
+    runtime_perm_mode.unwrap_or(perm_mode)
+}
+
 fn native_session_allows_dangerously_skip_permissions(options: &NativeSessionOptions) -> bool {
     options.provider == NativeProvider::Claude
         && (is_bypass_permission_mode(&options.perm_mode)
@@ -717,9 +724,10 @@ impl NativeRuntimeManager {
         let normalized_runtime_perm_mode = runtime_perm_mode
             .map(|mode| mode.trim().to_string())
             .filter(|mode| !mode.is_empty() && mode != &display_perm_mode);
-        let helper_perm_mode = normalized_runtime_perm_mode
-            .as_deref()
-            .unwrap_or(display_perm_mode.as_str());
+        let helper_perm_mode = effective_native_perm_mode(
+            display_perm_mode.as_str(),
+            normalized_runtime_perm_mode.as_deref(),
+        );
 
         self.write_to_child_with_reconnect(
             app,
@@ -904,7 +912,10 @@ impl NativeRuntimeManager {
             &record.project_dir,
             &runtime_id,
             &record.env_name,
-            Some(record.perm_mode.as_str()),
+            Some(effective_native_perm_mode(
+                record.perm_mode.as_str(),
+                record.runtime_perm_mode.as_deref(),
+            )),
             Some(provider_session_id.as_str()),
             record.provider.as_str(),
         )?;
@@ -1031,10 +1042,10 @@ impl NativeRuntimeManager {
             &HelperInputCommand::Init {
                 provider: options.provider.as_str(),
                 env_name: &options.env_name,
-                perm_mode: options
-                    .runtime_perm_mode
-                    .as_deref()
-                    .unwrap_or(options.perm_mode.as_str()),
+                perm_mode: effective_native_perm_mode(
+                    options.perm_mode.as_str(),
+                    options.runtime_perm_mode.as_deref(),
+                ),
                 allow_dangerously_skip_permissions:
                     native_session_allows_dangerously_skip_permissions(options),
                 working_dir: &options.working_dir,
@@ -2583,6 +2594,7 @@ mod tests {
             Some("provider-session-1")
         );
         assert_eq!(launches[0].runtime_id, runtime_id);
+        assert_eq!(launches[0].perm_mode.as_deref(), Some("dev"));
 
         let summary = manager.summary_for(runtime_id).expect("summary");
         assert_eq!(summary.status, "handoff");
@@ -2597,6 +2609,42 @@ mod tests {
             .expect("handles")
             .get(runtime_id)
             .is_none());
+
+        let runtime_id = "native-pending-handoff-runtime-perm";
+        let manager = manager_with_handle(runtime_id);
+        clear_terminal_launches();
+        manager
+            .update_record(runtime_id, |record| {
+                record.status = "handoff_pending".to_string();
+                record.perm_mode = "yolo".to_string();
+                record.runtime_perm_mode = Some("plan".to_string());
+                record.pending_handoff_terminal = Some(crate::terminal::TerminalType::TerminalApp);
+            })
+            .expect("set pending handoff");
+
+        manager
+            .process_helper_stdout(
+                runtime_id,
+                r#"{"type":"session_meta","provider_session_id":"provider-session-2"}"#,
+            )
+            .expect("process session meta");
+
+        let launches = take_terminal_launches();
+        assert_eq!(launches.len(), 1);
+        assert_eq!(
+            launches[0].resume_session_id.as_deref(),
+            Some("provider-session-2")
+        );
+        assert_eq!(launches[0].runtime_id, runtime_id);
+        assert_eq!(launches[0].perm_mode.as_deref(), Some("plan"));
+
+        let summary = manager.summary_for(runtime_id).expect("summary");
+        assert_eq!(summary.status, "handoff");
+        assert!(!summary.is_active);
+        assert_eq!(
+            summary.provider_session_id.as_deref(),
+            Some("provider-session-2")
+        );
     }
 
     #[test]
