@@ -153,6 +153,25 @@ pub enum SessionEventPayload {
         approved: bool,
         responder: String,
     },
+    CheckpointCreated {
+        provider: String,
+        checkpoint_id: String,
+        provider_session_id: Option<String>,
+        prompt_summary: Option<String>,
+        source: String,
+    },
+    FilesRewound {
+        provider: String,
+        checkpoint_id: String,
+        files_changed: Vec<String>,
+        insertions: Option<i64>,
+        deletions: Option<i64>,
+    },
+    FileRewindFailed {
+        provider: String,
+        checkpoint_id: String,
+        error: String,
+    },
     SessionCompleted {
         reason: String,
     },
@@ -396,6 +415,35 @@ mod tests {
         let encoded = serde_json::to_string(&payload).expect("serialize");
         let decoded: SessionEventPayload = serde_json::from_str(&encoded).expect("deserialize");
         assert_eq!(decoded, payload);
+    }
+
+    #[test]
+    fn file_checkpoint_events_round_trip() {
+        let checkpoint = SessionEventPayload::CheckpointCreated {
+            provider: "claude".to_string(),
+            checkpoint_id: "checkpoint-1".to_string(),
+            provider_session_id: Some("session-1".to_string()),
+            prompt_summary: Some("edit example.txt".to_string()),
+            source: "claude-file-checkpoint".to_string(),
+        };
+        let rewind = SessionEventPayload::FilesRewound {
+            provider: "claude".to_string(),
+            checkpoint_id: "checkpoint-1".to_string(),
+            files_changed: vec!["example.txt".to_string()],
+            insertions: Some(0),
+            deletions: Some(3),
+        };
+        let failure = SessionEventPayload::FileRewindFailed {
+            provider: "claude".to_string(),
+            checkpoint_id: "checkpoint-1".to_string(),
+            error: "No file checkpoint found for message".to_string(),
+        };
+
+        for payload in [checkpoint, rewind, failure] {
+            let encoded = serde_json::to_string(&payload).expect("serialize");
+            let decoded: SessionEventPayload = serde_json::from_str(&encoded).expect("deserialize");
+            assert_eq!(decoded, payload);
+        }
     }
 
     #[test]

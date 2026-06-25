@@ -828,6 +828,16 @@ export function useTauriCommands() {
     });
   }, []);
 
+  const rewindNativeSessionFiles = useCallback(async (
+    runtimeId: string,
+    checkpointId: string,
+  ): Promise<void> => {
+    await invoke('rewind_native_session_files', {
+      runtimeId,
+      checkpointId,
+    });
+  }, []);
+
   const getNativeSessionEvents = useCallback(async (
     runtimeId: string,
     sinceSeq?: number | null,
@@ -1419,6 +1429,7 @@ export function useTauriCommands() {
     sendNativeSessionInput,
     respondNativeSessionPermission,
     respondNativeSessionPrompt,
+    rewindNativeSessionFiles,
     getNativeSessionEvents,
     stopNativeSession,
     updateNativeSessionSettings,

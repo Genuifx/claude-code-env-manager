@@ -231,6 +231,9 @@ enum HelperInputCommand<'a> {
         #[serde(skip_serializing_if = "Option::is_none")]
         effort: Option<&'a str>,
     },
+    RewindFiles {
+        checkpoint_id: &'a str,
+    },
     Stop,
 }
 
@@ -667,6 +670,26 @@ impl NativeRuntimeManager {
                 answers,
                 annotations,
             },
+        )
+    }
+
+    pub fn rewind_files(
+        self: &Arc<Self>,
+        app: &AppHandle,
+        runtime_id: &str,
+        checkpoint_id: &str,
+    ) -> Result<(), String> {
+        let checkpoint_id = checkpoint_id.trim();
+        if checkpoint_id.is_empty() {
+            return Err("Checkpoint id is required.".to_string());
+        }
+
+        let handle = self.ensure_handle(app.clone(), runtime_id)?;
+        self.write_to_child_with_reconnect(
+            app,
+            runtime_id,
+            handle,
+            &HelperInputCommand::RewindFiles { checkpoint_id },
         )
     }
 
@@ -2406,6 +2429,17 @@ mod tests {
         let serialized = serde_json::to_value(HelperInputCommand::Stop).expect("serialize stop");
 
         assert_eq!(serialized["type"], "stop");
+    }
+
+    #[test]
+    fn helper_rewind_files_serializes_checkpoint_command() {
+        let serialized = serde_json::to_value(HelperInputCommand::RewindFiles {
+            checkpoint_id: "checkpoint-1",
+        })
+        .expect("serialize rewind files");
+
+        assert_eq!(serialized["type"], "rewind_files");
+        assert_eq!(serialized["checkpoint_id"], "checkpoint-1");
     }
 
     #[test]

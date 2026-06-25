@@ -88,6 +88,50 @@ pub(super) fn summarize_payload(payload: &SessionEventPayload) -> Option<EventSu
             title: "Permission responded".to_string(),
             text: format!("request_id: {request_id}\napproved: {approved}\nresponder: {responder}"),
         }),
+        SessionEventPayload::CheckpointCreated {
+            checkpoint_id,
+            prompt_summary,
+            ..
+        } => Some(EventSummary {
+            kind: BotBindingOutboxFrameKind::EventUpdate,
+            title: "File checkpoint".to_string(),
+            text: truncate_text(
+                &format!(
+                    "checkpoint_id: {}\nprompt: {}",
+                    checkpoint_id,
+                    prompt_summary.as_deref().unwrap_or("n/a")
+                ),
+                1200,
+            ),
+        }),
+        SessionEventPayload::FilesRewound {
+            checkpoint_id,
+            files_changed,
+            ..
+        } => Some(EventSummary {
+            kind: BotBindingOutboxFrameKind::EventUpdate,
+            title: "Files rewound".to_string(),
+            text: truncate_text(
+                &format!(
+                    "checkpoint_id: {}\nfiles_changed: {}",
+                    checkpoint_id,
+                    files_changed.len()
+                ),
+                1200,
+            ),
+        }),
+        SessionEventPayload::FileRewindFailed {
+            checkpoint_id,
+            error,
+            ..
+        } => Some(EventSummary {
+            kind: BotBindingOutboxFrameKind::Error,
+            title: "File rewind failed".to_string(),
+            text: truncate_text(
+                &format!("checkpoint_id: {checkpoint_id}\nerror: {error}"),
+                1200,
+            ),
+        }),
         SessionEventPayload::SessionCompleted { reason } => Some(EventSummary {
             kind: BotBindingOutboxFrameKind::SessionCompleted,
             title: "Session completed".to_string(),
