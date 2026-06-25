@@ -754,6 +754,7 @@
     "updateGlobalReadyLabel": "更新已下载，点击重启",
     "updateReadyTitle": "更新已就绪",
     "feedback": "反馈问题",
+    "openExternalFailed": "无法打开链接：{error}",
     "diagnosticsTitle": "Doctor 诊断",
     "diagnosticsDesc": "导出本机支持报告，包含性能事件、平台信息、工具路径和配置文件存在性，不包含 API Key 或配置内容。",
     "diagnosticsLongtask": "Long Task（>50ms 阻塞）",

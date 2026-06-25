@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { useAppStore } from '@/store';
 import { invoke } from '@tauri-apps/api/core';
+import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { toast } from 'sonner';
 import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
@@ -315,6 +316,12 @@ export function Settings() {
   useEffect(() => {
     applyPerformancePreference(performanceMode);
   }, [performanceMode]);
+
+  const handleOpenExternal = (url: string) => {
+    openExternal(url).catch((error) => {
+      toast.error(formatMessage(t('settings.openExternalFailed'), { error: String(error) }));
+    });
+  };
 
   const handleCheckUpdate = async () => {
     await checkForUpdate();
@@ -938,10 +945,10 @@ export function Settings() {
           <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${updateStatus === 'checking' ? 'animate-spin' : ''}`} />
           {updateStatus === 'checking' ? t('settings.checkingUpdate') : t('settings.checkUpdate')}
         </Button>
-        <Button variant="outline" size="sm" className="active:scale-[0.97] transition-transform" onClick={() => window.open(updateInfo?.releaseUrl ?? CCEM_REPO_URL, '_blank')}>
+        <Button variant="outline" size="sm" className="active:scale-[0.97] transition-transform" onClick={() => handleOpenExternal(updateInfo?.releaseUrl ?? CCEM_REPO_URL)}>
           GitHub
         </Button>
-        <Button variant="outline" size="sm" className="active:scale-[0.97] transition-transform" onClick={() => window.open(`${CCEM_REPO_URL}/issues`, '_blank')}>
+        <Button variant="outline" size="sm" className="active:scale-[0.97] transition-transform" onClick={() => handleOpenExternal(`${CCEM_REPO_URL}/issues`)}>
           {t('settings.feedback')}
         </Button>
       </div>
