@@ -1,18 +1,11 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
-import { LayoutGrid, List, Minimize2, Plus, Terminal, X, FolderOpen, Globe, Shield } from 'lucide-react';
+import { Minimize2, Plus, Terminal, X } from 'lucide-react';
 import { ProjectPickerModal } from '@/components/workspace/ProjectPickerModal';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import {
   SessionCard,
   SessionList,
   ArrangeBanner,
-  SessionLauncherPopover,
+  SessionsPageActions,
 } from '@/components/sessions';
 import { resolveSessionCloseAction } from '@/components/sessions/sessionCloseActions';
 import {
@@ -21,14 +14,11 @@ import {
   launchSingleSession,
 } from '@/components/sessions/sessionLaunchAction';
 import { useAppStore, type ArrangeLayout, type Session, type UnifiedSession } from '@/store';
-import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
-import { getEnvColorVar } from '@/lib/utils';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useLocale } from '../locales';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { SessionsSkeleton } from '@/components/ui/skeleton-states';
-import { PageActionsSlot } from '@/components/layout';
 import { toast } from 'sonner';
 import { shallow } from 'zustand/shallow';
 import { getRemotePlatformFromSource } from '@/lib/remote-platforms';
@@ -725,112 +715,26 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Page action buttons — portaled to titlebar */}
-      <PageActionsSlot>
-        <div className="flex items-center gap-2">
-          {/* View toggle — collapses below lg to free titlebar space */}
-          <div className="hidden lg:flex items-center gap-0.5 p-0.5 rounded-full bg-[hsl(var(--surface-raised))] border border-[hsl(var(--border-subtle))]">
-            <button
-              type="button"
-              onClick={() => setViewMode('card')}
-              className={`h-7 w-7 rounded-full flex items-center justify-center transition-all duration-150 ${
-                effectiveViewMode === 'card'
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              <LayoutGrid className="w-3.5 h-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('list')}
-              disabled={hasUnifiedOnlyInView}
-              className={`h-7 w-7 rounded-full flex items-center justify-center transition-all duration-150 ${
-                effectiveViewMode === 'list'
-                  ? 'bg-primary/10 text-primary'
-                  : hasUnifiedOnlyInView
-                    ? 'text-muted-foreground/30 cursor-not-allowed'
-                    : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              <List className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          {/* Env selector */}
-          <Select value={currentEnv} onValueChange={switchEnvironment}>
-            <SelectTrigger variant="badge" badgeColor={getEnvColorVar(currentEnv)} className="hover:bg-[hsl(var(--surface-raised))] max-w-[140px]">
-              <Globe className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">
-                <SelectValue />
-              </span>
-            </SelectTrigger>
-            <SelectContent>
-              {environments.map(env => (
-                <SelectItem key={env.name} value={env.name}>{env.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          {/* Permission selector */}
-          <Select value={permissionMode} onValueChange={(v) => setPermissionMode(v as PermissionModeName)}>
-            <SelectTrigger variant="badge" badgeColor="var(--chart-4)" className="hover:bg-[hsl(var(--surface-raised))] max-w-[140px]">
-              <Shield className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">
-                <SelectValue />
-              </span>
-            </SelectTrigger>
-            <SelectContent>
-              {Object.keys(PERMISSION_PRESETS).map((mode) => (
-                <SelectItem key={mode} value={mode}>{mode}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          {/* Directory button — text hides below xl to save width */}
-          <button
-            type="button"
-            onClick={() => setShowProjectPicker(true)}
-            className="rounded-full border border-[hsl(var(--border-subtle))] px-3 py-2 text-[13px] hover:bg-[hsl(var(--surface-raised))] active:scale-95 transition-all flex items-center gap-1.5"
-            title={launchDirDisplay || t('workspace.selectDir')}
-          >
-            <FolderOpen className="w-3.5 h-3.5 text-muted-foreground" />
-            <span className="hidden xl:inline font-mono text-xs max-w-[100px] truncate text-muted-foreground">
-              {launchDirDisplay || t('workspace.selectDir')}
-            </span>
-          </button>
-
-          {/* New Session pill — icon-only below sm */}
-          <button
-            type="button"
-            onClick={handleLaunchClick}
-            disabled={isLaunching}
-            className={`bg-primary text-white rounded-full px-3 sm:px-4 py-2 text-[14px] font-medium hover:bg-primary/90 active:scale-95 transition-all flex items-center gap-1.5${isLaunching ? ' opacity-70 cursor-not-allowed' : launched ? ' opacity-90' : ''}`}
-            title={t('sessions.newSession')}
-          >
-            <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">{isLaunching ? t('sessions.launching') : t('sessions.newSession')}</span>
-          </button>
-
-          {/* Multi-Launch — collapses below xl */}
-          <SessionLauncherPopover
-            open={launcherOpen}
-            onOpenChange={setLauncherOpen}
-            onLaunchMulti={handleMultiLaunch}
-            onBrowseAndLaunch={handleBrowseAndLaunch}
-            isLaunching={isMultiLaunching || isLaunching}
-            trigger={
-              <button
-                type="button"
-                className="hidden xl:flex rounded-full border border-[hsl(var(--border-subtle))] px-3 py-2 text-[13px] hover:bg-[hsl(var(--surface-raised))] active:scale-95 transition-all items-center gap-1.5"
-              >
-                <LayoutGrid className="w-3.5 h-3.5" />
-                {t('sessions.multiLaunch')}
-              </button>
-            }
-          />
-        </div>
-      </PageActionsSlot>
+      <SessionsPageActions
+        effectiveViewMode={effectiveViewMode}
+        hasUnifiedOnlyInView={hasUnifiedOnlyInView}
+        currentEnv={currentEnv}
+        environments={environments}
+        permissionMode={permissionMode as PermissionModeName}
+        launchDirDisplay={launchDirDisplay}
+        isLaunching={isLaunching}
+        launched={launched}
+        launcherOpen={launcherOpen}
+        isMultiLaunching={isMultiLaunching}
+        onViewModeChange={setViewMode}
+        onEnvironmentChange={switchEnvironment}
+        onPermissionModeChange={setPermissionMode}
+        onOpenProjectPicker={() => setShowProjectPicker(true)}
+        onLaunchClick={handleLaunchClick}
+        onLauncherOpenChange={setLauncherOpen}
+        onLaunchMulti={handleMultiLaunch}
+        onBrowseAndLaunch={handleBrowseAndLaunch}
+      />
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto px-5 py-5">
