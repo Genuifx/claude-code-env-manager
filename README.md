@@ -244,7 +244,7 @@ ccem load https://your-server.com/api/env?key=YOUR_KEY --secret YOUR_SECRET
 <details>
 <summary><b>Server deployment</b></summary>
 
-Server code lives in `server/`. Configure `keys.json` (access keys) and `environments.json` (env vars), then run `node index.js`. Features AES-256-GCM (v2) encryption with legacy AES-256-CBC fallback, rate limiting, and hot-reload. PM2 recommended for production.
+Server code lives in `server/` and is part of the pnpm workspace. From the repo root, run `pnpm install`, configure `server/keys.json` (access keys) and `server/environments.json` (env vars), then start it with `pnpm --filter ccem-server start`. Server tests run with `pnpm --filter ccem-server test:run`, and production dependency audit coverage is included in `pnpm audit:prod:high`. Features AES-256-GCM (v2) encryption with legacy AES-256-CBC fallback, rate limiting, and hot-reload. PM2 recommended for production.
 
 </details>
 

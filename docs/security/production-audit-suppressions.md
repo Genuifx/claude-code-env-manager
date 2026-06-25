@@ -16,6 +16,8 @@ The high advisories found at baseline `dcf1674` were remediated with root `pnpm.
 - `lodash-es`
 - `ws`
 
+The remote config server is also part of the pnpm workspace. Its production dependencies are resolved through the root `pnpm-lock.yaml` and covered by the same `pnpm audit:prod:high` CI gate; it must not carry a separate npm lockfile.
+
 ## Suppression Requirements
 
 Only add a suppression when a high or critical production advisory is confirmed unreachable or cannot be safely fixed without a larger migration. Each suppression entry must include:

@@ -243,7 +243,7 @@ ccem load https://your-server.com/api/env?key=YOUR_KEY --secret YOUR_SECRET
 <details>
 <summary><b>服务端部署</b></summary>
 
-服务端代码在 `server/` 目录。配置 `keys.json`（访问密钥）和 `environments.json`（环境变量），跑 `node index.js` 启动。支持 AES-256-GCM（v2）加密并兼容旧版 AES-256-CBC、Rate Limiting、热加载。生产环境推荐 PM2。
+服务端代码在 `server/` 目录，并已纳入 pnpm workspace。从仓库根目录执行 `pnpm install`，配置 `server/keys.json`（访问密钥）和 `server/environments.json`（环境变量），再用 `pnpm --filter ccem-server start` 启动。服务端测试用 `pnpm --filter ccem-server test:run`，生产依赖审计由 `pnpm audit:prod:high` 覆盖。支持 AES-256-GCM（v2）加密并兼容旧版 AES-256-CBC、Rate Limiting、热加载。生产环境推荐 PM2。
 
 </details>
 

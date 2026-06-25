@@ -5,10 +5,12 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "pnpm run test:run",
+    "test:run": "node --test validate-config.test.mjs http-smoke.test.mjs"
   },
   "dependencies": {
-    "express": "^4.18.2",
+    "express": "^5.2.1",
     "helmet": "^7.1.0",
     "express-rate-limit": "^7.1.5"
   }
