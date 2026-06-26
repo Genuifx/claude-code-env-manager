@@ -1,5 +1,17 @@
 # ccem
 
+## 2.33.0
+
+### Minor Changes
+
+- v2.33.0 release
+
+  Highlights since v2.32.0:
+
+  - fix(core): fail closed on malformed v2 ciphertext
+  - fix(desktop): fail closed on install key IO errors
+  - fix(server): make trust proxy explicit for remote config
+
 ## 2.32.0
 
 ### Minor Changes
