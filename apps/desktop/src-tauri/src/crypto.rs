@@ -2,7 +2,8 @@ use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit};
 use rand::Rng;
 use scrypt::{scrypt, Params};
-use std::sync::OnceLock;
+use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 
 type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
 type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
@@ -10,7 +11,11 @@ type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
 const PASSWORD: &[u8] = b"claude-code-env-manager-secret";
 const SALT: &[u8] = b"salt";
 static LOCAL_KEY: OnceLock<[u8; 32]> = OnceLock::new();
-static INSTALL_KEY: OnceLock<[u8; 32]> = OnceLock::new();
+// Install key cache: `Some(key)` only after a successful load-or-create. `None`
+// means "not yet initialized or last attempt failed" — failures are NOT cached,
+// so the next call retries from scratch. This avoids std's unstable
+// `OnceLock::get_or_try_init` while still preventing repeated IO on success.
+static INSTALL_KEY: Mutex<Option<[u8; 32]>> = Mutex::new(None);
 
 /// Derive the same 32-byte key as Node.js crypto.scryptSync (legacy, migration only)
 fn derive_key() -> [u8; 32] {
@@ -23,70 +28,110 @@ fn derive_key() -> [u8; 32] {
     })
 }
 
+/// Resolve the install key path under the user's ~/.ccem directory.
+fn install_key_path() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|h| h.join(".ccem").join(".install-key"))
+}
+
+/// Load an existing install key from `key_path`, or create a new random key
+/// and persist it (dir + file + 0600 perms on Unix) before returning.
+///
+/// Fail-closed contract: every IO / decode / chmod failure is surfaced as an
+/// `Err`. We never return an in-memory-only key — if persistence fails the
+/// caller must abort the write so no credential is encrypted with an
+/// unpersisted key that the next launch cannot recover.
+///
+/// Error messages describe the failed operation only and never include the
+/// key bytes themselves.
+fn load_or_create_install_key_at(key_path: &Path) -> Result<[u8; 32], String> {
+    if key_path.exists() {
+        let content = std::fs::read_to_string(key_path)
+            .map_err(|e| format!("Failed to read install key: {}", e))?;
+        let trimmed = content.trim();
+        let bytes = hex::decode(trimmed)
+            .map_err(|_| "Install key is not valid hex".to_string())?;
+        if bytes.len() != 32 {
+            return Err(format!(
+                "Install key has wrong length: expected 32 bytes, got {}",
+                bytes.len()
+            ));
+        }
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&bytes);
+        return Ok(arr);
+    }
+
+    let key_dir = key_path
+        .parent()
+        .ok_or_else(|| "Install key path has no parent directory".to_string())?;
+    std::fs::create_dir_all(key_dir)
+        .map_err(|e| format!("Failed to create config directory for install key: {}", e))?;
+
+    let mut rng = rand::thread_rng();
+    let new_key: [u8; 32] = rng.gen();
+    std::fs::write(key_path, hex::encode(new_key))
+        .map_err(|e| format!("Failed to persist install key: {}", e))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(key_path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("Failed to restrict install key permissions: {}", e))?;
+    }
+
+    Ok(new_key)
+}
+
 /// Get or create the per-install encryption key from ~/.ccem/.install-key.
 /// Shared with the CLI (Node.js) since both use the same config directory.
-fn get_or_create_install_key() -> [u8; 32] {
-    *INSTALL_KEY.get_or_init(|| {
-        let home = dirs::home_dir().expect("Could not find home directory");
-        let key_path = home.join(".ccem").join(".install-key");
-
-        if key_path.exists() {
-            let content = std::fs::read_to_string(&key_path).unwrap_or_default();
-            let trimmed = content.trim();
-            if let Ok(bytes) = hex::decode(trimmed) {
-                if bytes.len() == 32 {
-                    let mut arr = [0u8; 32];
-                    arr.copy_from_slice(&bytes);
-                    return arr;
-                }
-            }
-        }
-
-        // Create new random key
-        let mut rng = rand::thread_rng();
-        let new_key: [u8; 32] = rng.gen();
-        let key_dir = home.join(".ccem");
-        let _ = std::fs::create_dir_all(&key_dir);
-        let _ = std::fs::write(&key_path, hex::encode(new_key));
-
-        // Set file permissions to 0600 on Unix
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600));
-        }
-
-        new_key
-    })
+///
+/// Caching strategy: a successful key is cached for the process lifetime.
+/// A failed load/create is **not** cached — the mutex stays `None`, so the
+/// next call retries from scratch. This prevents a single IO hiccup from
+/// poisoning the entire process with an unrecoverable pseudo-key while
+/// avoiding repeated IO on the success path.
+fn get_or_create_install_key() -> Result<[u8; 32], String> {
+    let mut slot = INSTALL_KEY.lock().expect("install key mutex poisoned");
+    if let Some(cached) = *slot {
+        return Ok(cached);
+    }
+    let key_path = install_key_path()
+        .ok_or_else(|| "Could not resolve home directory for install key".to_string())?;
+    let key = load_or_create_install_key_at(&key_path)?;
+    *slot = Some(key);
+    Ok(key)
 }
 
 /// Encrypt plaintext using AES-256-GCM with install-bound key.
 /// Format: enc:v2:<nonce_hex>:<ciphertext_hex>:<tag_hex>
-pub fn encrypt(plaintext: &str) -> String {
+///
+/// Returns Err if the install key cannot be loaded/persisted or AES-GCM
+/// encryption itself fails. Empty plaintext short-circuits to an empty
+/// string (no key material needed).
+pub fn encrypt(plaintext: &str) -> Result<String, String> {
     if plaintext.is_empty() {
-        return plaintext.to_string();
+        return Ok(String::new());
     }
 
-    let key = get_or_create_install_key();
+    let key = get_or_create_install_key()?;
     let cipher = Aes256Gcm::new(&key.into());
     let nonce: [u8; 12] = rand::thread_rng().gen();
 
     let ciphertext = cipher
         .encrypt(aes_gcm::Nonce::from_slice(&nonce), plaintext.as_bytes())
-        .map_err(|e| format!("Encryption failed: {}", e))
-        .unwrap_or_default();
+        .map_err(|e| format!("Encryption failed: {}", e))?;
 
     // aes-gcm appends the 16-byte tag to the ciphertext
     let ct_len = ciphertext.len().saturating_sub(16);
     let ct = &ciphertext[..ct_len];
     let tag = &ciphertext[ct_len..];
 
-    format!(
+    Ok(format!(
         "enc:v2:{}:{}:{}",
         hex::encode(nonce),
         hex::encode(ct),
         hex::encode(tag)
-    )
+    ))
 }
 
 /// Decrypt ciphertext. Auto-detects v2 (AES-256-GCM) vs legacy (AES-256-CBC).
@@ -111,7 +156,7 @@ pub fn decrypt(ciphertext: &str) -> Result<String, String> {
             return Err("Invalid v2 encrypted format".to_string());
         }
 
-        let key = get_or_create_install_key();
+        let key = get_or_create_install_key()?;
         let cipher = Aes256Gcm::new(&key.into());
 
         // aes-gcm expects ciphertext + tag concatenated
@@ -214,7 +259,7 @@ mod tests {
     #[test]
     fn test_encrypt_decrypt_roundtrip() {
         let plaintext = "sk-ant-api03-test-key";
-        let encrypted = encrypt(plaintext);
+        let encrypted = encrypt(plaintext).expect("encrypt should succeed with valid install key");
         assert!(encrypted.starts_with("enc:v2:"));
 
         let decrypted = decrypt(&encrypted).unwrap();
@@ -230,13 +275,13 @@ mod tests {
 
     #[test]
     fn test_encrypt_empty() {
-        let result = encrypt("");
+        let result = encrypt("").expect("empty plaintext should short-circuit without key IO");
         assert_eq!(result, "");
     }
 
     #[test]
     fn test_v2_format_structure() {
-        let encrypted = encrypt("test-secret-key");
+        let encrypted = encrypt("test-secret-key").expect("encrypt should succeed");
         assert!(encrypted.starts_with("enc:v2:"));
         let parts: Vec<&str> = encrypted.split(':').collect();
         // enc, v2, nonce, ciphertext, tag
@@ -249,7 +294,7 @@ mod tests {
 
     #[test]
     fn test_tamper_detection() {
-        let encrypted = encrypt("sensitive-token-value");
+        let encrypted = encrypt("sensitive-token-value").expect("encrypt should succeed");
         let parts: Vec<&str> = encrypted.split(':').collect();
 
         // Flip a bit in the ciphertext
@@ -335,7 +380,7 @@ mod tests {
         assert_eq!(decrypted, plaintext);
 
         // Step 3: Re-encrypt with v2
-        let v2_encrypted = encrypt(&decrypted);
+        let v2_encrypted = encrypt(&decrypted).expect("encrypt should succeed");
         assert!(v2_encrypted.starts_with("enc:v2:"));
 
         // Step 4: Decrypt v2 value — should match original
@@ -375,5 +420,134 @@ mod tests {
         // Decrypt and verify
         let decrypted = decrypt_remote(&encoded, secret).unwrap();
         assert_eq!(decrypted, plaintext);
+    }
+
+    // ---- install key IO failure-mode tests ----
+    //
+    // These tests exercise `load_or_create_install_key_at` directly (bypassing
+    // the process-global OnceLock) so each scenario starts from a clean slate
+    // in its own tempdir. The contract under test: every IO / decode / chmod
+    // failure must surface as `Err`; we never return an in-memory-only key.
+
+    #[test]
+    fn install_key_create_then_read_roundtrip() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let key_path = dir.path().join(".install-key");
+        let created = load_or_create_install_key_at(&key_path).expect("first call creates key");
+
+        // File must now exist on disk with hex-encoded 32-byte key
+        assert!(key_path.exists(), "key file should be persisted");
+        let persisted = std::fs::read_to_string(&key_path).expect("read persisted key");
+        let decoded = hex::decode(persisted.trim()).expect("persisted key is hex");
+        assert_eq!(decoded.len(), 32, "persisted key has 32 bytes");
+        assert_eq!(decoded, created.to_vec(), "persisted bytes match returned key");
+
+        // Second call must load the same key (not generate a new one)
+        let reloaded = load_or_create_install_key_at(&key_path).expect("second call reads key");
+        assert_eq!(reloaded, created, "reloaded key must match created key");
+    }
+
+    #[test]
+    fn install_key_unix_permissions_are_restricted() {
+        // Only meaningful on Unix; on other platforms the chmod step is absent.
+        if !cfg!(unix) {
+            return;
+        }
+
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let key_path = dir.path().join(".install-key");
+        load_or_create_install_key_at(&key_path).expect("create key");
+
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&key_path)
+            .expect("stat key")
+            .permissions()
+            .mode();
+        let perm_bits = mode & 0o777;
+        assert_eq!(
+            perm_bits, 0o600,
+            "install key must be 0600 after creation, got {:o}",
+            perm_bits
+        );
+    }
+
+    #[test]
+    fn install_key_rejects_non_hex_content() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let key_path = dir.path().join(".install-key");
+        std::fs::write(&key_path, "this-is-not-hex!!")
+            .expect("seed malformed key file");
+
+        let error = load_or_create_install_key_at(&key_path)
+            .expect_err("non-hex key should fail");
+        assert!(
+            !error.contains("this-is-not-hex"),
+            "error must not echo file contents: {}",
+            error
+        );
+        assert!(
+            error.contains("not valid hex"),
+            "error should describe the decode failure: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn install_key_rejects_wrong_length() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let key_path = dir.path().join(".install-key");
+        // 16 bytes instead of 32 — valid hex, wrong length.
+        std::fs::write(&key_path, hex::encode([0u8; 16]))
+            .expect("seed short key");
+
+        let error = load_or_create_install_key_at(&key_path)
+            .expect_err("short key should fail");
+        assert!(
+            error.contains("wrong length") && error.contains("32"),
+            "error should mention expected length: {}",
+            error
+        );
+        // Must not include the actual bytes.
+        assert!(
+            !error.contains(&hex::encode([0u8; 16])),
+            "error must not leak key bytes"
+        );
+    }
+
+    #[test]
+    fn install_key_create_fails_when_parent_is_a_file() {
+        // If the parent "directory" is actually a regular file, create_dir_all
+        // fails — we must surface that error rather than silently writing the
+        // key to a nonsensical location.
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let parent = dir.path().join("blocking-file");
+        std::fs::write(&parent, b"blocker").expect("seed blocker file");
+        let key_path = parent.join(".install-key");
+
+        let error = load_or_create_install_key_at(&key_path)
+            .expect_err("should fail when parent is not a directory");
+        assert!(
+            error.contains("config directory"),
+            "error should describe dir-create failure: {}",
+            error
+        );
+        // Crucially: no key file was created, no key returned.
+        assert!(!key_path.exists(), "key file must not be created on failure");
+    }
+
+    #[test]
+    fn install_key_read_fails_when_path_is_a_directory() {
+        // If the key path itself is a directory, read_to_string fails.
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let key_path = dir.path().join(".install-key");
+        std::fs::create_dir(&key_path).expect("seed key-as-directory");
+
+        let error = load_or_create_install_key_at(&key_path)
+            .expect_err("should fail when key path is a directory");
+        assert!(
+            error.contains("Failed to read install key"),
+            "error should describe read failure: {}",
+            error
+        );
     }
 }

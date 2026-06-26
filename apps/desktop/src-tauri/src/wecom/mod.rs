@@ -1100,7 +1100,9 @@ pub fn write_wecom_settings(settings: &WecomSettings) -> Result<(), String> {
             .secret
             .as_ref()
             .filter(|value| !value.trim().is_empty())
-            .map(|value| crypto::encrypt(value));
+            .map(|value| crypto::encrypt(value))
+            .transpose()
+            .map_err(|e| format!("Failed to encrypt WeCom bot secret: {}", e))?;
         if bot.id.trim().is_empty() {
             bot.id = generate_req_id("bot");
         }

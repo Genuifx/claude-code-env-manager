@@ -311,7 +311,7 @@ fn add_environment(
         default_haiku_model,
         runtime_model,
         subagent_model,
-    );
+    )?;
 
     cfg.registries.insert(name, env_config);
     config::write_config(&cfg)
@@ -348,7 +348,7 @@ fn update_environment(
         default_haiku_model,
         runtime_model,
         subagent_model,
-    );
+    )?;
 
     // Remove old key if renamed
     if old_name != name {
@@ -2656,7 +2656,7 @@ fn load_from_remote(url: String, key: String, secret: String) -> Result<LoadResu
             default_haiku_model,
             runtime_model,
             env.subagent_model,
-        );
+        )?;
 
         cfg.registries.insert(final_name.clone(), env_config);
         loaded.push(LoadedEnv {

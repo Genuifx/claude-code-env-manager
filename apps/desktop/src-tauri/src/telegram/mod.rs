@@ -837,7 +837,9 @@ pub fn write_telegram_settings(settings: &TelegramSettings) -> Result<(), String
         .bot_token
         .as_ref()
         .filter(|value| !value.trim().is_empty())
-        .map(|value| crypto::encrypt(value));
+        .map(|value| crypto::encrypt(value))
+        .transpose()
+        .map_err(|e| format!("Failed to encrypt telegram bot token: {}", e))?;
     let content = serde_json::to_string_pretty(&persisted)
         .map_err(|error| format!("Failed to serialize telegram settings: {}", error))?;
     fs::write(telegram_settings_path(), content)

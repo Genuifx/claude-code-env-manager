@@ -949,7 +949,10 @@ pub fn inject_ai_env(cmd: &mut std::process::Command) {
     }
 }
 
-/// Create environment config with encrypted auth token
+/// Create environment config with encrypted auth token.
+/// Returns Err if the install key cannot be loaded/persisted or AES-GCM
+/// encryption fails — callers must propagate so no credential is saved
+/// with an unpersisted key.
 pub fn create_env_with_encrypted_key(
     base_url: Option<String>,
     auth_token: Option<String>,
@@ -958,18 +961,21 @@ pub fn create_env_with_encrypted_key(
     default_haiku_model: Option<String>,
     runtime_model: Option<String>,
     subagent_model: Option<String>,
-) -> EnvConfig {
+) -> Result<EnvConfig, String> {
     let default_sonnet_model = default_sonnet_model.or_else(|| default_opus_model.clone());
 
-    EnvConfig {
+    Ok(EnvConfig {
         base_url,
-        auth_token: auth_token.map(|k| crypto::encrypt(&k)),
+        auth_token: auth_token
+            .map(|k| crypto::encrypt(&k))
+            .transpose()
+            .map_err(|e| format!("Failed to encrypt auth token: {}", e))?,
         default_opus_model,
         default_sonnet_model,
         default_haiku_model,
         model: runtime_model.or_else(|| Some("opus".to_string())),
         subagent_model,
-    }
+    })
 }
 
 #[cfg(test)]
