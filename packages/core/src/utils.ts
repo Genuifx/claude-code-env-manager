@@ -57,15 +57,34 @@ export const decrypt = (text: string): string => {
   // v2 format: enc:v2:nonce_hex:ciphertext_hex:tag_hex
   if (text.startsWith('enc:v2:')) {
     const parts = text.split(':');
-    if (parts.length !== 5) return text; // malformed — graceful fallback
+    if (parts.length !== 5) {
+      throw new Error('Invalid enc:v2: ciphertext format');
+    }
+
+    const nonceHex = parts[2];
+    const ciphertextHex = parts[3];
+    const tagHex = parts[4];
+
+    // Validate hex encoding and expected lengths before crypto operations.
+    // Buffer.from(str, 'hex') silently truncates on invalid chars, so we must
+    // check explicitly — matching Rust crypto.rs fail-closed behavior.
+    if (!/^[0-9a-f]{24}$/i.test(nonceHex)) {
+      throw new Error('Invalid enc:v2: nonce');
+    }
+    if (!/^[0-9a-f]{32}$/i.test(tagHex)) {
+      throw new Error('Invalid enc:v2: auth tag');
+    }
+    if (ciphertextHex.length === 0 || !/^[0-9a-f]+$/i.test(ciphertextHex) || ciphertextHex.length % 2 !== 0) {
+      throw new Error('Invalid enc:v2: ciphertext');
+    }
+
     try {
       const key = getOrCreateInstallKey();
-      const nonce = Buffer.from(parts[2], 'hex');
-      const ciphertext = parts[3];
-      const tag = Buffer.from(parts[4], 'hex');
+      const nonce = Buffer.from(nonceHex, 'hex');
+      const tag = Buffer.from(tagHex, 'hex');
       const decipher = crypto.createDecipheriv(V2_ALGORITHM, key, nonce);
       decipher.setAuthTag(tag);
-      let decrypted = decipher.update(ciphertext, 'hex', 'utf8');
+      let decrypted = decipher.update(ciphertextHex, 'hex', 'utf8');
       decrypted += decipher.final('utf8');
       return decrypted;
     } catch {

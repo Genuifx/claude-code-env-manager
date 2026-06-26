@@ -66,9 +66,44 @@ describe('utils', () => {
       expect(decrypted).toBe(original);
     });
 
-    it('should return input for malformed encrypted string', () => {
+    it('should return input for malformed legacy encrypted string', () => {
       expect(decrypt('enc:invalid')).toBe('enc:invalid');
       expect(decrypt('enc:xx:yy:zz')).toBe('enc:xx:yy:zz');
+    });
+
+    it('should fail closed on malformed v2 ciphertext (wrong field count)', () => {
+      expect(() => decrypt('enc:v2:abc')).toThrow(/Invalid enc:v2:/);
+      expect(() => decrypt('enc:v2:a:b:c:d')).toThrow(/Invalid enc:v2:/);
+    });
+
+    it('should fail closed on malformed v2 (empty nonce)', () => {
+      expect(() => decrypt('enc:v2::aabb:00112233445566778899aabbccddeeff')).toThrow(/Invalid enc:v2: nonce/);
+    });
+
+    it('should fail closed on malformed v2 (wrong tag length)', () => {
+      const encrypted = encrypt('cli-test-value');
+      const parts = encrypted.split(':');
+      const badTag = '0011223344556677';
+      const tampered = `${parts[0]}:${parts[1]}:${parts[2]}:${parts[3]}:${badTag}`;
+      expect(() => decrypt(tampered)).toThrow(/Invalid enc:v2: auth tag/);
+    });
+
+    it('should fail closed on malformed v2 (non-hex nonce)', () => {
+      expect(() => decrypt('enc:v2:zzzzzzzzzzzzzzzzzzzzzzzz:aabb:00112233445566778899aabbccddeeff')).toThrow(/Invalid enc:v2: nonce/);
+    });
+
+    it('should not return malformed v2 ciphertext as plaintext', () => {
+      // Critical: CLI injects decrypt() output into env. A malformed v2 value
+      // must never be returned as-is — it would be used as a real token.
+      const malformed = 'enc:v2:truncated';
+      expect(() => decrypt(malformed)).toThrow();
+      // Verify it does NOT return the original string
+      try {
+        decrypt(malformed);
+        expect.unreachable('should have thrown');
+      } catch {
+        // expected
+      }
     });
   });
 });

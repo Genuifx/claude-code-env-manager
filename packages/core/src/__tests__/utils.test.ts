@@ -67,9 +67,42 @@ describe('utils', () => {
       expect(decrypted).toBe(original);
     });
 
-    it('should return input for malformed encrypted string', () => {
+    it('should return input for malformed legacy encrypted string', () => {
+      // Legacy format (enc:iv:ct) malformed values still fall back to plaintext
       expect(decrypt('enc:invalid')).toBe('enc:invalid');
       expect(decrypt('enc:xx:yy:zz')).toBe('enc:xx:yy:zz');
+    });
+
+    it('should fail closed on malformed v2 ciphertext (wrong field count)', () => {
+      expect(() => decrypt('enc:v2:abc')).toThrow(/Invalid enc:v2:/);
+      expect(() => decrypt('enc:v2:a:b')).toThrow(/Invalid enc:v2:/);
+      expect(() => decrypt('enc:v2:a:b:c:d')).toThrow(/Invalid enc:v2:/);
+      // Exactly 5 parts but bad nonce length still fails
+      expect(() => decrypt('enc:v2:short:abcd:abcd')).toThrow(/Invalid enc:v2:/);
+    });
+
+    it('should fail closed on malformed v2 (empty nonce)', () => {
+      // enc:v2:<empty>:<ct>:<tag> — nonce must be 24 hex chars
+      expect(() => decrypt('enc:v2::aabb:00112233445566778899aabbccddeeff')).toThrow(/Invalid enc:v2: nonce/);
+    });
+
+    it('should fail closed on malformed v2 (wrong tag length)', () => {
+      const encrypted = encrypt('test-value');
+      const parts = encrypted.split(':');
+      // Replace tag with wrong-length hex (16 chars instead of 32)
+      const badTag = '0011223344556677';
+      const tampered = `${parts[0]}:${parts[1]}:${parts[2]}:${parts[3]}:${badTag}`;
+      expect(() => decrypt(tampered)).toThrow(/Invalid enc:v2: auth tag/);
+    });
+
+    it('should fail closed on malformed v2 (non-hex nonce)', () => {
+      // 24 chars but contains non-hex characters
+      expect(() => decrypt('enc:v2:zzzzzzzzzzzzzzzzzzzzzzzz:aabb:00112233445566778899aabbccddeeff')).toThrow(/Invalid enc:v2: nonce/);
+    });
+
+    it('should fail closed on malformed v2 (non-hex ciphertext)', () => {
+      // Valid nonce and tag format, but ciphertext is not hex
+      expect(() => decrypt('enc:v2:000000000000000000000000:xyz:00112233445566778899aabbccddeeff')).toThrow(/Invalid enc:v2: ciphertext/);
     });
 
     it('should produce v2 format with GCM structure', () => {
