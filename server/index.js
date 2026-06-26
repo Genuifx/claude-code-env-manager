@@ -188,18 +188,47 @@ const encrypt = (text, secret) => {
 
 const HOST = process.env.HOST || '127.0.0.1';
 
+// ============ Trust proxy 解析 ============
+// Express `trust proxy` 接受 true/false/非负整数 hop count。
+// 我们严格解析 CCEM_TRUST_PROXY，非法值 fail-closed（抛错并拒绝启动）：
+// 直连部署下若误信 forwarded header，客户端可伪造来源 IP 绕过 cooldown/rate limit。
+// 返回值直接喂给 app.set('trust proxy', value)。
+export const parseTrustProxy = (raw) => {
+  if (raw === undefined || raw === null) return false;
+  const value = String(raw).trim();
+  if (value === '') return false;
+  const lower = value.toLowerCase();
+  if (lower === 'true') return true;
+  if (lower === 'false') return false;
+  // 仅接受非负整数 hop count
+  if (/^\d+$/.test(lower)) {
+    const n = Number(lower);
+    if (!Number.isSafeInteger(n) || n < 0) {
+      throw new Error(`Invalid CCEM_TRUST_PROXY=${raw}: hop count must be a non-negative integer`);
+    }
+    return n;
+  }
+  throw new Error(
+    `Invalid CCEM_TRUST_PROXY=${raw}. ` +
+    `Accepted values: 'true', 'false', or a non-negative integer hop count (e.g., '1').`
+  );
+};
+
 export const createApp = ({
   keysFile = KEYS_FILE,
   environmentsFile = ENVS_FILE,
   secret = getOrCreateSecret(),
   logger = log,
   now = () => Date.now(),
-  failedAttempts = new Map()
+  failedAttempts = new Map(),
+  trustProxy = false
 } = {}) => {
   const app = express();
 
-  // 信任代理（nginx 反代时获取真实 IP）
-  app.set('trust proxy', 1);
+  // 显式配置 trust proxy。默认 false（不信任任何 forwarded header）——
+  // 直连部署下若信任 X-Forwarded-For，客户端可伪造 IP 绕过基于 req.ip 的
+  // cooldown 和 rate limit。反代部署应在 startServer 入口经 CCEM_TRUST_PROXY 显式开启。
+  app.set('trust proxy', trustProxy);
 
   // ============ 安全中间件 ============
 
@@ -229,6 +258,14 @@ export const createApp = ({
     max: 10, // 每分钟最多 10 次请求
     standardHeaders: true,
     legacyHeaders: false,
+    // Suppress the xForwardedForHeader validation: it warns when trustProxy is
+    // false and a request carries X-Forwarded-For. In our default (direct)
+    // mode that's by design — the header is intentionally ignored and we have
+    // a regression test for it. Keeping the warning on would flood stderr on
+    // every spoofed-header request with no security benefit.
+    // The trustProxy validation is left enabled so trustProxy=true still
+    // logs ERR_ERL_PERMISSIVE_TRUST_PROXY (use a hop count instead).
+    validate: { xForwardedForHeader: false },
     handler: (req, res) => {
       const ip = getIp(req);
       logger('BLOCKED', ip, 'Rate limit exceeded');
@@ -323,11 +360,28 @@ export const startServer = ({
   host = HOST,
   secretFile = SECRET_FILE
 } = {}) => {
-  const app = createApp();
+  // 从环境变量解析 trust proxy。未设置 → 默认 false 并打印迁移提示，
+  // 避免反代生产部署被无提示破坏。
+  const rawEnv = process.env.CCEM_TRUST_PROXY;
+  if (rawEnv === undefined || String(rawEnv).trim() === '') {
+    console.warn(
+      '[security] CCEM_TRUST_PROXY is not set. Defaulting to "false" (do not trust X-Forwarded-For).\n' +
+      '  Direct (no reverse proxy) deployments: keep this default — clients cannot spoof their source IP.\n' +
+      '  Reverse proxy deployments (nginx, Cloudflare, etc.): set CCEM_TRUST_PROXY=1 explicitly.\n' +
+      '  Without this, all clients share the proxy IP and rate limit / auth cooldown collapse into one bucket.'
+    );
+  }
+  const trustProxy = parseTrustProxy(rawEnv);
+  const trustProxyLabel = trustProxy === true ? 'true (trust all)'
+    : trustProxy === false ? 'false (direct mode)'
+    : `hop ${trustProxy}`;
+
+  const app = createApp({ trustProxy });
   return app.listen(port, host, () => {
     console.log('================================');
     console.log(`Server started on ${host}:${port}`);
     console.log(`Auth: configured (secret stored at ${secretFile})`);
+    console.log(`Trust proxy: ${trustProxyLabel}`);
     console.log('To view the secret: cat server/.secret');
     console.log('================================');
   });

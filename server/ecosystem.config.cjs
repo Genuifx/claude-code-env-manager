@@ -11,7 +11,11 @@ module.exports = {
     env: {
       NODE_ENV: 'production',
       PORT: 13333,
-      HOST: '127.0.0.1'
+      HOST: '127.0.0.1',
+      // Set to 1 (or true) if behind nginx/Cloudflare so rate limit and auth
+      // cooldown key on the real client IP. Defaults to false (no trust) for
+      // direct deployments — prevents X-Forwarded-For spoofing.
+      // CCEM_TRUST_PROXY: 1
     },
     log_date_format: 'YYYY-MM-DD HH:mm:ss',
     error_file: 'logs/error.log',

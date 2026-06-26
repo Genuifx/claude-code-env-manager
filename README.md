@@ -246,6 +246,23 @@ ccem load https://your-server.com/api/env?key=YOUR_KEY --secret YOUR_SECRET
 
 Server code lives in `server/` and is part of the pnpm workspace. From the repo root, run `pnpm install`, configure `server/keys.json` (access keys) and `server/environments.json` (env vars), then start it with `pnpm --filter ccem-server start`. Server tests run with `pnpm --filter ccem-server test:run`, and production dependency audit coverage is included in `pnpm audit:prod:high`. Features AES-256-GCM (v2) encryption with legacy AES-256-CBC fallback, rate limiting, and hot-reload. PM2 recommended for production.
 
+**Reverse proxy and `CCEM_TRUST_PROXY`:** Auth cooldown and rate limiting are keyed on `req.ip`. By default the server does **not** trust `X-Forwarded-For` headers (`CCEM_TRUST_PROXY=false`), so clients cannot spoof their source IP to bypass cooldown. If you deploy behind a reverse proxy (nginx, Cloudflare, etc.), set `CCEM_TRUST_PROXY` explicitly so the real client IP is used:
+
+```bash
+# One proxy hop (typical for a single nginx/Cloudflare layer)
+CCEM_TRUST_PROXY=1 pnpm --filter ccem-server start
+
+# PM2 ecosystem.config.cjs — uncomment the env entry
+env: {
+  CCEM_TRUST_PROXY: 1,
+  // ...
+}
+```
+
+Accepted values: `true` (trust all — not recommended, use a hop count instead), `false` (trust none, default), or a non-negative integer hop count (e.g., `1`). An invalid value fails closed — the server refuses to start with a clear error.
+
+> **Migration note:** Previously the server trusted one proxy hop unconditionally (`trust proxy = 1`). If you deploy behind a reverse proxy, you must now set `CCEM_TRUST_PROXY=1` explicitly. Direct deployments benefit from the new default — spoofed `X-Forwarded-For` headers no longer bypass auth cooldown or rate limiting. If `CCEM_TRUST_PROXY` is unset, the server prints a startup warning to alert operators.
+
 </details>
 
 ## Setup
