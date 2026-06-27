@@ -1,5 +1,15 @@
 # ccem
 
+## 2.34.0
+
+### Minor Changes
+
+- v2.34.0 release
+
+  Highlights since v2.33.0:
+
+  - fix(desktop): harden session persistence with atomic save and cleanup
+
 ## 2.33.0
 
 ### Minor Changes
