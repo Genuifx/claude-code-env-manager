@@ -1,7 +1,8 @@
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
@@ -64,12 +65,14 @@ impl Session {
 
 pub struct SessionManager {
     pub sessions: Mutex<Vec<Session>>,
+    sessions_file_path: PathBuf,
 }
 
 impl Default for SessionManager {
     fn default() -> Self {
         Self {
             sessions: Mutex::new(vec![]),
+            sessions_file_path: get_sessions_file_path(),
         }
     }
 }
@@ -78,7 +81,10 @@ impl SessionManager {
     /// Load sessions from ~/.ccem/sessions.json, returning a new SessionManager.
     /// Returns an empty manager if the file doesn't exist or is corrupted.
     pub fn load_from_disk() -> Self {
-        let path = get_sessions_file_path();
+        Self::load_from_path(get_sessions_file_path())
+    }
+
+    fn load_from_path(path: PathBuf) -> Self {
         let sessions = if path.exists() {
             match std::fs::read_to_string(&path) {
                 Ok(content) => serde_json::from_str::<Vec<Session>>(&content)
@@ -102,7 +108,15 @@ impl SessionManager {
         };
         Self {
             sessions: Mutex::new(sessions),
+            sessions_file_path: path,
         }
+    }
+
+    fn lock_sessions(&self) -> MutexGuard<'_, Vec<Session>> {
+        self.sessions.lock().unwrap_or_else(|poisoned| {
+            eprintln!("Session manager lock was poisoned; recovering session state");
+            poisoned.into_inner()
+        })
     }
 
     fn normalize_loaded_session(mut session: Session) -> Session {
@@ -115,70 +129,74 @@ impl SessionManager {
         session
     }
 
-    /// Persist current sessions to ~/.ccem/sessions.json with atomic write.
-    /// Errors are logged but never panic.
-    fn save_to_disk(&self) {
-        let path = get_sessions_file_path();
+    fn save_to_disk_result(&self) -> Result<(), String> {
+        let path = self.sessions_file_path.clone();
         let temp_path = path.with_extension("tmp");
 
         // 在锁内完成读取-序列化-写入
-        let sessions = self.sessions.lock().unwrap().clone();
+        let sessions = self.lock_sessions().clone();
 
         if let Some(parent) = path.parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                eprintln!("Failed to create sessions dir: {}", e);
-                return;
-            }
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create sessions dir: {}", e))?;
         }
 
         // 获取文件锁
-        let lock_result = OpenOptions::new()
+        let lock_file = OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(false)
-            .open(&path);
-
-        let lock_file = match lock_result {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!("Failed to open sessions file for locking: {}", e);
-                return;
-            }
-        };
+            .open(&path)
+            .map_err(|e| format!("Failed to open sessions file for locking: {}", e))?;
 
         // 加排他锁
-        if let Err(e) = lock_file.lock_exclusive() {
-            eprintln!("Failed to acquire lock on sessions file: {}", e);
-            return;
-        }
+        lock_file
+            .lock_exclusive()
+            .map_err(|e| format!("Failed to acquire lock on sessions file: {}", e))?;
 
         // 序列化并写入临时文件
-        match serde_json::to_string_pretty(&sessions) {
-            Ok(json) => {
-                if let Err(e) = fs::write(&temp_path, json) {
-                    eprintln!("Failed to write temp sessions file: {}", e);
-                    return;
-                }
-                // 原子替换
-                if let Err(e) = fs::rename(&temp_path, &path) {
-                    eprintln!("Failed to rename temp sessions file: {}", e);
-                }
-            }
-            Err(e) => {
-                eprintln!("Failed to serialize sessions: {}", e);
-            }
-        }
+        let json = serde_json::to_string_pretty(&sessions)
+            .map_err(|e| format!("Failed to serialize sessions: {}", e))?;
+        fs::write(&temp_path, json)
+            .map_err(|e| format!("Failed to write temp sessions file: {}", e))?;
+        // 原子替换
+        fs::rename(&temp_path, &path)
+            .map_err(|e| format!("Failed to rename temp sessions file: {}", e))?;
         // 锁会在 lock_file drop 时自动释放
+        Ok(())
+    }
+
+    /// Persist current sessions to ~/.ccem/sessions.json with atomic write.
+    /// Errors are logged but never panic.
+    fn save_to_disk(&self) {
+        if let Err(e) = self.save_to_disk_result() {
+            eprintln!("{}", e);
+        }
+    }
+
+    pub fn try_add_session(&self, session: Session) -> Result<(), String> {
+        let session_id = session.id.clone();
+        {
+            let mut sessions = self.lock_sessions();
+            sessions.push(session);
+        }
+        if let Err(error) = self.save_to_disk_result() {
+            let mut sessions = self.lock_sessions();
+            sessions.retain(|s| s.id != session_id);
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub fn add_session(&self, session: Session) {
-        self.sessions.lock().unwrap().push(session);
-        self.save_to_disk();
+        if let Err(error) = self.try_add_session(session) {
+            eprintln!("Failed to add session: {}", error);
+        }
     }
 
     pub fn remove_session(&self, id: &str) {
         {
-            let mut sessions = self.sessions.lock().unwrap();
+            let mut sessions = self.lock_sessions();
             sessions.retain(|s| s.id != id);
         }
         self.save_to_disk();
@@ -186,7 +204,7 @@ impl SessionManager {
 
     pub fn update_session_status(&self, id: &str, status: &str) {
         {
-            let mut sessions = self.sessions.lock().unwrap();
+            let mut sessions = self.lock_sessions();
             if let Some(session) = sessions.iter_mut().find(|s| s.id == id) {
                 session.status = status.to_string();
             }
@@ -195,23 +213,16 @@ impl SessionManager {
     }
 
     pub fn list_sessions(&self) -> Vec<Session> {
-        self.sessions.lock().unwrap().clone()
+        self.lock_sessions().clone()
     }
 
     pub fn get_session(&self, id: &str) -> Option<Session> {
-        self.sessions
-            .lock()
-            .unwrap()
-            .iter()
-            .find(|s| s.id == id)
-            .cloned()
+        self.lock_sessions().iter().find(|s| s.id == id).cloned()
     }
 
     /// Get all running sessions with PIDs for monitoring
     pub fn get_running_sessions_with_pid(&self) -> Vec<(String, u32)> {
-        self.sessions
-            .lock()
-            .unwrap()
+        self.lock_sessions()
             .iter()
             .filter(|s| s.status == "running" && s.pid.is_some())
             .map(|s| (s.id.clone(), s.pid.unwrap()))
@@ -220,9 +231,7 @@ impl SessionManager {
 
     /// Get all running sessions (including those without PID)
     pub fn get_running_sessions(&self) -> Vec<Session> {
-        self.sessions
-            .lock()
-            .unwrap()
+        self.lock_sessions()
             .iter()
             .filter(|s| s.status == "running")
             .cloned()
@@ -232,7 +241,7 @@ impl SessionManager {
     /// Update the iTerm2 session ID for a session
     pub fn update_session_iterm_id(&self, id: &str, iterm_session_id: &str) {
         {
-            let mut sessions = self.sessions.lock().unwrap();
+            let mut sessions = self.lock_sessions();
             if let Some(session) = sessions.iter_mut().find(|s| s.id == id) {
                 session.iterm_session_id = Some(iterm_session_id.to_string());
             }
@@ -243,7 +252,7 @@ impl SessionManager {
     /// Update the window ID for a session (used after arrange merges windows)
     pub fn update_session_window_id(&self, id: &str, window_id: &str) {
         {
-            let mut sessions = self.sessions.lock().unwrap();
+            let mut sessions = self.lock_sessions();
             if let Some(session) = sessions.iter_mut().find(|s| s.id == id) {
                 session.window_id = Some(window_id.to_string());
             }
@@ -259,7 +268,7 @@ impl SessionManager {
         iterm_session_id: Option<&str>,
     ) {
         {
-            let mut sessions = self.sessions.lock().unwrap();
+            let mut sessions = self.lock_sessions();
             if let Some(session) = sessions.iter_mut().find(|s| s.id == id) {
                 session.terminal_type = Some(terminal_type.to_string());
                 session.window_id = window_id.map(str::to_string);
@@ -271,7 +280,7 @@ impl SessionManager {
 
     pub fn update_session_pid(&self, id: &str, pid: Option<u32>) {
         {
-            let mut sessions = self.sessions.lock().unwrap();
+            let mut sessions = self.lock_sessions();
             if let Some(session) = sessions.iter_mut().find(|s| s.id == id) {
                 session.pid = pid;
             }
@@ -281,9 +290,7 @@ impl SessionManager {
 
     /// Get all running sessions that have terminal metadata
     pub fn get_running_terminal_sessions(&self) -> Vec<Session> {
-        self.sessions
-            .lock()
-            .unwrap()
+        self.lock_sessions()
             .iter()
             .filter(|s| s.status == "running" && s.terminal_type.is_some() && !s.is_tmux_backed())
             .cloned()
@@ -296,7 +303,7 @@ impl SessionManager {
     /// - Marks orphaned sessions as stopped or interrupted
     pub fn validate_and_reconcile(&self) {
         let has_running_sessions = {
-            let mut sessions = self.sessions.lock().unwrap();
+            let mut sessions = self.lock_sessions();
             sessions.retain(|s| s.status == "running");
             !sessions.is_empty()
         };
@@ -310,7 +317,7 @@ impl SessionManager {
         let active_terminal_windows = terminal::list_terminal_app_windows();
 
         {
-            let mut sessions = self.sessions.lock().unwrap();
+            let mut sessions = self.lock_sessions();
 
             // Validate each remaining running session
             for session in sessions.iter_mut() {
@@ -418,9 +425,7 @@ pub fn cleanup_stale_exit_files_except(manager: &SessionManager) {
     }
 
     let known_ids: std::collections::HashSet<String> = manager
-        .sessions
-        .lock()
-        .unwrap()
+        .lock_sessions()
         .iter()
         .map(|s| s.id.clone())
         .collect();
@@ -541,7 +546,26 @@ fn project_label(working_dir: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{tmux_session_has_recoverable_target, Session};
+    use super::{tmux_session_has_recoverable_target, Session, SessionManager};
+    use std::sync::Arc;
+
+    fn sample_session(id: &str) -> Session {
+        Session {
+            id: id.to_string(),
+            pid: Some(42),
+            client: "claude".to_string(),
+            env_name: "glm-official".to_string(),
+            config_source: Some("ccem".to_string()),
+            perm_mode: "dev".to_string(),
+            working_dir: "/tmp/project".to_string(),
+            start_time: "2026-06-26T00:00:00Z".to_string(),
+            status: "running".to_string(),
+            terminal_type: Some("embedded".to_string()),
+            window_id: None,
+            iterm_session_id: None,
+            tmux_target: Some(format!("ccem-{}:main", id.replace('-', ""))),
+        }
+    }
 
     #[test]
     fn tmux_backed_session_with_target_survives_pidless_startup_reconcile() {
@@ -562,5 +586,49 @@ mod tests {
         };
 
         assert!(tmux_session_has_recoverable_target(&session));
+    }
+
+    #[test]
+    fn try_add_session_persists_to_configured_path() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let sessions_path = temp_dir.path().join("sessions.json");
+        let manager = SessionManager::load_from_path(sessions_path.clone());
+
+        manager
+            .try_add_session(sample_session("session-1782480915757"))
+            .expect("session should persist");
+
+        let persisted = std::fs::read_to_string(&sessions_path).expect("sessions file");
+        let sessions: Vec<Session> =
+            serde_json::from_str(&persisted).expect("persisted sessions json");
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "session-1782480915757");
+    }
+
+    #[test]
+    fn try_add_session_recovers_poisoned_session_lock() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let sessions_path = temp_dir.path().join("sessions.json");
+        let manager = Arc::new(SessionManager::load_from_path(sessions_path.clone()));
+        let poison_target = Arc::clone(&manager);
+
+        let _ = std::thread::spawn(move || {
+            let _guard = poison_target
+                .sessions
+                .lock()
+                .expect("lock before poisoning");
+            panic!("poison session manager lock for regression test");
+        })
+        .join();
+
+        manager
+            .try_add_session(sample_session("session-1782480920439"))
+            .expect("poisoned lock should be recovered");
+
+        let persisted = std::fs::read_to_string(&sessions_path).expect("sessions file");
+        let sessions: Vec<Session> =
+            serde_json::from_str(&persisted).expect("persisted sessions json");
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "session-1782480920439");
     }
 }

@@ -190,8 +190,28 @@ impl InteractiveRuntimeManager {
             alive: AtomicBool::new(true),
         });
 
-        self.insert_handle(session.id.clone(), handle.clone())?;
-        session_manager.add_session(session.clone());
+        if let Err(error) = self.insert_handle(session.id.clone(), handle.clone()) {
+            if let Err(stop_error) = self.tmux.stop_session(&session.id) {
+                eprintln!(
+                    "Failed to clean tmux session {} after registration error: {}",
+                    session.id, stop_error
+                );
+            }
+            return Err(error);
+        }
+        if let Err(error) = session_manager.try_add_session(session.clone()) {
+            if let Err(stop_error) = self.tmux.stop_session(&session.id) {
+                eprintln!(
+                    "Failed to clean tmux session {} after persistence error: {}",
+                    session.id, stop_error
+                );
+            }
+            self.remove_session(&session.id);
+            return Err(format!(
+                "Interactive session started but could not be saved: {}",
+                error
+            ));
+        }
         self.persist_state_best_effort();
 
         self.append_output(
