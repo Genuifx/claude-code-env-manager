@@ -99,7 +99,7 @@ function ProjectTreeSkeleton() {
   );
 }
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 6;
 const MAX_LABEL_LENGTH = 24;
 const PINNED_SESSION_KEYS_STORAGE_KEY = 'ccem-workspace-pinned-sessions';
 
@@ -1017,15 +1017,6 @@ export const ProjectTree = memo(function ProjectTree({
                       {node.projectName}
                     </span>
                   </button>
-                  <span
-                    className={cn(
-                      'pointer-events-none absolute top-1/2 z-10 -translate-y-1/2 inline-flex items-center justify-center rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-opacity duration-150',
-                      'opacity-0 group-hover/project:opacity-100',
-                      onCreateForProject ? 'right-9' : 'right-2'
-                    )}
-                  >
-                    {node.sessions.length}
-                  </span>
                   {onCreateForProject && (
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -1071,13 +1062,18 @@ export const ProjectTree = memo(function ProjectTree({
                           </button>
                         )}
                         {hasMore && (
-                          <button
-                            type="button"
-                            onClick={() => loadMore(node.project)}
-                            className="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors"
-                          >
-                            {t('workspace.loadMore')}
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => loadMore(node.project)}
+                              className="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              {t('workspace.loadMore')}
+                            </button>
+                            <span className="ml-auto text-[10px] tabular-nums text-muted-foreground/50">
+                              {visible.length}/{node.sessions.length}
+                            </span>
+                          </>
                         )}
                       </div>
                     )}
