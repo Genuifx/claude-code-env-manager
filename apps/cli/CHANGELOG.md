@@ -1,5 +1,11 @@
 # ccem
 
+## 2.36.0
+
+### Minor Changes
+
+- Minor release with workspace usage stats refresh on streak capsule click, session count relocation, dark mode visual polish, and native claude runtime retention while idle.
+
 ## 2.34.0
 
 ### Minor Changes
