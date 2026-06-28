@@ -80,7 +80,7 @@ function NavButton({
         'sidebar-nav-item group relative w-full flex items-center gap-2.5 px-2.5 h-[30px] rounded-lg',
         'transition-colors duration-[var(--duration-fast)]',
         isActive
-          ? 'sidebar-nav-active text-primary'
+          ? 'sidebar-nav-active text-foreground'
           : 'text-sidebar-foreground hover:text-foreground hover:bg-white/[0.06]'
       )}
     >
@@ -119,7 +119,7 @@ export function SideRail({ activeTab, onTabChange, onTabPrefetch, glassMuted }: 
         {navGroupDefs.map((group, gi) => (
           <div key={gi}>
             {group.titleKey && (
-              <div className="px-2.5 mb-1.5 text-[11px] font-semibold text-muted-foreground/50 uppercase tracking-wider">
+              <div className="px-2.5 mb-1.5 text-[11px] font-semibold text-sidebar-foreground/40 uppercase tracking-wider">
                 {t(group.titleKey)}
               </div>
             )}
@@ -140,7 +140,7 @@ export function SideRail({ activeTab, onTabChange, onTabPrefetch, glassMuted }: 
       </nav>
 
       {/* Bottom items */}
-      <div className="flex flex-col gap-0.5 px-3 py-3 border-t border-white/[0.06]">
+      <div className="flex flex-col gap-0.5 px-3 py-3 border-t border-white/[0.08]">
         {/* <PetEntry /> */}
         {bottomItemDefs.map((item) => (
           <NavButton

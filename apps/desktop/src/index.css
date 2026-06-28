@@ -75,12 +75,12 @@
     --radius-xl: 1rem;
     --radius-2xl: 1.5rem;
 
-    /* Sidebar (macOS System Settings style - very dark) */
-    --sidebar: 30 5% 8%;
-    --sidebar-foreground: 0 0% 74%;
+    /* Sidebar — pure neutral black, no hue */
+    --sidebar: 0 0% 7%;
+    --sidebar-foreground: 0 0% 62%;
     --sidebar-active: 211 100% 50%;
     --sidebar-active-foreground: 0 0% 100%;
-    --sidebar-border: 30 5% 14%;
+    --sidebar-border: 0 0% 14%;
 
     /* Chart colors (cool blue spectrum) */
     --chart-1: 211 100% 58%;
@@ -95,7 +95,7 @@
     --glass-saturate: 100%;
     --glass-bg: 30 5% 12%;
     --glass-bg-opacity: 1;
-    --glass-sidebar-bg: 30 5% 8%;
+    --glass-sidebar-bg: 0 0% 7%;
     --glass-sidebar-opacity: 1;
     --glass-sidebar-blur: 0px;
     --glass-sidebar-saturate: 100%;
@@ -386,6 +386,13 @@
 /* Fourth orb — removed, Apple uses minimal color */
 .ambient-orb-4 {
   display: none;
+}
+
+/* Dark mode: kill ambient orbs — bright blobs on dark = mud */
+:root:not(.light) .ambient-bg::before,
+:root:not(.light) .ambient-bg::after,
+:root:not(.light) .ambient-orb-3 {
+  opacity: 0;
 }
 
 /* ========================================================= */
@@ -1358,6 +1365,13 @@
   opacity: 0;
 }
 
+/* --- Dark mode sidebar panel: flat, opaque, pure neutral --- */
+:root:not(.light) .glass-sidebar-panel {
+  background: hsl(0 0% 7%);
+  border-color: hsl(0 0% 14% / 0.5);
+  box-shadow: none;
+}
+
 .sidebar-aurora {
   position: absolute;
   inset: 0;
@@ -1377,7 +1391,7 @@
   -webkit-backdrop-filter: blur(80px) saturate(220%);
 }
 
-.dark .sidebar-aurora {
+:root:not(.light) .sidebar-aurora {
   opacity: 0;
 }
 
@@ -1747,10 +1761,7 @@
   user-select: none;
 }
 .sidebar-nav-active {
-  background: hsl(var(--sidebar-active) / 0.12);
-  box-shadow:
-    inset 0 0.5px 0 0 hsl(var(--glass-inset-highlight) / 0.08),
-    0 0.5px 1.5px hsl(var(--glass-shadow-base) / 0.08);
+  background: hsl(0 0% 100% / 0.07);
 }
 .light .sidebar-nav-active {
   background: hsl(var(--sidebar-active) / 0.10);

@@ -76,7 +76,7 @@ function PresetProviderIcon({ entry }: { entry?: PresetIconEntry }) {
 
   if (entry.contrastSurface === "dark") {
     return (
-      <span className="inline-flex items-center justify-center rounded-md bg-black/75 p-0.5 dark:bg-black/50">
+      <span className="inline-flex items-center justify-center rounded-md bg-black/75 p-0.5 dark:bg-transparent dark:p-0">
         {iconEl}
       </span>
     );

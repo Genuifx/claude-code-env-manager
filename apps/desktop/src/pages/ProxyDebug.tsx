@@ -73,16 +73,16 @@ const REDACTED_MARKER = '[REDACTED]';
 
 function HeaderMapView({ data }: { data: Record<string, string> }) {
   const entries = Object.entries(data);
-  if (entries.length === 0) return <div className="text-[14px] text-[#86868b] dark:text-[#a1a1a6]">-</div>;
+  if (entries.length === 0) return <div className="text-[14px] text-muted-foreground">-</div>;
   return (
-    <div className="max-h-48 space-y-1 overflow-auto rounded-lg border border-[#e0e0e0] bg-[#f5f5f7] p-3 dark:border-[#3a3a3c] dark:bg-[#1c1c1e]">
+    <div className="max-h-48 space-y-1 overflow-auto rounded-lg border border-border bg-muted p-3">
       {entries.map(([key, value]) => {
         const isRedacted = value === REDACTED_MARKER;
         return (
-          <div key={key} className="font-mono text-xs break-all leading-5 text-[#86868b] dark:text-[#a1a1a6]">
-            <span className="text-[#1d1d1f] dark:text-[#f5f5f7]">{key}</span>:{' '}
+          <div key={key} className="font-mono text-xs break-all leading-5 text-muted-foreground">
+            <span className="text-foreground">{key}</span>:{' '}
             {isRedacted ? (
-              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+              <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning">
                 redacted
               </span>
             ) : value}
@@ -215,48 +215,32 @@ export function ProxyDebug() {
   return (
     <div className="space-y-6">
       {/* --- HEADER --- */}
-      <div className="rounded-[18px] border border-[#e0e0e0] bg-white p-5 dark:border-[#3a3a3c] dark:bg-[#272729]">
+      <div className="rounded-xl border border-border bg-card p-5">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h3 className="text-[17px] font-semibold tracking-[-0.374px] text-[#1d1d1f] dark:text-[#f5f5f7]">
+            <h3 className="text-[17px] font-semibold tracking-[-0.374px] text-foreground">
               {t('proxyDebug.runtime')}
             </h3>
-            <p className="mt-1 text-[14px] tracking-[-0.224px] text-[#86868b] dark:text-[#a1a1a6]">
+            <p className="mt-1 text-[14px] tracking-[-0.224px] text-muted-foreground">
               {state?.running
                 ? `${t('proxyDebug.runningAt')} ${state.baseUrl || '-'} (${t('proxyDebug.routes')}: ${state.routeCount})`
                 : t('proxyDebug.notRunning')}
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setConfigDialogOpen(true)}
-              title={t('proxyDebug.config')}
-              aria-label={t('proxyDebug.config')}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-[#1d1d1f] text-white active:scale-95 dark:bg-[#f5f5f7] dark:text-[#1d1d1f]"
-            >
+            <Button variant="secondary" size="icon" className="h-8 w-8" onClick={() => setConfigDialogOpen(true)} title={t('proxyDebug.config')} aria-label={t('proxyDebug.config')}>
               <Settings className="h-4 w-4" />
-            </button>
-            <button
-              onClick={() => refreshState()}
-              disabled={loadingState}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#1d1d1f] px-3 text-[14px] tracking-[-0.224px] text-white active:scale-95 disabled:opacity-50 dark:bg-[#f5f5f7] dark:text-[#1d1d1f]"
-            >
+            </Button>
+            <Button variant="secondary" size="icon" className="h-8 w-8" onClick={() => refreshState()} disabled={loadingState} title={t('proxyDebug.refresh')}>
               <RotateCw className="h-3.5 w-3.5" />
-              {t('proxyDebug.refresh')}
-            </button>
-            <button
-              onClick={handleClearLogs}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-red-300 px-3 text-[14px] tracking-[-0.224px] text-red-600 active:scale-95 dark:border-red-800 dark:text-red-400"
-            >
+            </Button>
+            <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={handleClearLogs}>
               <Trash2 className="h-3.5 w-3.5" />
               {t('proxyDebug.clearLogs')}
-            </button>
-            <button
-              onClick={handleToggle}
-              className="inline-flex h-8 items-center rounded-full bg-[#0066cc] px-5 text-[14px] font-medium tracking-[-0.224px] text-white active:scale-95"
-            >
+            </Button>
+            <Button onClick={handleToggle}>
               {state?.enabled ? t('proxyDebug.disable') : t('proxyDebug.enable')}
-            </button>
+            </Button>
           </div>
         </div>
         <div className="mt-5 grid grid-cols-3 gap-5">
@@ -311,18 +295,18 @@ export function ProxyDebug() {
                     value={parsedDialogBody.jsonValue}
                     labels={{ topLevelKeys: t('proxyDebug.topLevelKeys'), messagesCount: t('proxyDebug.messagesCount'), inputPreview: t('proxyDebug.inputPreview') }}
                   />
-                  <pre className="min-h-0 flex-1 overflow-auto rounded-lg border border-[#e0e0e0] bg-[#f5f5f7] p-3 font-mono text-xs whitespace-pre-wrap break-words dark:border-[#3a3a3c] dark:bg-[#1c1c1e]">
+                  <pre className="min-h-0 flex-1 overflow-auto rounded-lg border border-border bg-muted p-3 font-mono text-xs whitespace-pre-wrap break-words">
                     {parsedDialogBody.prettyText}
                   </pre>
                 </div>
               ) : (
-                <pre className="min-h-0 flex-1 overflow-auto rounded-lg border border-[#e0e0e0] bg-[#f5f5f7] p-3 font-mono text-xs whitespace-pre-wrap break-words dark:border-[#3a3a3c] dark:bg-[#1c1c1e]">
+                <pre className="min-h-0 flex-1 overflow-auto rounded-lg border border-border bg-muted p-3 font-mono text-xs whitespace-pre-wrap break-words">
                   {parsedDialogBody.prettyText}
                 </pre>
               )}
             </TabsContent>
             <TabsContent value="raw" className="mt-3 flex-1 min-h-0">
-              <pre className="min-h-0 flex-1 overflow-auto rounded-lg border border-[#e0e0e0] bg-[#f5f5f7] p-3 font-mono text-xs whitespace-pre dark:border-[#3a3a3c] dark:bg-[#1c1c1e]">
+              <pre className="min-h-0 flex-1 overflow-auto rounded-lg border border-border bg-muted p-3 font-mono text-xs whitespace-pre">
                 {parsedDialogBody.rawText}
               </pre>
             </TabsContent>
@@ -338,28 +322,28 @@ export function ProxyDebug() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <label className="text-[14px] text-[#86868b] dark:text-[#a1a1a6]">{t('proxyDebug.codexUpstream')}</label>
+              <label className="text-[14px] text-muted-foreground">{t('proxyDebug.codexUpstream')}</label>
               <Input value={codexUpstreamBaseUrl} onChange={(e) => setCodexUpstreamBaseUrl(e.target.value)} placeholder="https://api.openai.com/v1" />
             </div>
             <div className="space-y-2">
-              <label className="text-[14px] text-[#86868b] dark:text-[#a1a1a6]">{t('proxyDebug.recordMode')}</label>
+              <label className="text-[14px] text-muted-foreground">{t('proxyDebug.recordMode')}</label>
               <select
                 value={recordMode}
                 onChange={(e) => setRecordMode(e.target.value)}
-                className="w-full h-9 rounded-lg border border-[#e0e0e0] bg-white px-3 text-sm dark:border-[#3a3a3c] dark:bg-[#272729] dark:text-[#f5f5f7]"
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
               >
                 <option value="full">{t('proxyDebug.recordModeFull')}</option>
                 <option value="metadata">{t('proxyDebug.recordModeMeta')}</option>
               </select>
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={handleSaveConfig} className="inline-flex h-8 items-center rounded-full bg-[#0066cc] px-5 text-[14px] font-medium text-white active:scale-95">
+              <Button onClick={handleSaveConfig}>
                 {t('proxyDebug.saveConfig')}
-              </button>
-              <button onClick={handleClearLogs} className="inline-flex h-8 items-center rounded-lg border border-[#e0e0e0] px-3 text-[14px] text-[#1d1d1f] active:scale-95 dark:border-[#3a3a3c] dark:text-[#f5f5f7]">
+              </Button>
+              <Button variant="outline" onClick={handleClearLogs}>
                 {t('proxyDebug.clearLogs')}
-              </button>
-              <span className="ml-auto text-[12px] text-[#86868b] dark:text-[#a1a1a6]">
+              </Button>
+              <span className="ml-auto text-[12px] text-muted-foreground">
                 {t('proxyDebug.logQuota')}: {formatBytes(state?.logMaxBytes ?? 0)}
               </span>
             </div>
@@ -385,29 +369,24 @@ function TrafficList({
   nextCursor: string | undefined;
 }) {
   return (
-    <section className="flex min-h-[560px] flex-col overflow-hidden rounded-[18px] border border-[#e0e0e0] bg-white dark:border-[#3a3a3c] dark:bg-[#272729]">
-      <div className="flex items-center justify-between border-b border-[#e0e0e0] px-5 py-4 dark:border-[#3a3a3c]">
+    <section className="flex min-h-[560px] flex-col overflow-hidden rounded-xl border border-border bg-card">
+      <div className="flex items-center justify-between border-b border-border px-5 py-4">
         <div>
-          <h3 className="text-[15px] font-semibold tracking-[-0.374px] text-[#1d1d1f] dark:text-[#f5f5f7]">
+          <h3 className="text-[15px] font-semibold tracking-[-0.374px] text-foreground">
             {t('proxyDebug.traffic')}
           </h3>
-          <p className="mt-0.5 text-[12px] tracking-[-0.12px] text-[#86868b] dark:text-[#a1a1a6]">
+          <p className="mt-0.5 text-[12px] tracking-[-0.12px] text-muted-foreground">
             {state?.running ? state.baseUrl || '-' : t('proxyDebug.notRunning')}
           </p>
         </div>
-        <button
-          onClick={() => refreshTraffic()}
-          disabled={loadingTraffic}
-          className="inline-flex h-7 items-center gap-1 rounded-lg bg-[#1d1d1f] px-2.5 text-[12px] text-white active:scale-95 disabled:opacity-50 dark:bg-[#f5f5f7] dark:text-[#1d1d1f]"
-        >
+        <Button variant="secondary" size="icon" className="h-7 w-7" onClick={() => refreshTraffic()} disabled={loadingTraffic} title={t('proxyDebug.refresh')}>
           <RotateCw className="h-3 w-3" />
-          {t('proxyDebug.refresh')}
-        </button>
+        </Button>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto p-3">
         {traffic.length === 0 && (
-          <div className="flex h-full min-h-[300px] items-center justify-center text-[14px] text-[#86868b] dark:text-[#a1a1a6]">
+          <div className="flex h-full min-h-[300px] items-center justify-center text-[14px] text-muted-foreground">
             {t('proxyDebug.noTraffic')}
           </div>
         )}
@@ -419,24 +398,24 @@ function TrafficList({
                 key={item.id}
                 onClick={() => setSelectedId(item.id)}
                 className={cn(
-                  'group w-full rounded-xl border px-4 py-3 text-left transition-all active:scale-[0.98]',
+                  'group w-full rounded-lg border px-4 py-3 text-left transition-all active:scale-[0.98]',
                   active
-                    ? 'border-2 border-[#0066cc] bg-[#f5f5f7] dark:bg-[#1c1c1e]'
-                    : 'border-[#e0e0e0] bg-white hover:bg-[#f5f5f7] dark:border-[#3a3a3c] dark:bg-[#272729] dark:hover:bg-[#1c1c1e]',
+                    ? 'border-primary bg-muted'
+                    : 'border-transparent hover:bg-muted/60',
                 )}
                 style={{ contentVisibility: 'auto', containIntrinsicSize: '96px' }}
               >
                 <div className="flex items-start gap-3">
                   <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                     <div className="flex items-center gap-2">
-                      <span className="rounded bg-[#f5f5f7] px-1.5 py-0.5 font-mono text-[11px] font-semibold uppercase text-[#1d1d1f] dark:bg-[#3a3a3c] dark:text-[#f5f5f7]">
+                      <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] font-semibold uppercase text-foreground">
                         {item.method}
                       </span>
-                      <span className="min-w-0 flex-1 truncate text-[13px] text-[#1d1d1f] dark:text-[#f5f5f7]">
+                      <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
                         {item.path}
                       </span>
                     </div>
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[#86868b] dark:text-[#a1a1a6]">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
                       <span>{formatTime(item.timestamp)}</span>
                       <span className="opacity-40">·</span>
                       <span>{item.client}</span>
@@ -444,7 +423,7 @@ function TrafficList({
                       <span>{item.durationMs} ms</span>
                     </div>
                     {item.promptPreview && (
-                      <div className="line-clamp-2 text-[12px] leading-5 text-[#86868b] dark:text-[#a1a1a6]">
+                      <div className="line-clamp-2 text-[12px] leading-5 text-muted-foreground">
                         {item.promptPreview}
                       </div>
                     )}
@@ -452,8 +431,8 @@ function TrafficList({
                   <span className={cn(
                     'rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums',
                     item.status >= 400
-                      ? 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
-                      : 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400',
+                      ? 'bg-destructive/10 text-destructive'
+                      : 'bg-success/10 text-success',
                   )}>
                     {item.status}
                   </span>
@@ -465,14 +444,10 @@ function TrafficList({
       </div>
 
       {nextCursor && (
-        <div className="border-t border-[#e0e0e0] p-3 dark:border-[#3a3a3c]">
-          <button
-            onClick={() => refreshTraffic(nextCursor)}
-            disabled={loadingTraffic}
-            className="w-full rounded-full bg-[#0066cc] py-2 text-[14px] text-white active:scale-95 disabled:opacity-50"
-          >
+        <div className="border-t border-border p-3">
+          <Button className="w-full" onClick={() => refreshTraffic(nextCursor)} disabled={loadingTraffic}>
             {t('proxyDebug.loadMore')}
-          </button>
+          </Button>
         </div>
       )}
     </section>
@@ -488,25 +463,25 @@ function DetailPanel({
   openBodyDialog: (title: string, body: string | undefined) => void;
 }) {
   return (
-    <section className="flex min-h-[560px] flex-col overflow-hidden rounded-[18px] border border-[#e0e0e0] bg-white dark:border-[#3a3a3c] dark:bg-[#272729]">
-      <div className="flex items-center justify-between border-b border-[#e0e0e0] px-5 py-4 dark:border-[#3a3a3c]">
+    <section className="flex min-h-[560px] flex-col overflow-hidden rounded-xl border border-border bg-card">
+      <div className="flex items-center justify-between border-b border-border px-5 py-4">
         <div>
-          <h3 className="text-[15px] font-semibold tracking-[-0.374px] text-[#1d1d1f] dark:text-[#f5f5f7]">
+          <h3 className="text-[15px] font-semibold tracking-[-0.374px] text-foreground">
             {t('proxyDebug.detail')}
           </h3>
-          <p className="mt-0.5 text-[12px] tracking-[-0.12px] text-[#86868b] dark:text-[#a1a1a6]">
+          <p className="mt-0.5 text-[12px] tracking-[-0.12px] text-muted-foreground">
             {selectedItem ? `${selectedItem.method} ${selectedItem.path}` : t('proxyDebug.selectOne')}
           </p>
         </div>
         {selectedItem && (
-          <span className="rounded-full border border-[#e0e0e0] px-2.5 py-1 text-[11px] text-[#86868b] dark:border-[#3a3a3c] dark:text-[#a1a1a6]">
+          <span className="rounded-full border border-border px-2.5 py-1 text-[11px] text-muted-foreground">
             {selectedItem.client}
           </span>
         )}
       </div>
 
       {!selectedItem ? (
-        <div className="flex flex-1 items-center justify-center text-[14px] text-[#86868b] dark:text-[#a1a1a6]">
+        <div className="flex flex-1 items-center justify-center text-[14px] text-muted-foreground">
           {t('proxyDebug.selectOne')}
         </div>
       ) : (
@@ -519,7 +494,7 @@ function DetailPanel({
           </div>
 
           <DetailSection title={t('proxyDebug.reduced')}>
-            <div className="rounded-lg border border-[#e0e0e0] bg-[#f5f5f7] p-3 text-[14px] leading-6 text-[#1d1d1f] whitespace-pre-wrap break-words dark:border-[#3a3a3c] dark:bg-[#1c1c1e] dark:text-[#f5f5f7]">
+            <div className="rounded-lg border border-border bg-muted p-3 text-[14px] leading-6 text-foreground whitespace-pre-wrap break-words">
               {detail?.reduced?.finalText || detail?.item.reduced?.finalText || '-'}
             </div>
           </DetailSection>
@@ -553,10 +528,10 @@ function DetailPanel({
 function Metric({ title, value }: { title: string; value: string }) {
   return (
     <div>
-      <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[#86868b] dark:text-[#a1a1a6]">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
         {title}
       </div>
-      <div className="mt-1 text-[17px] font-semibold tabular-nums text-[#1d1d1f] dark:text-[#f5f5f7]">
+      <div className="mt-1 text-[17px] font-semibold tabular-nums text-foreground">
         {value}
       </div>
     </div>
@@ -567,7 +542,7 @@ function DetailSection({ title, action, children }: { title: string; action?: Re
   return (
     <section>
       <div className="mb-2 flex items-center justify-between">
-        <h4 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[#86868b] dark:text-[#a1a1a6]">
+        <h4 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
           {title}
         </h4>
         {action}
@@ -582,12 +557,12 @@ function BodyPreview({ title, body, actionLabel, onOpen }: { title: string; body
     <DetailSection
       title={title}
       action={
-        <button onClick={onOpen} className="text-[12px] text-[#0066cc] active:scale-95 dark:text-[#2997ff]">
+        <button onClick={onOpen} className="text-[12px] text-primary active:scale-95">
           {actionLabel}
         </button>
       }
     >
-      <pre className="max-h-40 overflow-auto rounded-lg border border-[#e0e0e0] bg-[#f5f5f7] p-3 font-mono text-xs leading-5 text-[#1d1d1f] whitespace-pre-wrap break-words dark:border-[#3a3a3c] dark:bg-[#1c1c1e] dark:text-[#f5f5f7]">
+      <pre className="max-h-40 overflow-auto rounded-lg border border-border bg-muted p-3 font-mono text-xs leading-5 text-foreground whitespace-pre-wrap break-words">
         {body || '-'}
       </pre>
     </DetailSection>
@@ -602,17 +577,17 @@ function FriendlyJsonSummary({ value, labels }: { value: unknown; labels: { topL
   const input = obj.input;
   return (
     <div className="space-y-1.5">
-      <div className="text-[14px] text-[#86868b] dark:text-[#a1a1a6]">
-        {labels.topLevelKeys}: <span className="text-[#1d1d1f] dark:text-[#f5f5f7]">{keys.join(', ') || '-'}</span>
+      <div className="text-[14px] text-muted-foreground">
+        {labels.topLevelKeys}: <span className="text-foreground">{keys.join(', ') || '-'}</span>
       </div>
       {messages && (
-        <div className="text-[14px] text-[#86868b] dark:text-[#a1a1a6]">
-          {labels.messagesCount}: <span className="text-[#1d1d1f] dark:text-[#f5f5f7]">{messages.length}</span>
+        <div className="text-[14px] text-muted-foreground">
+          {labels.messagesCount}: <span className="text-foreground">{messages.length}</span>
         </div>
       )}
       {typeof input === 'string' && (
-        <div className="text-[14px] text-[#86868b] dark:text-[#a1a1a6] line-clamp-2">
-          {labels.inputPreview}: <span className="text-[#1d1d1f] dark:text-[#f5f5f7]">{input}</span>
+        <div className="text-[14px] text-muted-foreground line-clamp-2">
+          {labels.inputPreview}: <span className="text-foreground">{input}</span>
         </div>
       )}
     </div>
