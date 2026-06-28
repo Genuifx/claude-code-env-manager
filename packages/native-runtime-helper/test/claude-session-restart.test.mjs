@@ -21,6 +21,7 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
   const logInterrupt = options.logInterrupt ?? false;
   const expectedQueryModel = options.expectedQueryModel ?? null;
   const reportModelState = options.reportModelState ?? false;
+  const keepAliveAfterResult = options.keepAliveAfterResult ?? false;
 
   await build({
     entryPoints: [path.join(packageDir, 'src', 'index.ts')],
@@ -48,6 +49,7 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
             const logInterrupt = ${JSON.stringify(logInterrupt)};
             const expectedQueryModel = ${JSON.stringify(expectedQueryModel)};
             const reportModelState = ${JSON.stringify(reportModelState)};
+            const keepAliveAfterResult = ${JSON.stringify(keepAliveAfterResult)};
             let queryCount = 0;
             let setModelCalled = false;
             export function query({ prompt, options }) {
@@ -85,7 +87,7 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
                     const next = await iterator.next();
                     if (closed || next.done) return;
                     localTurn += 1;
-                    const responseNumber = interruptible ? localTurn : turn;
+                    const responseNumber = interruptible || keepAliveAfterResult ? localTurn : turn;
                     const text = reportModelState
                       ? 'model=' + (options.model ?? '<none>') + ';setModel=' + setModelCalled
                       : 'mock response ' + responseNumber;
@@ -113,7 +115,7 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
                     if (settleDelayMsAfterResult > 0) {
                       await new Promise((resolve) => setTimeout(resolve, settleDelayMsAfterResult));
                     }
-                    if (!interruptible) return;
+                    if (!interruptible && !keepAliveAfterResult) return;
                   }
                 },
               };
@@ -161,6 +163,36 @@ function waitForOutput(outputs, predicate, stderrRef, description) {
 
     check();
   });
+}
+
+function waitForStderr(stderrRef, pattern, description) {
+  const timeoutMs = 1_500;
+  const startedAt = Date.now();
+
+  return new Promise((resolve, reject) => {
+    const check = () => {
+      if (pattern.test(stderrRef.value)) {
+        resolve();
+        return;
+      }
+
+      if (Date.now() - startedAt > timeoutMs) {
+        reject(new Error([
+          `Timed out waiting for ${description}.`,
+          `stderr=${stderrRef.value}`,
+        ].join('\n')));
+        return;
+      }
+
+      setTimeout(check, 20);
+    };
+
+    check();
+  });
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 test('restarts Claude query after a completed turn so later prompts are consumed', async (t) => {
@@ -242,6 +274,335 @@ test('restarts Claude query after a completed turn so later prompts are consumed
     .map((output) => output.payload.text);
 
   assert.deepEqual(chunks, ['mock response 1', 'mock response 2']);
+});
+
+test('keeps an idle Claude query open for the next prompt instead of closing background work', async (t) => {
+  const helperPath = await buildHelperWithMockClaudeSdk({
+    keepAliveAfterResult: true,
+    logClose: true,
+  });
+  const helper = spawn(process.execPath, [helperPath], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  t.after(() => {
+    helper.kill('SIGTERM');
+  });
+
+  const outputs = [];
+  const stderrRef = { value: '' };
+  let stdoutBuffer = '';
+
+  helper.stdout.setEncoding('utf8');
+  helper.stdout.on('data', (chunk) => {
+    stdoutBuffer += chunk;
+    let newlineIndex = stdoutBuffer.indexOf('\n');
+    while (newlineIndex >= 0) {
+      const line = stdoutBuffer.slice(0, newlineIndex).trim();
+      stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+      if (line) {
+        outputs.push(JSON.parse(line));
+      }
+      newlineIndex = stdoutBuffer.indexOf('\n');
+    }
+  });
+
+  helper.stderr.setEncoding('utf8');
+  helper.stderr.on('data', (chunk) => {
+    stderrRef.value += chunk;
+  });
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'init',
+    provider: 'claude',
+    env_name: 'default',
+    perm_mode: 'dev',
+    working_dir: os.tmpdir(),
+    initial_prompt: 'first',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'status'
+      && output.status === 'ready'
+      && output.detail === 'Ready for the next prompt.',
+    stderrRef,
+    'ready status after the first persistent Claude turn',
+  );
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'prompt',
+    text: 'second',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'event'
+      && output.payload?.type === 'assistant_chunk'
+      && output.payload.text === 'mock response 2',
+    stderrRef,
+    'second Claude response on the same persistent query',
+  );
+
+  assert.doesNotMatch(stderrRef.value, /__MOCK_CLAUDE_CLOSE__/);
+});
+
+test('closes an idle Claude query after the retention timeout', async (t) => {
+  const helperPath = await buildHelperWithMockClaudeSdk({
+    keepAliveAfterResult: true,
+    logClose: true,
+  });
+  const helper = spawn(process.execPath, [helperPath], {
+    env: {
+      ...process.env,
+      CCEM_NATIVE_CLAUDE_IDLE_TTL_MS: '40',
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  t.after(() => {
+    helper.kill('SIGTERM');
+  });
+
+  const outputs = [];
+  const stderrRef = { value: '' };
+  let stdoutBuffer = '';
+
+  helper.stdout.setEncoding('utf8');
+  helper.stdout.on('data', (chunk) => {
+    stdoutBuffer += chunk;
+    let newlineIndex = stdoutBuffer.indexOf('\n');
+    while (newlineIndex >= 0) {
+      const line = stdoutBuffer.slice(0, newlineIndex).trim();
+      stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+      if (line) {
+        outputs.push(JSON.parse(line));
+      }
+      newlineIndex = stdoutBuffer.indexOf('\n');
+    }
+  });
+
+  helper.stderr.setEncoding('utf8');
+  helper.stderr.on('data', (chunk) => {
+    stderrRef.value += chunk;
+  });
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'init',
+    provider: 'claude',
+    env_name: 'default',
+    perm_mode: 'dev',
+    working_dir: os.tmpdir(),
+    initial_prompt: 'first',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'status'
+      && output.status === 'ready'
+      && output.detail === 'Ready for the next prompt.',
+    stderrRef,
+    'ready status before idle retention timeout',
+  );
+
+  await waitForStderr(
+    stderrRef,
+    /__MOCK_CLAUDE_CLOSE__/,
+    'idle Claude query close after retention timeout',
+  );
+});
+
+test('queues Claude settings without closing an idle retained query', async (t) => {
+  const helperPath = await buildHelperWithMockClaudeSdk({
+    keepAliveAfterResult: true,
+    logClose: true,
+  });
+  const helper = spawn(process.execPath, [helperPath], {
+    env: {
+      ...process.env,
+      CCEM_NATIVE_CLAUDE_IDLE_TTL_MS: '500',
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  t.after(() => {
+    helper.kill('SIGTERM');
+  });
+
+  const outputs = [];
+  const stderrRef = { value: '' };
+  let stdoutBuffer = '';
+
+  helper.stdout.setEncoding('utf8');
+  helper.stdout.on('data', (chunk) => {
+    stdoutBuffer += chunk;
+    let newlineIndex = stdoutBuffer.indexOf('\n');
+    while (newlineIndex >= 0) {
+      const line = stdoutBuffer.slice(0, newlineIndex).trim();
+      stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+      if (line) {
+        outputs.push(JSON.parse(line));
+      }
+      newlineIndex = stdoutBuffer.indexOf('\n');
+    }
+  });
+
+  helper.stderr.setEncoding('utf8');
+  helper.stderr.on('data', (chunk) => {
+    stderrRef.value += chunk;
+  });
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'init',
+    provider: 'claude',
+    env_name: 'default',
+    perm_mode: 'dev',
+    working_dir: os.tmpdir(),
+    initial_prompt: 'first',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'status'
+      && output.status === 'ready'
+      && output.detail === 'Ready for the next prompt.',
+    stderrRef,
+    'ready status before settings update',
+  );
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'update_settings',
+    env_name: 'updated',
+    env_vars: { ANTHROPIC_MODEL: 'new-model' },
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'status'
+      && output.status === 'ready'
+      && output.detail === 'Settings will apply to the next Claude runtime.',
+    stderrRef,
+    'queued settings status',
+  );
+
+  await delay(80);
+  assert.doesNotMatch(stderrRef.value, /__MOCK_CLAUDE_CLOSE__/);
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'prompt',
+    text: 'second',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'event'
+      && output.payload?.type === 'assistant_chunk'
+      && output.payload.text === 'mock response 2',
+    stderrRef,
+    'second Claude response on retained query after settings update',
+  );
+
+  assert.doesNotMatch(stderrRef.value, /__MOCK_CLAUDE_CLOSE__/);
+});
+
+test('applies queued Claude settings after the retained query is reclaimed', async (t) => {
+  const helperPath = await buildHelperWithMockClaudeSdk({
+    keepAliveAfterResult: true,
+    logClose: true,
+    reportModelState: true,
+  });
+  const helper = spawn(process.execPath, [helperPath], {
+    env: {
+      ...process.env,
+      CCEM_NATIVE_CLAUDE_IDLE_TTL_MS: '60',
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  t.after(() => {
+    helper.kill('SIGTERM');
+  });
+
+  const outputs = [];
+  const stderrRef = { value: '' };
+  let stdoutBuffer = '';
+
+  helper.stdout.setEncoding('utf8');
+  helper.stdout.on('data', (chunk) => {
+    stdoutBuffer += chunk;
+    let newlineIndex = stdoutBuffer.indexOf('\n');
+    while (newlineIndex >= 0) {
+      const line = stdoutBuffer.slice(0, newlineIndex).trim();
+      stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+      if (line) {
+        outputs.push(JSON.parse(line));
+      }
+      newlineIndex = stdoutBuffer.indexOf('\n');
+    }
+  });
+
+  helper.stderr.setEncoding('utf8');
+  helper.stderr.on('data', (chunk) => {
+    stderrRef.value += chunk;
+  });
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'init',
+    provider: 'claude',
+    env_name: 'default',
+    env_vars: { ANTHROPIC_MODEL: 'old-model' },
+    perm_mode: 'dev',
+    working_dir: os.tmpdir(),
+    initial_prompt: 'first',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'event'
+      && output.payload?.type === 'assistant_chunk'
+      && output.payload.text === 'model=old-model;setModel=false',
+    stderrRef,
+    'first Claude response with original model',
+  );
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'status'
+      && output.status === 'ready'
+      && output.detail === 'Ready for the next prompt.',
+    stderrRef,
+    'ready status before queued settings update',
+  );
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'update_settings',
+    env_name: 'updated',
+    env_vars: { ANTHROPIC_MODEL: 'new-model' },
+  })}\n`);
+
+  await delay(25);
+  assert.doesNotMatch(stderrRef.value, /__MOCK_CLAUDE_CLOSE__/);
+
+  await waitForStderr(
+    stderrRef,
+    /__MOCK_CLAUDE_CLOSE__/,
+    'idle retained query close after queued settings',
+  );
+  await delay(30);
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'prompt',
+    text: 'second',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'event'
+      && output.payload?.type === 'assistant_chunk'
+      && output.payload.text === 'model=new-model;setModel=false',
+    stderrRef,
+    'second Claude response with queued model',
+  );
 });
 
 test('restarts Claude query when a prompt arrives after idle but before the old query settles', async (t) => {

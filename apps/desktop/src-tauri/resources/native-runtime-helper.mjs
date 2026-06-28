@@ -16624,6 +16624,7 @@ function readLatestCodexContextUsageFromSessionFile(filePath) {
 }
 
 // src/index.ts
+var DEFAULT_CLAUDE_IDLE_TTL_MS = 10 * 60 * 1e3;
 var initCommand = null;
 var stopped = false;
 var activeTurn = false;
@@ -16632,12 +16633,14 @@ var currentAbortController = null;
 var currentClaudeQuery = null;
 var claudeInputQueue = null;
 var claudeConsumeLoop = null;
+var claudeIdleCloseTimer = null;
 var claudeLastSessionState = null;
 var claudeInterruptRequested = false;
 var claudeInterruptCompletionEmitted = false;
 var claudeSawPartialText = false;
 var claudeSawPartialThinking = false;
 var claudeTurnCompletionEmitted = false;
+var pendingClaudePromptReplay = null;
 var claudeSeenMessageIds = /* @__PURE__ */ new Set();
 var claudeContextUsageFailureKey = null;
 var codexClient = null;
@@ -16705,6 +16708,45 @@ function emitSessionMeta(providerSessionId) {
   }
   currentProviderSessionId = providerSessionId;
   emit({ type: "session_meta", provider_session_id: providerSessionId });
+}
+function resolveClaudeIdleTtlMs() {
+  const raw = process3.env.CCEM_NATIVE_CLAUDE_IDLE_TTL_MS;
+  if (raw == null || raw.trim() === "") {
+    return DEFAULT_CLAUDE_IDLE_TTL_MS;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : DEFAULT_CLAUDE_IDLE_TTL_MS;
+}
+function clearClaudeIdleCloseTimer() {
+  if (claudeIdleCloseTimer) {
+    clearTimeout(claudeIdleCloseTimer);
+    claudeIdleCloseTimer = null;
+  }
+}
+function scheduleClaudeIdleClose() {
+  clearClaudeIdleCloseTimer();
+  if (!currentClaudeQuery || !claudeInputQueue || initCommand?.provider !== "claude") {
+    return;
+  }
+  const ttlMs = resolveClaudeIdleTtlMs();
+  if (ttlMs <= 0) {
+    return;
+  }
+  const queryToClose = currentClaudeQuery;
+  const queueToClose = claudeInputQueue;
+  claudeIdleCloseTimer = setTimeout(() => {
+    claudeIdleCloseTimer = null;
+    if (currentClaudeQuery !== queryToClose || claudeInputQueue !== queueToClose) {
+      return;
+    }
+    if (!claudeTurnCompletionEmitted && !claudeInterruptCompletionEmitted) {
+      return;
+    }
+    pendingClaudePromptReplay = null;
+    queueToClose.close();
+    queryToClose.close();
+  }, ttlMs);
+  claudeIdleCloseTimer.unref?.();
 }
 function toolCategory(rawName, category) {
   const normalized = category ?? "unknown";
@@ -16868,6 +16910,7 @@ function emitClaudeTurnCompleted(detail) {
     detail
   });
   emitStatus("ready", "Ready for the next prompt.");
+  scheduleClaudeIdleClose();
   return true;
 }
 function emitClaudeTurnInterrupted(detail = "Claude turn interrupted by desktop workspace.") {
@@ -16883,6 +16926,7 @@ function emitClaudeTurnInterrupted(detail = "Claude turn interrupted by desktop 
     });
   }
   emitStatus("ready", "Turn interrupted. Ready for the next prompt.");
+  scheduleClaudeIdleClose();
 }
 function categorizeClaudeTool(name) {
   if (name.includes("AskUser") || name.includes("Question")) {
@@ -17395,12 +17439,15 @@ async function applyClaudePermissionSettingsCommand(command) {
   applySettingsCommand(command);
   return true;
 }
+function hasRetainedClaudeRuntime() {
+  return Boolean(claudeConsumeLoop || claudeInputQueue || currentClaudeQuery);
+}
 function canApplySettingsImmediately() {
   if (!initCommand) return false;
   if (initCommand.provider === "codex") {
     return !activeTurn;
   }
-  return claudeLastSessionState === "idle" || !claudeConsumeLoop;
+  return !hasRetainedClaudeRuntime();
 }
 function denyPendingPermissions() {
   for (const pending of pendingPermissions.values()) {
@@ -17417,14 +17464,6 @@ function denyPendingClaudeInteractivePrompts(message) {
     });
   }
   pendingClaudeInteractivePrompts.clear();
-}
-function teardownClaudeSession() {
-  claudeInputQueue?.close();
-  currentClaudeQuery?.close();
-  claudeInputQueue = null;
-  currentClaudeQuery = null;
-  claudeConsumeLoop = null;
-  resetClaudeTurnTracking();
 }
 function teardownCodexSession(envChanged) {
   codexThread = null;
@@ -17591,6 +17630,9 @@ async function consumeClaudeMessages() {
         continue;
       }
       if (message.type === "system" && message.subtype === "session_state_changed") {
+        if (message.state === "running") {
+          pendingClaudePromptReplay = null;
+        }
         if (message.state !== claudeLastSessionState) {
           if (message.state === "running") {
             resetClaudeTurnTracking();
@@ -17610,12 +17652,6 @@ async function consumeClaudeMessages() {
           }
         }
         claudeLastSessionState = message.state;
-        if (message.state === "idle" && pendingSettings) {
-          applyPendingSettingsToInitCommand();
-          teardownClaudeSession();
-          emitStatus("ready", "Settings applied.");
-          return;
-        }
         continue;
       }
       if (message.type === "result") {
@@ -17665,7 +17701,12 @@ async function consumeClaudeMessages() {
       claudeInputQueue = null;
     }
     if (currentClaudeQuery === claudeQuery) {
+      clearClaudeIdleCloseTimer();
       currentClaudeQuery = null;
+    }
+    if (initCommand?.provider === "claude" && pendingSettings && !claudeInputQueue && !currentClaudeQuery) {
+      applyPendingSettingsToInitCommand();
+      emitStatus("ready", "Settings applied.");
     }
   }
 }
@@ -17677,6 +17718,9 @@ async function ensureClaudeSession() {
     return;
   }
   if (!claudeConsumeLoop || !claudeInputQueue) {
+    if (!claudeInputQueue && !currentClaudeQuery) {
+      applyPendingSettingsToInitCommand();
+    }
     let loop;
     loop = consumeClaudeMessages().catch((error) => {
       const isAbort = error instanceof Error && error.name === "AbortError";
@@ -17702,18 +17746,33 @@ async function ensureClaudeSession() {
       if (claudeConsumeLoop === loop) {
         claudeConsumeLoop = null;
       }
+      void replayPendingClaudePromptIfNeeded().catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        emitEvent({
+          type: "stderr_line",
+          line: message
+        });
+        emitEvent({
+          type: "session_completed",
+          reason: message
+        });
+        emitStatus("error", message);
+      });
     });
     claudeConsumeLoop = loop;
   }
 }
-async function ensureClaudePromptQueueReady() {
-  if (claudeConsumeLoop && claudeTurnCompletionEmitted && !claudeInterruptCompletionEmitted) {
-    const settlingLoop = claudeConsumeLoop;
-    claudeInputQueue?.close();
-    currentClaudeQuery?.close();
-    await settlingLoop.catch(() => {
-    });
+async function replayPendingClaudePromptIfNeeded() {
+  if (!pendingClaudePromptReplay || stopped || initCommand?.provider !== "claude") {
+    return;
   }
+  const prompt = pendingClaudePromptReplay;
+  pendingClaudePromptReplay = null;
+  await ensureClaudePromptQueueReady();
+  enqueueClaudePrompt(prompt.text, prompt.images);
+}
+async function ensureClaudePromptQueueReady() {
+  clearClaudeIdleCloseTimer();
   await ensureClaudeSession();
   if (!claudeInputQueue) {
     await ensureClaudeSession();
@@ -17723,6 +17782,7 @@ function enqueueClaudePrompt(text, images) {
   if (!claudeInputQueue) {
     throw new Error("Claude streaming input queue is not ready");
   }
+  pendingClaudePromptReplay = { text, images };
   claudeInterruptRequested = false;
   claudeInterruptCompletionEmitted = false;
   const parts = buildPromptContentParts(text, images);
@@ -18114,11 +18174,19 @@ async function handleCommand(command) {
       emitStatus("ready", "Settings applied.");
       return;
     }
+    if (initCommand.provider === "claude") {
+      if (canApplySettingsImmediately()) {
+        applySettingsCommand(command);
+        emitStatus("ready", "Settings applied.");
+      } else {
+        queuePendingSettings(command);
+        const status = claudeLastSessionState === "running" && !claudeTurnCompletionEmitted && !claudeInterruptCompletionEmitted ? "processing" : "ready";
+        emitStatus(status, "Settings will apply to the next Claude runtime.");
+      }
+      return;
+    }
     if (canApplySettingsImmediately()) {
       applySettingsCommand(command);
-      if (initCommand.provider === "claude" && claudeConsumeLoop) {
-        teardownClaudeSession();
-      }
       if (initCommand.provider === "codex") {
         teardownCodexSession(command.env_vars !== void 0 || command.effort !== void 0);
       }
@@ -18145,6 +18213,8 @@ async function handleCommand(command) {
   }
   if (command.type === "stop") {
     stopped = true;
+    clearClaudeIdleCloseTimer();
+    pendingClaudePromptReplay = null;
     denyPendingPermissions();
     denyPendingClaudeInteractivePrompts("Native runtime turn was interrupted before user responded.");
     if (initCommand?.provider === "claude") {
