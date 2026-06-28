@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { Radio, Circle, Flame, Clock, Check, Settings2, ClipboardCheck, Search, Command } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { useLocale } from '@/locales';
@@ -18,6 +19,21 @@ import {
 } from '@/components/ui/popover';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { StreakUsagePopoverContent } from './StreakUsagePopover';
+import type { UsageStats } from '@/types/analytics';
+
+// Walks dailyHistory backwards from today counting consecutive days.
+// Matches the boot-time calculation in App.tsx.
+function calculateContinuousUsageDays(dailyHistory: UsageStats['dailyHistory']): number {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  let streak = 0;
+  while (true) {
+    const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    if (!dailyHistory[dateKey]) return streak;
+    streak += 1;
+    date.setDate(date.getDate() - 1);
+  }
+}
 
 interface WorkspaceStatusStripProps {
   onNavigate: (tab: string) => void;
@@ -93,6 +109,7 @@ export function WorkspaceStatusStrip({
     shallow
   );
   const [streakPopoverOpen, setStreakPopoverOpen] = useState(false);
+  const [isRefreshingStreak, setIsRefreshingStreak] = useState(false);
   const { reviewEntry, reviewPanelOpen, setReviewPanelOpen } = useAppStore(
     (state) => ({
       reviewEntry: state.reviewEntry,
@@ -101,7 +118,31 @@ export function WorkspaceStatusStrip({
     }),
     shallow
   );
+  const { setUsageStats, setContinuousUsageDays } = useAppStore(
+    (state) => ({
+      setUsageStats: state.setUsageStats,
+      setContinuousUsageDays: state.setContinuousUsageDays,
+    }),
+    shallow
+  );
   const { switchEnvironment } = useTauriCommands();
+
+  // Actively refresh usage stats from the backend so the streak popover
+  // reflects the latest data each time it's opened.
+  const refreshStreakUsage = useCallback(async () => {
+    setIsRefreshingStreak(true);
+    try {
+      const stats = await invoke<UsageStats>('get_usage_stats');
+      if (stats) {
+        setUsageStats(stats);
+        setContinuousUsageDays(calculateContinuousUsageDays(stats.dailyHistory));
+      }
+    } catch (err) {
+      console.debug('Failed to refresh streak usage:', err);
+    } finally {
+      setIsRefreshingStreak(false);
+    }
+  }, [setUsageStats, setContinuousUsageDays]);
 
   const runningSessions = sessions.filter((s) => s.status === 'running');
   const activeCronTasks = cronTasks.filter((t) => t.enabled !== false);
@@ -181,13 +222,20 @@ export function WorkspaceStatusStrip({
       </DropdownMenu>
 
       {continuousUsageDays > 0 && usageStats && (
-        <Popover open={streakPopoverOpen} onOpenChange={setStreakPopoverOpen}>
+        <Popover
+          open={streakPopoverOpen}
+          onOpenChange={(open) => {
+            setStreakPopoverOpen(open);
+            if (open) void refreshStreakUsage();
+          }}
+        >
           <PopoverTrigger asChild>
             <div className="hidden md:inline-flex">
               <StatusChip
                 icon={Flame}
                 label={`${continuousUsageDays} ${t('workspace.statusStreak')}`}
                 color="hsl(25 95% 53%)"
+                className={isRefreshingStreak ? 'opacity-70' : undefined}
               />
             </div>
           </PopoverTrigger>
