@@ -26,6 +26,77 @@ async function importDomHelpers() {
   return import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
 }
 
+function withFakeDOM(callback) {
+  const previous = {
+    document: globalThis.document,
+    HTMLElement: globalThis.HTMLElement,
+    HTMLBRElement: globalThis.HTMLBRElement,
+    Text: globalThis.Text,
+    Node: globalThis.Node,
+  };
+
+  class FakeNode {
+    constructor(text = '') {
+      this.textContent = text;
+      this.parentNode = null;
+    }
+  }
+
+  class FakeTextNode extends FakeNode {}
+
+  class FakeHTMLElement extends FakeNode {
+    constructor(tagName, text = '') {
+      super(text);
+      this.tagName = tagName;
+      this.dataset = {};
+      this.childNodes = [];
+    }
+
+    appendChild(node) {
+      node.parentNode = this;
+      this.childNodes.push(node);
+      return node;
+    }
+
+    replaceChild(newNode, oldNode) {
+      const index = this.childNodes.indexOf(oldNode);
+      assert.notEqual(index, -1);
+      newNode.parentNode = this;
+      oldNode.parentNode = null;
+      this.childNodes[index] = newNode;
+      return oldNode;
+    }
+
+    normalize() {}
+  }
+
+  class FakeBRElement extends FakeHTMLElement {
+    constructor() {
+      super('BR');
+    }
+  }
+
+  globalThis.Node = FakeNode;
+  globalThis.Text = FakeTextNode;
+  globalThis.HTMLElement = FakeHTMLElement;
+  globalThis.HTMLBRElement = FakeBRElement;
+  globalThis.document = {
+    createTextNode(text) {
+      return new FakeTextNode(text);
+    },
+  };
+
+  try {
+    return callback({ FakeTextNode, FakeHTMLElement, FakeBRElement });
+  } finally {
+    globalThis.document = previous.document;
+    globalThis.HTMLElement = previous.HTMLElement;
+    globalThis.HTMLBRElement = previous.HTMLBRElement;
+    globalThis.Text = previous.Text;
+    globalThis.Node = previous.Node;
+  }
+}
+
 test('triggerless image chips are valid prompt-area chips', async () => {
   const { createChipSegmentFromParts } = await importDomHelpers();
 
@@ -50,4 +121,23 @@ test('triggerless image chips are valid prompt-area chips', async () => {
     createChipSegmentFromParts(undefined, '[Image #1]', '[Image #1]'),
     null,
   );
+});
+
+test('prompt-area sentinel text normalizes back into editable text', async () => {
+  const { normalizeEditorDOM } = await importDomHelpers();
+
+  withFakeDOM(({ FakeTextNode, FakeHTMLElement, FakeBRElement }) => {
+    const editor = new FakeHTMLElement('DIV');
+    const sentinel = new FakeHTMLElement('SPAN', '\u200B第二行');
+    sentinel.dataset.sentinel = 'true';
+
+    editor.appendChild(new FakeTextNode('大发大发'));
+    editor.appendChild(new FakeBRElement());
+    editor.appendChild(sentinel);
+
+    assert.equal(normalizeEditorDOM(editor), true);
+    assert.equal(editor.childNodes.length, 3);
+    assert.ok(editor.childNodes[2] instanceof FakeTextNode);
+    assert.equal(editor.childNodes[2].textContent, '第二行');
+  });
 });

@@ -20,6 +20,19 @@ export function isBRElement(node: Node): node is HTMLBRElement {
 }
 
 /**
+ * Type guard: checks if a DOM node is an internal prompt-area sentinel.
+ * Sentinels provide layout affordances and must not be serialized as input.
+ */
+export function isPromptAreaSentinel(node: Node): boolean {
+  return node instanceof HTMLElement && node.dataset.sentinel === 'true'
+}
+
+export function getPromptAreaSentinelUserText(node: Node): string {
+  if (!isPromptAreaSentinel(node)) return ''
+  return (node.textContent ?? '').replace(/\u200B/g, '')
+}
+
+/**
  * Type guard: checks if a DOM node is a Text node.
  */
 export function isTextNode(node: Node): node is Text {
@@ -211,9 +224,17 @@ export function normalizeEditorDOM(editor: HTMLElement): boolean {
   for (let i = editor.childNodes.length - 1; i >= 0; i--) {
     const child = editor.childNodes[i]
 
-    // Skip non-element nodes, chip elements, and BR elements
+    // Skip non-element nodes, chip elements, sentinels, and BR elements
     if (!(child instanceof HTMLElement)) continue
     if (child.dataset.chipTrigger !== undefined) continue
+    if (isPromptAreaSentinel(child)) {
+      const userText = getPromptAreaSentinelUserText(child)
+      if (userText) {
+        editor.replaceChild(document.createTextNode(userText), child)
+        changed = true
+      }
+      continue
+    }
     if (child instanceof HTMLBRElement) continue
 
     const tag = child.tagName
