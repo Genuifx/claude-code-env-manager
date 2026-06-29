@@ -1,5 +1,23 @@
 # ccem
 
+## 2.37.0
+
+### Minor Changes
+
+- Minor release v2.37.0 — checkpoint restore UI, security hardening, and session history improvements.
+
+  - feat(desktop): add Claude file checkpoint restore UI
+  - fix(desktop): harden checkpoint restore flow
+  - fix(desktop): load workspace history from native events
+  - fix(desktop): stabilize composer trailing newline caret
+  - fix(desktop): encrypt weixin bot token storage
+  - fix(desktop): redact telegram transport tokens
+  - fix(desktop): hide opencode config from terminal command
+  - fix(desktop): avoid remote load credential argv
+  - fix(desktop): harden opencode secret env file creation
+  - fix(desktop): cfg-gate opencode secret env file helpers
+  - fix(desktop): reject invalid cron expressions
+
 ## 2.36.0
 
 ### Minor Changes
