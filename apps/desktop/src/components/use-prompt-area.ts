@@ -39,6 +39,8 @@ import {
   normalizeEditorDOM,
   decorateURLsInEditor,
   decorateMarkdownInEditor,
+  isPromptAreaSentinel,
+  getPromptAreaSentinelUserText,
   safeJsonStringify,
   getSelectionRange,
 } from './dom-helpers'
@@ -169,8 +171,13 @@ export function usePromptArea({
         if (chip) {
           segments.push(chip)
         }
+      } else if (isPromptAreaSentinel(node)) {
+        const text = getPromptAreaSentinelUserText(node)
+        if (text) {
+          segments.push({ type: 'text', text })
+        }
+        continue
       } else if (isBRElement(node)) {
-        if (node.dataset.sentinel) continue // skip sentinel <br>
         segments.push({ type: 'text', text: '\n' })
       } else if (isHTMLElement(node)) {
         // Unknown element — extract text content
@@ -248,10 +255,14 @@ export function usePromptArea({
         }
       }
 
-      // Append sentinel <br> so trailing newlines are visible in contentEditable
+      // Append an inline sentinel so trailing newlines are visible in contentEditable
+      // without leaving the caret on an empty block-sized <br> line.
       if (editor.lastChild && isBRElement(editor.lastChild)) {
-        const sentinel = document.createElement('br')
+        const sentinel = document.createElement('span')
         sentinel.dataset.sentinel = 'true'
+        sentinel.className = 'prompt-area-trailing-newline-sentinel'
+        sentinel.setAttribute('aria-hidden', 'true')
+        sentinel.textContent = '\u200B'
         editor.appendChild(sentinel)
       }
 
@@ -1185,6 +1196,8 @@ function restoreCursorPosition(editor: HTMLElement, saved: SavedCursor): void {
     const lastChild = childNodes[childNodes.length - 1]
     if (lastChild.nodeType === Node.TEXT_NODE) {
       range.setStart(lastChild, (lastChild.textContent ?? '').length)
+    } else if (isPromptAreaSentinel(lastChild)) {
+      range.setStartBefore(lastChild)
     } else {
       range.setStartAfter(lastChild)
     }
@@ -1193,6 +1206,8 @@ function restoreCursorPosition(editor: HTMLElement, saved: SavedCursor): void {
     if (targetNode.nodeType === Node.TEXT_NODE) {
       const maxOffset = (targetNode.textContent ?? '').length
       range.setStart(targetNode, Math.min(saved.offset, maxOffset))
+    } else if (isPromptAreaSentinel(targetNode)) {
+      range.setStartBefore(targetNode)
     } else {
       range.setStartAfter(targetNode)
     }
@@ -1263,8 +1278,10 @@ function getTextLengthInRange(range: Range): number {
       const trigger = node.dataset.chipTrigger ?? ''
       const display = node.dataset.chipDisplay ?? node.textContent ?? ''
       length += trigger.length + display.length
+    } else if (isPromptAreaSentinel(node)) {
+      length += getPromptAreaSentinelUserText(node).length
+      return
     } else if (isHTMLElement(node) && node.tagName === 'BR') {
-      if (node.dataset.sentinel) return // skip sentinel <br>
       length += 1
     } else if (isHTMLElement(node)) {
       node.childNodes.forEach(walk)
@@ -1351,8 +1368,9 @@ function findDOMPosition(
         return { node: container, offset: i + 1 }
       }
       remaining -= chipLen
+    } else if (isPromptAreaSentinel(child)) {
+      continue
     } else if (isBRElement(child)) {
-      if (child.dataset.sentinel) continue // skip sentinel <br>
       if (remaining <= 1) {
         return { node: container, offset: i + 1 }
       }

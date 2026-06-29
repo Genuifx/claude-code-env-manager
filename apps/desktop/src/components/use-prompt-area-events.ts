@@ -7,6 +7,8 @@ import { resolveTriggersInSegments } from './prompt-area-engine'
 import {
   isChipElement,
   isHTMLElement,
+  isPromptAreaSentinel,
+  getPromptAreaSentinelUserText,
   normalizeEditorDOM,
   readChipSegment,
   safeJsonStringify,
@@ -474,6 +476,9 @@ function serializeFragmentToPlainText(fragment: DocumentFragment): string {
       const trigger = node.dataset.chipTrigger ?? ''
       const display = node.dataset.chipDisplay ?? node.textContent ?? ''
       text += trigger + display
+    } else if (isPromptAreaSentinel(node)) {
+      text += getPromptAreaSentinelUserText(node)
+      return
     } else if (isHTMLElement(node) && node.tagName === 'BR') {
       text += '\n'
     } else {
@@ -503,6 +508,12 @@ function serializeFragmentToSegments(fragment: DocumentFragment): Segment[] {
       if (chip) {
         segments.push(chip)
       }
+    } else if (isPromptAreaSentinel(node)) {
+      const text = getPromptAreaSentinelUserText(node)
+      if (text) {
+        segments.push({ type: 'text', text })
+      }
+      return
     } else if (isHTMLElement(node) && node.tagName === 'BR') {
       segments.push({ type: 'text', text: '\n' })
     } else {
@@ -582,6 +593,9 @@ function insertSegmentsAtCursor(
       const trigger = node.dataset.chipTrigger ?? ''
       const display = node.dataset.chipDisplay ?? node.textContent ?? ''
       cursorOffset += trigger.length + display.length
+    } else if (isPromptAreaSentinel(node)) {
+      cursorOffset += getPromptAreaSentinelUserText(node).length
+      return
     } else if (isHTMLElement(node) && node.tagName === 'BR') {
       cursorOffset += 1
     } else {
