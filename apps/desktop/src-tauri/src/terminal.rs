@@ -978,6 +978,7 @@ fn write_opencode_secret_env_file(session_id: &str, raw_value: &str) -> Result<P
                 last_err = Some(format!("secret env path already exists: {e}"));
                 continue;
             }
+            #[cfg(unix)]
             Err(e) if e.raw_os_error() == Some(libc::ELOOP) => {
                 // O_NOFOLLOW rejected a symlink at this candidate path; retry
                 // with a fresh name rather than following or clobbering it.
@@ -1002,6 +1003,7 @@ fn write_opencode_secret_env_file(session_id: &str, raw_value: &str) -> Result<P
 /// - `O_NOFOLLOW`: fails (ELOOP) if `path` is a symlink rather than following it.
 /// - `mode(0o600)`: the file is created restrictive from the first instant, so
 ///   there is no umask window where group/world can read it.
+#[cfg(unix)]
 fn create_secret_env_file_at(path: &std::path::Path, snippet: &str) -> std::io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
@@ -1015,6 +1017,19 @@ fn create_secret_env_file_at(path: &std::path::Path, snippet: &str) -> std::io::
     file.write_all(snippet.as_bytes())?;
     file.sync_all()?;
     Ok(())
+}
+
+/// Non-Unix fallback. External terminal launch is macOS-only (see
+/// `external_terminal_launch_supported`), so this path is unreachable in
+/// practice; returning a clear error keeps the module compiling on non-Unix
+/// targets without silently weakening the hardened Unix path or exposing a
+/// weaker `fs::write`-based equivalent.
+#[cfg(not(unix))]
+fn create_secret_env_file_at(_path: &std::path::Path, _snippet: &str) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "secret env file creation is not supported on this platform",
+    ))
 }
 
 /// 64 bits of CSPRNG entropy, hex-encoded, for unguessable secret file names.
@@ -2231,6 +2246,7 @@ mod tests {
         assert!(!cmd.contains("--prompt"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_write_opencode_secret_env_file_creates_0600_export_snippet() {
         use std::os::unix::fs::PermissionsExt;
@@ -2290,6 +2306,7 @@ mod tests {
         assert_eq!(exported.as_ref(), secret_json);
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_create_secret_env_file_at_refuses_to_overwrite_existing_file() {
         // A pre-existing regular file at the candidate path must NOT be
@@ -2316,6 +2333,7 @@ mod tests {
         assert_eq!(mode_of(&target), mode_before, "planted file mode must not change");
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_create_secret_env_file_at_refuses_to_follow_symlink() {
         // A pre-existing symlink at the candidate path must NOT be followed to
@@ -2344,6 +2362,7 @@ mod tests {
         assert_eq!(after, "VICTIM-SENTINEL\n", "victim must not be written via the symlink");
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_create_secret_env_file_at_refuses_dangling_symlink() {
         // The dangerous case: a symlink pointing at a non-existent target. The
@@ -2370,6 +2389,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_create_secret_env_file_at_creates_0600_fresh() {
         // On a fresh path the helper creates the file atomically at 0600.
@@ -2389,6 +2409,7 @@ mod tests {
     }
 
     /// Helper: masked st_mode permission bits of a path.
+    #[cfg(unix)]
     fn mode_of(path: &std::path::Path) -> u32 {
         use std::os::unix::fs::PermissionsExt;
         std::fs::metadata(path)
