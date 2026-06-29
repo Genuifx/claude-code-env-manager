@@ -176,6 +176,80 @@ interface LoadResult {
   renamed: boolean;
 }
 
+export interface ResolvedCredentials {
+  secret: string;
+  key: string;
+}
+
+export interface CredentialOptionFlags {
+  secret?: string;
+  key?: string;
+  credentialsStdin?: boolean;
+}
+
+/**
+ * Read all of stdin as a UTF-8 string. Used by `load --credentials-stdin` so
+ * the desktop app can pipe credentials without leaking them through argv.
+ */
+export const readAllStdin = (): Promise<string> =>
+  new Promise((resolve, reject) => {
+    let data = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk) => {
+      data += chunk;
+    });
+    process.stdin.on('end', () => resolve(data));
+    process.stdin.on('error', reject);
+  });
+
+/**
+ * Resolve credentials for `ccem load`, supporting two mutually-exclusive modes:
+ *   - argv:     `--secret <value> [--key <value>]`
+ *   - stdin:    `--credentials-stdin` with JSON `{"secret":"...","key":"..."}`
+ *
+ * argv credentials are kept for backward compatibility with user scripts.
+ * The desktop app exclusively uses `--credentials-stdin` to avoid leaking keys
+ * through process listings, crash dumps, and diagnostic collectors.
+ *
+ * Throws on mixed modes, missing secret, or malformed stdin JSON. Error
+ * messages never echo the secret/key values themselves.
+ */
+export const resolveLoadCredentials = (
+  options: CredentialOptionFlags,
+  stdinInput: string,
+): ResolvedCredentials => {
+  if (options.credentialsStdin) {
+    if (options.secret !== undefined || options.key !== undefined) {
+      throw new Error('--credentials-stdin 与 --secret/--key 互斥，请二选一');
+    }
+    let parsed: { secret?: unknown; key?: unknown };
+    try {
+      parsed = JSON.parse(stdinInput);
+    } catch {
+      throw new Error('--credentials-stdin 输入不是合法 JSON');
+    }
+    if (
+      parsed.secret === undefined ||
+      typeof parsed.secret !== 'string' ||
+      parsed.secret.length === 0
+    ) {
+      throw new Error('--credentials-stdin JSON 缺少必填字段 secret');
+    }
+    return {
+      secret: parsed.secret,
+      key: typeof parsed.key === 'string' ? parsed.key : '',
+    };
+  }
+
+  if (options.secret === undefined || options.secret.length === 0) {
+    throw new Error('必须提供 --secret 或 --credentials-stdin');
+  }
+  return {
+    secret: options.secret,
+    key: options.key ?? '',
+  };
+};
+
 /**
  * 从远程 URL 加载环境配置
  * @param url    服务器地址（可含 ?key= 查询参数）

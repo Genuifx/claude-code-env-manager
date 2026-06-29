@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import crypto from 'crypto';
 import { getCcemConfigDir } from '@ccem/core';
 import Conf from 'conf';
-import { decryptWithSecret as realDecryptWithSecret } from '../remote';
+import { decryptWithSecret as realDecryptWithSecret, resolveLoadCredentials } from '../remote';
 
 // Test the decryption logic that remote.ts uses
 describe('remote', () => {
@@ -490,6 +490,125 @@ describe('remote', () => {
         'utf8',
       ).toString('base64');
       expect(() => realDecryptWithSecret(tampered, secret)).toThrow();
+    });
+  });
+
+  // -----------------------------------------------------------------
+  // resolveLoadCredentials — argv vs stdin credential resolution.
+  // The desktop app pipes credentials via stdin to keep them out of
+  // process listings; argv (--secret/--key) stays for user scripts.
+  // -----------------------------------------------------------------
+  describe('resolveLoadCredentials (stdin vs argv)', () => {
+    it('resolves credentials from argv (--secret only)', () => {
+      const result = resolveLoadCredentials({ secret: 'enc-secret' }, '');
+      expect(result).toEqual({ secret: 'enc-secret', key: '' });
+    });
+
+    it('resolves credentials from argv (--secret + --key)', () => {
+      const result = resolveLoadCredentials(
+        { secret: 'enc-secret', key: 'access-key' },
+        '',
+      );
+      expect(result).toEqual({ secret: 'enc-secret', key: 'access-key' });
+    });
+
+    it('resolves credentials from --credentials-stdin JSON', () => {
+      const stdin = JSON.stringify({ secret: 'enc-secret', key: 'access-key' });
+      const result = resolveLoadCredentials({ credentialsStdin: true }, stdin);
+      expect(result).toEqual({ secret: 'enc-secret', key: 'access-key' });
+    });
+
+    it('stdin mode omits key when not provided (CLI falls back to secret for auth)', () => {
+      const stdin = JSON.stringify({ secret: 'enc-secret' });
+      const result = resolveLoadCredentials({ credentialsStdin: true }, stdin);
+      expect(result).toEqual({ secret: 'enc-secret', key: '' });
+    });
+
+    it('rejects mixed mode (--credentials-stdin + --secret)', () => {
+      expect(() =>
+        resolveLoadCredentials(
+          { credentialsStdin: true, secret: 'enc-secret' },
+          JSON.stringify({ secret: 'enc-secret' }),
+        ),
+      ).toThrow(/互斥/);
+    });
+
+    it('rejects mixed mode (--credentials-stdin + --key)', () => {
+      expect(() =>
+        resolveLoadCredentials(
+          { credentialsStdin: true, key: 'access-key' },
+          JSON.stringify({ secret: 'enc-secret' }),
+        ),
+      ).toThrow(/互斥/);
+    });
+
+    it('rejects --credentials-stdin with no secret field', () => {
+      expect(() =>
+        resolveLoadCredentials(
+          { credentialsStdin: true },
+          JSON.stringify({ key: 'access-key' }),
+        ),
+      ).toThrow(/缺少必填字段 secret/);
+    });
+
+    it('rejects --credentials-stdin with empty secret', () => {
+      expect(() =>
+        resolveLoadCredentials(
+          { credentialsStdin: true },
+          JSON.stringify({ secret: '' }),
+        ),
+      ).toThrow(/缺少必填字段 secret/);
+    });
+
+    it('rejects --credentials-stdin with non-string secret', () => {
+      expect(() =>
+        resolveLoadCredentials(
+          { credentialsStdin: true },
+          JSON.stringify({ secret: 123 }),
+        ),
+      ).toThrow(/缺少必填字段 secret/);
+    });
+
+    it('rejects --credentials-stdin with malformed JSON', () => {
+      expect(() =>
+        resolveLoadCredentials({ credentialsStdin: true }, '{not valid json'),
+      ).toThrow(/不是合法 JSON/);
+    });
+
+    it('rejects when neither mode provides a secret', () => {
+      expect(() => resolveLoadCredentials({}, '')).toThrow(
+        /必须提供 --secret 或 --credentials-stdin/,
+      );
+    });
+
+    it('error messages never echo the secret or key value', () => {
+      const secretValue = 'sk-super-secret-DO-NOT-LEAK-12345';
+      const keyValue = 'access-key-DO-NOT-LEAK-67890';
+
+      // Mixed mode — error must not contain either value.
+      try {
+        resolveLoadCredentials(
+          { credentialsStdin: true, secret: secretValue },
+          JSON.stringify({ secret: secretValue, key: keyValue }),
+        );
+        throw new Error('should have thrown');
+      } catch (err) {
+        const msg = (err as Error).message;
+        expect(msg).not.toContain(secretValue);
+        expect(msg).not.toContain(keyValue);
+      }
+
+      // Missing secret field — error must not contain the key value.
+      try {
+        resolveLoadCredentials(
+          { credentialsStdin: true },
+          JSON.stringify({ key: keyValue }),
+        );
+        throw new Error('should have thrown');
+      } catch (err) {
+        const msg = (err as Error).message;
+        expect(msg).not.toContain(keyValue);
+      }
     });
   });
 });

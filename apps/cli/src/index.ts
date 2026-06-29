@@ -64,7 +64,7 @@ import {
   installSkill,
 } from './skills.js';
 import { runSkillSelector } from './components/index.js';
-import { loadFromRemote } from './remote.js';
+import { loadFromRemote, readAllStdin, resolveLoadCredentials } from './remote.js';
 import { CCEM_BOT_BIND_SKILL_CONTENT } from './bot-bind-skill.js';
 import { CCEM_CRON_SKILL_CONTENT } from './cron-skill.js';
 import {
@@ -1412,14 +1412,31 @@ skillCmd
   });
 
 // load 命令 - 从远程加载环境配置
+//
+// Credentials can be supplied two ways:
+//   1. argv:      --secret <value> [--key <value>]   (kept for user scripts)
+//   2. stdin:     --credentials-stdin                (preferred; pipes JSON)
+// The desktop app uses path 2 exclusively so secrets never appear in the
+// process listing, crash dumps, or diagnostic collectors. The two modes are
+// mutually exclusive — supplying both is an error.
 program
   .command('load <url>')
   .description('从远程服务器加载环境配置')
-  .requiredOption('--secret <secret>', '解密密钥（encryption secret）')
+  .option('--secret <secret>', '解密密钥（encryption secret）')
   .option('--key <key>', '访问密钥（access key，用于认证；不填则回退用 --secret 认证）')
+  .option('--credentials-stdin', '从 stdin 读取 JSON 凭据 {"secret":"...","key":"..."}，与 --secret/--key 互斥')
   .option('--json', '以 JSON 格式输出结果（供程序调用）')
-  .action(async (url: string, options: { secret: string; key?: string; json?: boolean }) => {
-    const results = await loadFromRemote(url, options.key ?? '', options.secret);
+  .action(async (url: string, options: { secret?: string; key?: string; credentialsStdin?: boolean; json?: boolean }) => {
+    let credentials;
+    try {
+      const stdinInput = options.credentialsStdin ? await readAllStdin() : '';
+      credentials = resolveLoadCredentials(options, stdinInput);
+    } catch (err) {
+      console.error(chalk.red(`Error: ${(err as Error).message}`));
+      process.exit(1);
+    }
+
+    const results = await loadFromRemote(url, credentials.key, credentials.secret);
 
     // 如果指定了 --json，输出 JSON 格式供程序解析
     if (options.json) {

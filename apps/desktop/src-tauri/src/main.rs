@@ -100,6 +100,7 @@ use session_provenance::{
 use std::collections::HashMap;
 use std::fs;
 use std::process::Command;
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use telegram::{
@@ -2552,35 +2553,77 @@ struct RemoteEnvironments {
     environments: HashMap<String, RemoteEnvConfig>,
 }
 
+/// Build the argv vector for invoking `ccem load` (Path A).
+///
+/// Credentials are deliberately NOT placed in argv: process listings, crash
+/// dumps, and diagnostic collectors can capture argv. Instead the CLI reads
+/// credentials from stdin via `--credentials-stdin`; see
+/// [`build_remote_load_stdin_payload`].
+fn build_remote_load_args(url: &str) -> Vec<String> {
+    vec![
+        "load".into(),
+        url.to_string(),
+        "--credentials-stdin".into(),
+        "--json".into(),
+    ]
+}
+
+/// Build the JSON payload piped to the CLI's stdin for `--credentials-stdin`.
+///
+/// Kept separate from [`build_remote_load_args`] so unit tests can assert that
+/// no secret/key value ever lands in the argv vector. `key` is omitted when
+/// empty — the CLI then falls back to `secret` for authentication (legacy
+/// compat).
+fn build_remote_load_stdin_payload(key: &str, secret: &str) -> String {
+    let mut obj = serde_json::json!({ "secret": secret });
+    if !key.is_empty() {
+        obj["key"] = serde_json::Value::String(key.to_string());
+    }
+    obj.to_string()
+}
+
 #[tauri::command]
 fn load_from_remote(url: String, key: String, secret: String) -> Result<LoadResult, String> {
-    // Path A: try CLI if installed
+    // Path A: try CLI if installed. Credentials are piped via stdin, never argv.
     if let Some(ccem_path) = terminal::resolve_ccem_path() {
-        let mut args: Vec<String> = vec!["load".into(), url.clone(), "--secret".into(), secret.clone(), "--json".into()];
-        if !key.is_empty() {
-            args.insert(2, "--key".into());
-            args.insert(3, key.clone());
-        }
-        let output = Command::new(&ccem_path)
+        let args = build_remote_load_args(&url);
+        let stdin_payload = build_remote_load_stdin_payload(&key, &secret);
+
+        let spawn_result = Command::new(&ccem_path)
             .args(&args)
-            .output();
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn();
 
-        if let Ok(out) = output {
-            if out.status.success() {
-                // CLI succeeded — parse JSON output to get imported environments
-                let stdout = String::from_utf8_lossy(&out.stdout);
-
-                // 查找 JSON 输出（跳过前面的日志行）
-                if let Some(json_line) = stdout.lines().find(|line| line.trim().starts_with('{')) {
-                    if let Ok(result) = serde_json::from_str::<LoadResult>(json_line) {
-                        return Ok(result);
-                    }
-                }
-
-                // 如果无法解析 JSON，返回错误
-                return Err("Failed to parse CLI output".to_string());
+        if let Ok(mut child) = spawn_result {
+            if let Some(stdin) = child.stdin.as_mut() {
+                use std::io::Write;
+                let _ = stdin.write_all(stdin_payload.as_bytes());
             }
-            // CLI failed — fall through to native path
+            // Drop stdin handle to signal EOF so the CLI proceeds to read.
+            child.stdin.take();
+
+            let output = child.wait_with_output();
+
+            if let Ok(out) = output {
+                if out.status.success() {
+                    // CLI succeeded — parse JSON output to get imported environments
+                    let stdout = String::from_utf8_lossy(&out.stdout);
+
+                    // 查找 JSON 输出（跳过前面的日志行）
+                    if let Some(json_line) = stdout.lines().find(|line| line.trim().starts_with('{')) {
+                        if let Ok(result) = serde_json::from_str::<LoadResult>(json_line) {
+                            return Ok(result);
+                        }
+                    }
+
+                    // 如果无法解析 JSON，返回错误
+                    return Err("Failed to parse CLI output".to_string());
+                }
+                // CLI failed — fall through to native path
+            }
+            // wait_with_output failed — fall through to native path (no credential values logged)
         }
     }
 
@@ -4821,6 +4864,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
+        build_remote_load_args, build_remote_load_stdin_payload,
         media_kind_for_extension, merge_git_numstat, normalize_git_changed_path,
         parse_git_status_line, WorkspaceGitChangedFile,
     };
@@ -4836,6 +4880,61 @@ mod tests {
     fn test_launch_claude_code_validates_env() {
         // 这个测试需要完整的 Tauri 上下文，暂时跳过
         // 实际测试应该在集成测试中进行
+    }
+
+    // -----------------------------------------------------------------
+    // Remote-load credential isolation: argv must never carry the
+    // encryption secret or access key. They travel through a stdin
+    // pipe instead, so process listings / crash dumps cannot capture them.
+    // -----------------------------------------------------------------
+    #[test]
+    fn remote_load_args_never_carry_credentials() {
+        let args = build_remote_load_args("https://example.com/config");
+
+        // The server URL is fine — it is a public address, not a credential.
+        assert!(args.contains(&"https://example.com/config".to_string()));
+
+        // No credential flags may appear in argv.
+        assert!(!args.iter().any(|a| a == "--secret"));
+        assert!(!args.iter().any(|a| a == "--key"));
+
+        // The stdin channel must be requested.
+        assert!(args.contains(&"--credentials-stdin".to_string()));
+
+        // JSON output mode stays on so the desktop can parse the result.
+        assert!(args.contains(&"--json".to_string()));
+    }
+
+    #[test]
+    fn remote_load_stdin_payload_carries_credentials_separately() {
+        let payload =
+            build_remote_load_stdin_payload("access-key-abc", "encryption-secret-xyz");
+        let parsed: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(parsed["secret"], "encryption-secret-xyz");
+        assert_eq!(parsed["key"], "access-key-abc");
+
+        // Empty key is omitted — the CLI falls back to secret for auth.
+        let payload_no_key = build_remote_load_stdin_payload("", "encryption-secret-xyz");
+        let parsed_no_key: serde_json::Value = serde_json::from_str(&payload_no_key).unwrap();
+        assert_eq!(parsed_no_key["secret"], "encryption-secret-xyz");
+        assert!(parsed_no_key.get("key").is_none() || parsed_no_key["key"].is_null());
+    }
+
+    #[test]
+    fn remote_load_args_and_stdin_keep_secret_out_of_argv() {
+        // End-to-end contract: a real secret value must only appear in the
+        // stdin payload, never in the argv vector built for the same call.
+        let secret = "sk-ant-secret-DO-NOT-LEAK";
+        let key = "access-key-DO-NOT-LEAK";
+        let url = "https://example.com/config";
+
+        let args = build_remote_load_args(url);
+        let stdin = build_remote_load_stdin_payload(key, secret);
+
+        assert!(!args.iter().any(|a| a.contains(secret)));
+        assert!(!args.iter().any(|a| a.contains(key)));
+        assert!(stdin.contains(secret));
+        assert!(stdin.contains(key));
     }
 
     #[test]
