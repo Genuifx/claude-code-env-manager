@@ -449,8 +449,14 @@ impl TelegramBridgeManager {
     }
 
     fn set_last_error(&self, message: impl Into<String>) {
+        // Defense in depth: transport errors already strip the bot token at
+        // the format site (see `redact_telegram_token`), but any error path
+        // that bypasses those formatters converges here. Strip again so the
+        // persisted `last_error` shown in the desktop UI can never carry a
+        // token, even if a future call site forgets to redact.
+        let redacted = redact_telegram_token(&message.into());
         if let Ok(mut state) = self.state.lock() {
-            state.last_error = Some(message.into());
+            state.last_error = Some(redacted);
             state.running = false;
         }
     }
@@ -3228,7 +3234,7 @@ fn handle_callback_query(
                 answer_callback_query(
                     token,
                     &callback_query.id,
-                    &truncate_for_telegram(&format!("Failed: {error}")),
+                    &truncate_for_telegram(&redact_telegram_token(&format!("Failed: {error}"))),
                     true,
                 )?;
             }
@@ -3256,7 +3262,7 @@ fn handle_callback_query(
                 answer_callback_query(
                     token,
                     &callback_query.id,
-                    &truncate_for_telegram(&format!("Failed: {error}")),
+                    &truncate_for_telegram(&redact_telegram_token(&format!("Failed: {error}"))),
                     true,
                 )?;
             }
@@ -4588,7 +4594,7 @@ fn monitor_interactive_session_with_channel(
                                 thread_id,
                                 &format!(
                                     "Failed to send queued follow-up to {runtime_id}: {}{}",
-                                    truncate_for_telegram(&error),
+                                    truncate_for_telegram(&redact_telegram_token(&error)),
                                     suffix
                                 ),
                             );
@@ -5098,7 +5104,7 @@ fn monitor_interactive_session(
                                 thread_id,
                                 &format!(
                                     "Failed to send queued follow-up to {runtime_id}: {}{}",
-                                    truncate_for_telegram(&error),
+                                    truncate_for_telegram(&redact_telegram_token(&error)),
                                     suffix
                                 ),
                             );
@@ -5309,6 +5315,100 @@ fn truncate_for_telegram(value: &str) -> String {
     truncated
 }
 
+/// Minimum shape of a Telegram bot token that we redact on sight.
+///
+/// Real tokens look like `<bot_id>:<secret>` where `<bot_id>` is 8-10 digits
+/// and `<secret>` is ~35 characters of `[A-Za-z0-9_-]`. The constants below
+/// are deliberately loose lower bounds so we still catch truncated or
+/// newly-formatted tokens while avoiding false positives on ordinary text.
+const REDACT_TOKEN_MIN_DIGITS: usize = 6;
+const REDACT_TOKEN_MIN_SECRET: usize = 20;
+const REDACT_TOKEN_MAX_SECRET: usize = 80;
+const REDACT_TOKEN_REPLACEMENT: &str = "[REDACTED]";
+
+#[inline]
+fn is_telegram_token_secret_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'
+}
+
+/// Next UTF-8 character boundary at or after `start`. Used so byte-level
+/// scanning never splits a multi-byte character when copying non-matching
+/// input verbatim.
+#[inline]
+fn next_char_boundary(bytes: &[u8], start: usize) -> usize {
+    if start >= bytes.len() {
+        return bytes.len();
+    }
+    let lead = bytes[start];
+    let len = if lead < 0x80 {
+        1
+    } else if lead & 0xE0 == 0xC0 {
+        2
+    } else if lead & 0xF0 == 0xE0 {
+        3
+    } else if lead & 0xF8 == 0xF0 {
+        4
+    } else {
+        // Invalid UTF-8 lead byte; step one byte to make progress.
+        1
+    };
+    (start + len).min(bytes.len())
+}
+
+/// Strip Telegram bot tokens from `value`.
+///
+/// The Telegram API embeds the bot token in the URL path
+/// (`https://api.telegram.org/bot<token>/<method>`), and `reqwest` surfaces
+/// that URL inside transport error strings. Left unfiltered, those errors
+/// flow into `last_error` state, log lines, and even external Telegram
+/// replies. This helper finds the `<digits>:<secret>` shape anywhere in the
+/// input and replaces it with `[REDACTED]`, preserving HTTP status, endpoint
+/// names, and other diagnostic context.
+fn redact_telegram_token(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = String::with_capacity(bytes.len());
+    let mut cursor = 0usize;
+
+    while cursor < bytes.len() {
+        if bytes[cursor].is_ascii_digit() {
+            let digit_start = cursor;
+            while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
+                cursor += 1;
+            }
+            let digit_end = cursor;
+
+            let has_enough_digits = digit_end - digit_start >= REDACT_TOKEN_MIN_DIGITS;
+            let followed_by_colon = cursor < bytes.len() && bytes[cursor] == b':';
+            if has_enough_digits && followed_by_colon {
+                let secret_start = cursor + 1;
+                let mut scan = secret_start;
+                while scan < bytes.len()
+                    && (scan - secret_start) < REDACT_TOKEN_MAX_SECRET
+                    && is_telegram_token_secret_byte(bytes[scan])
+                {
+                    scan += 1;
+                }
+                if scan - secret_start >= REDACT_TOKEN_MIN_SECRET {
+                    out.push_str(REDACT_TOKEN_REPLACEMENT);
+                    cursor = scan;
+                    continue;
+                }
+            }
+
+            // Not a token; copy the digit run verbatim. Both bounds sit on
+            // ASCII byte boundaries, which are always valid UTF-8 boundaries.
+            out.push_str(&value[digit_start..digit_end]);
+            continue;
+        }
+
+        let end = next_char_boundary(bytes, cursor);
+        out.push_str(&value[cursor..end]);
+        cursor = end;
+    }
+
+    out
+}
+
 fn normalize_command_text(text: &str, bot_username: Option<&str>) -> String {
     let mut parts = text.splitn(2, ' ');
     let command = parts.next().unwrap_or_default();
@@ -5435,7 +5535,7 @@ fn get_me(token: &str) -> Result<TelegramUser, String> {
     let response = client
         .get(url)
         .send()
-        .map_err(|error| format!("Telegram getMe failed: {}", error))?;
+        .map_err(|error| redact_telegram_token(&format!("Telegram getMe failed: {}", error)))?;
     let payload: TelegramApiResponse<TelegramUser> =
         parse_telegram_response(response, "Telegram getMe response")?;
     if payload.ok {
@@ -5467,7 +5567,10 @@ fn set_my_commands(
         .post(url)
         .json(&SetMyCommandsBody { commands, scope })
         .send()
-        .map_err(|error| format!("Telegram setMyCommands failed: {}", error))?;
+        .map_err(|error| redact_telegram_token(&format!(
+            "Telegram setMyCommands failed: {}",
+            error
+        )))?;
     let payload: TelegramApiResponse<bool> =
         parse_telegram_response(response, "Telegram setMyCommands response")?;
     if payload.ok {
@@ -5496,7 +5599,10 @@ fn delete_my_commands(token: &str, scope: Option<&TelegramBotCommandScope>) -> R
         .post(url)
         .json(&DeleteMyCommandsBody { scope })
         .send()
-        .map_err(|error| format!("Telegram deleteMyCommands failed: {}", error))?;
+        .map_err(|error| redact_telegram_token(&format!(
+            "Telegram deleteMyCommands failed: {}",
+            error
+        )))?;
     let payload: TelegramApiResponse<bool> =
         parse_telegram_response(response, "Telegram deleteMyCommands response")?;
     if payload.ok {
@@ -5524,7 +5630,10 @@ fn get_updates(token: &str, offset: Option<i64>) -> Result<Vec<TelegramUpdate>, 
         .get(url)
         .query(&query)
         .send()
-        .map_err(|error| format!("Telegram getUpdates failed: {}", error))?;
+        .map_err(|error| redact_telegram_token(&format!(
+            "Telegram getUpdates failed: {}",
+            error
+        )))?;
     let payload: TelegramApiResponse<Vec<TelegramUpdate>> =
         parse_telegram_response(response, "Telegram updates")?;
     if payload.ok {
@@ -5556,7 +5665,10 @@ fn create_forum_topic(token: &str, chat_id: i64, name: &str) -> Result<i64, Stri
             icon_color: TELEGRAM_DEFAULT_TOPIC_ICON_COLOR,
         })
         .send()
-        .map_err(|error| format!("Telegram createForumTopic failed: {}", error))?;
+        .map_err(|error| redact_telegram_token(&format!(
+            "Telegram createForumTopic failed: {}",
+            error
+        )))?;
     let payload: TelegramApiResponse<TelegramCreatedForumTopic> =
         parse_telegram_response(response, "Telegram createForumTopic response")?;
     if payload.ok {
@@ -5665,7 +5777,10 @@ fn send_message_with_markup(
             reply_markup,
         })
         .send()
-        .map_err(|error| format!("Telegram sendMessage failed: {}", error))?;
+        .map_err(|error| redact_telegram_token(&format!(
+            "Telegram sendMessage failed: {}",
+            error
+        )))?;
     let payload: TelegramApiResponse<TelegramSentMessage> =
         parse_telegram_response(response, "Telegram sendMessage response")?;
     if payload.ok {
@@ -5706,7 +5821,10 @@ fn edit_message_text(
             reply_markup,
         })
         .send()
-        .map_err(|error| format!("Telegram editMessageText failed: {}", error))?;
+        .map_err(|error| redact_telegram_token(&format!(
+            "Telegram editMessageText failed: {}",
+            error
+        )))?;
     let payload: TelegramApiResponse<serde_json::Value> =
         parse_telegram_response(response, "Telegram editMessageText response")?;
     if payload.ok {
@@ -5744,7 +5862,10 @@ fn answer_callback_query(
             show_alert,
         })
         .send()
-        .map_err(|error| format!("Telegram answerCallbackQuery failed: {}", error))?;
+        .map_err(|error| redact_telegram_token(&format!(
+            "Telegram answerCallbackQuery failed: {}",
+            error
+        )))?;
     let payload: TelegramApiResponse<serde_json::Value> =
         parse_telegram_response(response, "Telegram answerCallbackQuery response")?;
     if payload.ok {
@@ -5768,7 +5889,7 @@ fn telegram_http_client(timeout: Option<Duration>) -> Result<reqwest::blocking::
     }
     builder
         .build()
-        .map_err(|error| format!("Failed to build Telegram client: {}", error))
+        .map_err(|error| redact_telegram_token(&format!("Failed to build Telegram client: {}", error)))
 }
 
 fn telegram_no_proxy_requested() -> bool {
@@ -5814,8 +5935,8 @@ mod tests {
         is_sender_allowed, is_vscode_text_entry_option, normalize_command_text, parse_bind_command,
         parse_interactive_tool_cancel_callback_data, parse_interactive_tool_select_callback_data,
         parse_interactive_tool_submit_callback_data, parse_new_topic_command,
-        parse_permission_callback_data, remove_topic_binding, selection_submit_options,
-        summarize_interactive_prompt_resolution, upsert_topic_binding,
+        parse_permission_callback_data, redact_telegram_token, remove_topic_binding,
+        selection_submit_options, summarize_interactive_prompt_resolution, upsert_topic_binding,
         ActiveInteractiveChoicePrompt, InteractiveChoiceSubmitMode, PendingInteractiveAction,
         TelegramBotCommandScope, TelegramBridgeManager, TelegramSettings, TelegramTopicBinding,
         TELEGRAM_FULL_GROUP_COMMANDS, TELEGRAM_MINIMAL_GROUP_COMMANDS, TELEGRAM_PRIVATE_COMMANDS,
@@ -6478,5 +6599,164 @@ mod tests {
         assert!(!manager.mark_interactive_tool_seen(1, Some(2), "toolu-1"));
         assert!(manager.mark_interactive_tool_seen(1, Some(3), "toolu-1"));
         assert!(manager.mark_interactive_tool_seen(1, Some(2), "toolu-2"));
+    }
+
+    // ----- redact_telegram_token ------------------------------------------------
+    //
+    // The fake token constants below are intentionally invalid — they only
+    // satisfy the shape (digits:secret) so the redactor matches them. They
+    // are NOT live credentials.
+
+    /// Shape-valid but non-live token used in every redaction test.
+    const FAKE_TOKEN: &str = "123456789:ABCdef1234567890_ABCdef1234567890_X";
+    /// Second distinct fake token so multi-occurrence tests can distinguish
+    /// matches without reusing the same constant.
+    const FAKE_TOKEN_TWO: &str = "9876543210:Zyxwvu0987654321_Zyxwvu0987654321_A";
+
+    #[test]
+    fn redact_telegram_token_strips_token_in_api_url() {
+        let url = format!("https://api.telegram.org/bot{FAKE_TOKEN}/getMe");
+        let redacted = redact_telegram_token(&url);
+        assert!(!redacted.contains(FAKE_TOKEN), "token survived redaction");
+        assert!(
+            redacted.contains("api.telegram.org/bot"),
+            "URL host and /bot prefix must be preserved: {redacted}"
+        );
+        assert!(
+            redacted.contains("/getMe"),
+            "endpoint name must be preserved: {redacted}"
+        );
+        assert!(
+            redacted.contains("[REDACTED]"),
+            "expected replacement marker: {redacted}"
+        );
+    }
+
+    #[test]
+    fn redact_telegram_token_strips_bare_token() {
+        let redacted = redact_telegram_token(FAKE_TOKEN);
+        assert_eq!(redacted, "[REDACTED]");
+    }
+
+    #[test]
+    fn redact_telegram_token_preserves_diagnostic_context() {
+        // Simulates the kind of error string reqwest produces, including the
+        // URL with token, HTTP status, and a wrapped cause.
+        let error = format!(
+            "error sending request for url (https://api.telegram.org/bot{FAKE_TOKEN}/sendMessage): \
+             connection refused (status 502)"
+        );
+        let redacted = redact_telegram_token(&error);
+        assert!(!redacted.contains(FAKE_TOKEN));
+        assert!(redacted.contains("status 502"));
+        assert!(redacted.contains("connection refused"));
+        assert!(redacted.contains("/sendMessage"));
+        assert!(redacted.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn redact_telegram_token_handles_multiple_tokens_in_one_string() {
+        let combined = format!("first {FAKE_TOKEN} then {FAKE_TOKEN_TWO} end");
+        let redacted = redact_telegram_token(&combined);
+        assert!(!redacted.contains(FAKE_TOKEN));
+        assert!(!redacted.contains(FAKE_TOKEN_TWO));
+        assert_eq!(redacted, "first [REDACTED] then [REDACTED] end");
+    }
+
+    #[test]
+    fn redact_telegram_token_preserves_non_token_digit_text() {
+        // Years, status codes, port numbers, and short digit runs must survive
+        // unchanged. None of these have the `<digits>:<long-secret>` shape.
+        let cases = [
+            "Status 503 returned in 2024",
+            "connecting to host:443/path",
+            "short id 12345 only",
+            "time 12:34",
+            "config v1.2.3",
+        ];
+        for case in cases {
+            assert_eq!(redact_telegram_token(case), case, "non-token text changed");
+        }
+    }
+
+    #[test]
+    fn redact_telegram_token_handles_empty_and_plain_input() {
+        assert_eq!(redact_telegram_token(""), "");
+        assert_eq!(
+            redact_telegram_token("no digits no colons here"),
+            "no digits no colons here"
+        );
+    }
+
+    #[test]
+    fn redact_telegram_token_preserves_utf8_around_token() {
+        let input = format!("桥接失败 bridge failed: {FAKE_TOKEN} 终止");
+        let redacted = redact_telegram_token(&input);
+        assert!(!redacted.contains(FAKE_TOKEN));
+        assert!(redacted.contains("桥接失败 bridge failed:"));
+        assert!(redacted.contains("终止"));
+        assert!(redacted.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn redact_telegram_token_strips_when_token_is_at_string_boundaries() {
+        let leading = format!("{FAKE_TOKEN}/getUpdates");
+        let redacted = redact_telegram_token(&leading);
+        assert_eq!(redacted, "[REDACTED]/getUpdates");
+
+        let trailing = format!("error: {FAKE_TOKEN}");
+        let redacted = redact_telegram_token(&trailing);
+        assert_eq!(redacted, "error: [REDACTED]");
+    }
+
+    #[test]
+    fn redact_telegram_token_rejects_short_secrets() {
+        // Too few secret chars → not a token, must be preserved verbatim.
+        let short = "123456789:short";
+        assert_eq!(redact_telegram_token(short), short);
+
+        // Borderline: exactly 19 chars (under MIN_SECRET=20).
+        let borderline = "123456789:abcdefghijklmnopqrstuvwxyzS"; // 30 chars actually
+        assert!(
+            redact_telegram_token(borderline).contains("[REDACTED]"),
+            "30-char secret should be redacted"
+        );
+    }
+
+    #[test]
+    fn set_last_error_strips_telegram_token_from_persisted_state() {
+        // Integration guard: even if a caller hands set_last_error a raw
+        // transport error containing the token URL, the value surfaced
+        // through status() must never carry the token.
+        let manager = TelegramBridgeManager::default();
+        let leaked = format!(
+            "Telegram getUpdates failed: error sending request for url \
+             (https://api.telegram.org/bot{FAKE_TOKEN}/getUpdates): timeout (status 504)"
+        );
+
+        manager.set_last_error(leaked);
+
+        let status = manager.status();
+        assert!(!status.running, "set_last_error must mark bridge as not running");
+        let stored = status
+            .last_error
+            .as_deref()
+            .expect("last_error should be populated");
+        assert!(
+            !stored.contains(FAKE_TOKEN),
+            "last_error must not retain the bot token: {stored}"
+        );
+        assert!(
+            stored.contains("/getUpdates"),
+            "endpoint context must be preserved: {stored}"
+        );
+        assert!(
+            stored.contains("status 504"),
+            "HTTP status must be preserved: {stored}"
+        );
+        assert!(
+            stored.contains("[REDACTED]"),
+            "expected replacement marker in last_error: {stored}"
+        );
     }
 }
