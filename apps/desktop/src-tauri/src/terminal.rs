@@ -942,15 +942,16 @@ const OPENCODE_STARTUP_PROMPT: &str = "Before taking any action, load the pua sk
 const OPENCODE_CONFIG_CONTENT_KEY: &str = "OPENCODE_CONFIG_CONTENT";
 
 /// Write the secret `OPENCODE_CONFIG_CONTENT` value into a 0600 env file under
-/// `~/.ccem/sessions/<session_id>.env` and return the file path. The shell
-/// command sources and deletes this file (see `build_opencode_shell_command`),
-/// keeping the value out of process args / shell history / AppleScript text.
+/// `~/.ccem/sessions/<session_id>.<random>.env` and return the file path. The
+/// shell command sources and deletes this file (see
+/// `build_opencode_shell_command`), keeping the value out of process args /
+/// shell history / AppleScript text.
 ///
-/// On Unix the file is created with mode 0600 so only the owning user can read
-/// it during the brief window before it is removed.
+/// The file is created atomically with restrictive mode 0600 via
+/// `create_new(true)` on a fresh random-suffixed path (see
+/// `create_secret_env_file_at`), so there is no umask-derived permission window
+/// and no overwrite/follow of a pre-existing predictable path.
 fn write_opencode_secret_env_file(session_id: &str, raw_value: &str) -> Result<PathBuf, String> {
-    use std::os::unix::fs::PermissionsExt;
-
     let dir = dirs::home_dir()
         .map(|h| h.join(".ccem/sessions"))
         .ok_or_else(|| "could not resolve home directory for secret env file".to_string())?;
@@ -958,21 +959,70 @@ fn write_opencode_secret_env_file(session_id: &str, raw_value: &str) -> Result<P
         .map_err(|e| format!("failed to create sessions dir for secret env: {e}"))?;
 
     let safe_name = session_id.replace('/', "_");
-    let path = dir.join(format!("{}.env", safe_name));
-
     // Write as a shell snippet that exports the value. Single-quote escape so
     // the value is passed through verbatim by the sourcing shell.
     let escaped = raw_value.replace("'", "'\\''");
     let snippet = format!("export {}='{}'\n", OPENCODE_CONFIG_CONTENT_KEY, escaped);
 
-    // Write then explicitly tighten perms. Create the file with restrictive
-    // perms in the first place by writing through a brand-new file (truncate).
-    fs::write(&path, &snippet)
-        .map_err(|e| format!("failed to write secret env file: {e}"))?;
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
-        .map_err(|e| format!("failed to set secret env file permissions: {e}"))?;
+    // Bounded retry on path collision (EEXIST) or hostile symlink (ELOOP). With
+    // a 64-bit random suffix the collision probability is negligible; the bound
+    // only guards against a misbehaving same-user attacker.
+    const MAX_ATTEMPTS: u32 = 8;
+    let mut last_err: Option<String> = None;
+    for _ in 0..MAX_ATTEMPTS {
+        let suffix = random_path_suffix();
+        let path = dir.join(format!("{}.{}.env", safe_name, suffix));
+        match create_secret_env_file_at(&path, &snippet) {
+            Ok(()) => return Ok(path),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                last_err = Some(format!("secret env path already exists: {e}"));
+                continue;
+            }
+            Err(e) if e.raw_os_error() == Some(libc::ELOOP) => {
+                // O_NOFOLLOW rejected a symlink at this candidate path; retry
+                // with a fresh name rather than following or clobbering it.
+                last_err = Some(format!("secret env path is a symlink (refused): {e}"));
+                continue;
+            }
+            Err(e) => return Err(format!("failed to create secret env file: {e}")),
+        }
+    }
+    Err(format!(
+        "could not allocate a fresh secret env file after {} attempts: {}",
+        MAX_ATTEMPTS,
+        last_err.unwrap_or_else(|| "unknown error".to_string())
+    ))
+}
 
-    Ok(path)
+/// Atomically create the secret env file at `path` with mode 0600 and write the
+/// snippet through the open handle.
+///
+/// Flags: `O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW` with mode 0600.
+/// - `O_EXCL` (`create_new`): never overwrites/truncates an existing file.
+/// - `O_NOFOLLOW`: fails (ELOOP) if `path` is a symlink rather than following it.
+/// - `mode(0o600)`: the file is created restrictive from the first instant, so
+///   there is no umask window where group/world can read it.
+fn create_secret_env_file_at(path: &std::path::Path, snippet: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)?;
+    file.write_all(snippet.as_bytes())?;
+    file.sync_all()?;
+    Ok(())
+}
+
+/// 64 bits of CSPRNG entropy, hex-encoded, for unguessable secret file names.
+fn random_path_suffix() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 8];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    hex::encode(bytes)
 }
 
 /// Pull `OPENCODE_CONFIG_CONTENT` out of `env_vars`, persist it to a 0600 secret
@@ -2238,6 +2288,114 @@ mod tests {
         assert!(probe.status.success(), "source should succeed");
         let exported = String::from_utf8_lossy(&probe.stdout);
         assert_eq!(exported.as_ref(), secret_json);
+    }
+
+    #[test]
+    fn test_create_secret_env_file_at_refuses_to_overwrite_existing_file() {
+        // A pre-existing regular file at the candidate path must NOT be
+        // truncated or rewritten — `create_new` (O_EXCL) rejects it, so a
+        // same-user attacker cannot trick us into clobbering a planted file.
+        let dir = tempfile::tempdir().expect("tempdir should resolve");
+        let target = dir.path().join("planted.env");
+
+        std::fs::write(&target, "ORIGINAL-SENTINEL\n").expect("plant file");
+        let mode_before = mode_of(&target);
+
+        let err = create_secret_env_file_at(&target, "export OPENCODE_CONFIG_CONTENT='X'\n")
+            .expect_err("must refuse to overwrite");
+        assert_eq!(
+            err.kind(),
+            std::io::ErrorKind::AlreadyExists,
+            "expected AlreadyExists, got {:?}",
+            err
+        );
+
+        // The planted file is untouched.
+        let after = std::fs::read_to_string(&target).expect("planted file still readable");
+        assert_eq!(after, "ORIGINAL-SENTINEL\n", "planted file must not be modified");
+        assert_eq!(mode_of(&target), mode_before, "planted file mode must not change");
+    }
+
+    #[test]
+    fn test_create_secret_env_file_at_refuses_to_follow_symlink() {
+        // A pre-existing symlink at the candidate path must NOT be followed to
+        // its target. On macOS `O_CREAT|O_EXCL|O_NOFOLLOW` refuses the path
+        // (observed as EEXIST for the symlink itself, or ELOOP via O_NOFOLLOW
+        // on other unices); either way the target must never be written.
+        let dir = tempfile::tempdir().expect("tempdir should resolve");
+        let victim = dir.path().join("victim.env");
+        let link = dir.path().join("planted-link.env");
+
+        std::fs::write(&victim, "VICTIM-SENTINEL\n").expect("plant victim");
+        std::os::unix::fs::symlink(&victim, &link).expect("plant symlink");
+
+        let err = create_secret_env_file_at(&link, "export OPENCODE_CONFIG_CONTENT='X'\n")
+            .expect_err("must refuse to open through a symlink");
+        let refused = matches!(err.raw_os_error(), Some(libc::EEXIST) | Some(libc::ELOOP));
+        assert!(
+            refused,
+            "expected EEXIST/ELOOP (refused), got errno {:?} ({})",
+            err.raw_os_error(),
+            err
+        );
+
+        // The victim file behind the symlink is untouched.
+        let after = std::fs::read_to_string(&victim).expect("victim still readable");
+        assert_eq!(after, "VICTIM-SENTINEL\n", "victim must not be written via the symlink");
+    }
+
+    #[test]
+    fn test_create_secret_env_file_at_refuses_dangling_symlink() {
+        // The dangerous case: a symlink pointing at a non-existent target. The
+        // open must still refuse rather than creating a file through the link.
+        let dir = tempfile::tempdir().expect("tempdir should resolve");
+        let dangling_target = dir.path().join("never-created");
+        let link = dir.path().join("planted-dangling.env");
+
+        std::os::unix::fs::symlink(&dangling_target, &link).expect("plant dangling symlink");
+
+        let err = create_secret_env_file_at(&link, "export OPENCODE_CONFIG_CONTENT='X'\n")
+            .expect_err("must refuse dangling symlink");
+        let refused = matches!(err.raw_os_error(), Some(libc::EEXIST) | Some(libc::ELOOP));
+        assert!(
+            refused,
+            "expected EEXIST/ELOOP (refused), got errno {:?} ({})",
+            err.raw_os_error(),
+            err
+        );
+
+        assert!(
+            !dangling_target.exists(),
+            "must not create a file by following the dangling symlink"
+        );
+    }
+
+    #[test]
+    fn test_create_secret_env_file_at_creates_0600_fresh() {
+        // On a fresh path the helper creates the file atomically at 0600.
+        let dir = tempfile::tempdir().expect("tempdir should resolve");
+        let target = dir.path().join("fresh.env");
+
+        create_secret_env_file_at(&target, "export OPENCODE_CONFIG_CONTENT='Y'\n")
+            .expect("fresh create should succeed");
+
+        assert_eq!(
+            mode_of(&target),
+            0o600,
+            "freshly created secret file must be 0600"
+        );
+        let on_disk = std::fs::read_to_string(&target).expect("file readable by owner");
+        assert!(on_disk.starts_with("export OPENCODE_CONFIG_CONTENT="));
+    }
+
+    /// Helper: masked st_mode permission bits of a path.
+    fn mode_of(path: &std::path::Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path)
+            .expect("metadata should resolve")
+            .permissions()
+            .mode()
+            & 0o777
     }
 
     #[test]
