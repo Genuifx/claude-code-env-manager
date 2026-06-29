@@ -1095,6 +1095,7 @@ export function usePromptArea({
       },
       getPlainText: () => segmentsToPlainText(readSegmentsFromDOM()),
       clear: () => {
+        lastRenderedValue.current = []
         onChange([])
         const editor = editorRef.current
         if (editor) {

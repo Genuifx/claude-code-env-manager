@@ -1231,6 +1231,7 @@ export function WorkspaceSessionComposer({
 
     const result = await onSubmit(payload);
     if (result !== false) {
+      promptAreaRef.current?.clear();
       revokeComposerImageUrls(currentAttachments);
       attachmentsRef.current = [];
       setAttachments([]);
