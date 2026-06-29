@@ -1,6 +1,7 @@
 mod channel;
 
 use crate::config;
+use crate::crypto;
 use crate::remote::RemotePlatform;
 use crate::runtime::{
     HeadlessRuntimeManager, HeadlessSessionOptions, HeadlessSessionSource, ManagedSessionSource,
@@ -1454,23 +1455,52 @@ pub fn read_weixin_settings() -> Result<WeixinSettings, String> {
         .map_err(|error| format!("Failed to read weixin settings: {}", error))?;
     let settings: WeixinSettings = serde_json::from_str(&content)
         .map_err(|error| format!("Failed to parse weixin settings: {}", error))?;
-    Ok(WeixinSettings {
+    let normalized = WeixinSettings {
         api_base_url: normalize_api_base_url(&settings.api_base_url),
         flush_interval_ms: settings.flush_interval_ms.max(500),
         ..settings
-    })
+    };
+    decrypt_weixin_settings(normalized)
+}
+
+/// Decrypt the bot token in-place. Values without the `enc:` prefix are
+/// returned as-is, so legacy plaintext configs remain readable and are
+/// re-encrypted as v2 on the next `write_weixin_settings` call.
+fn decrypt_weixin_settings(mut settings: WeixinSettings) -> Result<WeixinSettings, String> {
+    settings.bot_token = settings
+        .bot_token
+        .as_deref()
+        .map(|token| crypto::decrypt_local_secret("Weixin bot token", token))
+        .transpose()?;
+    Ok(settings)
 }
 
 pub fn write_weixin_settings(settings: &WeixinSettings) -> Result<(), String> {
+    config::ensure_ccem_dir().map_err(|error| format!("Failed to create config dir: {}", error))?;
     let normalized = WeixinSettings {
         api_base_url: normalize_api_base_url(&settings.api_base_url),
         flush_interval_ms: settings.flush_interval_ms.max(500),
         ..settings.clone()
     };
-    let content = serde_json::to_string_pretty(&normalized)
+    let persisted = encrypt_weixin_settings(normalized)?;
+    let content = serde_json::to_string_pretty(&persisted)
         .map_err(|error| format!("Failed to serialize weixin settings: {}", error))?;
     fs::write(weixin_settings_path(), content)
         .map_err(|error| format!("Failed to write weixin settings: {}", error))
+}
+
+/// Encrypt the bot token for at-rest persistence. Empty tokens are left as
+/// `None` so the serialized file never carries a token-shaped field when the
+/// bot is not logged in. Error messages never include the token value.
+fn encrypt_weixin_settings(mut settings: WeixinSettings) -> Result<WeixinSettings, String> {
+    settings.bot_token = settings
+        .bot_token
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| crypto::encrypt(value))
+        .transpose()
+        .map_err(|e| format!("Failed to encrypt Weixin bot token: {}", e))?;
+    Ok(settings)
 }
 
 fn read_weixin_state() -> Result<WeixinStateFile, String> {
@@ -1791,9 +1821,10 @@ fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_peer_allowed, normalize_api_base_url, parse_headless_result_payload,
-        parse_permission_reply, split_text_chunks, PermissionOwner, PermissionResolution,
-        WeixinBridgeManager, WeixinSettings,
+        decrypt_weixin_settings, encrypt_weixin_settings, is_peer_allowed,
+        normalize_api_base_url, parse_headless_result_payload, parse_permission_reply,
+        split_text_chunks, PermissionOwner, PermissionResolution, WeixinBridgeManager,
+        WeixinSettings,
     };
     use std::thread;
     use std::time::Duration;
@@ -1899,5 +1930,97 @@ mod tests {
             .ensure_worker_stopped(Duration::from_millis(250))
             .is_ok());
         assert!(manager.worker.lock().expect("lock worker").is_none());
+    }
+
+    // ---- bot_token encryption tests ----
+    //
+    // These tests exercise the pure encrypt/decrypt helpers directly, avoiding
+    // file IO and the process-global home-dir resolution in `config::get_ccem_dir`.
+    // The contract mirrors Telegram/WeCom: ciphertext on disk, plaintext in memory.
+
+    #[test]
+    fn encrypt_then_decrypt_roundtrip_recovers_original_token() {
+        let original = WeixinSettings {
+            enabled: true,
+            bot_token: Some("wx-bot-secret-12345".to_string()),
+            ..WeixinSettings::default()
+        };
+
+        let persisted = encrypt_weixin_settings(original.clone()).expect("encrypt should succeed");
+        // persisted must carry ciphertext, not the plaintext
+        assert_ne!(
+            persisted.bot_token.as_deref(),
+            Some("wx-bot-secret-12345"),
+            "persisted token must be ciphertext, not plaintext"
+        );
+        assert!(persisted.bot_token.as_deref().unwrap().starts_with("enc:v2:"));
+
+        let restored = decrypt_weixin_settings(persisted).expect("decrypt should succeed");
+        assert_eq!(restored.bot_token.as_deref(), original.bot_token.as_deref());
+    }
+
+    #[test]
+    fn decrypt_accepts_legacy_plaintext_token_for_migration() {
+        // Old configs store bot_token as raw plaintext (no `enc:` prefix).
+        // `decrypt` must pass these through unchanged so the next write upgrades them.
+        let legacy = WeixinSettings {
+            bot_token: Some("legacy-plaintext-token".to_string()),
+            ..WeixinSettings::default()
+        };
+
+        let restored = decrypt_weixin_settings(legacy.clone()).expect("plaintext should pass through");
+        assert_eq!(restored.bot_token, legacy.bot_token);
+    }
+
+    #[test]
+    fn decrypt_tampered_v2_token_fails_without_leaking_value() {
+        let tampered = "enc:v2:000000000000000000000000:00:00000000000000000000000000000000";
+        let settings = WeixinSettings {
+            bot_token: Some(tampered.to_string()),
+            ..WeixinSettings::default()
+        };
+
+        let error = decrypt_weixin_settings(settings).expect_err("tampered token must fail");
+
+        assert!(
+            !error.contains(tampered),
+            "Error must not echo encrypted token material: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn encrypted_settings_serialize_without_plaintext_token() {
+        let plaintext = "do-not-leak-this-token";
+        let settings = WeixinSettings {
+            bot_token: Some(plaintext.to_string()),
+            ..WeixinSettings::default()
+        };
+
+        let persisted = encrypt_weixin_settings(settings).expect("encrypt should succeed");
+        let json = serde_json::to_string(&persisted).expect("serialize for at-rest check");
+
+        assert!(
+            !json.contains(plaintext),
+            "Serialized settings must not contain the plaintext token: {}",
+            json
+        );
+        assert!(json.contains("enc:v2:"), "Serialized settings should carry v2 ciphertext");
+    }
+
+    #[test]
+    fn encrypt_drops_empty_or_whitespace_token() {
+        for empty in ["", "   ", "\t\n"] {
+            let settings = WeixinSettings {
+                bot_token: Some(empty.to_string()),
+                ..WeixinSettings::default()
+            };
+            let persisted = encrypt_weixin_settings(settings).expect("encrypt should succeed");
+            assert!(
+                persisted.bot_token.is_none(),
+                "empty/whitespace token should be dropped to None, got {:?}",
+                persisted.bot_token
+            );
+        }
     }
 }
