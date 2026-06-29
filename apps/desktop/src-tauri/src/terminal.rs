@@ -936,12 +936,77 @@ fn build_codex_shell_command(
 
 const OPENCODE_STARTUP_PROMPT: &str = "Before taking any action, load the pua skill.";
 
+/// Marker env key whose value carries the OpenCode runtime config JSON. This
+/// JSON contains the upstream API key, so it must never be embedded in shell
+/// command text. It is written to a 0600 file and sourced at launch time.
+const OPENCODE_CONFIG_CONTENT_KEY: &str = "OPENCODE_CONFIG_CONTENT";
+
+/// Write the secret `OPENCODE_CONFIG_CONTENT` value into a 0600 env file under
+/// `~/.ccem/sessions/<session_id>.env` and return the file path. The shell
+/// command sources and deletes this file (see `build_opencode_shell_command`),
+/// keeping the value out of process args / shell history / AppleScript text.
+///
+/// On Unix the file is created with mode 0600 so only the owning user can read
+/// it during the brief window before it is removed.
+fn write_opencode_secret_env_file(session_id: &str, raw_value: &str) -> Result<PathBuf, String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = dirs::home_dir()
+        .map(|h| h.join(".ccem/sessions"))
+        .ok_or_else(|| "could not resolve home directory for secret env file".to_string())?;
+    fs::create_dir_all(&dir)
+        .map_err(|e| format!("failed to create sessions dir for secret env: {e}"))?;
+
+    let safe_name = session_id.replace('/', "_");
+    let path = dir.join(format!("{}.env", safe_name));
+
+    // Write as a shell snippet that exports the value. Single-quote escape so
+    // the value is passed through verbatim by the sourcing shell.
+    let escaped = raw_value.replace("'", "'\\''");
+    let snippet = format!("export {}='{}'\n", OPENCODE_CONFIG_CONTENT_KEY, escaped);
+
+    // Write then explicitly tighten perms. Create the file with restrictive
+    // perms in the first place by writing through a brand-new file (truncate).
+    fs::write(&path, &snippet)
+        .map_err(|e| format!("failed to write secret env file: {e}"))?;
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+        .map_err(|e| format!("failed to set secret env file permissions: {e}"))?;
+
+    Ok(path)
+}
+
+/// Pull `OPENCODE_CONFIG_CONTENT` out of `env_vars`, persist it to a 0600 secret
+/// file, and return `(remaining_env_vars, Some(path_string))`. If the key is
+/// absent the map is returned unchanged with `None` so the non-secret path is a
+/// strict no-op.
+fn split_opencode_secret_env(
+    mut env_vars: HashMap<String, String>,
+    session_id: &str,
+) -> Result<(HashMap<String, String>, Option<String>), String> {
+    match env_vars.remove(OPENCODE_CONFIG_CONTENT_KEY) {
+        Some(content) => {
+            let path = write_opencode_secret_env_file(session_id, &content)?;
+            Ok((env_vars, Some(path.to_string_lossy().into_owned())))
+        }
+        None => Ok((env_vars, None)),
+    }
+}
+
 /// Build the shell command to launch OpenCode and write exit code for session tracking.
+///
+/// `secret_env_path` optionally points at a 0600 env file (see
+/// `write_opencode_secret_env_file`) carrying sensitive values such as the
+/// `OPENCODE_CONFIG_CONTENT` JSON that contains the API key. When provided,
+/// the file is sourced and immediately removed inline so the secret value is
+/// never embedded in the command text (which is otherwise visible via process
+/// args, shell history, and AppleScript payloads). Remaining `env_vars` are
+/// treated as non-sensitive and exported inline as before.
 fn build_opencode_shell_command(
     env_vars: &HashMap<String, String>,
     working_dir: &str,
     session_id: &str,
     resume_session_id: Option<&str>,
+    secret_env_path: Option<&str>,
 ) -> String {
     let mut parts = Vec::new();
     parts.push("mkdir -p ~/.ccem/sessions".to_string());
@@ -949,6 +1014,18 @@ fn build_opencode_shell_command(
     let escaped_dir = working_dir.replace("\\", "\\\\").replace("\"", "\\\"");
     parts.push(format!("cd \"{}\"", escaped_dir));
     parts.push("unset CLAUDECODE".to_string());
+
+    if let Some(path) = secret_env_path {
+        // Source the secret env file, capture status, ALWAYS remove the file
+        // (even on source failure), then re-assert the status so a failed
+        // source still blocks the opencode launch. Grouped so rm runs even if
+        // the sourced file exits non-zero.
+        let escaped_path = path.replace("'", "'\\''");
+        parts.push(format!(
+            "{{ . '{p}'; __ccem_src=$?; rm -f '{p}'; [ $__ccem_src -eq 0 ]; }}",
+            p = escaped_path
+        ));
+    }
 
     for (key, value) in env_vars {
         let escaped_value = value.replace("'", "'\\''");
@@ -1098,7 +1175,14 @@ pub fn launch_in_terminal(
     let shell_command = if client == "codex" {
         build_codex_shell_command(&env_vars, working_dir, session_id, resume_session_id)
     } else if client == "opencode" {
-        build_opencode_shell_command(&env_vars, working_dir, session_id, resume_session_id)
+        let (safe_env_vars, secret_path) = split_opencode_secret_env(env_vars, session_id)?;
+        build_opencode_shell_command(
+            &safe_env_vars,
+            working_dir,
+            session_id,
+            resume_session_id,
+            secret_path.as_deref(),
+        )
     } else if is_ccem_launch_supported() {
         let proxy_base_url = env_vars.get("ANTHROPIC_BASE_URL").and_then(|url| {
             if url.starts_with("http://127.0.0.1:") && url.contains("/proxy/claude/") {
@@ -2040,21 +2124,47 @@ mod tests {
     }
 
     #[test]
-    fn test_build_opencode_shell_command_injects_startup_prompt_and_overlay() {
+    fn test_build_opencode_shell_command_never_inlines_secret_value() {
+        // The secret content (config JSON carrying the API key) must NEVER
+        // appear in the command text. It is delivered via a sourced 0600 file.
+        let secret_path = "/tmp/ccem-test-opencode-secret.env";
         let mut env_vars = HashMap::new();
         env_vars.insert(
-            "OPENCODE_CONFIG_CONTENT".to_string(),
-            "{\"model\":\"anthropic/claude-sonnet-test\"}".to_string(),
+            "ANTHROPIC_MODEL".to_string(),
+            "claude-sonnet-test".to_string(),
         );
 
-        let cmd = build_opencode_shell_command(&env_vars, "/home/user", "test-session-123", None);
+        let cmd = build_opencode_shell_command(
+            &env_vars,
+            "/home/user",
+            "test-session-123",
+            None,
+            Some(secret_path),
+        );
 
         assert!(cmd.contains("cd \"/home/user\""));
-        assert!(cmd.contains(
-            "export OPENCODE_CONFIG_CONTENT='{\"model\":\"anthropic/claude-sonnet-test\"}'"
-        ));
+        // Secret value must not be inlined anywhere in the command text.
+        assert!(!cmd.contains("OPENCODE_CONFIG_CONTENT='"));
+        assert!(!cmd.contains("apiKey"));
+        // The secret file is sourced and removed inline instead.
+        assert!(cmd.contains(&format!(". '{}'", secret_path)));
+        assert!(cmd.contains(&format!("rm -f '{}'", secret_path)));
+        // Non-sensitive env is still exported inline.
+        assert!(cmd.contains("export ANTHROPIC_MODEL='claude-sonnet-test'"));
         assert!(cmd.contains("--prompt 'Before taking any action, load the pua skill.'"));
         assert!(cmd.contains("echo $? > ~/.ccem/sessions/'test-session-123'.exit"));
+    }
+
+    #[test]
+    fn test_build_opencode_shell_command_omits_secret_block_when_no_path() {
+        // When no secret path is provided, the source/rm block must be absent
+        // and the launch still works with whatever non-secret env is present.
+        let cmd =
+            build_opencode_shell_command(&HashMap::new(), "/home/user", "sid", None, None);
+
+        assert!(!cmd.contains("rm -f"));
+        assert!(!cmd.contains("__ccem_src"));
+        assert!(cmd.contains("cd \"/home/user\""));
     }
 
     #[test]
@@ -2064,10 +2174,82 @@ mod tests {
             "/home/user",
             "test-session-123",
             Some("open-session-456"),
+            None,
         );
 
         assert!(cmd.contains("--session 'open-session-456'"));
         assert!(!cmd.contains("--prompt"));
+    }
+
+    #[test]
+    fn test_write_opencode_secret_env_file_creates_0600_export_snippet() {
+        use std::os::unix::fs::PermissionsExt;
+
+        struct RemoveOnDrop(Option<std::path::PathBuf>);
+        impl Drop for RemoveOnDrop {
+            fn drop(&mut self) {
+                if let Some(p) = self.0.take() {
+                    let _ = std::fs::remove_file(p);
+                }
+            }
+        }
+
+        let session_id = format!(
+            "ccem-test-secret-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let secret_json = "{\"provider\":{\"anthropic\":{\"options\":{\"apiKey\":\"sk-test-LEAK-CANARY\"}}}}";
+
+        let path = write_opencode_secret_env_file(&session_id, secret_json)
+            .expect("secret env file should be written");
+        // Ensure the test file is removed even if an assert below panics.
+        let _cleanup = RemoveOnDrop(Some(path.clone()));
+
+        let on_disk = std::fs::read_to_string(&path).expect("file should be readable by owner");
+        assert!(
+            on_disk.starts_with("export OPENCODE_CONFIG_CONTENT="),
+            "file must be an export snippet, got: {on_disk}"
+        );
+        assert!(
+            on_disk.contains("sk-test-LEAK-CANARY"),
+            "file must carry the raw secret value for sourcing"
+        );
+
+        let mode = std::fs::metadata(&path)
+            .expect("metadata should resolve")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "secret env file must be 0600, got {:o}", mode);
+
+        // Sanity: the sourced snippet, when evaluated by a real shell, exports
+        // the variable and exits cleanly — proving the launch path works.
+        let probe = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(format!(
+                ". '{}'; printf '%s' \"$OPENCODE_CONFIG_CONTENT\"",
+                path.to_string_lossy()
+            ))
+            .output()
+            .expect("shell probe should run");
+        assert!(probe.status.success(), "source should succeed");
+        let exported = String::from_utf8_lossy(&probe.stdout);
+        assert_eq!(exported.as_ref(), secret_json);
+    }
+
+    #[test]
+    fn test_split_opencode_secret_env_returns_none_without_key() {
+        let mut env_vars = HashMap::new();
+        env_vars.insert("ANTHROPIC_MODEL".to_string(), "claude-test".to_string());
+
+        let (remaining, secret_path) =
+            split_opencode_secret_env(env_vars.clone(), "sid-no-secret")
+                .expect("split should succeed without secret key");
+        assert!(secret_path.is_none());
+        assert_eq!(remaining, env_vars);
     }
 
     #[test]
