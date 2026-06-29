@@ -20,6 +20,7 @@ import {
   findCodexSessionFile,
   readLatestCodexContextUsageFromSessionFile,
 } from './codexContextUsage';
+import { buildClaudeFileCheckpointEvent } from './claudeFileCheckpoints';
 
 type NativeProvider = 'claude' | 'codex';
 
@@ -74,6 +75,11 @@ type UpdateSettingsCommand = {
   effort?: string;
 };
 
+type RewindFilesCommand = {
+  type: 'rewind_files';
+  checkpoint_id: string;
+};
+
 type TitleQueryCommand = {
   type: 'title_query';
   title_input: string;
@@ -101,6 +107,7 @@ type InputCommand =
   | InteractivePromptResponseCommand
   | PermissionResponseCommand
   | UpdateSettingsCommand
+  | RewindFilesCommand
   | TitleQueryCommand
   | StopCommand;
 
@@ -1254,6 +1261,53 @@ function canApplySettingsImmediately() {
   return !hasRetainedClaudeRuntime();
 }
 
+function buildClaudeQueryOptions() {
+  if (!initCommand || initCommand.provider !== 'claude') {
+    throw new Error('Native runtime helper not initialized for Claude');
+  }
+
+  const permission = normalizeClaudePermissionMode(initCommand.perm_mode, {
+    allowDangerouslySkipPermissions: initCommand.allow_dangerously_skip_permissions === true,
+  });
+  const env = buildClaudeQueryEnv({
+    envVars: initCommand.env_vars,
+    effort: initCommand.effort,
+  });
+  const model = resolveClaudeRuntimeModel(initCommand.env_vars);
+
+  return {
+    cwd: initCommand.working_dir,
+    env,
+    resume: currentProviderSessionId ?? undefined,
+    pathToClaudeCodeExecutable: initCommand.claude_path ?? undefined,
+    includePartialMessages: true,
+    includeHookEvents: true,
+    persistSession: true,
+    enableFileCheckpointing: true,
+    extraArgs: { 'replay-user-messages': null },
+    settingSources: [...CLAUDE_SKILL_SETTING_SOURCES],
+    allowedTools: ensureClaudeSkillToolAllowed(initCommand.allowed_tools),
+    disallowedTools: initCommand.disallowed_tools ?? undefined,
+    ...(model ? { model } : {}),
+    hooks: buildClaudePlanModeHooks(
+      () => initCommand?.provider === 'claude' && initCommand.perm_mode === 'plan',
+    ),
+    canUseTool: async (toolName: string, input: unknown, options: { toolUseID: string }) => {
+      if (isClaudeAskUserQuestionTool(toolName)) {
+        return waitForAskUserQuestionResponse(input, options.toolUseID);
+      }
+      if (isClaudePlanExitTool(toolName)) {
+        return waitForPlanExitApproval(input, options.toolUseID);
+      }
+      if (isClaudeInteractiveUserInputTool(toolName)) {
+        return buildAllowedClaudeToolResult(input, options.toolUseID);
+      }
+      return waitForPermission(toolName, input, options);
+    },
+    ...permission,
+  };
+}
+
 function denyPendingPermissions() {
   for (const pending of pendingPermissions.values()) {
     pending.resolve(false);
@@ -1295,48 +1349,12 @@ async function consumeClaudeMessages() {
   }
 
   claudeContextUsageFailureKey = null;
-  const permission = normalizeClaudePermissionMode(initCommand.perm_mode, {
-    allowDangerouslySkipPermissions: initCommand.allow_dangerously_skip_permissions === true,
-  });
-  const env = buildClaudeQueryEnv({
-    envVars: initCommand.env_vars,
-    effort: initCommand.effort,
-  });
-  const model = resolveClaudeRuntimeModel(initCommand.env_vars);
 
   const inputQueue = new AsyncMessageQueue<SDKUserMessage>();
   claudeInputQueue = inputQueue;
   const claudeQuery = query({
     prompt: inputQueue,
-    options: {
-      cwd: initCommand.working_dir,
-      env,
-      resume: currentProviderSessionId ?? undefined,
-      pathToClaudeCodeExecutable: initCommand.claude_path ?? undefined,
-      includePartialMessages: true,
-      includeHookEvents: true,
-      persistSession: true,
-      settingSources: [...CLAUDE_SKILL_SETTING_SOURCES],
-      allowedTools: ensureClaudeSkillToolAllowed(initCommand.allowed_tools),
-      disallowedTools: initCommand.disallowed_tools ?? undefined,
-      ...(model ? { model } : {}),
-      hooks: buildClaudePlanModeHooks(
-        () => initCommand?.provider === 'claude' && initCommand.perm_mode === 'plan',
-      ),
-      canUseTool: async (toolName, input, options) => {
-        if (isClaudeAskUserQuestionTool(toolName)) {
-          return waitForAskUserQuestionResponse(input, options.toolUseID);
-        }
-        if (isClaudePlanExitTool(toolName)) {
-          return waitForPlanExitApproval(input, options.toolUseID);
-        }
-        if (isClaudeInteractiveUserInputTool(toolName)) {
-          return buildAllowedClaudeToolResult(input, options.toolUseID);
-        }
-        return waitForPermission(toolName, input, options);
-      },
-      ...permission,
-    },
+    options: buildClaudeQueryOptions(),
   });
   currentClaudeQuery = claudeQuery;
 
@@ -1422,6 +1440,11 @@ async function consumeClaudeMessages() {
       }
 
       if (message.type === 'user') {
+        const checkpoint = buildClaudeFileCheckpointEvent(message, currentProviderSessionId);
+        if (checkpoint) {
+          emitEvent(checkpoint);
+        }
+
         const contentBlocks = getClaudeContentBlocks(message.message);
         contentBlocks.forEach((block) => {
           if (block.type !== 'tool_result' || typeof block.tool_use_id !== 'string') {
@@ -1675,6 +1698,78 @@ function enqueueClaudePrompt(text: string, images?: PromptImage[] | null) {
     parent_tool_use_id: null,
   });
   emitStatus('processing', 'Claude is processing a turn.');
+}
+
+async function rewindClaudeFiles(checkpointId: string) {
+  const checkpoint = checkpointId.trim();
+  if (!checkpoint) {
+    throw new Error('Missing checkpoint id.');
+  }
+  if (!initCommand || initCommand.provider !== 'claude') {
+    throw new Error('File rewind is only available for Claude sessions.');
+  }
+  if (pendingPermissions.size > 0 || pendingClaudeInteractivePrompts.size > 0) {
+    throw new Error('Cannot rewind while a permission or user prompt is waiting.');
+  }
+  if (currentClaudeQuery && claudeLastSessionState !== 'idle' && !claudeTurnCompletionEmitted) {
+    throw new Error('Cannot rewind while Claude is processing or starting a turn.');
+  }
+
+  if (currentClaudeQuery) {
+    return currentClaudeQuery.rewindFiles(checkpoint);
+  }
+
+  if (!currentProviderSessionId) {
+    throw new Error('Cannot rewind before Claude provides a session id.');
+  }
+
+  const rewindQuery = query({
+    prompt: '',
+    options: buildClaudeQueryOptions(),
+  });
+
+  try {
+    for await (const message of rewindQuery) {
+      const sessionId = (message as { session_id?: string } | undefined)?.session_id;
+      if (sessionId) {
+        emitSessionMeta(sessionId);
+      }
+      return await rewindQuery.rewindFiles(checkpoint);
+    }
+  } finally {
+    rewindQuery.close();
+  }
+
+  throw new Error('Claude resume ended before file rewind could run.');
+}
+
+async function handleRewindFilesCommand(command: RewindFilesCommand) {
+  const checkpointId = command.checkpoint_id.trim();
+  try {
+    emitStatus('processing', 'Restoring files from Claude checkpoint.');
+    const result = await rewindClaudeFiles(checkpointId);
+    if (!result.canRewind) {
+      throw new Error(result.error || 'Claude could not rewind files for this checkpoint.');
+    }
+    emitEvent({
+      type: 'files_rewound',
+      provider: 'claude',
+      checkpoint_id: checkpointId,
+      files_changed: result.filesChanged ?? [],
+      insertions: result.insertions ?? null,
+      deletions: result.deletions ?? null,
+    });
+    emitStatus('ready', 'Files restored from Claude checkpoint.');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    emitEvent({
+      type: 'file_rewind_failed',
+      provider: 'claude',
+      checkpoint_id: checkpointId,
+      error: message,
+    });
+    emitStatus('ready', 'File rewind failed.');
+  }
 }
 
 function codexCategoryForItem(item: Record<string, unknown>) {
@@ -2073,6 +2168,11 @@ async function handleCommand(command: InputCommand) {
         command.tool_use_id,
       ),
     );
+    return;
+  }
+
+  if (command.type === 'rewind_files') {
+    await handleRewindFilesCommand(command);
     return;
   }
 

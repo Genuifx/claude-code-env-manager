@@ -293,6 +293,9 @@ fn query_events_since(
                    AND (
                      seq IN (SELECT seq FROM tail)
                      OR payload_json LIKE '{\"type\":\"user_prompt\"%'
+                     OR payload_json LIKE '{\"type\":\"checkpoint_created\"%'
+                     OR payload_json LIKE '{\"type\":\"files_rewound\"%'
+                     OR payload_json LIKE '{\"type\":\"file_rewind_failed\"%'
                    )
                  ORDER BY seq ASC",
             )
@@ -381,6 +384,9 @@ fn should_flush_after_append(payload: &SessionEventPayload) -> bool {
         | SessionEventPayload::PermissionResponded { .. }
         | SessionEventPayload::TerminalPromptRequired { .. }
         | SessionEventPayload::TerminalPromptResolved { .. }
+        | SessionEventPayload::CheckpointCreated { .. }
+        | SessionEventPayload::FilesRewound { .. }
+        | SessionEventPayload::FileRewindFailed { .. }
         | SessionEventPayload::TokenUsage { .. }
         | SessionEventPayload::ContextUsage { .. } => true,
         SessionEventPayload::ToolUseStarted { needs_response, .. } => *needs_response,
@@ -568,6 +574,81 @@ mod tests {
                 .map(|event| event.seq)
                 .collect::<Vec<_>>(),
             vec![1, 4, 5],
+        );
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn native_event_log_keeps_checkpoint_anchors_in_limited_replay() {
+        let db_path = std::env::temp_dir().join(format!(
+            "ccem-native-event-log-checkpoint-anchor-test-{}.sqlite",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default(),
+        ));
+        let log = NativeEventLog::new(db_path.clone());
+        let runtime_id = "runtime-checkpoint-anchor";
+
+        log.append(&SessionEventRecord {
+            runtime_id: runtime_id.to_string(),
+            seq: 1,
+            occurred_at: Utc::now(),
+            payload: SessionEventPayload::CheckpointCreated {
+                provider: "claude".to_string(),
+                checkpoint_id: "checkpoint-1".to_string(),
+                provider_session_id: Some("session-1".to_string()),
+                prompt_summary: Some("edit example".to_string()),
+                source: "claude-file-checkpoint".to_string(),
+            },
+        })
+        .expect("append checkpoint");
+        log.append(&SessionEventRecord {
+            runtime_id: runtime_id.to_string(),
+            seq: 2,
+            occurred_at: Utc::now(),
+            payload: SessionEventPayload::FilesRewound {
+                provider: "claude".to_string(),
+                checkpoint_id: "checkpoint-1".to_string(),
+                files_changed: vec!["example.txt".to_string()],
+                insertions: Some(0),
+                deletions: Some(1),
+            },
+        })
+        .expect("append rewind");
+        log.append(&SessionEventRecord {
+            runtime_id: runtime_id.to_string(),
+            seq: 3,
+            occurred_at: Utc::now(),
+            payload: SessionEventPayload::FileRewindFailed {
+                provider: "claude".to_string(),
+                checkpoint_id: "checkpoint-2".to_string(),
+                error: "missing checkpoint".to_string(),
+            },
+        })
+        .expect("append rewind failure");
+
+        for seq in 4..=7 {
+            log.append(&SessionEventRecord {
+                runtime_id: runtime_id.to_string(),
+                seq,
+                occurred_at: Utc::now(),
+                payload: SessionEventPayload::AssistantChunk {
+                    text: format!("chunk-{seq}"),
+                },
+            })
+            .expect("append chunk");
+        }
+
+        let replay = log
+            .replay(runtime_id, None, Some(2))
+            .expect("replay tail");
+
+        assert_eq!(
+            replay
+                .events
+                .iter()
+                .map(|event| event.seq)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3, 6, 7],
         );
 
         let _ = std::fs::remove_file(db_path);

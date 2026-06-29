@@ -3,9 +3,11 @@ import {
   ChevronUp,
   Check,
   ClipboardList,
+  History,
   Layers3,
   LoaderCircle,
   MessageSquareQuote,
+  RotateCcw,
   Share2,
   ShieldAlert,
   Square,
@@ -15,6 +17,14 @@ import {
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -74,6 +84,10 @@ import {
 } from './workspaceNativeAttention';
 import { normalizeEffortForProvider } from './workspaceSessionPreferences';
 import { resolveWorkspaceRuntimePlanMode } from './workspaceRuntimePlanMode';
+import {
+  deriveNativeFileCheckpoints,
+  type NativeFileCheckpoint,
+} from './workspaceNativeCheckpoints';
 import {
   buildWorkspaceCronAgentPrompt,
   isWorkspaceCronCommand,
@@ -198,6 +212,7 @@ const IDLE_POLL_INTERVAL_MS = 700;
 const TERMINAL_POLL_INTERVAL_MS = 1100;
 const SUMMARY_REFRESH_COOLDOWN_MS = 2000;
 const CACHE_FLUSH_INTERVAL_MS = 1500;
+const FILE_REWIND_TIMEOUT_MS = 30_000;
 const INITIAL_EVENT_REPLAY_LIMIT = 1200;
 const NATIVE_EVENT_CACHE_KEY_PREFIX = 'ccem-workspace-native-events:';
 const NATIVE_EVENT_CACHE_LIMIT = 8000;
@@ -334,6 +349,33 @@ function resolveGuidanceMessagesUpdate(
 
 function isTerminalStatus(status: string) {
   return status === 'stopped' || status === 'error' || status === 'handoff';
+}
+
+function formatCheckpointRelativeTime(
+  createdAt: string,
+  t: (key: string) => string,
+) {
+  const created = Date.parse(createdAt);
+  if (Number.isNaN(created)) {
+    return t('workspace.nativeRestoreJustNow');
+  }
+
+  const elapsedMs = Math.max(0, Date.now() - created);
+  const elapsedMinutes = Math.floor(elapsedMs / 60_000);
+  if (elapsedMinutes < 1) {
+    return t('workspace.nativeRestoreJustNow');
+  }
+  if (elapsedMinutes < 60) {
+    return t('workspace.nativeRestoreMinutesAgo').replace('{count}', String(elapsedMinutes));
+  }
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) {
+    return t('workspace.nativeRestoreHoursAgo').replace('{count}', String(elapsedHours));
+  }
+
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  return t('workspace.nativeRestoreDaysAgo').replace('{count}', String(elapsedDays));
 }
 
 function nativeSessionRuntimePermMode(session: NativeSessionSummary) {
@@ -1134,6 +1176,7 @@ export function WorkspaceNativeSessionView({
     sendNativeSessionInput,
     respondNativeSessionPermission,
     respondNativeSessionPrompt,
+    rewindNativeSessionFiles,
     stopNativeSession,
     updateNativeSessionSettings,
     setNativeSessionRuntimePermMode,
@@ -1179,6 +1222,10 @@ export function WorkspaceNativeSessionView({
   const [isHandingOff, setIsHandingOff] = useState(false);
   const [isWecomBindDialogOpen, setIsWecomBindDialogOpen] = useState(false);
   const [isExternalActionsOpen, setIsExternalActionsOpen] = useState(false);
+  const [isFileRestoreMenuOpen, setIsFileRestoreMenuOpen] = useState(false);
+  const [selectedFileCheckpoint, setSelectedFileCheckpoint] = useState<NativeFileCheckpoint | null>(null);
+  const [isRestoreDialogOpen, setIsRestoreDialogOpen] = useState(false);
+  const [isRewindingFiles, setIsRewindingFiles] = useState(false);
   const reviewPanelOpen = useAppStore((state) => state.reviewPanelOpen);
   const setReviewPanelOpen = useAppStore((state) => state.setReviewPanelOpen);
   const setReviewEntry = useAppStore((state) => state.setReviewEntry);
@@ -1219,11 +1266,42 @@ export function WorkspaceNativeSessionView({
   const scrollFrameRef = useRef<number | null>(null);
   const scrollSettleTimeoutRef = useRef<number | null>(null);
   const externalActionsCloseTimerRef = useRef<number | null>(null);
+  const fileRestorePointerToggleRef = useRef(false);
+  const fileRewindTimeoutRef = useRef<number | null>(null);
+  const pendingRewindCheckpointIdRef = useRef<string | null>(null);
+  const pendingRewindStartSeqRef = useRef(0);
   const prevEventCountRef = useRef(0);
   const tickInFlightRef = useRef(false);
   const gitSnapshotRequestSeqRef = useRef(0);
 
   const sessionUsage = useMemo(() => computeSessionUsage(events), [events]);
+  const fileCheckpoints = useMemo(() => deriveNativeFileCheckpoints(events), [events]);
+
+  const clearFileRewindTimeout = useCallback(() => {
+    if (fileRewindTimeoutRef.current !== null) {
+      window.clearTimeout(fileRewindTimeoutRef.current);
+      fileRewindTimeoutRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => clearFileRewindTimeout, [clearFileRewindTimeout]);
+
+  useEffect(() => {
+    if (!selectedFileCheckpoint) {
+      return;
+    }
+
+    const nextSelected = fileCheckpoints.find(
+      (checkpoint) => checkpoint.checkpointId === selectedFileCheckpoint.checkpointId,
+    );
+    if (nextSelected) {
+      setSelectedFileCheckpoint(nextSelected);
+      return;
+    }
+
+    setSelectedFileCheckpoint(null);
+    setIsRestoreDialogOpen(false);
+  }, [fileCheckpoints, selectedFileCheckpoint]);
 
   const clearExternalActionsCloseTimer = useCallback(() => {
     if (externalActionsCloseTimerRef.current !== null) {
@@ -1317,11 +1395,17 @@ export function WorkspaceNativeSessionView({
     setQueuedMessages([]);
     setLocalUserPrompts(initialPrompts);
     setLocallyDismissedPromptIds(new Set());
+    setSelectedFileCheckpoint(null);
+    setIsRestoreDialogOpen(false);
+    setIsRewindingFiles(false);
+    clearFileRewindTimeout();
+    pendingRewindCheckpointIdRef.current = null;
+    pendingRewindStartSeqRef.current = 0;
     setReviewPanelOpen(false);
     gitSnapshotRequestSeqRef.current += 1;
     setGitSnapshot(null);
     setIsRefreshingGitSnapshot(false);
-  }, [initialImages, initialPrompt, session.runtime_id]);
+  }, [clearFileRewindTimeout, initialImages, initialPrompt, session.runtime_id]);
 
   useEffect(() => {
     gitSnapshotRequestSeqRef.current += 1;
@@ -1720,6 +1804,38 @@ export function WorkspaceNativeSessionView({
   const canSend = !isSending
     && !isTerminalStatus(session.status)
     && composerText.trim().length > 0;
+  const canShowFileRestorePoints = session.provider === 'claude'
+    && fileCheckpoints.length > 0;
+  const canUseFileRestorePoints = canShowFileRestorePoints
+    && !isTerminalStatus(session.status)
+    && !isProcessingTurn
+    && !hasBlockingAttention
+    && !isRewindingFiles;
+  const fileRestoreDisabledReason = canUseFileRestorePoints
+    ? null
+    : isRewindingFiles
+      ? t('common.loading')
+      : hasBlockingAttention
+        ? t('workspace.nativeRestoreBlocked')
+        : isProcessingTurn
+          ? t('workspace.nativeRestoreBusy')
+          : isTerminalStatus(session.status)
+            ? t('workspace.nativeRestoreUnavailable')
+            : null;
+
+  useEffect(() => {
+    if (!canUseFileRestorePoints) {
+      setIsFileRestoreMenuOpen(false);
+    }
+  }, [canUseFileRestorePoints]);
+
+  const toggleFileRestoreMenu = useCallback(() => {
+    if (!canUseFileRestorePoints) {
+      return;
+    }
+
+    setIsFileRestoreMenuOpen((open) => !open);
+  }, [canUseFileRestorePoints]);
 
   const buildDispatchText = useCallback((text: string, planModeEnabled: boolean) => {
     const trimmedText = text.trim();
@@ -2290,6 +2406,91 @@ export function WorkspaceNativeSessionView({
     }
   }, [handoffNativeSessionToTerminal, refreshSummary, session.runtime_id, t]);
 
+  const handleRestoreFileCheckpoint = useCallback(async () => {
+    if (!selectedFileCheckpoint || !canUseFileRestorePoints) {
+      return;
+    }
+
+    const checkpointId = selectedFileCheckpoint.checkpointId;
+    setIsRewindingFiles(true);
+    pendingRewindCheckpointIdRef.current = checkpointId;
+    pendingRewindStartSeqRef.current = latestEventSeq(latestEventsRef.current) ?? 0;
+    clearFileRewindTimeout();
+    fileRewindTimeoutRef.current = window.setTimeout(() => {
+      if (pendingRewindCheckpointIdRef.current !== checkpointId) {
+        return;
+      }
+
+      fileRewindTimeoutRef.current = null;
+      pendingRewindCheckpointIdRef.current = null;
+      pendingRewindStartSeqRef.current = 0;
+      setIsRewindingFiles(false);
+      toast.error(
+        t('workspace.nativeRestoreFailed').replace('{error}', t('workspace.nativeRestoreTimedOut')),
+      );
+      void refreshSummary({ force: true });
+    }, FILE_REWIND_TIMEOUT_MS);
+
+    try {
+      await rewindNativeSessionFiles(session.runtime_id, checkpointId);
+      await pollEvents();
+    } catch (error) {
+      clearFileRewindTimeout();
+      pendingRewindCheckpointIdRef.current = null;
+      setIsRewindingFiles(false);
+      console.error('Failed to request native file rewind:', error);
+      toast.error(
+        t('workspace.nativeRestoreFailed').replace('{error}', String(error)),
+      );
+    }
+  }, [
+    canUseFileRestorePoints,
+    clearFileRewindTimeout,
+    pollEvents,
+    refreshSummary,
+    rewindNativeSessionFiles,
+    selectedFileCheckpoint,
+    session.runtime_id,
+    t,
+  ]);
+
+  useEffect(() => {
+    const checkpointId = pendingRewindCheckpointIdRef.current;
+    if (!checkpointId) {
+      return;
+    }
+
+    const newerEvents = events.filter((event) => event.seq > pendingRewindStartSeqRef.current);
+    const resultEvent = newerEvents.find((event) =>
+      (event.payload.type === 'files_rewound' || event.payload.type === 'file_rewind_failed')
+      && event.payload.checkpoint_id === checkpointId
+    );
+
+    if (!resultEvent) {
+      return;
+    }
+
+    pendingRewindCheckpointIdRef.current = null;
+    pendingRewindStartSeqRef.current = resultEvent.seq;
+    clearFileRewindTimeout();
+    setIsRewindingFiles(false);
+
+    if (resultEvent.payload.type === 'files_rewound') {
+      setIsRestoreDialogOpen(false);
+      setSelectedFileCheckpoint(null);
+      toast.success(t('workspace.nativeRestoreSuccess'));
+      void refreshGitSnapshot();
+      void refreshSummary({ force: true });
+      return;
+    }
+
+    if (resultEvent.payload.type === 'file_rewind_failed') {
+      toast.error(
+        t('workspace.nativeRestoreFailed').replace('{error}', resultEvent.payload.error),
+      );
+    }
+  }, [clearFileRewindTimeout, events, refreshGitSnapshot, refreshSummary, t]);
+
   useEffect(() => {
     if (
       queuedMessages.length === 0
@@ -2470,6 +2671,102 @@ export function WorkspaceNativeSessionView({
         secondaryActions={(
           <>
             <ContextWindowIndicator usage={sessionUsage} />
+            {canShowFileRestorePoints ? (
+              <DropdownMenu
+                modal={false}
+                open={isFileRestoreMenuOpen}
+                onOpenChange={setIsFileRestoreMenuOpen}
+              >
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex">
+                      <DropdownMenuTrigger asChild disabled={!canUseFileRestorePoints}>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-9 w-9 rounded-full transition-colors"
+                          aria-label={t('workspace.nativeRestorePoints')}
+                          disabled={!canUseFileRestorePoints}
+                          onPointerDown={(event) => {
+                            if (!canUseFileRestorePoints) {
+                              return;
+                            }
+                            fileRestorePointerToggleRef.current = true;
+                            event.preventDefault();
+                            toggleFileRestoreMenu();
+                          }}
+                          onClick={() => {
+                            if (fileRestorePointerToggleRef.current) {
+                              fileRestorePointerToggleRef.current = false;
+                              return;
+                            }
+                            toggleFileRestoreMenu();
+                          }}
+                        >
+                          {isRewindingFiles ? (
+                            <LoaderCircle className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <History className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    {fileRestoreDisabledReason ?? t('workspace.nativeRestorePoints')}
+                  </TooltipContent>
+                </Tooltip>
+                <DropdownMenuContent
+                  align="end"
+                  side="top"
+                  sideOffset={8}
+                  className="w-[300px]"
+                >
+                  {fileCheckpoints.map((checkpoint) => (
+                    <DropdownMenuItem
+                      key={checkpoint.checkpointId}
+                      disabled={!canUseFileRestorePoints}
+                      className="flex cursor-pointer flex-col items-stretch gap-1.5 px-3 py-2"
+                      onSelect={(event) => {
+                        event.preventDefault();
+                        if (!canUseFileRestorePoints) {
+                          return;
+                        }
+                        setIsFileRestoreMenuOpen(false);
+                        setSelectedFileCheckpoint(checkpoint);
+                        setIsRestoreDialogOpen(true);
+                      }}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="min-w-0 truncate text-xs font-medium text-foreground">
+                          {t('workspace.nativeRestorePointTurn')
+                            .replace('{index}', String(checkpoint.turnIndex))}
+                        </span>
+                        <span className="shrink-0 text-[11px] text-muted-foreground">
+                          {formatCheckpointRelativeTime(checkpoint.createdAt, t)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+                          {checkpoint.promptSummary || t('workspace.nativeRestorePointUnknown')}
+                        </span>
+                        {checkpoint.status === 'rewound' ? (
+                          <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-600">
+                            {t('workspace.nativeRestorePointRewound')}
+                          </span>
+                        ) : null}
+                        {checkpoint.status === 'failed' ? (
+                          <span className="shrink-0 rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive">
+                            {t('workspace.nativeRestorePointFailed')}
+                          </span>
+                        ) : null}
+                      </div>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
             <DropdownMenu modal={false} open={isExternalActionsOpen} onOpenChange={handleExternalActionsOpenChange}>
               <span
                 className="inline-flex"
@@ -2547,6 +2844,69 @@ export function WorkspaceNativeSessionView({
         )}
       />
     </div>
+    <Dialog
+      open={isRestoreDialogOpen}
+      onOpenChange={(open) => {
+        if (isRewindingFiles) {
+          return;
+        }
+        setIsRestoreDialogOpen(open);
+        if (!open) {
+          setSelectedFileCheckpoint(null);
+        }
+      }}
+    >
+      <DialogContent className="max-w-[420px]">
+        <DialogHeader>
+          <DialogTitle>{t('workspace.nativeRestoreConfirmTitle')}</DialogTitle>
+          <DialogDescription>
+            {t('workspace.nativeRestoreConfirmBody')}
+          </DialogDescription>
+        </DialogHeader>
+        {selectedFileCheckpoint ? (
+          <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+            <div className="flex items-center justify-between gap-3 text-xs">
+              <span className="font-medium text-foreground">
+                {t('workspace.nativeRestorePointTurn')
+                  .replace('{index}', String(selectedFileCheckpoint.turnIndex))}
+              </span>
+              <span className="text-muted-foreground">
+                {formatCheckpointRelativeTime(selectedFileCheckpoint.createdAt, t)}
+              </span>
+            </div>
+            <p className="mt-1 truncate text-[12px] text-muted-foreground">
+              {selectedFileCheckpoint.promptSummary || t('workspace.nativeRestorePointUnknown')}
+            </p>
+          </div>
+        ) : null}
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={isRewindingFiles}
+            onClick={() => {
+              setIsRestoreDialogOpen(false);
+              setSelectedFileCheckpoint(null);
+            }}
+          >
+            {t('workspace.nativeRestoreCancel')}
+          </Button>
+          <Button
+            type="button"
+            disabled={!selectedFileCheckpoint || !canUseFileRestorePoints}
+            onClick={() => void handleRestoreFileCheckpoint()}
+            className="gap-2"
+          >
+            {isRewindingFiles ? (
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+            ) : (
+              <RotateCcw className="h-4 w-4" />
+            )}
+            <span>{t('workspace.nativeRestoreConfirmAction')}</span>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     <WorkspaceWecomBindDialog
       open={isWecomBindDialogOpen}
       onOpenChange={setIsWecomBindDialogOpen}

@@ -308,6 +308,13 @@ export interface TauriCommands {
     },
     void
   ];
+  rewind_native_session_files: [
+    {
+      runtimeId: string;
+      checkpointId: string;
+    },
+    void
+  ];
   get_native_session_events: [
     {
       runtimeId: string;
@@ -1086,6 +1093,28 @@ export type SessionEventPayload =
       input_summary?: string | null;
     }
   | { type: 'permission_responded'; request_id: string; approved: boolean; responder: string }
+  | {
+      type: 'checkpoint_created';
+      provider: 'claude';
+      checkpoint_id: string;
+      provider_session_id?: string | null;
+      prompt_summary?: string | null;
+      source: 'claude-file-checkpoint';
+    }
+  | {
+      type: 'files_rewound';
+      provider: 'claude';
+      checkpoint_id: string;
+      files_changed: string[];
+      insertions?: number | null;
+      deletions?: number | null;
+    }
+  | {
+      type: 'file_rewind_failed';
+      provider: 'claude';
+      checkpoint_id: string;
+      error: string;
+    }
   | { type: 'terminal_prompt_required'; prompt_kind: TerminalPromptKind; prompt_text: string }
   | { type: 'terminal_prompt_resolved'; prompt_kind: TerminalPromptKind; approved: boolean }
   | { type: 'session_completed'; reason: string }

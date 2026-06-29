@@ -1250,6 +1250,16 @@ fn respond_native_session_prompt(
 }
 
 #[tauri::command]
+fn rewind_native_session_files(
+    app: tauri::AppHandle,
+    native_state: State<'_, Arc<NativeRuntimeManager>>,
+    runtime_id: String,
+    checkpoint_id: String,
+) -> Result<(), String> {
+    native_state.rewind_files(&app, &runtime_id, &checkpoint_id)
+}
+
+#[tauri::command]
 fn get_native_session_events(
     native_state: State<'_, Arc<NativeRuntimeManager>>,
     runtime_id: String,
@@ -4461,6 +4471,7 @@ fn main() {
             send_native_session_input,
             respond_native_session_permission,
             respond_native_session_prompt,
+            rewind_native_session_files,
             get_native_session_events,
             read_prompt_image_attachment,
             update_native_session_settings,
