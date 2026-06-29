@@ -44,6 +44,7 @@ import {
   invalidateHistoryCache,
 } from '@/features/conversations/historyData';
 import type {
+  ConversationContentBlock,
   ConversationMessageData,
   HistorySegment,
   HistorySessionItem,
@@ -84,8 +85,15 @@ import {
   buildWorkspaceCronAgentPrompt,
   isWorkspaceCronCommand,
 } from '@/components/workspace/workspaceCronCommand';
-import { trimSeedMessagesBeforeFirstUserPrompt } from '@/components/workspace/workspaceEventTranscript';
-import { parseCcemSessionLink } from '@/components/workspace/sessionLinks';
+import {
+  buildMessagesFromEvents,
+  trimSeedMessagesBeforeFirstUserPrompt,
+} from '@/components/workspace/workspaceEventTranscript';
+import {
+  nativeSessionMatchesCcemSessionLink,
+  parseCcemSessionLink,
+  shouldPreferLiveSessionForCcemLink,
+} from '@/components/workspace/sessionLinks';
 import { buildPetNotificationId } from '@/lib/petNotifications';
 import type { PetOpenSessionRequest } from '@/types/pet';
 
@@ -147,6 +155,67 @@ function canRestoreWorkspaceLiveSession(session: NativeSessionSummary): boolean 
   }
 
   return !['stopped', 'error', 'handoff'].includes(session.status);
+}
+
+function contentBlockHasRenderableContent(
+  block: ConversationContentBlock,
+): boolean {
+  if (typeof block.text === 'string' && block.text.trim()) {
+    return true;
+  }
+  if (block.type === 'image') {
+    return true;
+  }
+  if (typeof block.thinking === 'string' && block.thinking.trim()) {
+    return true;
+  }
+  if (typeof block.content === 'string' && block.content.trim()) {
+    return true;
+  }
+  return block.type === 'tool_use' || block.type === 'tool_result';
+}
+
+function messageHasRenderableContent(content: ConversationMessageData['content']): boolean {
+  if (typeof content === 'string') {
+    return content.trim().length > 0;
+  }
+  if (Array.isArray(content)) {
+    return content.some(contentBlockHasRenderableContent);
+  }
+  if (content && typeof content === 'object') {
+    return contentBlockHasRenderableContent(content as ConversationContentBlock);
+  }
+  return false;
+}
+
+function hasNativeHistoryTranscriptMessages(messages: ConversationMessageData[]): boolean {
+  return messages.some((message) =>
+    ['user', 'human', 'assistant', 'ai'].includes(message.msgType)
+    && messageHasRenderableContent(message.content)
+  );
+}
+
+function nativeSessionMatchesHistorySession(
+  nativeSession: NativeSessionSummary,
+  session: HistorySessionItem,
+  runtimeId?: string | null,
+): boolean {
+  if (nativeSession.provider !== session.source) {
+    return false;
+  }
+  if (runtimeId) {
+    return nativeSession.runtime_id === runtimeId;
+  }
+  return nativeSession.runtime_id === session.id
+    || nativeSession.provider_session_id === session.id;
+}
+
+function sortNativeSessionsByUpdatedAt(
+  sessions: NativeSessionSummary[],
+): NativeSessionSummary[] {
+  return [...sessions].sort((left, right) =>
+    Date.parse(right.updated_at) - Date.parse(left.updated_at)
+  );
 }
 
 interface WorkspaceProps {
@@ -543,10 +612,38 @@ export function Workspace({
     setSelectedKey(nextKey);
   }, [activeLiveEntry, sessions, workspaceMode]);
 
+  const loadNativeHistoryConversation = useCallback(async (
+    nativeSession: NativeSessionSummary,
+  ): Promise<{ messages: ConversationMessageData[]; segments: HistorySegment[] } | null> => {
+    const replayBatch = await getNativeSessionEvents(nativeSession.runtime_id, null, null);
+    if (replayBatch.events.length === 0) {
+      return null;
+    }
+
+    const nativeMessages = buildMessagesFromEvents(
+      [],
+      [],
+      replayBatch.events,
+      nativeSession.status === 'error' ? nativeSession.last_error : null,
+    );
+    if (!hasNativeHistoryTranscriptMessages(nativeMessages)) {
+      return null;
+    }
+
+    return {
+      messages: nativeMessages,
+      segments: [],
+    };
+  }, [getNativeSessionEvents]);
+
   const loadConversation = useCallback(
     async (
       session: HistorySessionItem,
-      options: { resetBeforeLoad?: boolean; showLoading?: boolean } = {}
+      options: {
+        resetBeforeLoad?: boolean;
+        showLoading?: boolean;
+        nativeHistorySession?: NativeSessionSummary | null;
+      } = {}
     ) => {
       const { resetBeforeLoad = true, showLoading = true } = options;
       const requestSeq = ++conversationRequestSeqRef.current;
@@ -562,6 +659,21 @@ export function Workspace({
       }
 
       try {
+        const nativeHistory = options.nativeHistorySession
+          ? await loadNativeHistoryConversation(options.nativeHistorySession).catch((error) => {
+            console.error('Failed to load native history transcript:', error);
+            return null;
+          })
+          : null;
+        if (requestSeq !== conversationRequestSeqRef.current) {
+          return;
+        }
+        if (nativeHistory) {
+          setMessages(nativeHistory.messages);
+          setSegments(nativeHistory.segments);
+          return;
+        }
+
         const { messages: msgs, segments: segs } = await fetchConversationDetail(session);
 
         if (requestSeq !== conversationRequestSeqRef.current) {
@@ -581,7 +693,7 @@ export function Workspace({
         }
       }
     },
-    []
+    [loadNativeHistoryConversation]
   );
 
   const refreshWorkspaceData = useCallback(
@@ -878,6 +990,18 @@ export function Workspace({
       hydratingLiveRuntimeIdsRef.current.delete(session.runtime_id);
     }
   }, [getNativeSessionEvents, upsertLiveSessionEntry]);
+
+  const findNativeHistorySessionForSession = useCallback(async (
+    session: HistorySessionItem,
+  ): Promise<NativeSessionSummary | null> => {
+    const runtimeId = decorationsBySessionKey[toSessionKey(session)]?.runtimeId;
+    const nativeSessions = await listNativeSessions();
+    return sortNativeSessionsByUpdatedAt(
+      nativeSessions.filter((nativeSession) =>
+        nativeSessionMatchesHistorySession(nativeSession, session, runtimeId)
+      ),
+    )[0] ?? null;
+  }, [decorationsBySessionKey, listNativeSessions]);
 
   const ensureLiveEntryForSession = useCallback(async (
     session: HistorySessionItem,
@@ -1210,12 +1334,18 @@ export function Workspace({
   }, [installedSkills, loadWorkspaceSkills, skillsContext]);
 
   const handleSelect = useCallback(
-    async (session: HistorySessionItem) => {
+    async (
+      session: HistorySessionItem,
+      options?: {
+        forceHistory?: boolean;
+        nativeHistorySession?: NativeSessionSummary | null;
+      },
+    ) => {
       const key = toSessionKey(session);
       setSelectedKey(key);
       selectedKeyRef.current = key;
 
-      const liveEntry = await ensureLiveEntryForSession(session);
+      const liveEntry = options?.forceHistory ? null : await ensureLiveEntryForSession(session);
       await markPetNotificationReadForSession(session, liveEntry);
       if (liveEntry && canRestoreWorkspaceLiveSession(liveEntry.session)) {
         setActiveLiveRuntimeId(liveEntry.session.runtime_id);
@@ -1225,13 +1355,25 @@ export function Workspace({
         return;
       }
 
+      const shouldLookupNativeHistory = options?.nativeHistorySession === undefined;
+      const nativeHistorySession = shouldLookupNativeHistory
+        ? await findNativeHistorySessionForSession(session)
+        : options.nativeHistorySession ?? null;
+
       setWorkspaceMode('history');
       await loadConversation(session, {
         resetBeforeLoad: true,
         showLoading: true,
+        nativeHistorySession,
       });
     },
-    [ensureLiveEntryForSession, loadConversation, markPetNotificationReadForSession, setSelectedWorkingDir]
+    [
+      ensureLiveEntryForSession,
+      findNativeHistorySessionForSession,
+      loadConversation,
+      markPetNotificationReadForSession,
+      setSelectedWorkingDir,
+    ]
   );
 
   const selectNativeSessionSummary = useCallback((session: NativeSessionSummary) => {
@@ -1268,8 +1410,10 @@ export function Workspace({
 
     const targetRuntimeId = parsed.runtimeId || (parsed.idKind === 'runtime' ? parsed.id : null);
     const targetProviderSessionId = parsed.providerSessionId || (parsed.idKind === 'provider' ? parsed.id : null);
+    const preferLiveSession = shouldPreferLiveSessionForCcemLink(parsed);
+    let matchingNativeSession: NativeSessionSummary | null = null;
 
-    if (targetRuntimeId) {
+    if (preferLiveSession && targetRuntimeId) {
       const liveEntry = liveSessionsByRuntimeIdRef.current[targetRuntimeId];
       if (liveEntry && canRestoreWorkspaceLiveSession(liveEntry.session)) {
         selectNativeSessionSummary(liveEntry.session);
@@ -1282,18 +1426,15 @@ export function Workspace({
         console.error('Failed to list native sessions for ccem link:', error);
         return [] as NativeSessionSummary[];
       });
-      const matchingNativeSession = nativeSessions
-        .filter((session) => session.provider === parsed.source)
-        .find((session) => {
-          if (targetRuntimeId && session.runtime_id === targetRuntimeId) {
-            return true;
-          }
-          if (targetProviderSessionId && session.provider_session_id === targetProviderSessionId) {
-            return true;
-          }
-          return false;
-        });
-      if (matchingNativeSession && canRestoreWorkspaceLiveSession(matchingNativeSession)) {
+      matchingNativeSession = sortNativeSessionsByUpdatedAt(
+        nativeSessions.filter((session) => nativeSessionMatchesCcemSessionLink(parsed, session)),
+      )[0] ?? null;
+
+      if (
+        preferLiveSession
+        && matchingNativeSession
+        && canRestoreWorkspaceLiveSession(matchingNativeSession)
+      ) {
         selectNativeSessionSummary(matchingNativeSession);
         return;
       }
@@ -1317,7 +1458,10 @@ export function Workspace({
 
     const matchingSession = sidebarSessions.find(matchesParsedSession);
     if (matchingSession) {
-      await handleSelect(matchingSession);
+      await handleSelect(matchingSession, {
+        forceHistory: !preferLiveSession,
+        nativeHistorySession: matchingNativeSession,
+      });
       return;
     }
 
@@ -1328,7 +1472,10 @@ export function Workspace({
     });
     const refreshedMatchingSession = refreshedSessions?.find(matchesParsedSession);
     if (refreshedMatchingSession) {
-      await handleSelect(refreshedMatchingSession);
+      await handleSelect(refreshedMatchingSession, {
+        forceHistory: !preferLiveSession,
+        nativeHistorySession: matchingNativeSession,
+      });
       return;
     }
 
