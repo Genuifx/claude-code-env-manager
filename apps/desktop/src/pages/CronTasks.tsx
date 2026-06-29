@@ -573,6 +573,8 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
         } : null,
       });
       onClose();
+    } catch (err) {
+      toast.error(typeof err === 'string' ? err : t('cron.taskSaveFailed'));
     } finally {
       setSaving(false);
     }

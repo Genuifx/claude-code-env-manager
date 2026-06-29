@@ -1185,6 +1185,7 @@
     "statusTimeout": "Timeout",
     "taskAdded": "Task added",
     "taskUpdated": "Task updated",
+    "taskSaveFailed": "Failed to save task, please check your input",
     "taskDeleted": "Task deleted",
     "taskRetried": "Task triggered",
     "retryFailed": "Failed to trigger task",

@@ -1185,6 +1185,7 @@
     "statusTimeout": "超时",
     "taskAdded": "任务已添加",
     "taskUpdated": "任务已更新",
+    "taskSaveFailed": "保存失败，请检查输入",
     "taskDeleted": "任务已删除",
     "taskRetried": "任务已触发执行",
     "retryFailed": "触发执行失败",

@@ -239,60 +239,111 @@ fn generate_id(prefix: &str) -> String {
 
 /// Parse a single cron field (e.g. "*/5", "1-3", "1,2,3", "*") into a sorted
 /// list of matching values within [min, max].
-fn parse_cron_field(field: &str, min: u32, max: u32) -> Vec<u32> {
+///
+/// Returns an error describing the first invalid token instead of silently
+/// dropping it. This prevents bad expressions from passing validation only to
+/// never fire at runtime.
+fn parse_cron_field(field: &str, min: u32, max: u32) -> Result<Vec<u32>, String> {
     let mut result = Vec::new();
     for part in field.split(',') {
         let part = part.trim();
+        if part.is_empty() {
+            return Err(format!("empty value (allowed range {}-{})", min, max));
+        }
         if part == "*" {
-            return (min..=max).collect();
+            result.extend(min..=max);
         } else if let Some(step_str) = part.strip_prefix("*/") {
-            if let Ok(step) = step_str.parse::<u32>() {
-                if step > 0 {
-                    let mut v = min;
-                    while v <= max {
-                        result.push(v);
-                        v += step;
-                    }
-                }
+            let step = step_str
+                .parse::<u32>()
+                .map_err(|_| format!("invalid step '{}'", step_str))?;
+            if step == 0 {
+                return Err("step cannot be zero".to_string());
+            }
+            let mut v = min;
+            while v <= max {
+                result.push(v);
+                v += step;
             }
         } else if part.contains('-') {
             let bounds: Vec<&str> = part.split('-').collect();
-            if bounds.len() == 2 {
-                if let (Ok(lo), Ok(hi)) = (bounds[0].parse::<u32>(), bounds[1].parse::<u32>()) {
-                    let lo = lo.max(min);
-                    let hi = hi.min(max);
-                    for v in lo..=hi {
-                        result.push(v);
-                    }
-                }
+            if bounds.len() != 2 {
+                return Err(format!("invalid range '{}'", part));
             }
-        } else if let Ok(v) = part.parse::<u32>() {
-            if v >= min && v <= max {
+            let lo = bounds[0]
+                .trim()
+                .parse::<u32>()
+                .map_err(|_| format!("invalid range start '{}' in '{}'", bounds[0], part))?;
+            let hi = bounds[1]
+                .trim()
+                .parse::<u32>()
+                .map_err(|_| format!("invalid range end '{}' in '{}'", bounds[1], part))?;
+            if lo > hi {
+                return Err(format!(
+                    "inverted range '{}' (start {} > end {})",
+                    part, lo, hi
+                ));
+            }
+            if lo < min || hi > max {
+                return Err(format!(
+                    "range '{}' out of bounds (allowed {}-{})",
+                    part, min, max
+                ));
+            }
+            for v in lo..=hi {
                 result.push(v);
             }
+        } else {
+            let v = part
+                .parse::<u32>()
+                .map_err(|_| format!("invalid value '{}'", part))?;
+            if v < min || v > max {
+                return Err(format!("value {} out of range (allowed {}-{})", v, min, max));
+            }
+            result.push(v);
         }
     }
     result.sort();
     result.dedup();
-    result
+    Ok(result)
+}
+
+/// Parse and validate all 5 fields of a cron expression, returning the
+/// resolved value sets. Used as the single shared validator across
+/// create/update/preview/scheduler boundaries.
+fn parse_cron_expression(
+    expression: &str,
+) -> Result<(Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>), String> {
+    let fields: Vec<&str> = expression.split_whitespace().collect();
+    if fields.len() != 5 {
+        return Err(
+            "cron expression must have exactly 5 fields (minute hour day month weekday)"
+                .to_string(),
+        );
+    }
+    let minutes = parse_cron_field(fields[0], 0, 59).map_err(|e| format!("minute field: {e}"))?;
+    let hours = parse_cron_field(fields[1], 0, 23).map_err(|e| format!("hour field: {e}"))?;
+    let days = parse_cron_field(fields[2], 1, 31).map_err(|e| format!("day-of-month field: {e}"))?;
+    let months = parse_cron_field(fields[3], 1, 12).map_err(|e| format!("month field: {e}"))?;
+    let weekdays = parse_cron_field(fields[4], 0, 6).map_err(|e| format!("day-of-week field: {e}"))?;
+    Ok((minutes, hours, days, months, weekdays))
+}
+
+/// Validate a cron expression without retaining the parsed values.
+fn validate_cron_expression(expression: &str) -> Result<(), String> {
+    parse_cron_expression(expression).map(|_| ())
 }
 
 /// Check whether a given chrono::DateTime matches a 5-field cron expression
 /// (minute hour day-of-month month day-of-week).
-fn cron_matches(expression: &str, dt: &chrono::DateTime<chrono::Local>) -> bool {
+///
+/// Returns an error if the expression is invalid so callers can distinguish
+/// "does not match right now" from "will never match because the expression is
+/// malformed".
+fn cron_matches(expression: &str, dt: &chrono::DateTime<chrono::Local>) -> Result<bool, String> {
     use chrono::Datelike;
     use chrono::Timelike;
 
-    let fields: Vec<&str> = expression.split_whitespace().collect();
-    if fields.len() != 5 {
-        return false;
-    }
-
-    let minutes = parse_cron_field(fields[0], 0, 59);
-    let hours = parse_cron_field(fields[1], 0, 23);
-    let days = parse_cron_field(fields[2], 1, 31);
-    let months = parse_cron_field(fields[3], 1, 12);
-    let weekdays = parse_cron_field(fields[4], 0, 6);
+    let (minutes, hours, days, months, weekdays) = parse_cron_expression(expression)?;
 
     let m = dt.minute();
     let h = dt.hour();
@@ -302,17 +353,23 @@ fn cron_matches(expression: &str, dt: &chrono::DateTime<chrono::Local>) -> bool 
     // cron convention: Sun=0, Mon=1 .. Sat=6
     let wd = dt.weekday().num_days_from_sunday();
 
-    minutes.contains(&m)
+    Ok(minutes.contains(&m)
         && hours.contains(&h)
         && days.contains(&d)
         && months.contains(&mo)
-        && weekdays.contains(&wd)
+        && weekdays.contains(&wd))
 }
 
 /// Compute the next `count` run times for a cron expression, starting from now.
-/// Returns ISO-8601 strings in local time.
-fn next_runs(expression: &str, count: usize) -> Vec<String> {
-    use chrono::{Duration, Local, Timelike};
+/// Returns ISO-8601 strings in local time. Rejects invalid expressions instead
+/// of silently returning an empty/sparse schedule.
+fn next_runs(expression: &str, count: usize) -> Result<Vec<String>, String> {
+    use chrono::{Datelike, Duration, Local, Timelike};
+
+    // Validate and parse once, then match against the resolved value sets.
+    // This both rejects bad expressions up front and avoids re-parsing on every
+    // iteration of the scan loop.
+    let (minutes, hours, days, months, weekdays) = parse_cron_expression(expression)?;
 
     let mut results = Vec::new();
     // Start from the next whole minute
@@ -328,14 +385,24 @@ fn next_runs(expression: &str, count: usize) -> Vec<String> {
     let mut iterations = 0;
 
     while results.len() < count && iterations < limit {
-        if cron_matches(expression, &cursor) {
+        let m = cursor.minute();
+        let h = cursor.hour();
+        let d = cursor.day();
+        let mo = cursor.month();
+        let wd = cursor.weekday().num_days_from_sunday();
+        if minutes.contains(&m)
+            && hours.contains(&h)
+            && days.contains(&d)
+            && months.contains(&mo)
+            && weekdays.contains(&wd)
+        {
             results.push(cursor.to_rfc3339());
         }
         cursor += Duration::minutes(1);
         iterations += 1;
     }
 
-    results
+    Ok(results)
 }
 
 // ============================================================================
@@ -987,8 +1054,19 @@ pub fn start_cron_scheduler(
                 if task.trigger_type != "schedule" {
                     continue;
                 }
-                if !cron_matches(&task.cron_expression, &now) {
-                    continue;
+                match cron_matches(&task.cron_expression, &now) {
+                    Ok(true) => {}
+                    Ok(false) => continue,
+                    Err(e) => {
+                        // Defense-in-depth: create/update validate up front, but
+                        // persisted tasks may predate validation or be hand-edited.
+                        // Log and skip instead of silently treating as "never fire".
+                        eprintln!(
+                            "[cron] skipping task {} ({}): invalid expression '{}': {}",
+                            task.id, task.name, task.cron_expression, e
+                        );
+                        continue;
+                    }
                 }
 
                 // Dedup: skip if already fired this minute
@@ -1108,13 +1186,9 @@ pub fn add_cron_task(
     template_id: Option<String>,
     wecom_notification: Option<CronWecomNotification>,
 ) -> Result<CronTask, String> {
-    // Validate cron expression (must be 5 fields)
-    let fields: Vec<&str> = cron_expression.split_whitespace().collect();
-    if fields.len() != 5 {
-        return Err(
-            "Invalid cron expression: must have exactly 5 fields (minute hour day month weekday)"
-                .to_string(),
-        );
+    // Validate cron expression (5 fields + per-field token/range checks)
+    if let Err(e) = validate_cron_expression(&cron_expression) {
+        return Err(e);
     }
 
     let now = chrono::Utc::now().to_rfc3339();
@@ -1174,9 +1248,8 @@ pub fn update_cron_task(
         task.name = v;
     }
     if let Some(v) = cron_expression {
-        let fields: Vec<&str> = v.split_whitespace().collect();
-        if fields.len() != 5 {
-            return Err("Invalid cron expression: must have exactly 5 fields".to_string());
+        if let Err(e) = validate_cron_expression(&v) {
+            return Err(e);
         }
         task.cron_expression = v;
     }
@@ -1273,11 +1346,7 @@ pub fn get_cron_next_runs(
     cron_expression: String,
     count: Option<usize>,
 ) -> Result<Vec<String>, String> {
-    let fields: Vec<&str> = cron_expression.split_whitespace().collect();
-    if fields.len() != 5 {
-        return Err("Invalid cron expression: must have exactly 5 fields".to_string());
-    }
-    Ok(next_runs(&cron_expression, count.unwrap_or(5)))
+    next_runs(&cron_expression, count.unwrap_or(5))
 }
 
 // ============================================================================
@@ -1366,14 +1435,160 @@ pub fn generate_cron_task_stream(app: AppHandle, query: String) {
 mod tests {
     use super::{
         build_cron_claude_command, build_cron_launch_provenance, build_cron_user_path,
-        expand_cron_working_dir, normalize_execution_profile, normalize_wecom_peer_id,
-        resolve_cron_env_name, resolve_cron_wecom_notification_target, resolve_execution_profile,
-        resolve_task_tool_policy, CronTask, CronWecomNotification, ResolvedToolPolicy,
+        cron_matches, expand_cron_working_dir, next_runs, normalize_execution_profile,
+        normalize_wecom_peer_id, parse_cron_field, resolve_cron_env_name,
+        resolve_cron_wecom_notification_target, resolve_execution_profile, resolve_task_tool_policy,
+        validate_cron_expression, CronTask, CronWecomNotification, ResolvedToolPolicy,
     };
     use crate::wecom::WecomTaskBindingTargetType;
     use std::collections::HashMap;
     use std::ffi::OsStr;
     use std::path::PathBuf;
+
+    // ---- cron parser validation tests ----
+
+    #[test]
+    fn parse_cron_field_accepts_valid_forms() {
+        // wildcard
+        let v = parse_cron_field("*", 0, 59).expect("wildcard");
+        assert_eq!(v.len(), 60);
+        assert_eq!(v[0], 0);
+        assert_eq!(v[59], 59);
+
+        // single value
+        assert_eq!(parse_cron_field("5", 0, 59).unwrap(), vec![5]);
+
+        // explicit range
+        assert_eq!(parse_cron_field("1-3", 0, 59).unwrap(), vec![1, 2, 3]);
+
+        // step from wildcard
+        assert_eq!(parse_cron_field("*/15", 0, 59).unwrap(), vec![0, 15, 30, 45]);
+
+        // list of values
+        assert_eq!(parse_cron_field("1,3,5", 0, 59).unwrap(), vec![1, 3, 5]);
+
+        // mixed list (value + range)
+        assert_eq!(parse_cron_field("0,10-12", 0, 59).unwrap(), vec![0, 10, 11, 12]);
+
+        // boundary values
+        assert_eq!(parse_cron_field("0", 0, 6).unwrap(), vec![0]);
+        assert_eq!(parse_cron_field("6", 0, 6).unwrap(), vec![6]);
+    }
+
+    #[test]
+    fn parse_cron_field_rejects_invalid_tokens() {
+        assert!(parse_cron_field("abc", 0, 59).is_err());
+        assert!(parse_cron_field("x", 0, 59).is_err());
+        assert!(parse_cron_field("1,x,3", 0, 59).is_err());
+    }
+
+    #[test]
+    fn parse_cron_field_rejects_out_of_range_values() {
+        // minute max is 59
+        let err = parse_cron_field("60", 0, 59).unwrap_err();
+        assert!(err.contains("out of range"), "{err}");
+
+        // hour max is 23
+        let err = parse_cron_field("24", 0, 23).unwrap_err();
+        assert!(err.contains("out of range"), "{err}");
+
+        // range exceeding bounds is rejected (no silent clamp)
+        let err = parse_cron_field("0-99", 0, 59).unwrap_err();
+        assert!(err.contains("out of bounds"), "{err}");
+    }
+
+    #[test]
+    fn parse_cron_field_rejects_zero_step() {
+        let err = parse_cron_field("*/0", 0, 59).unwrap_err();
+        assert!(err.contains("zero"), "{err}");
+    }
+
+    #[test]
+    fn parse_cron_field_rejects_invalid_step_token() {
+        assert!(parse_cron_field("*/x", 0, 59).is_err());
+        assert!(parse_cron_field("*/", 0, 59).is_err());
+    }
+
+    #[test]
+    fn parse_cron_field_rejects_inverted_range() {
+        let err = parse_cron_field("5-3", 0, 59).unwrap_err();
+        assert!(err.contains("inverted"), "{err}");
+    }
+
+    #[test]
+    fn parse_cron_field_rejects_malformed_range() {
+        // too many dashes
+        assert!(parse_cron_field("1-2-3", 0, 59).is_err());
+        // lone dash
+        assert!(parse_cron_field("-", 0, 59).is_err());
+    }
+
+    #[test]
+    fn parse_cron_field_rejects_empty_field() {
+        assert!(parse_cron_field("", 0, 59).is_err());
+        assert!(parse_cron_field(",", 0, 59).is_err());
+    }
+
+    #[test]
+    fn validate_cron_expression_accepts_template_expressions() {
+        // Every expression used by built-in templates and visual-mode presets.
+        assert!(validate_cron_expression("0 9 * * 1-5").is_ok());
+        assert!(validate_cron_expression("0 */4 * * *").is_ok());
+        assert!(validate_cron_expression("0 18 * * 5").is_ok());
+        assert!(validate_cron_expression("0 3 * * 1").is_ok());
+        assert!(validate_cron_expression("0 17 * * 5").is_ok());
+        assert!(validate_cron_expression("0 9 * * *").is_ok());
+        assert!(validate_cron_expression("* * * * *").is_ok());
+    }
+
+    #[test]
+    fn validate_cron_expression_rejects_field_count() {
+        assert!(validate_cron_expression("* * * *").is_err());
+        assert!(validate_cron_expression("* * * * * *").is_err());
+        assert!(validate_cron_expression("").is_err());
+    }
+
+    #[test]
+    fn validate_cron_expression_error_names_the_field() {
+        let err = validate_cron_expression("0 99 * * *").unwrap_err();
+        assert!(err.contains("hour"), "should identify hour field: {err}");
+
+        let err = validate_cron_expression("* * * * 7").unwrap_err();
+        assert!(err.contains("day-of-week"), "should identify weekday field: {err}");
+
+        let err = validate_cron_expression("* * 32 * *").unwrap_err();
+        assert!(err.contains("day-of-month"), "should identify day field: {err}");
+
+        let err = validate_cron_expression("* * * 13 *").unwrap_err();
+        assert!(err.contains("month"), "should identify month field: {err}");
+
+        let err = validate_cron_expression("60 * * * *").unwrap_err();
+        assert!(err.contains("minute"), "should identify minute field: {err}");
+    }
+
+    #[test]
+    fn cron_matches_rejects_invalid_expression() {
+        use chrono::Local;
+        let now = Local::now();
+        // Invalid expression must surface as Err, not silently Ok(false).
+        assert!(cron_matches("60 * * * *", &now).is_err());
+        assert!(cron_matches("abc def ghi jkl mno", &now).is_err());
+        assert!(cron_matches("* * * *", &now).is_err());
+    }
+
+    #[test]
+    fn next_runs_rejects_invalid_expression() {
+        assert!(next_runs("60 * * * *", 3).is_err());
+        assert!(next_runs("*/0 * * * *", 3).is_err());
+        assert!(next_runs("1-5-9 * * * *", 3).is_err());
+        assert!(next_runs("0 99 * * *", 3).is_err());
+    }
+
+    #[test]
+    fn next_runs_returns_results_for_valid_expression() {
+        let runs = next_runs("0 9 * * *", 3).expect("valid expression");
+        assert_eq!(runs.len(), 3);
+    }
 
     #[test]
     fn normalize_execution_profile_defaults_unknown_values() {

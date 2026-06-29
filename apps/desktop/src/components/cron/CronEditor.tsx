@@ -48,6 +48,7 @@ export function CronEditor({ value, onChange }: CronEditorProps) {
   const [dayOfMonth, setDayOfMonth] = useState(initial?.dayOfMonth ?? 1);
   const [dayOfWeek, setDayOfWeek] = useState(initial?.dayOfWeek ?? 1);
   const [nextRuns, setNextRuns] = useState<string[]>([]);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const nextRunsTimer = useRef<ReturnType<typeof setTimeout>>();
   const initialized = useRef(false);
 
@@ -80,13 +81,14 @@ export function CronEditor({ value, onChange }: CronEditorProps) {
     const expr = advancedMode ? value : expression;
     if (!expr || expr.trim().split(/\s+/).length !== 5) {
       setNextRuns([]);
+      setPreviewError(null);
       return;
     }
     clearTimeout(nextRunsTimer.current);
     nextRunsTimer.current = setTimeout(() => {
       getCronNextRuns(expr, 5)
-        .then(setNextRuns)
-        .catch(() => setNextRuns([]));
+        .then((runs) => { setNextRuns(runs); setPreviewError(null); })
+        .catch((err) => { setNextRuns([]); setPreviewError(typeof err === 'string' ? err : null); });
     }, 300);
     return () => clearTimeout(nextRunsTimer.current);
   }, [expression, value, advancedMode, getCronNextRuns]);
@@ -237,6 +239,9 @@ export function CronEditor({ value, onChange }: CronEditorProps) {
             ))}
           </div>
         </div>
+      )}
+      {previewError && (
+        <p className="text-2xs text-destructive font-mono break-all">{previewError}</p>
       )}
     </div>
   );
