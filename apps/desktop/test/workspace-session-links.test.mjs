@@ -53,7 +53,12 @@ test('builds runtime ccem links without confusing provider session ids', async (
 });
 
 test('builds provider ccem links for history sessions', async () => {
-  const { buildCcemSessionLink, parseCcemSessionLink } = await importSessionLinks();
+  const {
+    buildCcemSessionLink,
+    nativeSessionMatchesCcemSessionLink,
+    parseCcemSessionLink,
+    shouldPreferLiveSessionForCcemLink,
+  } = await importSessionLinks();
 
   const link = buildCcemSessionLink({
     source: 'claude',
@@ -62,12 +67,13 @@ test('builds provider ccem links for history sessions', async () => {
     cwd: '/Users/wzt/project',
     focus: 'history',
   });
+  const parsed = parseCcemSessionLink(link);
 
   assert.equal(
     link,
     'ccem://workspace/session?source=claude&idKind=provider&id=provider-abc&cwd=%2FUsers%2Fwzt%2Fproject&focus=history'
   );
-  assert.deepEqual(parseCcemSessionLink(link), {
+  assert.deepEqual(parsed, {
     source: 'claude',
     idKind: 'provider',
     id: 'provider-abc',
@@ -76,6 +82,36 @@ test('builds provider ccem links for history sessions', async () => {
     cwd: '/Users/wzt/project',
     focus: 'history',
   });
+  assert.equal(shouldPreferLiveSessionForCcemLink(parsed), false);
+  assert.equal(
+    nativeSessionMatchesCcemSessionLink(parsed, {
+      provider: 'claude',
+      runtime_id: 'native-runtime-1',
+      provider_session_id: 'provider-abc',
+    }),
+    true
+  );
+});
+
+test('prefers live sessions unless a ccem link explicitly requests history focus', async () => {
+  const {
+    parseCcemSessionLink,
+    shouldPreferLiveSessionForCcemLink,
+  } = await importSessionLinks();
+
+  const defaultFocus = parseCcemSessionLink(
+    'ccem://workspace/session?source=claude&idKind=provider&id=provider-abc'
+  );
+  const liveFocus = parseCcemSessionLink(
+    'ccem://workspace/session?source=claude&idKind=provider&id=provider-abc&focus=live'
+  );
+  const eventsFocus = parseCcemSessionLink(
+    'ccem://workspace/session?source=claude&idKind=provider&id=provider-abc&focus=events'
+  );
+
+  assert.equal(shouldPreferLiveSessionForCcemLink(defaultFocus), true);
+  assert.equal(shouldPreferLiveSessionForCcemLink(liveFocus), true);
+  assert.equal(shouldPreferLiveSessionForCcemLink(eventsFocus), true);
 });
 
 test('rejects invalid ccem session links', async () => {

@@ -23,6 +23,12 @@ export interface ParsedCcemSessionLink {
   focus: CcemSessionLinkFocus | null;
 }
 
+export interface CcemSessionLinkNativeSessionRef {
+  provider: Extract<HistorySource, 'claude' | 'codex' | 'opencode'> | string;
+  runtime_id: string;
+  provider_session_id?: string | null;
+}
+
 const VALID_SOURCES = new Set(['claude', 'codex', 'opencode']);
 const VALID_ID_KINDS = new Set(['runtime', 'provider']);
 const VALID_FOCUS = new Set(['events', 'history', 'live']);
@@ -107,4 +113,28 @@ export function parseCcemSessionLink(rawLink: string): ParsedCcemSessionLink | n
     cwd: readOptionalString(url.searchParams, 'cwd'),
     focus: focus as CcemSessionLinkFocus | null,
   };
+}
+
+export function shouldPreferLiveSessionForCcemLink(parsed: ParsedCcemSessionLink): boolean {
+  return parsed.focus !== 'history';
+}
+
+export function nativeSessionMatchesCcemSessionLink(
+  parsed: ParsedCcemSessionLink,
+  session: CcemSessionLinkNativeSessionRef,
+): boolean {
+  if (session.provider !== parsed.source) {
+    return false;
+  }
+
+  const targetRuntimeId = parsed.runtimeId || (parsed.idKind === 'runtime' ? parsed.id : null);
+  const targetProviderSessionId = parsed.providerSessionId || (parsed.idKind === 'provider' ? parsed.id : null);
+
+  if (targetRuntimeId && session.runtime_id === targetRuntimeId) {
+    return true;
+  }
+  if (targetProviderSessionId && session.provider_session_id === targetProviderSessionId) {
+    return true;
+  }
+  return false;
 }
