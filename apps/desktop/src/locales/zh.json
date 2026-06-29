@@ -235,6 +235,7 @@
     "nativeRestoreConfirmAction": "恢复文件",
     "nativeRestoreSuccess": "已恢复到文件检查点",
     "nativeRestoreFailed": "恢复失败：{error}",
+    "nativeRestoreTimedOut": "等待 Claude 完成文件恢复超时。",
     "nativeRestoreUnavailable": "当前会话不能恢复文件",
     "nativeRestoreBlocked": "先处理当前权限或用户提示",
     "nativeRestoreBusy": "Claude 正在处理时不能恢复文件",

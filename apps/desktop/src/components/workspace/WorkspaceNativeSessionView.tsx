@@ -212,6 +212,7 @@ const IDLE_POLL_INTERVAL_MS = 700;
 const TERMINAL_POLL_INTERVAL_MS = 1100;
 const SUMMARY_REFRESH_COOLDOWN_MS = 2000;
 const CACHE_FLUSH_INTERVAL_MS = 1500;
+const FILE_REWIND_TIMEOUT_MS = 30_000;
 const INITIAL_EVENT_REPLAY_LIMIT = 1200;
 const NATIVE_EVENT_CACHE_KEY_PREFIX = 'ccem-workspace-native-events:';
 const NATIVE_EVENT_CACHE_LIMIT = 8000;
@@ -1266,6 +1267,7 @@ export function WorkspaceNativeSessionView({
   const scrollSettleTimeoutRef = useRef<number | null>(null);
   const externalActionsCloseTimerRef = useRef<number | null>(null);
   const fileRestorePointerToggleRef = useRef(false);
+  const fileRewindTimeoutRef = useRef<number | null>(null);
   const pendingRewindCheckpointIdRef = useRef<string | null>(null);
   const pendingRewindStartSeqRef = useRef(0);
   const prevEventCountRef = useRef(0);
@@ -1274,6 +1276,15 @@ export function WorkspaceNativeSessionView({
 
   const sessionUsage = useMemo(() => computeSessionUsage(events), [events]);
   const fileCheckpoints = useMemo(() => deriveNativeFileCheckpoints(events), [events]);
+
+  const clearFileRewindTimeout = useCallback(() => {
+    if (fileRewindTimeoutRef.current !== null) {
+      window.clearTimeout(fileRewindTimeoutRef.current);
+      fileRewindTimeoutRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => clearFileRewindTimeout, [clearFileRewindTimeout]);
 
   useEffect(() => {
     if (!selectedFileCheckpoint) {
@@ -1387,13 +1398,14 @@ export function WorkspaceNativeSessionView({
     setSelectedFileCheckpoint(null);
     setIsRestoreDialogOpen(false);
     setIsRewindingFiles(false);
+    clearFileRewindTimeout();
     pendingRewindCheckpointIdRef.current = null;
     pendingRewindStartSeqRef.current = 0;
     setReviewPanelOpen(false);
     gitSnapshotRequestSeqRef.current += 1;
     setGitSnapshot(null);
     setIsRefreshingGitSnapshot(false);
-  }, [initialImages, initialPrompt, session.runtime_id]);
+  }, [clearFileRewindTimeout, initialImages, initialPrompt, session.runtime_id]);
 
   useEffect(() => {
     gitSnapshotRequestSeqRef.current += 1;
@@ -1797,13 +1809,13 @@ export function WorkspaceNativeSessionView({
   const canUseFileRestorePoints = canShowFileRestorePoints
     && !isTerminalStatus(session.status)
     && !isProcessingTurn
-    && !hasHardBlockingAttention
+    && !hasBlockingAttention
     && !isRewindingFiles;
   const fileRestoreDisabledReason = canUseFileRestorePoints
     ? null
     : isRewindingFiles
       ? t('common.loading')
-      : hasHardBlockingAttention
+      : hasBlockingAttention
         ? t('workspace.nativeRestoreBlocked')
         : isProcessingTurn
           ? t('workspace.nativeRestoreBusy')
@@ -2395,18 +2407,35 @@ export function WorkspaceNativeSessionView({
   }, [handoffNativeSessionToTerminal, refreshSummary, session.runtime_id, t]);
 
   const handleRestoreFileCheckpoint = useCallback(async () => {
-    if (!selectedFileCheckpoint || isRewindingFiles) {
+    if (!selectedFileCheckpoint || !canUseFileRestorePoints) {
       return;
     }
 
+    const checkpointId = selectedFileCheckpoint.checkpointId;
     setIsRewindingFiles(true);
-    pendingRewindCheckpointIdRef.current = selectedFileCheckpoint.checkpointId;
+    pendingRewindCheckpointIdRef.current = checkpointId;
     pendingRewindStartSeqRef.current = latestEventSeq(latestEventsRef.current) ?? 0;
+    clearFileRewindTimeout();
+    fileRewindTimeoutRef.current = window.setTimeout(() => {
+      if (pendingRewindCheckpointIdRef.current !== checkpointId) {
+        return;
+      }
+
+      fileRewindTimeoutRef.current = null;
+      pendingRewindCheckpointIdRef.current = null;
+      pendingRewindStartSeqRef.current = 0;
+      setIsRewindingFiles(false);
+      toast.error(
+        t('workspace.nativeRestoreFailed').replace('{error}', t('workspace.nativeRestoreTimedOut')),
+      );
+      void refreshSummary({ force: true });
+    }, FILE_REWIND_TIMEOUT_MS);
 
     try {
-      await rewindNativeSessionFiles(session.runtime_id, selectedFileCheckpoint.checkpointId);
+      await rewindNativeSessionFiles(session.runtime_id, checkpointId);
       await pollEvents();
     } catch (error) {
+      clearFileRewindTimeout();
       pendingRewindCheckpointIdRef.current = null;
       setIsRewindingFiles(false);
       console.error('Failed to request native file rewind:', error);
@@ -2415,8 +2444,10 @@ export function WorkspaceNativeSessionView({
       );
     }
   }, [
-    isRewindingFiles,
+    canUseFileRestorePoints,
+    clearFileRewindTimeout,
     pollEvents,
+    refreshSummary,
     rewindNativeSessionFiles,
     selectedFileCheckpoint,
     session.runtime_id,
@@ -2441,6 +2472,7 @@ export function WorkspaceNativeSessionView({
 
     pendingRewindCheckpointIdRef.current = null;
     pendingRewindStartSeqRef.current = resultEvent.seq;
+    clearFileRewindTimeout();
     setIsRewindingFiles(false);
 
     if (resultEvent.payload.type === 'files_rewound') {
@@ -2457,7 +2489,7 @@ export function WorkspaceNativeSessionView({
         t('workspace.nativeRestoreFailed').replace('{error}', resultEvent.payload.error),
       );
     }
-  }, [events, refreshGitSnapshot, refreshSummary, t]);
+  }, [clearFileRewindTimeout, events, refreshGitSnapshot, refreshSummary, t]);
 
   useEffect(() => {
     if (
@@ -2861,7 +2893,7 @@ export function WorkspaceNativeSessionView({
           </Button>
           <Button
             type="button"
-            disabled={!selectedFileCheckpoint || isRewindingFiles}
+            disabled={!selectedFileCheckpoint || !canUseFileRestorePoints}
             onClick={() => void handleRestoreFileCheckpoint()}
             className="gap-2"
           >

@@ -24,7 +24,7 @@ function truncateSummary(value: string) {
   if (value.length <= PROMPT_SUMMARY_MAX_LENGTH) {
     return value;
   }
-  return `${value.slice(0, PROMPT_SUMMARY_MAX_LENGTH - 1)}...`;
+  return `${value.slice(0, PROMPT_SUMMARY_MAX_LENGTH - 3)}...`;
 }
 
 export function summarizeClaudeUserPrompt(message: unknown): string | null {

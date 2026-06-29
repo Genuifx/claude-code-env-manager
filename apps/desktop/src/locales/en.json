@@ -235,6 +235,7 @@
     "nativeRestoreConfirmAction": "Restore files",
     "nativeRestoreSuccess": "Restored to file checkpoint",
     "nativeRestoreFailed": "Restore failed: {error}",
+    "nativeRestoreTimedOut": "Timed out waiting for Claude to finish restoring files.",
     "nativeRestoreUnavailable": "This session cannot restore files",
     "nativeRestoreBlocked": "Handle the current permission or user prompt first",
     "nativeRestoreBusy": "Files cannot be restored while Claude is processing",

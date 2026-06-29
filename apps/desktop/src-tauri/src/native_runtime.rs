@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(test)]
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
@@ -25,6 +25,7 @@ use tauri_plugin_shell::{
 };
 
 const NATIVE_STOP_GRACE_PERIOD: Duration = Duration::from_millis(1_500);
+static NATIVE_RUNTIME_STATE_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -255,6 +256,10 @@ fn native_session_allows_dangerously_skip_permissions(options: &NativeSessionOpt
                 .runtime_perm_mode
                 .as_deref()
                 .is_some_and(is_bypass_permission_mode))
+}
+
+fn native_status_allows_file_rewind(status: &str) -> bool {
+    matches!(status, "idle" | "ready" | "interrupted")
 }
 
 #[derive(Debug, Deserialize)]
@@ -685,6 +690,19 @@ impl NativeRuntimeManager {
         }
 
         let handle = self.ensure_handle(app.clone(), runtime_id)?;
+        let status = handle
+            .record
+            .lock()
+            .map_err(|_| "Failed to lock native session record".to_string())?
+            .status
+            .clone();
+        if !native_status_allows_file_rewind(&status) {
+            return Err(format!(
+                "Cannot rewind files while native session is {}.",
+                status
+            ));
+        }
+
         self.write_to_child_with_reconnect(
             app,
             runtime_id,
@@ -1921,11 +1939,25 @@ fn persist_native_runtime_state_to(
     let state = NativeRuntimeState { sessions: records };
     let serialized = serde_json::to_vec_pretty(&state)
         .map_err(|error| format!("Failed to serialize native runtime state: {}", error))?;
-    let temp_path = path.with_extension("json.tmp");
+    let temp_path = native_runtime_state_temp_file_path(path);
     fs::write(&temp_path, serialized)
         .map_err(|error| format!("Failed to write native runtime state: {}", error))?;
     fs::rename(&temp_path, path)
         .map_err(|error| format!("Failed to finalize native runtime state: {}", error))
+}
+
+fn native_runtime_state_temp_file_path(path: &Path) -> PathBuf {
+    let counter = NATIVE_RUNTIME_STATE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("native-runtime-state.json");
+    path.with_file_name(format!(
+        ".{}.{}.{}.tmp",
+        file_name,
+        std::process::id(),
+        counter
+    ))
 }
 
 fn build_runtime_bootstrap_options(
@@ -1977,10 +2009,11 @@ mod tests {
     use super::{
         clear_terminal_launches, drain_helper_output_lines, is_retryable_native_child_write_error,
         merge_helper_env_path, merge_path_values_with_separator,
-        native_session_allows_dangerously_skip_permissions, reactivate_record_for_reconnect,
-        read_native_runtime_state_from, take_terminal_launches, HelperInputCommand, NativeProvider,
-        NativeRuntimeManager, NativeSessionHandle, NativeSessionOptions, NativeSessionRecord,
-        NativeTransport, PromptImage,
+        native_runtime_state_temp_file_path, native_session_allows_dangerously_skip_permissions,
+        native_status_allows_file_rewind, reactivate_record_for_reconnect,
+        read_native_runtime_state_from, take_terminal_launches, HelperInputCommand,
+        NativeProvider, NativeRuntimeManager, NativeSessionHandle, NativeSessionOptions,
+        NativeSessionRecord, NativeTransport, PromptImage,
     };
     use crate::event_bus::{SessionEventPayload, SessionStore};
     use crate::native_event_log::NativeEventLog;
@@ -2231,6 +2264,22 @@ mod tests {
     }
 
     #[test]
+    fn native_runtime_state_temp_paths_are_unique_per_write() {
+        let state_path = std::env::temp_dir().join("ccem-native-runtime-state-test.json");
+
+        let first = native_runtime_state_temp_file_path(&state_path);
+        let second = native_runtime_state_temp_file_path(&state_path);
+
+        assert_ne!(first, second);
+        assert_eq!(first.parent(), state_path.parent());
+        assert_eq!(second.parent(), state_path.parent());
+        assert!(first
+            .file_name()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| value.contains("ccem-native-runtime-state-test.json")));
+    }
+
+    #[test]
     fn helper_output_buffers_partial_json_until_newline() {
         let mut buffer = Vec::new();
         let first = drain_helper_output_lines(&mut buffer, br#"{"type":"status","status":"ready""#);
@@ -2440,6 +2489,23 @@ mod tests {
 
         assert_eq!(serialized["type"], "rewind_files");
         assert_eq!(serialized["checkpoint_id"], "checkpoint-1");
+    }
+
+    #[test]
+    fn file_rewind_is_limited_to_idle_like_native_statuses() {
+        for status in ["idle", "ready", "interrupted"] {
+            assert!(native_status_allows_file_rewind(status), "{status}");
+        }
+        for status in [
+            "initializing",
+            "processing",
+            "handoff_pending",
+            "handoff",
+            "stopped",
+            "error",
+        ] {
+            assert!(!native_status_allows_file_rewind(status), "{status}");
+        }
     }
 
     #[test]

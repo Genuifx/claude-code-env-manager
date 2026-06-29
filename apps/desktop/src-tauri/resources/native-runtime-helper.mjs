@@ -20560,7 +20560,7 @@ function truncateSummary(value) {
   if (value.length <= PROMPT_SUMMARY_MAX_LENGTH) {
     return value;
   }
-  return `${value.slice(0, PROMPT_SUMMARY_MAX_LENGTH - 1)}...`;
+  return `${value.slice(0, PROMPT_SUMMARY_MAX_LENGTH - 3)}...`;
 }
 function summarizeClaudeUserPrompt(message) {
   const root = readObject(message);
@@ -21775,6 +21775,9 @@ async function rewindClaudeFiles(checkpointId) {
   }
   if (pendingPermissions.size > 0 || pendingClaudeInteractivePrompts.size > 0) {
     throw new Error("Cannot rewind while a permission or user prompt is waiting.");
+  }
+  if (currentClaudeQuery && claudeLastSessionState !== "idle" && !claudeTurnCompletionEmitted) {
+    throw new Error("Cannot rewind while Claude is processing or starting a turn.");
   }
   if (currentClaudeQuery) {
     return currentClaudeQuery.rewindFiles(checkpoint);
