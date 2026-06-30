@@ -1,5 +1,11 @@
 # ccem
 
+## 2.38.0
+
+### Minor Changes
+
+- Bug fixes since v2.37.0: i18n relative time strings, workspace composer input persistence, external terminal working_dir quoting, workspace terminal permission handoff, and composer editor clear-after-send.
+
 ## 2.37.0
 
 ### Minor Changes
