@@ -141,3 +141,18 @@ test('prompt-area sentinel text normalizes back into editable text', async () =>
     assert.equal(editor.childNodes[2].textContent, '第二行');
   });
 });
+
+test('prompt-area clear resets the rendered snapshot before publishing empty state', async () => {
+  const source = await fs.readFile(path.join(desktopDir, 'src', 'components', 'use-prompt-area.ts'), 'utf8');
+  const start = source.indexOf('clear: () => {');
+  assert.notEqual(start, -1, 'missing clear handle');
+  const end = source.indexOf('events.resetUndoHistory()', start);
+  assert.notEqual(end, -1, 'missing undo reset in clear handle');
+  const clearBlock = source.slice(start, end);
+
+  assert.match(clearBlock, /lastRenderedValue\.current = \[\]/);
+  assert.ok(
+    clearBlock.indexOf('lastRenderedValue.current = []') < clearBlock.indexOf('onChange([])'),
+    'the rendered snapshot should reset before clear emits an empty value',
+  );
+});
