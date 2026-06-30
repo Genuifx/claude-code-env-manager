@@ -1259,5 +1259,16 @@
     "noRecent": "暂无最近项目",
     "noVSCode": "暂无 VSCode 项目",
     "noJetBrains": "暂无 JetBrains 项目"
+  },
+  "time": {
+    "justNow": "刚刚",
+    "minutesAgo": "{n}分钟前",
+    "hoursAgo": "{n}小时前",
+    "yesterday": "昨天",
+    "daysAgo": "{n}天前",
+    "minutes": "{n}分钟",
+    "hours": "{n}小时",
+    "days": "{n}天",
+    "weeks": "{n}周"
   }
 }

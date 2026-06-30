@@ -127,7 +127,7 @@ export function ProjectList({ onLaunch }: ProjectListProps) {
                   <div className="text-xs text-muted-foreground truncate">
                     {truncatePath(project.path)}
                     {' · '}
-                    <span className="text-primary">{formatRelativeTime(project.lastUsed)}</span>
+                    <span className="text-primary">{formatRelativeTime(project.lastUsed, t)}</span>
                   </div>
                 </div>
               </div>

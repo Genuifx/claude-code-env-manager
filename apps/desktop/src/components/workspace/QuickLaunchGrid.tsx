@@ -263,7 +263,7 @@ export function QuickLaunchGrid({ onLaunch }: QuickLaunchGridProps) {
                   >
                     <Clock className="w-3 h-3 opacity-50" />
                     <span className="truncate max-w-[80px]">{getProjectName(project.path)}</span>
-                    <span className="text-2xs opacity-40">{formatRelativeTime(project.lastUsed)}</span>
+                    <span className="text-2xs opacity-40">{formatRelativeTime(project.lastUsed, t)}</span>
                   </button>
                 ))}
               </div>

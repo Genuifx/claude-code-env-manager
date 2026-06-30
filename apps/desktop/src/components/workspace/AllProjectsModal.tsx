@@ -183,7 +183,7 @@ export function AllProjectsModal({ open, onOpenChange, onLaunch }: AllProjectsMo
                 key={project.path}
                 name={getProjectName(project.path)}
                 path={project.path}
-                subtitle={formatRelativeTime(project.lastUsed)}
+                subtitle={formatRelativeTime(project.lastUsed, t)}
                 onLaunch={() => { onLaunch(project.path); onOpenChange(false); }}
                 trailing={
                   <>
