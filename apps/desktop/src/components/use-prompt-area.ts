@@ -97,6 +97,8 @@ type UsePromptAreaReturn = {
 
 /** Debounce interval for grouping typed characters into a single undo snapshot */
 const UNDO_DEBOUNCE_MS = 300
+const URL_DECORATION_HINT = /https?:\/\//i
+const TRIGGER_INPUT_SCAN_RADIUS = 96
 
 function getPromptChipKind(data: unknown): string | undefined {
   if (typeof data !== 'object' || data === null || Array.isArray(data)) {
@@ -104,6 +106,28 @@ function getPromptChipKind(data: unknown): string | undefined {
   }
   const kind = (data as { kind?: unknown }).kind
   return typeof kind === 'string' ? kind : undefined
+}
+
+function segmentsContainUrlHint(segments: Segment[]): boolean {
+  return segments.some((segment) => segment.type === 'text' && URL_DECORATION_HINT.test(segment.text))
+}
+
+function shouldRunTriggerDetectionAfterInput(
+  segments: Segment[],
+  cursorOffset: number | null,
+  triggers: TriggerConfig[],
+  activeTrigger: ActiveTrigger | null,
+): boolean {
+  if (activeTrigger) {
+    return true
+  }
+  if (cursorOffset === null || triggers.length === 0) {
+    return false
+  }
+
+  const plainText = segmentsToPlainText(segments)
+  const beforeCursor = plainText.slice(Math.max(0, cursorOffset - TRIGGER_INPUT_SCAN_RADIUS), cursorOffset)
+  return triggers.some((trigger) => trigger.char.length > 0 && beforeCursor.includes(trigger.char))
 }
 
 // ---------------------------------------------------------------------------
@@ -267,7 +291,9 @@ export function usePromptArea({
       }
 
       // Decorate URLs and markdown formatting in text nodes
-      decorateURLsInEditor(editor)
+      if (segmentsContainUrlHint(segments)) {
+        decorateURLsInEditor(editor)
+      }
       if (markdownEnabled) decorateMarkdownInEditor(editor)
 
       if (savedCursor) {
@@ -470,7 +496,9 @@ export function usePromptArea({
         onChange(formatted.segments)
         renderSegmentsToDOM(formatted.segments)
         setCursorAtOffset(editor, formatted.cursorOffset)
-        runTriggerDetection()
+        if (shouldRunTriggerDetectionAfterInput(formatted.segments, formatted.cursorOffset, triggers, activeTrigger)) {
+          runTriggerDetection()
+        }
         return
       }
     }
@@ -494,20 +522,26 @@ export function usePromptArea({
 
     // Decorate URLs and markdown formatting in text nodes
     if (editor) {
-      decorateURLsInEditor(editor)
+      if (segmentsContainUrlHint(segments)) {
+        decorateURLsInEditor(editor)
+      }
       if (markdownEnabled) decorateMarkdownInEditor(editor)
       if (savedCursorOffset !== null) {
         setCursorAtOffset(editor, savedCursorOffset)
       }
     }
 
-    runTriggerDetection()
+    if (shouldRunTriggerDetectionAfterInput(segments, savedCursorOffset, triggers, activeTrigger)) {
+      runTriggerDetection()
+    }
   }, [
+    activeTrigger,
     onChange,
     readSegmentsFromDOM,
     runTriggerDetection,
     renderSegmentsToDOM,
     markdownEnabled,
+    triggers,
     events,
   ])
 

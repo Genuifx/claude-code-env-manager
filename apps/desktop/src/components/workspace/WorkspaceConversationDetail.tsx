@@ -11,6 +11,10 @@ import type {
   HistorySegment,
   HistorySessionItem,
 } from '@/features/conversations/types';
+import {
+  getInitialTranscriptRenderCount,
+  getLatestTranscriptWindow,
+} from './workspaceTranscriptWindow';
 
 interface WorkspaceConversationDetailProps {
   selectedSession: HistorySessionItem;
@@ -43,6 +47,7 @@ export function WorkspaceConversationDetail({
   const lastVisibleMessageCountRef = useRef(0);
   const programmaticScrollRef = useRef(false);
   const autoScrollDetachedRef = useRef(false);
+  const pendingPrependScrollHeightRef = useRef<number | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
   const scrollSettleTimeoutRef = useRef<number | null>(null);
   const messageBatchSize = getPerformanceMode() === 'reduced' ? 24 : 48;
@@ -53,17 +58,23 @@ export function WorkspaceConversationDetail({
     return mergedMessages.filter((message) => message.segmentIndex === activeSegment);
   }, [activeSegment, mergedMessages]);
 
-  const [renderedMessageCount, setRenderedMessageCount] = useState(() => visibleMessages.length);
+  const [renderedMessageCount, setRenderedMessageCount] = useState(() =>
+    getInitialTranscriptRenderCount(visibleMessages.length, messageBatchSize)
+  );
   const displayedMessages = useMemo(
-    () => visibleMessages.slice(0, renderedMessageCount),
+    () => getLatestTranscriptWindow(visibleMessages, renderedMessageCount),
     [renderedMessageCount, visibleMessages]
   );
   const hasMoreMessages = renderedMessageCount < visibleMessages.length;
   const scrollContextKey = `${selectedSession.id}:${activeSegment ?? 'all'}`;
 
   useLayoutEffect(() => {
-    setRenderedMessageCount(visibleMessages.length);
-  }, [visibleMessages]);
+    pendingPrependScrollHeightRef.current = null;
+    setRenderedMessageCount((current) => {
+      const next = getInitialTranscriptRenderCount(visibleMessages.length, messageBatchSize);
+      return current === next ? current : next;
+    });
+  }, [messageBatchSize, scrollContextKey, visibleMessages.length]);
 
   useEffect(() => {
     initialScrollKeyRef.current = null;
@@ -150,6 +161,18 @@ export function WorkspaceConversationDetail({
     });
   }, [displayedMessages.length, scrollContextKey]);
 
+  useLayoutEffect(() => {
+    const previousScrollHeight = pendingPrependScrollHeightRef.current;
+    pendingPrependScrollHeightRef.current = null;
+
+    if (previousScrollHeight === null || !messagesContainerRef.current) {
+      return;
+    }
+
+    const container = messagesContainerRef.current;
+    container.scrollTop += container.scrollHeight - previousScrollHeight;
+  }, [displayedMessages.length]);
+
   useEffect(() => {
     const previousCount = lastVisibleMessageCountRef.current;
     lastVisibleMessageCountRef.current = visibleMessages.length;
@@ -206,6 +229,7 @@ export function WorkspaceConversationDetail({
         }
 
         observer.disconnect();
+        pendingPrependScrollHeightRef.current = root.scrollHeight;
         startTransition(() => {
           setRenderedMessageCount((current) => Math.min(current + messageBatchSize, visibleMessages.length));
         });
@@ -246,8 +270,8 @@ export function WorkspaceConversationDetail({
             </div>
           ) : (
             <div>
-              <WorkspaceTranscriptList messages={displayedMessages} />
               {hasMoreMessages ? <div ref={loadMoreSentinelRef} className="h-px" /> : null}
+              <WorkspaceTranscriptList messages={displayedMessages} />
             </div>
           )}
         </div>

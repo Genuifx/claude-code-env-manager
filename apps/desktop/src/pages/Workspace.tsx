@@ -71,8 +71,11 @@ import {
   type WorkspaceLiveSessionEntry,
   type WorkspaceLiveSessionsByRuntimeId,
 } from '@/components/workspace/workspaceLiveSessions';
-import { WorkspaceReviewDrawer } from '@/components/workspace/WorkspaceReviewDrawer';
-import { buildWorkspaceReviewModel } from '@/components/workspace/workspaceReview';
+import { LazyWorkspaceReviewDrawer } from '@/components/workspace/LazyWorkspaceReviewDrawer';
+import {
+  buildWorkspaceReviewModel,
+  buildWorkspaceReviewSummary,
+} from '@/components/workspace/workspaceReview';
 import {
   normalizeEffortForProvider,
   resolveHistorySessionControls,
@@ -1194,14 +1197,34 @@ export function Workspace({
     workspaceReviewWorkingDir,
     workspaceReviewProviderSessionId,
   ]);
-  const workspaceReviewModel = useMemo(
-    () => buildWorkspaceReviewModel({
-      session: workspaceReviewSession,
+  const workspaceReviewSummary = useMemo(
+    () => buildWorkspaceReviewSummary({
       events: [],
-      messages: workspaceMode === 'history' ? messages : [],
       gitSnapshot: workspaceGitSnapshot,
     }),
-    [messages, workspaceGitSnapshot, workspaceMode, workspaceReviewSession],
+    [workspaceGitSnapshot],
+  );
+  const workspaceReviewModel = useMemo(
+    () => {
+      if (!workspaceReviewOpen || !shouldRenderWorkspaceReview) {
+        return null;
+      }
+
+      return buildWorkspaceReviewModel({
+        session: workspaceReviewSession,
+        events: [],
+        messages: workspaceMode === 'history' ? messages : [],
+        gitSnapshot: workspaceGitSnapshot,
+      });
+    },
+    [
+      messages,
+      shouldRenderWorkspaceReview,
+      workspaceGitSnapshot,
+      workspaceMode,
+      workspaceReviewOpen,
+      workspaceReviewSession,
+    ],
   );
 
   // Publish review summary to the status-strip entry pill while compose/history owns the view.
@@ -1211,16 +1234,16 @@ export function Workspace({
     }
     setReviewEntry({
       envName: workspaceReviewSession.env_name,
-      failedTools: workspaceReviewModel.failedTools.length,
-      changedFiles: workspaceReviewModel.changedFiles.length,
-      artifacts: workspaceReviewModel.artifacts.length,
+      failedTools: workspaceReviewSummary.failedTools,
+      changedFiles: workspaceReviewSummary.changedFiles,
+      artifacts: workspaceReviewSummary.artifacts,
     });
   }, [
     shouldRenderWorkspaceReview,
     workspaceReviewSession.env_name,
-    workspaceReviewModel.failedTools.length,
-    workspaceReviewModel.changedFiles.length,
-    workspaceReviewModel.artifacts.length,
+    workspaceReviewSummary.failedTools,
+    workspaceReviewSummary.changedFiles,
+    workspaceReviewSummary.artifacts,
     setReviewEntry,
   ]);
 
@@ -2280,28 +2303,30 @@ export function Workspace({
         />
 
         <div className="workspace-reading-surface relative flex min-w-0 flex-1 flex-col overflow-hidden">
-          {shouldRenderWorkspaceReview ? (
-            <WorkspaceReviewDrawer
-              session={workspaceReviewSession}
-              model={workspaceReviewModel}
-              gitSnapshot={workspaceGitSnapshot}
-              isOpen={workspaceReviewOpen}
-              isRefreshingGit={isRefreshingWorkspaceGitSnapshot}
-              onOpenChange={setWorkspaceReviewOpen}
-              onRefreshGit={() => void refreshWorkspaceGitSnapshot()}
-              onLoadDiff={(filePath) => getWorkspaceFileDiff(workspaceReviewWorkingDir || '', filePath)}
-              isLive={workspaceMode !== 'history'}
-              onLoadSubagents={
-                workspaceReviewSession.provider === 'claude' && workspaceReviewSession.provider_session_id
-                  ? (detailAgentId) =>
-                      getSessionSubagents(
-                        workspaceReviewSession.provider_session_id!,
-                        workspaceReviewSession.provider,
-                        detailAgentId,
-                      )
-                  : undefined
-              }
-            />
+          {shouldRenderWorkspaceReview && workspaceReviewOpen && workspaceReviewModel ? (
+            <Suspense fallback={null}>
+              <LazyWorkspaceReviewDrawer
+                session={workspaceReviewSession}
+                model={workspaceReviewModel}
+                gitSnapshot={workspaceGitSnapshot}
+                isOpen={workspaceReviewOpen}
+                isRefreshingGit={isRefreshingWorkspaceGitSnapshot}
+                onOpenChange={setWorkspaceReviewOpen}
+                onRefreshGit={() => void refreshWorkspaceGitSnapshot()}
+                onLoadDiff={(filePath) => getWorkspaceFileDiff(workspaceReviewWorkingDir || '', filePath)}
+                isLive={workspaceMode !== 'history'}
+                onLoadSubagents={
+                  workspaceReviewSession.provider === 'claude' && workspaceReviewSession.provider_session_id
+                    ? (detailAgentId) =>
+                        getSessionSubagents(
+                          workspaceReviewSession.provider_session_id!,
+                          workspaceReviewSession.provider,
+                          detailAgentId,
+                        )
+                    : undefined
+                }
+              />
+            </Suspense>
           ) : null}
 
           {workspaceMode === 'history' && selectedSession
