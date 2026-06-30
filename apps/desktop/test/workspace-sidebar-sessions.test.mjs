@@ -39,6 +39,69 @@ function nativeSession(overrides = {}) {
   };
 }
 
+function historySession(overrides = {}) {
+  return {
+    id: 'history-1',
+    source: 'claude',
+    display: '历史任务',
+    timestamp: Date.parse('2026-05-02T12:53:00.000Z'),
+    project: '/Users/wzt/G/Github/claude-code-env-manager',
+    projectName: 'claude-code-env-manager',
+    envName: 'DeepSeek',
+    configSource: 'ccem',
+    ...overrides,
+  };
+}
+
+test('retains workspace history session references when refresh data is unchanged', async () => {
+  const { retainStableHistorySessions } = await importWorkspaceSidebarSessions();
+  const previous = [
+    historySession({ id: 'a', display: 'A' }),
+    historySession({ id: 'b', display: 'B', timestamp: Date.parse('2026-05-02T12:52:00.000Z') }),
+  ];
+  const next = previous.map((session) => ({ ...session }));
+
+  const retained = retainStableHistorySessions(previous, next);
+
+  assert.equal(retained, previous);
+  assert.equal(retained[0], previous[0]);
+  assert.equal(retained[1], previous[1]);
+});
+
+test('retains unchanged workspace history rows across partial refresh changes', async () => {
+  const { retainStableHistorySessions } = await importWorkspaceSidebarSessions();
+  const previous = [
+    historySession({ id: 'a', display: 'A' }),
+    historySession({ id: 'b', display: 'B', timestamp: Date.parse('2026-05-02T12:52:00.000Z') }),
+  ];
+  const changed = {
+    ...previous[1],
+    taskStage: 'validation',
+  };
+
+  const retained = retainStableHistorySessions(previous, [
+    { ...previous[0] },
+    changed,
+  ]);
+
+  assert.notEqual(retained, previous);
+  assert.equal(retained[0], previous[0]);
+  assert.notEqual(retained[1], previous[1]);
+  assert.equal(retained[1].taskStage, 'validation');
+});
+
+test('returns the existing history array when no live sidebar sessions are appended', async () => {
+  const { buildWorkspaceSidebarSessions } = await importWorkspaceSidebarSessions();
+  const history = [
+    historySession({ id: 'newer', timestamp: Date.parse('2026-05-02T12:53:00.000Z') }),
+    historySession({ id: 'older', timestamp: Date.parse('2026-05-02T12:52:00.000Z') }),
+  ];
+
+  const sessions = buildWorkspaceSidebarSessions(history, []);
+
+  assert.equal(sessions, history);
+});
+
 test('adds live native sessions to the workspace sidebar before provider history exists', async () => {
   const { buildWorkspaceSidebarSessions } = await importWorkspaceSidebarSessions();
 
