@@ -829,6 +829,24 @@ fn build_launch_command(
     cmd
 }
 
+/// Quote an arbitrary string as a single POSIX shell argument using
+/// single-quote wrapping.
+///
+/// Single quotes in POSIX shells suppress ALL interpretation: no variable
+/// expansion, no command substitution, no backtick evaluation, no escaping.
+/// The only character that cannot appear verbatim inside single quotes is a
+/// single quote itself; we close the current quote, emit an escaped quote
+/// (`\'`), and reopen. This is the standard `'\''` idiom.
+///
+/// Use this for any value that must be treated as inert shell data, such as
+/// `working_dir` paths that may contain `$()`, backticks, semicolons, spaces,
+/// single quotes, double quotes, or backslashes. Never use double quotes for
+/// untrusted data: POSIX shells still expand `$(...)` and backticks inside
+/// double quotes, enabling command injection.
+fn quote_posix_shell_word(value: &str) -> String {
+    format!("'{}'", value.replace("'", "'\\''"))
+}
+
 /// Build the shell command to set environment variables and launch Claude
 fn build_shell_command(
     env_vars: &HashMap<String, String>,
@@ -841,9 +859,11 @@ fn build_shell_command(
     // Ensure sessions directory exists
     parts.push("mkdir -p ~/.ccem/sessions".to_string());
 
-    // Change to working directory (escape backslashes and double quotes to prevent shell injection)
-    let escaped_dir = working_dir.replace("\\", "\\\\").replace("\"", "\\\"");
-    parts.push(format!("cd \"{}\"", escaped_dir));
+    // Change to working directory. working_dir is untrusted path data and must
+    // be single-quote wrapped so `$()`, backticks, semicolons, and quotes
+    // cannot execute or split.
+    let quoted_dir = quote_posix_shell_word(working_dir);
+    parts.push(format!("cd {}", quoted_dir));
 
     // Unset CLAUDECODE to prevent "nested session" detection error
     parts.push("unset CLAUDECODE".to_string());
@@ -908,8 +928,8 @@ fn build_codex_shell_command(
     let mut parts = Vec::new();
     parts.push("mkdir -p ~/.ccem/sessions".to_string());
 
-    let escaped_dir = working_dir.replace("\\", "\\\\").replace("\"", "\\\"");
-    parts.push(format!("cd \"{}\"", escaped_dir));
+    let quoted_dir = quote_posix_shell_word(working_dir);
+    parts.push(format!("cd {}", quoted_dir));
     parts.push("unset CLAUDECODE".to_string());
 
     for (key, value) in env_vars {
@@ -1076,8 +1096,8 @@ fn build_opencode_shell_command(
     let mut parts = Vec::new();
     parts.push("mkdir -p ~/.ccem/sessions".to_string());
 
-    let escaped_dir = working_dir.replace("\\", "\\\\").replace("\"", "\\\"");
-    parts.push(format!("cd \"{}\"", escaped_dir));
+    let quoted_dir = quote_posix_shell_word(working_dir);
+    parts.push(format!("cd {}", quoted_dir));
     parts.push("unset CLAUDECODE".to_string());
 
     if let Some(path) = secret_env_path {
@@ -2162,7 +2182,7 @@ mod tests {
         let cmd = build_shell_command(&env_vars, "/home/user", "test-session-123", None);
 
         assert!(cmd.contains("mkdir -p ~/.ccem/sessions"));
-        assert!(cmd.contains("cd \"/home/user\""));
+        assert!(cmd.contains("cd '/home/user'"));
         assert!(cmd.contains("export KEY1='value1'"));
         assert!(cmd.contains("export KEY2='value2'"));
         assert!(cmd.contains("claude; echo $? > ~/.ccem/sessions/'test-session-123'.exit"));
@@ -2183,7 +2203,7 @@ mod tests {
             Some("codex-session-456"),
         );
 
-        assert!(cmd.contains("cd \"/home/user\""));
+        assert!(cmd.contains("cd '/home/user'"));
         assert!(cmd.contains(" resume 'codex-session-456'"));
         assert!(cmd.contains("echo $? > ~/.ccem/sessions/'test-session-123'.exit"));
     }
@@ -2207,7 +2227,7 @@ mod tests {
             Some(secret_path),
         );
 
-        assert!(cmd.contains("cd \"/home/user\""));
+        assert!(cmd.contains("cd '/home/user'"));
         // Secret value must not be inlined anywhere in the command text.
         assert!(!cmd.contains("OPENCODE_CONFIG_CONTENT='"));
         assert!(!cmd.contains("apiKey"));
@@ -2229,7 +2249,7 @@ mod tests {
 
         assert!(!cmd.contains("rm -f"));
         assert!(!cmd.contains("__ccem_src"));
-        assert!(cmd.contains("cd \"/home/user\""));
+        assert!(cmd.contains("cd '/home/user'"));
     }
 
     #[test]
@@ -2244,6 +2264,100 @@ mod tests {
 
         assert!(cmd.contains("--session 'open-session-456'"));
         assert!(!cmd.contains("--prompt"));
+    }
+
+    #[test]
+    fn test_quote_posix_shell_word_escapes_only_single_quotes() {
+        // Plain word stays wrapped in single quotes.
+        assert_eq!(quote_posix_shell_word("/home/user"), "'/home/user'");
+        // Everything except single quotes is left verbatim — no escaping of
+        // $(), backticks, semicolons, double quotes, or backslashes, because
+        // single quotes already make them inert to POSIX shells.
+        assert_eq!(quote_posix_shell_word("$(whoami)"), "'$(whoami)'");
+        assert_eq!(quote_posix_shell_word("`whoami`"), "'`whoami`'");
+        assert_eq!(quote_posix_shell_word("; rm -rf /"), "'; rm -rf /'");
+        assert_eq!(quote_posix_shell_word("a \"b\" c"), "'a \"b\" c'");
+        assert_eq!(quote_posix_shell_word("a\\b"), "'a\\b'");
+        assert_eq!(quote_posix_shell_word("a b"), "'a b'");
+        // Embedded single quote uses the close-quote/escape/reopen idiom.
+        assert_eq!(quote_posix_shell_word("/tmp/a' b"), "'/tmp/a'\\'' b'");
+        // Multiple embedded single quotes each get their own escape sequence.
+        assert_eq!(
+            quote_posix_shell_word("x'y'z"),
+            "'x'\\''y'\\''z'"
+        );
+    }
+
+    /// Regression: working_dir values containing shell metacharacters must be
+    /// emitted as inert POSIX single-quoted words for ALL three terminal
+    /// launchers. Previously, `cd "..."` only escaped backslashes and double
+    /// quotes, so `$(...)`, backticks, and semicolons inside working_dir were
+    /// still interpreted by POSIX shells.
+    fn assert_cd_segment_is_safe(cmd: &str, label: &str, working_dir: &str) {
+        let expected_cd = format!("cd {}", quote_posix_shell_word(working_dir));
+        assert!(
+            cmd.contains(&expected_cd),
+            "[{label}] expected safe cd segment `{expected_cd}` in command: {cmd}"
+        );
+        // The unsafe double-quoted form must never appear for working_dir.
+        assert!(
+            !cmd.contains("cd \""),
+            "[{label}] command still uses unsafe double-quoted cd: {cmd}"
+        );
+    }
+
+    #[test]
+    fn test_working_dir_shell_metacharacters_are_quoted_inert_across_builders() {
+        let malicious_paths: &[(&str, &str)] = &[
+            ("command-substitution", "/tmp/$(echo pwned)"),
+            ("backticks", "/tmp/`echo pwned`"),
+            ("semicolon", "/tmp/foo; rm -rf /"),
+            ("spaces", "/tmp/a b c"),
+            ("single-quote", "/tmp/a' b"),
+            ("double-quotes", "/tmp/a\"b"),
+            ("backslash", "/tmp/a\\b"),
+            ("combined", "/tmp/a' b; `id` $(whoami) \"q\" \\z"),
+        ];
+
+        for (name, working_dir) in malicious_paths {
+            let claude = build_shell_command(&HashMap::new(), working_dir, "sid", None);
+            assert_cd_segment_is_safe(&claude, &format!("claude/{name}"), working_dir);
+
+            let codex = build_codex_shell_command(&HashMap::new(), working_dir, "sid", None);
+            assert_cd_segment_is_safe(&codex, &format!("codex/{name}"), working_dir);
+
+            let opencode =
+                build_opencode_shell_command(&HashMap::new(), working_dir, "sid", None, None);
+            assert_cd_segment_is_safe(&opencode, &format!("opencode/{name}"), working_dir);
+        }
+    }
+
+    /// Specifically exposes the pre-fix vulnerability: a working_dir of
+    /// `$(echo pwned)` used to render as `cd "$(echo pwned)"`, which a POSIX
+    /// shell would execute via command substitution inside double quotes. The
+    /// safe rendering is `cd '$(echo pwned)'`, where single quotes make the
+    /// substitution literal.
+    #[test]
+    fn test_working_dir_command_substitution_is_inert() {
+        let working_dir = "/tmp/$(echo pwned)";
+        let claude = build_shell_command(&HashMap::new(), working_dir, "sid", None);
+        let codex = build_codex_shell_command(&HashMap::new(), working_dir, "sid", None);
+        let opencode = build_opencode_shell_command(&HashMap::new(), working_dir, "sid", None, None);
+
+        for (cmd, label) in [
+            (claude.as_str(), "claude"),
+            (codex.as_str(), "codex"),
+            (opencode.as_str(), "opencode"),
+        ] {
+            assert!(
+                cmd.contains("cd '/tmp/$(echo pwned)'"),
+                "[{label}] expected command substitution to be single-quoted and inert: {cmd}"
+            );
+            assert!(
+                !cmd.contains("cd \"/tmp/$(echo pwned)\""),
+                "[{label}] command substitution is still inside unsafe double quotes: {cmd}"
+            );
+        }
     }
 
     #[cfg(unix)]
