@@ -312,8 +312,16 @@ export function Workspace({
     launchClient === 'codex' ? 'codex' : 'claude'
   );
   const [composePrompt, setComposePrompt] = useState('');
+  const composePromptRef = useRef('');
+  const composeHasDraftRef = useRef(false);
+  const [composePromptRevision, setComposePromptRevision] = useState(0);
+  const [composeHasDraft, setComposeHasDraft] = useState(false);
   const [composePlanModeEnabled, setComposePlanModeEnabled] = useState(false);
   const [historyComposerText, setHistoryComposerText] = useState('');
+  const historyComposerTextRef = useRef('');
+  const historyHasDraftRef = useRef(false);
+  const [historyComposerRevision, setHistoryComposerRevision] = useState(0);
+  const [historyHasDraft, setHistoryHasDraft] = useState(false);
   const [historyPlanModeEnabled, setHistoryPlanModeEnabled] = useState(false);
   const [historyEnv, setHistoryEnv] = useState('');
   const [historyPermMode, setHistoryPermMode] = useState<PermissionModeName>(permissionMode);
@@ -347,6 +355,36 @@ export function Workspace({
   const selectedKeyRef = useRef<string | null>(null);
   const persistedGeneratedTitleKeysRef = useRef(new Set<string>());
 
+  const handleComposePromptChange = useCallback((value: string) => {
+    composePromptRef.current = value;
+    const hasDraft = value.trim().length > 0;
+    if (composeHasDraftRef.current !== hasDraft) {
+      composeHasDraftRef.current = hasDraft;
+      setComposeHasDraft(hasDraft);
+    }
+  }, []);
+
+  const resetComposePrompt = useCallback((value = '') => {
+    handleComposePromptChange(value);
+    setComposePrompt(value);
+    setComposePromptRevision((revision) => revision + 1);
+  }, [handleComposePromptChange]);
+
+  const handleHistoryComposerTextChange = useCallback((value: string) => {
+    historyComposerTextRef.current = value;
+    const hasDraft = value.trim().length > 0;
+    if (historyHasDraftRef.current !== hasDraft) {
+      historyHasDraftRef.current = hasDraft;
+      setHistoryHasDraft(hasDraft);
+    }
+  }, []);
+
+  const resetHistoryComposerText = useCallback((value = '') => {
+    handleHistoryComposerTextChange(value);
+    setHistoryComposerText(value);
+    setHistoryComposerRevision((revision) => revision + 1);
+  }, [handleHistoryComposerTextChange]);
+
   useEffect(() => {
     selectedKeyRef.current = selectedKey;
   }, [selectedKey]);
@@ -371,12 +409,12 @@ export function Workspace({
     }
     lastComposeSeedIdRef.current = composeSeed.id;
     setWorkspaceMode('compose');
-    setComposePrompt(composeSeed.value);
+    resetComposePrompt(composeSeed.value);
     setComposePlanModeEnabled(false);
     if (!composeDir && (selectedWorkingDir || defaultWorkingDir)) {
       setComposeDir(selectedWorkingDir || defaultWorkingDir || null);
     }
-  }, [composeDir, composeSeed, defaultWorkingDir, selectedWorkingDir]);
+  }, [composeDir, composeSeed, defaultWorkingDir, resetComposePrompt, selectedWorkingDir]);
 
   const replaceLiveSessionsByRuntimeId = useCallback((next: WorkspaceLiveSessionsByRuntimeId) => {
     return replaceWorkspaceLiveSessionsSnapshot(
@@ -886,12 +924,12 @@ export function Workspace({
       defaultPermMode: permissionMode,
     });
 
-    setHistoryComposerText('');
+    resetHistoryComposerText('');
     setHistoryPlanModeEnabled(false);
     setHistoryEnv(controls.envName);
     setHistoryPermMode(controls.permMode);
     setHistoryEffort(controls.effort);
-  }, [selectedKey]);
+  }, [resetHistoryComposerText, selectedKey]);
 
   const environmentByName = useMemo(
     () => Object.fromEntries(environments.map((environment) => [environment.name, environment])),
@@ -1626,7 +1664,7 @@ export function Workspace({
     setIsLaunchingComposeTerminal(true);
     try {
       const result = await launchWorkspaceTerminalSession({
-        prompt: composePrompt,
+        prompt: composePromptRef.current,
         provider: composeProvider,
         currentEnv,
         workingDir: effectiveComposeDir,
@@ -1650,7 +1688,6 @@ export function Workspace({
       setIsLaunchingComposeTerminal(false);
     }
   }, [
-    composePrompt,
     composeProvider,
     currentEnv,
     effectiveComposeDir,
@@ -1737,7 +1774,7 @@ export function Workspace({
       return false;
     }
 
-    const rawPrompt = payload?.text ?? composePrompt;
+    const rawPrompt = payload?.text ?? composePromptRef.current;
     const displayPrompt = payload?.displayText ?? rawPrompt;
     const attachments = payload?.attachments ?? [];
     const workingDir = effectiveComposeDir;
@@ -1800,7 +1837,7 @@ export function Workspace({
       requestWorkspaceSessionTitle(summary, previewPrompt);
       setActiveLiveRuntimeId(summary.runtime_id);
       setWorkspaceMode('live');
-      setComposePrompt('');
+      resetComposePrompt('');
       setComposePlanModeEnabled(false);
       setSelectedWorkingDir(workingDir);
       scheduleWorkspaceRefresh(1200);
@@ -1816,7 +1853,6 @@ export function Workspace({
     buildComposerPromptPreview,
     buildComposerPromptText,
     extractComposerImagePayloads,
-    composePrompt,
     composeEffort,
     composeProvider,
     composePlanModeEnabled,
@@ -1826,6 +1862,7 @@ export function Workspace({
     isCreatingNativeSession,
     permissionMode,
     requestWorkspaceSessionTitle,
+    resetComposePrompt,
     scheduleWorkspaceRefresh,
     setSelectedWorkingDir,
     upsertLiveSessionEntry,
@@ -1851,7 +1888,7 @@ export function Workspace({
       return false;
     }
 
-    const rawPrompt = payload?.text ?? historyComposerText;
+    const rawPrompt = payload?.text ?? historyComposerTextRef.current;
     const displayPrompt = payload?.displayText ?? rawPrompt;
     const attachments = payload?.attachments ?? [];
     const isCronCommand = isWorkspaceCronCommand(rawPrompt);
@@ -1906,7 +1943,7 @@ export function Workspace({
       });
       setActiveLiveRuntimeId(summary.runtime_id);
       setWorkspaceMode('live');
-      setHistoryComposerText('');
+      resetHistoryComposerText('');
       setHistoryPlanModeEnabled(false);
       setSelectedWorkingDir(selectedSession.project);
       scheduleWorkspaceRefresh(1200);
@@ -1926,7 +1963,6 @@ export function Workspace({
     historyEnv,
     historyPermMode,
     historyPlanModeEnabled,
-    historyComposerText,
     historyEffort,
     isResumingHistorySession,
     launchOpenCodeWeb,
@@ -1935,6 +1971,7 @@ export function Workspace({
     selectedSession,
     setLaunchClient,
     setSelectedWorkingDir,
+    resetHistoryComposerText,
     upsertLiveSessionEntry,
     t,
   ]);
@@ -2033,10 +2070,11 @@ export function Workspace({
       <div className="w-full max-w-3xl">
         <WorkspaceSessionComposer
           value={composePrompt}
-          onValueChange={setComposePrompt}
+          valueRevision={composePromptRevision}
+          onValueChange={handleComposePromptChange}
           onSubmit={handleCreateNativeConversation}
           placeholder={t('workspace.composePlaceholder')}
-          canSubmit={!!composePrompt.trim() && !!effectiveComposeDir && !isCreatingNativeSession}
+          canSubmit={composeHasDraft && !!effectiveComposeDir && !isCreatingNativeSession}
           isSubmitting={isCreatingNativeSession}
           submitLabel={t('workspace.composeSend')}
           loadingLabel={t('common.loading')}
@@ -2116,7 +2154,8 @@ export function Workspace({
 
         <WorkspaceSessionComposer
           value={historyComposerText}
-          onValueChange={setHistoryComposerText}
+          valueRevision={historyComposerRevision}
+          onValueChange={handleHistoryComposerTextChange}
           onSubmit={handleContinueHistorySession}
           placeholder={
             selectedHistorySupportsInline
@@ -2124,7 +2163,7 @@ export function Workspace({
               : t('workspace.historyContinueUnsupported')
           }
           disabled={!selectedHistorySupportsInline}
-          canSubmit={selectedHistorySupportsInline && !!historyComposerText.trim() && !isResumingHistorySession}
+          canSubmit={selectedHistorySupportsInline && historyHasDraft && !isResumingHistorySession}
           isSubmitting={isResumingHistorySession}
           submitLabel={selectedHistorySupportsInline ? t('workspace.composeSend') : t('workspace.openCodeWeb')}
           loadingLabel={t('common.loading')}

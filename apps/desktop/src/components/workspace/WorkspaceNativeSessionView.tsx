@@ -1199,7 +1199,10 @@ export function WorkspaceNativeSessionView({
   const [sessionEffort, setSessionEffort] = useState<EffortLevel>(
     () => normalizeEffortForProvider(session.effort, session.provider),
   );
-  const [composerText, setComposerText] = useState('');
+  const composerTextRef = useRef('');
+  const composerHasDraftRef = useRef(false);
+  const [composerDraftRevision, setComposerDraftRevision] = useState(0);
+  const [composerHasDraft, setComposerHasDraft] = useState(false);
   const [composerPlanModeEnabled, setComposerPlanModeEnabled] = useState(
     () => isNativeSessionPlanRuntime(session),
   );
@@ -1273,6 +1276,20 @@ export function WorkspaceNativeSessionView({
   const prevEventCountRef = useRef(0);
   const tickInFlightRef = useRef(false);
   const gitSnapshotRequestSeqRef = useRef(0);
+
+  const handleComposerTextChange = useCallback((value: string) => {
+    composerTextRef.current = value;
+    const hasDraft = value.trim().length > 0;
+    if (composerHasDraftRef.current !== hasDraft) {
+      composerHasDraftRef.current = hasDraft;
+      setComposerHasDraft(hasDraft);
+    }
+  }, []);
+
+  const clearComposerDraft = useCallback(() => {
+    handleComposerTextChange('');
+    setComposerDraftRevision((revision) => revision + 1);
+  }, [handleComposerTextChange]);
 
   const sessionUsage = useMemo(() => computeSessionUsage(events), [events]);
   const fileCheckpoints = useMemo(() => deriveNativeFileCheckpoints(events), [events]);
@@ -1390,7 +1407,7 @@ export function WorkspaceNativeSessionView({
     autoScrollDetachedRef.current = false;
     prevEventCountRef.current = 0;
     setEvents(cachedEvents);
-    setComposerText('');
+    clearComposerDraft();
     setComposerPlanModeEnabled(isNativeSessionPlanRuntime(session));
     setQueuedMessages([]);
     setLocalUserPrompts(initialPrompts);
@@ -1405,7 +1422,7 @@ export function WorkspaceNativeSessionView({
     gitSnapshotRequestSeqRef.current += 1;
     setGitSnapshot(null);
     setIsRefreshingGitSnapshot(false);
-  }, [clearFileRewindTimeout, initialImages, initialPrompt, session.runtime_id]);
+  }, [clearComposerDraft, clearFileRewindTimeout, initialImages, initialPrompt, session.runtime_id]);
 
   useEffect(() => {
     gitSnapshotRequestSeqRef.current += 1;
@@ -1803,7 +1820,7 @@ export function WorkspaceNativeSessionView({
   const hasAttentionPanel = hasBlockingAttention;
   const canSend = !isSending
     && !isTerminalStatus(session.status)
-    && composerText.trim().length > 0;
+    && composerHasDraft;
   const canShowFileRestorePoints = session.provider === 'claude'
     && fileCheckpoints.length > 0;
   const canUseFileRestorePoints = canShowFileRestorePoints
@@ -2040,10 +2057,10 @@ export function WorkspaceNativeSessionView({
     setIsSending(true);
     setLocalUserPrompts((previous) => [...previous, promptEntry]);
     if (payload.kind === 'text') {
-      setComposerText('');
+      clearComposerDraft();
       setComposerPlanModeEnabled(sessionRuntimePermMode === 'plan');
     } else if (payload.kind === 'plan_exit') {
-      setComposerText('');
+      clearComposerDraft();
       setComposerPlanModeEnabled(exitedPlanModeForPrompt ? false : sessionRuntimePermMode === 'plan');
       if (dismissedPlanExitPromptIds.length > 0) {
         setLocallyDismissedPromptIds((previous) => {
@@ -2133,6 +2150,7 @@ export function WorkspaceNativeSessionView({
   }, [
     pollEvents,
     applyRuntimePlanModeChange,
+    clearComposerDraft,
     refreshSummary,
     respondNativeSessionPrompt,
     sendNativeSessionInput,
@@ -2202,7 +2220,7 @@ export function WorkspaceNativeSessionView({
       return false;
     }
 
-    const text = payload?.text ?? composerText.trim();
+    const text = payload?.text ?? composerTextRef.current.trim();
     const displayText = payload?.displayText ?? text;
     const attachments = payload?.attachments ?? [];
     if (!text && attachments.length === 0) {
@@ -2232,7 +2250,7 @@ export function WorkspaceNativeSessionView({
       planMode: isCronCommand ? false : composerPlanModeEnabled,
       attachments: isCronCommand ? [] : attachments,
     });
-    setComposerText('');
+    clearComposerDraft();
     setComposerPlanModeEnabled(sessionRuntimePermMode === 'plan');
 
     if (!isCronCommand && hasQuickReplyPrompt && !isProcessingTurn && !hasHardBlockingAttention) {
@@ -2295,7 +2313,7 @@ export function WorkspaceNativeSessionView({
     }
   }, [
     composerPlanModeEnabled,
-    composerText,
+    clearComposerDraft,
     hasHardBlockingAttention,
     hasBlockingAttention,
     hasQuickReplyPrompt,
@@ -2518,7 +2536,7 @@ export function WorkspaceNativeSessionView({
     session.status,
   ]);
 
-  const hasComposerDraft = composerText.trim().length > 0;
+  const hasComposerDraft = composerHasDraft;
   const shouldGuideModel = !isTerminalStatus(session.status)
     && hasComposerDraft
     && (isProcessingTurn || hasHardBlockingAttention);
@@ -2571,8 +2589,9 @@ export function WorkspaceNativeSessionView({
       </ScrollArea>
 
       <WorkspaceSessionComposer
-        value={composerText}
-        onValueChange={setComposerText}
+        value=""
+        valueRevision={composerDraftRevision}
+        onValueChange={handleComposerTextChange}
         onSubmit={handleSend}
         placeholder={t('workspace.composePlaceholder')}
         disabled={isTerminalStatus(session.status)}

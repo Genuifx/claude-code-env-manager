@@ -105,6 +105,7 @@ export interface ComposerQueuedMessage {
 
 interface WorkspaceSessionComposerProps {
   value: string;
+  valueRevision?: number;
   onValueChange: (value: string) => void;
   onSubmit: (payload: ComposerSubmitPayload) => boolean | void | Promise<boolean | void>;
   placeholder: string;
@@ -723,6 +724,7 @@ function ComposerTriggerSuggestionPanel({
 
 export function WorkspaceSessionComposer({
   value,
+  valueRevision = 0,
   onValueChange,
   onSubmit,
   placeholder,
@@ -764,6 +766,7 @@ export function WorkspaceSessionComposer({
   const composerShellRef = useRef<HTMLDivElement | null>(null);
   const promptAreaRef = useRef<PromptAreaHandle | null>(null);
   const syncedPlainTextRef = useRef(value);
+  const syncedValueRevisionRef = useRef(valueRevision);
   const [composerSegments, setComposerSegments] = useState<Segment[]>(() => plainTextToSegments(value));
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const attachmentsRef = useRef(attachments);
@@ -849,12 +852,16 @@ export function WorkspaceSessionComposer({
   }, [previewingImageSrc]);
 
   useEffect(() => {
-    if (value === syncedPlainTextRef.current) {
+    if (
+      value === syncedPlainTextRef.current
+      && valueRevision === syncedValueRevisionRef.current
+    ) {
       return;
     }
+    syncedValueRevisionRef.current = valueRevision;
     syncedPlainTextRef.current = value;
     setComposerSegments(plainTextToSegments(value));
-  }, [value]);
+  }, [value, valueRevision]);
 
   useEffect(() => {
     setRecentFiles(loadComposerRecentFiles(workingDir));
