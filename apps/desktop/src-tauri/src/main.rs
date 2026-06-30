@@ -1343,11 +1343,83 @@ fn stop_native_session(
 
 #[tauri::command]
 fn handoff_native_session_to_terminal(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<SessionManager>>,
+    interactive_state: State<'_, Arc<InteractiveRuntimeManager>>,
     native_state: State<'_, Arc<NativeRuntimeManager>>,
     runtime_id: String,
     terminal_type: Option<TerminalType>,
 ) -> Result<NativeHandoffResult, String> {
-    native_state.handoff_to_terminal(&runtime_id, terminal_type)
+    let handoff = match native_state.prepare_terminal_handoff(&runtime_id, terminal_type) {
+        Ok(handoff) => handoff,
+        Err(error) if error == "Session id is not ready for terminal handoff yet" => {
+            return native_state.handoff_to_terminal(&runtime_id, terminal_type);
+        }
+        Err(error) => return Err(error),
+    };
+
+    let attach_terminal = attach_terminal_for_native_terminal(handoff.terminal);
+    let session_manager = state.inner().clone();
+    let create_result = interactive_state.create_session(
+        app,
+        session_manager,
+        InteractiveSessionOptions {
+            session_id: handoff.runtime_id.clone(),
+            client: handoff.provider.as_str().to_string(),
+            env_name: handoff.env_name.clone(),
+            config_source: Some(DEFAULT_CONFIG_SOURCE.to_string()),
+            perm_mode: handoff.perm_mode.clone(),
+            working_dir: handoff.project_dir.clone(),
+            resume_session_id: Some(handoff.resume_session_id.clone()),
+            initial_prompt: None,
+            env_vars: handoff.env_vars.clone(),
+        },
+    );
+
+    let session = match create_result {
+        Ok(session) => session,
+        Err(error) => return Err(error),
+    };
+
+    if let Err(error) =
+        open_tmux_backed_session_in_terminal(state.inner(), &session.id, attach_terminal)
+    {
+        let _ = interactive_state.stop_session(&session.id);
+        state.remove_session(&session.id);
+        return Err(error);
+    }
+
+    native_state.complete_managed_terminal_handoff(&handoff.runtime_id, handoff.terminal)?;
+
+    if let Err(error) = register_launch(SessionProvenanceUpsert {
+        ccem_session_id: session.id.clone(),
+        client: session.client.clone(),
+        env_name: session.env_name.clone(),
+        config_source: session.config_source.clone(),
+        working_dir: session.working_dir.clone(),
+        perm_mode: Some(session.perm_mode.clone()),
+        launch_mode: "interactive_handoff".to_string(),
+        started_via: "desktop".to_string(),
+        source_session_id: Some(handoff.resume_session_id.clone()),
+    }) {
+        eprintln!(
+            "Failed to register native terminal handoff launch provenance for {}: {}",
+            session.id, error
+        );
+    }
+
+    if let Err(error) =
+        clear_runtime_recovery_candidates_by_claude_session_id(&handoff.resume_session_id)
+    {
+        eprintln!(
+            "Failed to clear recovery candidate for native handoff {}: {}",
+            handoff.resume_session_id, error
+        );
+    }
+
+    Ok(NativeHandoffResult {
+        status: native_runtime::NativeHandoffStatus::Opened,
+    })
 }
 
 #[tauri::command]
@@ -1678,6 +1750,67 @@ fn session_has_window_control(session: &Session) -> bool {
             .is_some_and(|value| !value.trim().is_empty())
 }
 
+fn attach_terminal_for_native_terminal(terminal: TerminalType) -> TmuxAttachTerminalType {
+    match terminal {
+        TerminalType::TerminalApp => TmuxAttachTerminalType::TerminalApp,
+        TerminalType::ITerm2 => TmuxAttachTerminalType::ITerm2,
+    }
+}
+
+fn open_tmux_backed_session_in_terminal(
+    state: &Arc<SessionManager>,
+    session_id: &str,
+    attach_terminal: TmuxAttachTerminalType,
+) -> Result<(), String> {
+    let session = state
+        .get_session(session_id)
+        .ok_or_else(|| format!("Session {} not found", session_id))?;
+
+    if !session.is_tmux_backed() {
+        return Err(
+            "Only tmux-backed interactive sessions can be opened in a new terminal".to_string(),
+        );
+    }
+
+    if session.status != "running" {
+        return Err(format!("Interactive session {} is not running", session_id));
+    }
+
+    let persisted_target = session.resolved_tmux_target();
+    let target = match tmux::TmuxManager::default()
+        .resolve_live_attach_target(session_id, persisted_target)
+    {
+        Ok(target) => target,
+        Err(error) => {
+            state.update_session_status(session_id, "stopped");
+            return Err(format!(
+                "Interactive session {} is no longer available: {}",
+                session_id, error
+            ));
+        }
+    };
+
+    let (window_id, iterm_session_id) =
+        terminal::open_tmux_target_in_attach_terminal(attach_terminal, &target)?;
+
+    match attach_terminal {
+        TmuxAttachTerminalType::TerminalApp => {
+            state.attach_tmux_terminal(session_id, "terminalapp", window_id.as_deref(), None);
+        }
+        TmuxAttachTerminalType::ITerm2 => {
+            state.attach_tmux_terminal(
+                session_id,
+                "iterm2",
+                window_id.as_deref(),
+                iterm_session_id.as_deref(),
+            );
+        }
+        TmuxAttachTerminalType::Ghostty => {}
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 fn stop_interactive_session(
     state: State<'_, Arc<SessionManager>>,
@@ -1721,59 +1854,12 @@ fn open_interactive_session_in_terminal(
     session_id: String,
     terminal_type: Option<TmuxAttachTerminalType>,
 ) -> Result<(), String> {
-    let session = state
-        .get_session(&session_id)
-        .ok_or_else(|| format!("Session {} not found", session_id))?;
-
-    if !session.is_tmux_backed() {
-        return Err(
-            "Only tmux-backed interactive sessions can be opened in a new terminal".to_string(),
-        );
-    }
-
-    if session.status != "running" {
-        return Err(format!("Interactive session {} is not running", session_id));
-    }
-
-    let persisted_target = session.resolved_tmux_target();
-    let target = match tmux::TmuxManager::default()
-        .resolve_live_attach_target(&session_id, persisted_target)
-    {
-        Ok(target) => target,
-        Err(error) => {
-            state.update_session_status(&session_id, "stopped");
-            return Err(format!(
-                "Interactive session {} is no longer available: {}",
-                session_id, error
-            ));
-        }
-    };
-
     let attach_terminal =
         terminal_type.unwrap_or_else(|| match terminal::get_preferred_terminal() {
             TerminalType::TerminalApp => TmuxAttachTerminalType::TerminalApp,
             TerminalType::ITerm2 => TmuxAttachTerminalType::ITerm2,
         });
-
-    let (window_id, iterm_session_id) =
-        terminal::open_tmux_target_in_attach_terminal(attach_terminal, &target)?;
-
-    match attach_terminal {
-        TmuxAttachTerminalType::TerminalApp => {
-            state.attach_tmux_terminal(&session_id, "terminalapp", window_id.as_deref(), None);
-        }
-        TmuxAttachTerminalType::ITerm2 => {
-            state.attach_tmux_terminal(
-                &session_id,
-                "iterm2",
-                window_id.as_deref(),
-                iterm_session_id.as_deref(),
-            );
-        }
-        TmuxAttachTerminalType::Ghostty => {}
-    }
-
-    Ok(())
+    open_tmux_backed_session_in_terminal(state.inner(), &session_id, attach_terminal)
 }
 
 #[tauri::command]

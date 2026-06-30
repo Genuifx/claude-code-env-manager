@@ -115,6 +115,18 @@ pub struct NativeHandoffResult {
 }
 
 #[derive(Debug, Clone)]
+pub struct NativeTerminalHandoff {
+    pub runtime_id: String,
+    pub provider: NativeProvider,
+    pub env_name: String,
+    pub perm_mode: String,
+    pub project_dir: String,
+    pub resume_session_id: String,
+    pub terminal: TerminalType,
+    pub env_vars: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct NativeSessionOptions {
     pub provider: NativeProvider,
     pub env_name: String,
@@ -929,6 +941,113 @@ impl NativeRuntimeManager {
         })
     }
 
+    pub fn prepare_terminal_handoff(
+        &self,
+        runtime_id: &str,
+        terminal_type: Option<TerminalType>,
+    ) -> Result<NativeTerminalHandoff, String> {
+        if !terminal::external_terminal_launch_supported() {
+            return Err(
+                "Terminal handoff is not available on this platform; continue in the native workspace runtime.".to_string(),
+            );
+        }
+
+        let terminal = terminal_type.unwrap_or_else(terminal::get_preferred_terminal);
+        let record = self.current_record(runtime_id)?;
+        let resume_session_id = record
+            .provider_session_id
+            .clone()
+            .ok_or_else(|| "Session id is not ready for terminal handoff yet".to_string())?;
+        let mut env_vars = self.terminal_env_vars_for_record(&record)?;
+        inject_ccem_runtime_env(&mut env_vars, &record.runtime_id);
+
+        Ok(NativeTerminalHandoff {
+            runtime_id: record.runtime_id.clone(),
+            provider: record.provider,
+            env_name: record.env_name.clone(),
+            perm_mode: effective_native_perm_mode(
+                record.perm_mode.as_str(),
+                record.runtime_perm_mode.as_deref(),
+            )
+            .to_string(),
+            project_dir: record.project_dir.clone(),
+            resume_session_id,
+            terminal,
+            env_vars,
+        })
+    }
+
+    pub fn complete_managed_terminal_handoff(
+        &self,
+        runtime_id: &str,
+        terminal: TerminalType,
+    ) -> Result<(), String> {
+        let record = self.current_record(runtime_id)?;
+        self.update_record(runtime_id, |entry| {
+            entry.status = "handoff".to_string();
+            entry.is_active = false;
+            entry.updated_at = Utc::now();
+            entry.can_handoff_to_terminal = true;
+            entry.pending_handoff_terminal = None;
+        })?;
+        self.append_event(
+            runtime_id,
+            SessionEventPayload::Lifecycle {
+                stage: "handoff".to_string(),
+                detail: format!(
+                    "Opened {} session in {}.",
+                    record.provider.as_str(),
+                    terminal.display_name()
+                ),
+            },
+        )?;
+        self.kill_child(runtime_id)?;
+        self.remove_handle(runtime_id)?;
+        Ok(())
+    }
+
+    fn current_record(&self, runtime_id: &str) -> Result<NativeSessionRecord, String> {
+        let handle = self
+            .handles
+            .lock()
+            .map_err(|_| "Failed to lock native runtime handles".to_string())?
+            .get(runtime_id)
+            .cloned();
+
+        if let Some(handle) = handle {
+            return handle
+                .record
+                .lock()
+                .map_err(|_| "Failed to lock native session record".to_string())
+                .map(|record| record.clone());
+        }
+
+        self.records
+            .lock()
+            .map_err(|_| "Failed to lock native runtime records".to_string())?
+            .get(runtime_id)
+            .cloned()
+            .ok_or_else(|| format!("Native runtime {} not found", runtime_id))
+    }
+
+    fn terminal_env_vars_for_record(
+        &self,
+        record: &NativeSessionRecord,
+    ) -> Result<HashMap<String, String>, String> {
+        let handle = self
+            .handles
+            .lock()
+            .map_err(|_| "Failed to lock native runtime handles".to_string())?
+            .get(&record.runtime_id)
+            .cloned();
+
+        if let Some(handle) = handle {
+            return Ok(handle.terminal_env_vars.clone());
+        }
+
+        build_runtime_bootstrap_options(record).map(|options| options.terminal_env_vars)
+    }
+
     fn complete_terminal_handoff(
         &self,
         record: NativeSessionRecord,
@@ -940,12 +1059,8 @@ impl NativeRuntimeManager {
             .clone()
             .ok_or_else(|| "Session id is not ready for terminal handoff yet".to_string())?;
 
-        let env_vars = match record.provider {
-            NativeProvider::Claude => resolve_claude_env(&record.env_name)
-                .map(|resolved| resolved.env_vars)
-                .unwrap_or_default(),
-            NativeProvider::Codex => resolve_codex_proxy_env(),
-        };
+        let mut env_vars = self.terminal_env_vars_for_record(&record)?;
+        inject_ccem_runtime_env(&mut env_vars, &runtime_id);
 
         launch_terminal_for_native_handoff(
             terminal,
@@ -2011,9 +2126,9 @@ mod tests {
         merge_helper_env_path, merge_path_values_with_separator,
         native_runtime_state_temp_file_path, native_session_allows_dangerously_skip_permissions,
         native_status_allows_file_rewind, reactivate_record_for_reconnect,
-        read_native_runtime_state_from, take_terminal_launches, HelperInputCommand,
-        NativeProvider, NativeRuntimeManager, NativeSessionHandle, NativeSessionOptions,
-        NativeSessionRecord, NativeTransport, PromptImage,
+        read_native_runtime_state_from, take_terminal_launches, HelperInputCommand, NativeProvider,
+        NativeRuntimeManager, NativeSessionHandle, NativeSessionOptions, NativeSessionRecord,
+        NativeTransport, PromptImage,
     };
     use crate::event_bus::{SessionEventPayload, SessionStore};
     use crate::native_event_log::NativeEventLog;
@@ -2025,13 +2140,20 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     fn native_session_handle(record: NativeSessionRecord) -> Arc<NativeSessionHandle> {
+        native_session_handle_with_terminal_env(record, HashMap::new())
+    }
+
+    fn native_session_handle_with_terminal_env(
+        record: NativeSessionRecord,
+        terminal_env_vars: HashMap<String, String>,
+    ) -> Arc<NativeSessionHandle> {
         let runtime_id = record.runtime_id.clone();
         Arc::new(NativeSessionHandle {
             record: Mutex::new(record),
             child: Mutex::new(None),
             events: Mutex::new(SessionStore::new(&runtime_id)),
             helper_env_vars: HashMap::new(),
-            terminal_env_vars: HashMap::new(),
+            terminal_env_vars,
             claude_path: None,
             codex_path: None,
             codex_base_url: None,
@@ -2376,6 +2498,57 @@ mod tests {
         assert!(!native_session_allows_dangerously_skip_permissions(
             &options
         ));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn terminal_handoff_preparation_preserves_desktop_terminal_env() {
+        let runtime_id = "native-handoff-terminal-env";
+        let mut record = native_record(runtime_id, "ready", true);
+        record.provider_session_id = Some("provider-session-bridge".to_string());
+        let mut terminal_env_vars = HashMap::new();
+        terminal_env_vars.insert("CCEM_RUNTIME_ID".to_string(), runtime_id.to_string());
+        terminal_env_vars.insert("CCEM_SESSION_ID".to_string(), runtime_id.to_string());
+        terminal_env_vars.insert(
+            "CCEM_TEST_DESKTOP_PERMISSION_BRIDGE".to_string(),
+            "connected".to_string(),
+        );
+        let handle = native_session_handle_with_terminal_env(record.clone(), terminal_env_vars);
+        let manager = NativeRuntimeManager {
+            records: Mutex::new(HashMap::from([(runtime_id.to_string(), record)])),
+            handles: Mutex::new(HashMap::from([(runtime_id.to_string(), handle)])),
+            state_path: std::env::temp_dir().join(format!(
+                "ccem-native-runtime-terminal-env-test-{runtime_id}.json"
+            )),
+            event_log: NativeEventLog::new(std::env::temp_dir().join(format!(
+                "ccem-native-runtime-terminal-env-test-{runtime_id}.sqlite"
+            ))),
+            prompt_image_store: PromptImageStore::new(std::env::temp_dir().join(format!(
+                "ccem-native-runtime-terminal-env-test-{runtime_id}-attachments"
+            ))),
+        };
+
+        let handoff = manager
+            .prepare_terminal_handoff(runtime_id, Some(crate::terminal::TerminalType::TerminalApp))
+            .expect("handoff should be ready");
+
+        assert_eq!(handoff.resume_session_id, "provider-session-bridge");
+        assert_eq!(handoff.runtime_id, runtime_id);
+        assert_eq!(
+            handoff.env_vars.get("CCEM_RUNTIME_ID").map(String::as_str),
+            Some(runtime_id)
+        );
+        assert_eq!(
+            handoff.env_vars.get("CCEM_SESSION_ID").map(String::as_str),
+            Some(runtime_id)
+        );
+        assert_eq!(
+            handoff
+                .env_vars
+                .get("CCEM_TEST_DESKTOP_PERMISSION_BRIDGE")
+                .map(String::as_str),
+            Some("connected")
+        );
     }
 
     #[test]
