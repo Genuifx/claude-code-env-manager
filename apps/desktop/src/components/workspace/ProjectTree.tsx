@@ -57,18 +57,19 @@ interface ProjectNode {
   latestTimestamp: number;
 }
 
-function formatRelativeTime(timestamp: number): string {
+function formatRelativeTime(timestamp: number, t: (key: string) => string): string {
   const now = Date.now();
   const diff = now - timestamp;
   const minutes = Math.floor(diff / 60_000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m`;
+  const tr = (key: string, n: number) => t(key).replace('{n}', String(n));
+  if (minutes < 1) return t('time.justNow');
+  if (minutes < 60) return tr('time.minutes', minutes);
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
+  if (hours < 24) return tr('time.hours', hours);
   const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d`;
+  if (days < 7) return tr('time.days', days);
   const weeks = Math.floor(days / 7);
-  return `${weeks}w`;
+  return tr('time.weeks', weeks);
 }
 
 function toKey(session: Pick<HistorySessionItem, 'id' | 'source'>): string {
@@ -846,7 +847,7 @@ export const ProjectTree = memo(function ProjectTree({
               </span>
             ) : (
               <span className="text-muted-foreground/60">
-                {formatRelativeTime(session.timestamp)}
+                {formatRelativeTime(session.timestamp, t)}
               </span>
             )}
           </span>

@@ -22,7 +22,7 @@ export function truncatePath(path: string): string {
   return path.length > 40 ? '...' + path.slice(-37) : path;
 }
 
-export function formatRelativeTime(dateStr: string): string {
+export function formatRelativeTime(dateStr: string, t?: (key: string) => string): string {
   const date = new Date(dateStr);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
@@ -30,11 +30,16 @@ export function formatRelativeTime(dateStr: string): string {
   const diffHours = Math.floor(diffMins / 60);
   const diffDays = Math.floor(diffHours / 24);
 
-  if (diffMins < 1) return 'just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays === 1) return 'yesterday';
-  if (diffDays < 7) return `${diffDays}d ago`;
+  const tr = (key: string, n?: number) => {
+    const tmpl = t ? t(key) : key;
+    return n !== undefined ? tmpl.replace('{n}', String(n)) : tmpl;
+  };
+
+  if (diffMins < 1) return tr('time.justNow');
+  if (diffMins < 60) return tr('time.minutesAgo', diffMins);
+  if (diffHours < 24) return tr('time.hoursAgo', diffHours);
+  if (diffDays === 1) return tr('time.yesterday');
+  if (diffDays < 7) return tr('time.daysAgo', diffDays);
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 

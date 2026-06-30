@@ -1259,5 +1259,16 @@
     "noRecent": "No recent projects",
     "noVSCode": "No VSCode projects",
     "noJetBrains": "No JetBrains projects"
+  },
+  "time": {
+    "justNow": "just now",
+    "minutesAgo": "{n}m ago",
+    "hoursAgo": "{n}h ago",
+    "yesterday": "yesterday",
+    "daysAgo": "{n}d ago",
+    "minutes": "{n}m",
+    "hours": "{n}h",
+    "days": "{n}d",
+    "weeks": "{n}w"
   }
 }

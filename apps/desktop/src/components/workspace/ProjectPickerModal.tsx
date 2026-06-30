@@ -39,6 +39,7 @@ const ProjectRow = memo(({ project, onSelect }: {
   project: ProjectEntry;
   onSelect: (path: string) => void;
 }) => {
+  const { t } = useLocale();
   const hue = pathHue(project.path);
   const displayName = project.name || getProjectName(project.path);
   const shortPath = project.path.replace(/^\/Users\/[^/]+/, '~');
@@ -68,7 +69,7 @@ const ProjectRow = memo(({ project, onSelect }: {
             )}
             {project.time && (
               <span className="text-muted-foreground/40 ml-1.5 font-sans">
-                · {formatRelativeTime(project.time)}
+                · {formatRelativeTime(project.time, t)}
               </span>
             )}
           </div>

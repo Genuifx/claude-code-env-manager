@@ -30,17 +30,22 @@ function SourceIcon({ source }: { source: HistorySource }) {
   return <Claude size={12} style={{ color: '#D97757' }} />;
 }
 
-function formatRelativeTime(timestamp: number): string {
+function formatRelativeTime(timestamp: number, t: (key: string) => string): string {
   const now = Date.now();
   const diff = now - timestamp;
   const minutes = Math.floor(diff / 60000);
   const hours = Math.floor(diff / 3600000);
   const days = Math.floor(diff / 86400000);
 
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  if (days < 7) return `${days}d ago`;
+  const tr = (key: string, n?: number) => {
+    const tmpl = t(key);
+    return n !== undefined ? tmpl.replace('{n}', String(n)) : tmpl;
+  };
+
+  if (minutes < 1) return tr('time.justNow');
+  if (minutes < 60) return tr('time.minutesAgo', minutes);
+  if (hours < 24) return tr('time.hoursAgo', hours);
+  if (days < 7) return tr('time.daysAgo', days);
   return new Date(timestamp).toLocaleDateString();
 }
 
@@ -237,7 +242,7 @@ export function HistoryList({
                       )}
                       <span className="truncate">{session.projectName}</span>
                       <span className="shrink-0 text-muted-foreground/25">·</span>
-                      <span className="shrink-0">{formatRelativeTime(session.timestamp)}</span>
+                      <span className="shrink-0">{formatRelativeTime(session.timestamp, t)}</span>
                     </div>
                   </button>
                 ))}
