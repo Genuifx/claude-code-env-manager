@@ -1,8 +1,7 @@
 import { memo, useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import type { DragEvent } from 'react';
-import { Check, ChevronRight, ChevronsUp, Copy, FolderOpen, FolderClosed, Link, MessageSquare, Pin, RefreshCw, SquarePen, X, Plus } from 'lucide-react';
+import { Check, Copy, Link, Pin, RefreshCw, X, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
@@ -25,6 +24,12 @@ import {
   getSessionStickerDefinition,
   getSessionTaskStageDefinition,
 } from './sessionAnnotations';
+import {
+  PinnedSessionsSection,
+  PROJECT_TREE_PAGE_SIZE,
+  ProjectTreeContent,
+  type ProjectNode,
+} from './ProjectTreeSections';
 
 interface ProjectTreeProps {
   sessions: HistorySessionItem[];
@@ -50,57 +55,24 @@ interface ProjectTreeProps {
   onNewSession?: () => void;
 }
 
-interface ProjectNode {
-  project: string;
-  projectName: string;
-  sessions: HistorySessionItem[];
-  latestTimestamp: number;
-}
-
-function formatRelativeTime(timestamp: number, t: (key: string) => string): string {
+function formatRelativeTime(timestamp: number): string {
   const now = Date.now();
   const diff = now - timestamp;
   const minutes = Math.floor(diff / 60_000);
-  const tr = (key: string, n: number) => t(key).replace('{n}', String(n));
-  if (minutes < 1) return t('time.justNow');
-  if (minutes < 60) return tr('time.minutes', minutes);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return tr('time.hours', hours);
+  if (hours < 24) return `${hours}h`;
   const days = Math.floor(hours / 24);
-  if (days < 7) return tr('time.days', days);
+  if (days < 7) return `${days}d`;
   const weeks = Math.floor(days / 7);
-  return tr('time.weeks', weeks);
+  return `${weeks}w`;
 }
 
 function toKey(session: Pick<HistorySessionItem, 'id' | 'source'>): string {
   return `${session.source}:${session.id}`;
 }
 
-function ProjectTreeSkeleton() {
-  return (
-    <div className="animate-pulse flex flex-col gap-2 p-3">
-      {[1, 2, 3].map((i) => (
-        <div key={i} className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-2 py-1.5">
-            <div className="w-4 h-4 rounded bg-muted" />
-            <div className="h-3.5 w-24 rounded bg-muted" />
-            <div className="h-3 w-6 rounded-full bg-muted ml-auto" />
-          </div>
-          {i <= 2 &&
-            [1, 2].map((j) => (
-              <div key={j} className="flex items-center gap-2 py-1 pl-6">
-                <div className="w-3.5 h-3.5 rounded bg-muted/60" />
-                <div className="h-3 rounded bg-muted/60" style={{ width: `${60 + j * 20}px` }} />
-                <div className="h-2.5 w-6 rounded bg-muted/40 ml-auto" />
-              </div>
-            ))}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-const PAGE_SIZE = 6;
 const MAX_LABEL_LENGTH = 24;
 const PINNED_SESSION_KEYS_STORAGE_KEY = 'ccem-workspace-pinned-sessions';
 
@@ -458,7 +430,7 @@ export const ProjectTree = memo(function ProjectTree({
   // Track which sessions just finished processing
   useEffect(() => {
     setFreshDotKeys((prev) => {
-      const next = new Set(prev);
+      let next: Set<string> | null = null;
       for (const session of sessions) {
         const key = toKey(session);
         const decoration = decorationsBySessionKey[key];
@@ -466,10 +438,13 @@ export const ProjectTree = memo(function ProjectTree({
           processingKeysRef.current.add(key);
         } else if (processingKeysRef.current.has(key)) {
           processingKeysRef.current.delete(key);
-          next.add(key);
+          if (!prev.has(key)) {
+            next ??= new Set(prev);
+            next.add(key);
+          }
         }
       }
-      return next;
+      return next ?? prev;
     });
   }, [sessions, decorationsBySessionKey]);
 
@@ -644,12 +619,15 @@ export const ProjectTree = memo(function ProjectTree({
 
   // Per-project visible count helper
   const getVisibleCount = useCallback(
-    (project: string) => projectVisibleCount[project] ?? PAGE_SIZE,
+    (project: string) => projectVisibleCount[project] ?? PROJECT_TREE_PAGE_SIZE,
     [projectVisibleCount]
   );
   const loadMore = useCallback(
     (project: string) =>
-      setProjectVisibleCount((prev) => ({ ...prev, [project]: (prev[project] ?? PAGE_SIZE) + PAGE_SIZE })),
+      setProjectVisibleCount((prev) => ({
+        ...prev,
+        [project]: (prev[project] ?? PROJECT_TREE_PAGE_SIZE) + PROJECT_TREE_PAGE_SIZE,
+      })),
     []
   );
   const collapseList = useCallback(
@@ -717,7 +695,10 @@ export const ProjectTree = memo(function ProjectTree({
     return environment?.name || clientLabel;
   }, [decorationsBySessionKey, resolveEnvironment, t]);
 
-  const renderSessionRow = (session: HistorySessionItem, options: { pinnedSection?: boolean } = {}) => {
+  const renderSessionRow = useCallback((
+    session: HistorySessionItem,
+    options: { pinnedSection?: boolean } = {},
+  ) => {
     const key = toKey(session);
     const isSelected = key === selectedKey;
     const isEditing = editingKey === key;
@@ -847,7 +828,7 @@ export const ProjectTree = memo(function ProjectTree({
               </span>
             ) : (
               <span className="text-muted-foreground/60">
-                {formatRelativeTime(session.timestamp, t)}
+                {formatRelativeTime(session.timestamp)}
               </span>
             )}
           </span>
@@ -905,7 +886,29 @@ export const ProjectTree = memo(function ProjectTree({
         </ContextMenuContent>
       </ContextMenu>
     );
-  };
+  }, [
+    clearDragState,
+    copyText,
+    decorationsBySessionKey,
+    draggingKey,
+    dropPosition,
+    dropTargetKey,
+    editValue,
+    editingKey,
+    freshDotKeys,
+    getIconTitle,
+    handlePinnedDragOver,
+    handlePinnedDragStart,
+    handlePinnedDrop,
+    onSaveAnnotation,
+    onSelect,
+    pinnedSessionKeySet,
+    resolveEnvironment,
+    saveEdit,
+    selectedKey,
+    t,
+    togglePinnedSession,
+  ]);
 
   return (
     <div className="flex w-[clamp(220px,30vw,280px)] shrink-0 flex-col bg-sidebar backdrop-blur-xl">
@@ -946,145 +949,27 @@ export const ProjectTree = memo(function ProjectTree({
           </button>
         </div>
 
-        <div className="px-0.5 pt-1">
-          <div className="flex h-5 items-center justify-between px-2">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-              {t('workspace.pinnedSessions')}
-            </span>
-            {pinnedSessions.length > 0 ? (
-              <span className="rounded-full bg-muted/70 px-1.5 py-0.5 text-[9px] font-medium tabular-nums text-muted-foreground">
-                {pinnedSessions.length}
-              </span>
-            ) : null}
-          </div>
-          {pinnedSessions.length > 0 ? (
-            <div className="mt-1 pr-0.5">
-              {pinnedSessions.map((session) => renderSessionRow(session, { pinnedSection: true }))}
-            </div>
-          ) : (
-            <div className="mt-1 px-2 py-2 text-[11px] text-muted-foreground/60">
-              {t('workspace.noPinnedSessions')}
-            </div>
-          )}
-        </div>
+        <PinnedSessionsSection
+          pinnedSessions={pinnedSessions}
+          renderSessionRow={renderSessionRow}
+          t={t}
+        />
       </div>
 
       {/* Tree content */}
-      <ScrollArea className="flex-1 min-h-0 py-1">
-        {isLoading ? (
-          <ProjectTreeSkeleton />
-        ) : projectNodes.length === 0 ? (
-          pinnedSessions.length > 0 ? null : (
-          <div className="flex flex-col items-center justify-center py-12 text-center px-4">
-            <MessageSquare className="w-8 h-8 text-muted-foreground/40 mb-3" />
-            <p className="text-xs text-muted-foreground mb-1">{t('workspace.noHistory')}</p>
-            <p className="text-xs text-muted-foreground/70">{t('workspace.noHistoryHint')}</p>
-          </div>
-          )
-        ) : (
-          projectNodes.map((node) => {
-            const isExpanded = effectiveExpanded.has(node.project);
-            const visibleCount = getVisibleCount(node.project);
-            const visible = node.sessions.slice(0, visibleCount);
-            const hasMore = node.sessions.length > visible.length;
-            const canCollapse = visibleCount > PAGE_SIZE;
-            return (
-              <div key={node.project} className="mb-0.5">
-                {/* Project header */}
-                <div
-                  className={cn(
-                    'group/project relative mx-1 flex items-center gap-2 rounded-md px-3 py-2 transition-colors duration-150',
-                    'hover:bg-muted/60',
-                    isExpanded && 'bg-muted/40'
-                  )}
-                >
-                  <button
-                    type="button"
-                    onClick={() => toggleProject(node.project)}
-                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                  >
-                    <ChevronRight
-                      className={cn(
-                        'w-4 h-4 text-muted-foreground transition-transform shrink-0',
-                        isExpanded && 'rotate-90'
-                      )}
-                    />
-                    {isExpanded ? (
-                      <FolderOpen className="w-4 h-4 text-primary shrink-0" />
-                    ) : (
-                      <FolderClosed className="w-4 h-4 text-muted-foreground shrink-0" />
-                    )}
-                    <span className="text-sm font-medium text-foreground truncate flex-1">
-                      {node.projectName}
-                    </span>
-                  </button>
-                  {onCreateForProject && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onCreateForProject(node.project);
-                          }}
-                          aria-label={t('workspace.createInProject')}
-                          className={cn(
-                            'absolute right-2 top-1/2 z-10 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md',
-                            'pointer-events-none text-foreground/70 opacity-0 transition-opacity duration-150',
-                            'hover:text-foreground focus:text-foreground',
-                            'focus:pointer-events-auto focus:opacity-100 focus-visible:ring-1 focus-visible:ring-foreground/25',
-                            'group-hover/project:pointer-events-auto group-hover/project:opacity-100'
-                          )}
-                        >
-                          <SquarePen className="h-3.5 w-3.5" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right" sideOffset={6} className="whitespace-nowrap">
-                        {t('workspace.createInProject')}
-                      </TooltipContent>
-                    </Tooltip>
-                  )}
-                </div>
-
-                {/* Session list */}
-                {isExpanded && (
-                  <div className="pb-1">
-                    {visible.map((session) => renderSessionRow(session))}
-                    {(hasMore || canCollapse) && (
-                      <div className="flex items-center gap-3 pl-9 py-1.5 text-[11px]">
-                        {canCollapse && (
-                          <button
-                            type="button"
-                            onClick={() => collapseList(node.project)}
-                            className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
-                          >
-                            <ChevronsUp className="h-3 w-3" />
-                            {t('workspace.collapseList')}
-                          </button>
-                        )}
-                        {hasMore && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => loadMore(node.project)}
-                              className="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors"
-                            >
-                              {t('workspace.loadMore')}
-                            </button>
-                            <span className="ml-auto text-[10px] tabular-nums text-muted-foreground/50">
-                              {visible.length}/{node.sessions.length}
-                            </span>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })
-        )}
-      </ScrollArea>
+      <ProjectTreeContent
+        effectiveExpanded={effectiveExpanded}
+        getVisibleCount={getVisibleCount}
+        isLoading={isLoading}
+        onCreateForProject={onCreateForProject}
+        pinnedSessionsCount={pinnedSessions.length}
+        projectNodes={projectNodes}
+        renderSessionRow={renderSessionRow}
+        toggleProject={toggleProject}
+        collapseList={collapseList}
+        loadMore={loadMore}
+        t={t}
+      />
 
       {/* Footer stats */}
       {totalSessions > 0 && (

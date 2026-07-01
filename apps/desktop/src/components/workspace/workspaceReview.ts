@@ -56,6 +56,12 @@ export interface WorkspaceReviewModel {
   todoTotal: number;
 }
 
+export interface WorkspaceReviewSummary {
+  failedTools: number;
+  changedFiles: number;
+  artifacts: number;
+}
+
 interface ClaudeRawToolUse {
   seq: number;
   id: string;
@@ -559,6 +565,23 @@ function buildToolEvidence(events: SessionEventRecord[]): ReviewToolEvidence[] {
     }
   }
   return Array.from(tools.values()).sort((left, right) => left.seq - right.seq);
+}
+
+export function buildWorkspaceReviewSummary({
+  events,
+  gitSnapshot,
+}: {
+  events: SessionEventRecord[];
+  gitSnapshot?: WorkspaceGitSnapshot | null;
+}): WorkspaceReviewSummary {
+  const changedFiles = buildChangedFiles(events, gitSnapshot);
+  const tools = buildToolEvidence(events);
+
+  return {
+    failedTools: tools.reduce((count, tool) => count + (tool.success === false ? 1 : 0), 0),
+    changedFiles: changedFiles.length,
+    artifacts: buildArtifacts(changedFiles).length,
+  };
 }
 
 export function buildWorkspaceReviewModel({

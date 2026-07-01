@@ -48,6 +48,8 @@ import type {
   ConversationMessageData,
   HistorySegment,
   HistorySessionItem,
+  SessionStickerId,
+  SessionTaskStage,
 } from '@/features/conversations/types';
 import { toSessionKey } from '@/features/conversations/types';
 import { useWorkspaceSessionDecorations } from '@/components/workspace/useWorkspaceSessionDecorations';
@@ -60,6 +62,7 @@ import type {
 import {
   buildWorkspaceSidebarSessions,
   findLiveEntryForSidebarSession,
+  retainStableHistorySessions,
   resolveWorkspaceReviewProviderSessionId,
   toLiveHistorySessionItem,
 } from '@/components/workspace/workspaceSidebarSessions';
@@ -71,8 +74,11 @@ import {
   type WorkspaceLiveSessionEntry,
   type WorkspaceLiveSessionsByRuntimeId,
 } from '@/components/workspace/workspaceLiveSessions';
-import { WorkspaceReviewDrawer } from '@/components/workspace/WorkspaceReviewDrawer';
-import { buildWorkspaceReviewModel } from '@/components/workspace/workspaceReview';
+import { LazyWorkspaceReviewDrawer } from '@/components/workspace/LazyWorkspaceReviewDrawer';
+import {
+  buildWorkspaceReviewModel,
+  buildWorkspaceReviewSummary,
+} from '@/components/workspace/workspaceReview';
 import {
   normalizeEffortForProvider,
   resolveHistorySessionControls,
@@ -298,6 +304,7 @@ export function Workspace({
   } = useTauriCommands();
 
   const [sessions, setSessions] = useState<HistorySessionItem[]>([]);
+  const sessionsRef = useRef<HistorySessionItem[]>([]);
   const [isLoadingSessions, setIsLoadingSessions] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -569,16 +576,23 @@ export function Workspace({
       });
   }, [installedSkills.length, loadInstalledSkills]);
 
+  const replaceSessions = useCallback((nextSessions: HistorySessionItem[]) => {
+    const retainedSessions = retainStableHistorySessions(sessionsRef.current, nextSessions);
+    sessionsRef.current = retainedSessions;
+    setSessions(retainedSessions);
+    return retainedSessions;
+  }, []);
+
   const syncSessionState = useCallback((nextSessions: HistorySessionItem[]) => {
-    setSessions(nextSessions);
+    const retainedSessions = replaceSessions(nextSessions);
 
     const currentSelectedKey = selectedKeyRef.current;
     if (!currentSelectedKey) {
-      return;
+      return retainedSessions;
     }
 
     const liveSessionsSnapshot = liveSessionsByRuntimeIdRef.current;
-    const stillExists = nextSessions.some((session) => toSessionKey(session) === currentSelectedKey)
+    const stillExists = retainedSessions.some((session) => toSessionKey(session) === currentSelectedKey)
       || Object.values(liveSessionsSnapshot).some((entry) => {
         const liveItem = toLiveHistorySessionItem(entry);
         return liveItem ? toSessionKey(liveItem) === currentSelectedKey : false;
@@ -594,7 +608,8 @@ export function Workspace({
         setWorkspaceMode('compose');
       }
     }
-  }, []);
+    return retainedSessions;
+  }, [replaceSessions]);
 
   useEffect(() => {
     if (!hasAttemptedNativeSessionRestore) {
@@ -757,13 +772,13 @@ export function Workspace({
           return null;
         }
 
-        syncSessionState(nextSessions);
+        const retainedSessions = syncSessionState(nextSessions);
         hasLoadedRef.current = true;
 
         if (includeSelectedConversation) {
           const currentSelectedKey = selectedKeyRef.current;
           if (currentSelectedKey) {
-            const selectedSession = nextSessions.find(
+            const selectedSession = retainedSessions.find(
               (session) => toSessionKey(session) === currentSelectedKey
             );
             if (selectedSession) {
@@ -775,7 +790,7 @@ export function Workspace({
           }
         }
 
-        return nextSessions;
+        return retainedSessions;
       } catch (error) {
         if (requestSeq !== refreshRequestSeqRef.current) {
           return null;
@@ -1194,14 +1209,34 @@ export function Workspace({
     workspaceReviewWorkingDir,
     workspaceReviewProviderSessionId,
   ]);
-  const workspaceReviewModel = useMemo(
-    () => buildWorkspaceReviewModel({
-      session: workspaceReviewSession,
+  const workspaceReviewSummary = useMemo(
+    () => buildWorkspaceReviewSummary({
       events: [],
-      messages: workspaceMode === 'history' ? messages : [],
       gitSnapshot: workspaceGitSnapshot,
     }),
-    [messages, workspaceGitSnapshot, workspaceMode, workspaceReviewSession],
+    [workspaceGitSnapshot],
+  );
+  const workspaceReviewModel = useMemo(
+    () => {
+      if (!workspaceReviewOpen || !shouldRenderWorkspaceReview) {
+        return null;
+      }
+
+      return buildWorkspaceReviewModel({
+        session: workspaceReviewSession,
+        events: [],
+        messages: workspaceMode === 'history' ? messages : [],
+        gitSnapshot: workspaceGitSnapshot,
+      });
+    },
+    [
+      messages,
+      shouldRenderWorkspaceReview,
+      workspaceGitSnapshot,
+      workspaceMode,
+      workspaceReviewOpen,
+      workspaceReviewSession,
+    ],
   );
 
   // Publish review summary to the status-strip entry pill while compose/history owns the view.
@@ -1211,16 +1246,16 @@ export function Workspace({
     }
     setReviewEntry({
       envName: workspaceReviewSession.env_name,
-      failedTools: workspaceReviewModel.failedTools.length,
-      changedFiles: workspaceReviewModel.changedFiles.length,
-      artifacts: workspaceReviewModel.artifacts.length,
+      failedTools: workspaceReviewSummary.failedTools,
+      changedFiles: workspaceReviewSummary.changedFiles,
+      artifacts: workspaceReviewSummary.artifacts,
     });
   }, [
     shouldRenderWorkspaceReview,
     workspaceReviewSession.env_name,
-    workspaceReviewModel.failedTools.length,
-    workspaceReviewModel.changedFiles.length,
-    workspaceReviewModel.artifacts.length,
+    workspaceReviewSummary.failedTools,
+    workspaceReviewSummary.changedFiles,
+    workspaceReviewSummary.artifacts,
     setReviewEntry,
   ]);
 
@@ -2224,6 +2259,55 @@ export function Workspace({
     );
   };
 
+  const handleProjectTreeRefresh = useCallback(() => {
+    void refreshWorkspaceData({
+      force: true,
+      silent: false,
+      includeSelectedConversation: true,
+    });
+  }, [refreshWorkspaceData]);
+
+  const handleProjectTreeSaveTitle = useCallback(async (
+    session: HistorySessionItem,
+    title: string,
+  ) => {
+    await setSessionTitle(session.source, session.id, title);
+  }, [setSessionTitle]);
+
+  const handleProjectTreeSaveAnnotation = useCallback(async (
+    session: HistorySessionItem,
+    annotation: {
+      stage?: SessionTaskStage;
+      sticker?: SessionStickerId;
+      label?: string;
+    },
+  ) => {
+    await setSessionAnnotation(session.source, session.id, annotation);
+    invalidateHistoryCache();
+    replaceSessions(
+      sessionsRef.current.map((currentSession) =>
+        currentSession.source === session.source && currentSession.id === session.id
+          ? {
+              ...currentSession,
+              taskStage: annotation.stage,
+              taskSticker: annotation.sticker,
+              taskLabel: annotation.label?.trim() || undefined,
+            }
+          : currentSession
+      )
+    );
+  }, [replaceSessions, setSessionAnnotation]);
+
+  const handleProjectTreeSessionsChanged = useCallback(async () => {
+    invalidateHistoryCache();
+    const refreshed = await fetchHistorySessions('all', true);
+    syncSessionState(refreshed);
+  }, [syncSessionState]);
+
+  const handleProjectTreeNewSession = useCallback(() => {
+    void handleNewSession(launchClient);
+  }, [handleNewSession, launchClient]);
+
   if (isLoadingEnvs || isLoadingStats) {
     return <WorkspaceSkeleton />;
   }
@@ -2244,64 +2328,39 @@ export function Workspace({
           isRefreshing={isRefreshing}
           selectedKey={selectedKey}
           onSelect={handleSelect}
-          onRefresh={() => {
-            void refreshWorkspaceData({
-              force: true,
-              silent: false,
-              includeSelectedConversation: true,
-            });
-          }}
-          onSaveTitle={async (session, title) => {
-            await setSessionTitle(session.source, session.id, title);
-          }}
-          onSaveAnnotation={async (session, annotation) => {
-            await setSessionAnnotation(session.source, session.id, annotation);
-            invalidateHistoryCache();
-            setSessions((currentSessions) =>
-              currentSessions.map((currentSession) =>
-                currentSession.source === session.source && currentSession.id === session.id
-                  ? {
-                      ...currentSession,
-                      taskStage: annotation.stage,
-                      taskSticker: annotation.sticker,
-                      taskLabel: annotation.label?.trim() || undefined,
-                    }
-                  : currentSession
-              )
-            );
-          }}
-          onSessionsChanged={async () => {
-            invalidateHistoryCache();
-            const refreshed = await fetchHistorySessions('all', true);
-            setSessions(refreshed);
-          }}
+          onRefresh={handleProjectTreeRefresh}
+          onSaveTitle={handleProjectTreeSaveTitle}
+          onSaveAnnotation={handleProjectTreeSaveAnnotation}
+          onSessionsChanged={handleProjectTreeSessionsChanged}
           onCreateForProject={handleCreateForProject}
-          onNewSession={() => void handleNewSession(launchClient)}
+          onNewSession={handleProjectTreeNewSession}
         />
 
         <div className="workspace-reading-surface relative flex min-w-0 flex-1 flex-col overflow-hidden">
-          {shouldRenderWorkspaceReview ? (
-            <WorkspaceReviewDrawer
-              session={workspaceReviewSession}
-              model={workspaceReviewModel}
-              gitSnapshot={workspaceGitSnapshot}
-              isOpen={workspaceReviewOpen}
-              isRefreshingGit={isRefreshingWorkspaceGitSnapshot}
-              onOpenChange={setWorkspaceReviewOpen}
-              onRefreshGit={() => void refreshWorkspaceGitSnapshot()}
-              onLoadDiff={(filePath) => getWorkspaceFileDiff(workspaceReviewWorkingDir || '', filePath)}
-              isLive={workspaceMode !== 'history'}
-              onLoadSubagents={
-                workspaceReviewSession.provider === 'claude' && workspaceReviewSession.provider_session_id
-                  ? (detailAgentId) =>
-                      getSessionSubagents(
-                        workspaceReviewSession.provider_session_id!,
-                        workspaceReviewSession.provider,
-                        detailAgentId,
-                      )
-                  : undefined
-              }
-            />
+          {shouldRenderWorkspaceReview && workspaceReviewOpen && workspaceReviewModel ? (
+            <Suspense fallback={null}>
+              <LazyWorkspaceReviewDrawer
+                session={workspaceReviewSession}
+                model={workspaceReviewModel}
+                gitSnapshot={workspaceGitSnapshot}
+                isOpen={workspaceReviewOpen}
+                isRefreshingGit={isRefreshingWorkspaceGitSnapshot}
+                onOpenChange={setWorkspaceReviewOpen}
+                onRefreshGit={() => void refreshWorkspaceGitSnapshot()}
+                onLoadDiff={(filePath) => getWorkspaceFileDiff(workspaceReviewWorkingDir || '', filePath)}
+                isLive={workspaceMode !== 'history'}
+                onLoadSubagents={
+                  workspaceReviewSession.provider === 'claude' && workspaceReviewSession.provider_session_id
+                    ? (detailAgentId) =>
+                        getSessionSubagents(
+                          workspaceReviewSession.provider_session_id!,
+                          workspaceReviewSession.provider,
+                          detailAgentId,
+                        )
+                    : undefined
+                }
+              />
+            </Suspense>
           ) : null}
 
           {workspaceMode === 'history' && selectedSession

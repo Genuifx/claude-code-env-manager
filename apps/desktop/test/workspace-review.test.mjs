@@ -135,6 +135,65 @@ test('builds review model from Claude task, file, artifact, and git evidence', a
   assert.equal(model.failedTools.length, 1);
 });
 
+test('builds lightweight review summary without message or todo scans', async () => {
+  const { buildWorkspaceReviewSummary } = await importWorkspaceReview();
+  const summary = buildWorkspaceReviewSummary({
+    events: [
+      event(1, {
+        type: 'claude_json',
+        message_type: 'assistant',
+        raw_json: JSON.stringify({
+          message: {
+            content: [{
+              type: 'tool_use',
+              id: 'todo-1',
+              name: 'TodoWrite',
+              input: { todos: [{ content: '无需常驻扫描', status: 'completed' }] },
+            }],
+          },
+        }),
+      }),
+      event(2, {
+        type: 'tool_use_started',
+        tool_use_id: 'edit-1',
+        raw_name: 'Write',
+        input_summary: 'reports/result.html',
+        needs_response: false,
+        category: { category: 'file_op', raw_name: 'Write' },
+      }),
+      event(3, {
+        type: 'tool_use_completed',
+        tool_use_id: 'edit-1',
+        raw_name: 'Write',
+        result_summary: 'ok',
+        success: true,
+      }),
+      event(4, {
+        type: 'tool_use_completed',
+        tool_use_id: 'bash-1',
+        raw_name: 'Bash',
+        result_summary: 'failed',
+        success: false,
+      }),
+    ],
+    gitSnapshot: {
+      is_repo: true,
+      root: '/repo',
+      branch: 'main',
+      sha: 'abc1234',
+      upstream: 'origin/main',
+      dirty_count: 1,
+      files: [{ path: 'reports/result.html', status: 'M', additions: 3, deletions: 0 }],
+    },
+  });
+
+  assert.deepEqual(summary, {
+    failedTools: 1,
+    changedFiles: 1,
+    artifacts: 1,
+  });
+});
+
 test('maps Codex todo_list summaries to unified todos', async () => {
   const { buildWorkspaceReviewModel } = await importWorkspaceReview();
   const model = buildWorkspaceReviewModel({

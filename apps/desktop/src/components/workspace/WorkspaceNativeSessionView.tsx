@@ -14,7 +14,7 @@ import {
   SquarePen,
   Terminal,
 } from 'lucide-react';
-import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -46,6 +46,7 @@ import type {
   ToolQuestionPrompt,
 } from '@/lib/tauri-ipc';
 import { cn } from '@/lib/utils';
+import { scheduleAfterFirstPaint } from '@/lib/idle';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useLocale } from '@/locales';
 import { useAppStore } from '@/store';
@@ -105,8 +106,11 @@ import {
 } from './workspaceEventTranscript';
 import { ContextWindowIndicator } from './ContextWindowIndicator';
 import { computeSessionUsage } from './workspaceUsage';
-import { WorkspaceReviewDrawer } from './WorkspaceReviewDrawer';
-import { buildWorkspaceReviewModel } from './workspaceReview';
+import { LazyWorkspaceReviewDrawer } from './LazyWorkspaceReviewDrawer';
+import {
+  buildWorkspaceReviewModel,
+  buildWorkspaceReviewSummary,
+} from './workspaceReview';
 import { WorkspaceWecomBindDialog } from './WorkspaceWecomBindDialog';
 
 function ProcessingActionIcon({ stopping = false }: { stopping?: boolean }) {
@@ -1261,6 +1265,7 @@ export function WorkspaceNativeSessionView({
   const latestEventsRef = useRef<SessionEventRecord[]>(events);
   const previousMessagesRef = useRef<ConversationMessageData[]>([]);
   const cacheFlushTimerRef = useRef<number | null>(null);
+  const cacheFlushIdleCancelRef = useRef<(() => void) | null>(null);
   const cacheFlushPendingRef = useRef(false);
   const lastSummaryRefreshTimestampRef = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1470,14 +1475,27 @@ export function WorkspaceNativeSessionView({
     [rawMessages],
   );
 
-  const reviewModel = useMemo(
-    () => buildWorkspaceReviewModel({
-      session,
+  const reviewSummary = useMemo(
+    () => buildWorkspaceReviewSummary({
       events,
-      messages,
       gitSnapshot,
     }),
-    [events, gitSnapshot, messages, session],
+    [events, gitSnapshot],
+  );
+  const reviewModel = useMemo(
+    () => {
+      if (!isReviewDrawerOpen) {
+        return null;
+      }
+
+      return buildWorkspaceReviewModel({
+        session,
+        events,
+        messages,
+        gitSnapshot,
+      });
+    },
+    [events, gitSnapshot, isReviewDrawerOpen, messages, session],
   );
 
   // Publish review summary to the status-strip entry pill while this live session owns the view.
@@ -1487,16 +1505,16 @@ export function WorkspaceNativeSessionView({
     }
     setReviewEntry({
       envName: session.env_name,
-      failedTools: reviewModel.failedTools.length,
-      changedFiles: reviewModel.changedFiles.length,
-      artifacts: reviewModel.artifacts.length,
+      failedTools: reviewSummary.failedTools,
+      changedFiles: reviewSummary.changedFiles,
+      artifacts: reviewSummary.artifacts,
     });
   }, [
     isVisible,
     session.env_name,
-    reviewModel.failedTools.length,
-    reviewModel.changedFiles.length,
-    reviewModel.artifacts.length,
+    reviewSummary.failedTools,
+    reviewSummary.changedFiles,
+    reviewSummary.artifacts,
     setReviewEntry,
   ]);
 
@@ -1504,9 +1522,26 @@ export function WorkspaceNativeSessionView({
     previousMessagesRef.current = messages;
   }, [messages]);
 
-  const flushCachedEvents = useCallback(() => {
+  const flushCachedEvents = useCallback((options: { immediate?: boolean } = {}) => {
     cacheFlushPendingRef.current = false;
-    writeCachedNativeEvents(session.runtime_id, latestEventsRef.current);
+    if (cacheFlushIdleCancelRef.current) {
+      cacheFlushIdleCancelRef.current();
+      cacheFlushIdleCancelRef.current = null;
+    }
+
+    const write = () => {
+      writeCachedNativeEvents(session.runtime_id, latestEventsRef.current);
+    };
+
+    if (options.immediate) {
+      write();
+      return;
+    }
+
+    cacheFlushIdleCancelRef.current = scheduleAfterFirstPaint(() => {
+      cacheFlushIdleCancelRef.current = null;
+      write();
+    }, { delayMs: 0, timeoutMs: 800 });
   }, [session.runtime_id]);
 
   const scheduleCacheFlush = useCallback(() => {
@@ -1535,14 +1570,18 @@ export function WorkspaceNativeSessionView({
       window.clearTimeout(cacheFlushTimerRef.current);
       cacheFlushTimerRef.current = null;
     }
+    if (cacheFlushIdleCancelRef.current) {
+      cacheFlushIdleCancelRef.current();
+      cacheFlushIdleCancelRef.current = null;
+    }
     if (latestEventsRef.current.length > 0) {
-      flushCachedEvents();
+      flushCachedEvents({ immediate: true });
     }
   }, [flushCachedEvents]);
 
   useEffect(() => {
     if (isTerminalStatus(session.status) && latestEventsRef.current.length > 0) {
-      flushCachedEvents();
+      flushCachedEvents({ immediate: true });
     }
   }, [flushCachedEvents, session.status]);
 
@@ -2544,24 +2583,28 @@ export function WorkspaceNativeSessionView({
   return (
     <>
     <div className="relative flex h-full min-h-0 flex-col">
-      <WorkspaceReviewDrawer
-        session={session}
-        model={reviewModel}
-        gitSnapshot={gitSnapshot}
-        isOpen={isReviewDrawerOpen}
-        isRefreshingGit={isRefreshingGitSnapshot}
-        onOpenChange={setReviewPanelOpen}
-        onRefreshGit={() => void refreshGitSnapshot()}
-        onLoadDiff={(filePath) => getWorkspaceFileDiff(session.project_dir, filePath)}
-        onLoadMediaPreview={(filePath) => getWorkspaceMediaPreview(session.project_dir, filePath)}
-        isLive
-        onLoadSubagents={
-          session.provider === 'claude' && session.provider_session_id
-            ? (detailAgentId) =>
-                getSessionSubagents(session.provider_session_id!, session.provider, detailAgentId)
-            : undefined
-        }
-      />
+      {isReviewDrawerOpen && reviewModel ? (
+        <Suspense fallback={null}>
+          <LazyWorkspaceReviewDrawer
+            session={session}
+            model={reviewModel}
+            gitSnapshot={gitSnapshot}
+            isOpen={isReviewDrawerOpen}
+            isRefreshingGit={isRefreshingGitSnapshot}
+            onOpenChange={setReviewPanelOpen}
+            onRefreshGit={() => void refreshGitSnapshot()}
+            onLoadDiff={(filePath) => getWorkspaceFileDiff(session.project_dir, filePath)}
+            onLoadMediaPreview={(filePath) => getWorkspaceMediaPreview(session.project_dir, filePath)}
+            isLive
+            onLoadSubagents={
+              session.provider === 'claude' && session.provider_session_id
+                ? (detailAgentId) =>
+                    getSessionSubagents(session.provider_session_id!, session.provider, detailAgentId)
+                : undefined
+            }
+          />
+        </Suspense>
+      ) : null}
 
       <ScrollArea viewportRef={containerRef} className="workspace-transcript-scroll flex-1 bg-background/30">
         <div className="mx-auto max-w-[960px] px-8 py-8">

@@ -59,6 +59,46 @@ export function getWorkspaceTranscriptSpacing(
   return kind === 'tool-digest' ? 'mt-5' : 'mt-6';
 }
 
+const processedMessageSegmentsCache = new WeakMap<
+  ConversationMessageData,
+  {
+    messageKey: string;
+    content: ConversationMessageData['content'];
+    isCompactBoundary: ConversationMessageData['isCompactBoundary'];
+    planContent: ConversationMessageData['planContent'];
+    msgType: ConversationMessageData['msgType'];
+    segments: MessageSegment[];
+  }
+>();
+
+function getProcessedMessageSegments(
+  message: ConversationMessageData,
+  messageKey: string,
+): MessageSegment[] {
+  const cached = processedMessageSegmentsCache.get(message);
+  if (
+    cached
+    && cached.messageKey === messageKey
+    && cached.content === message.content
+    && cached.isCompactBoundary === message.isCompactBoundary
+    && cached.planContent === message.planContent
+    && cached.msgType === message.msgType
+  ) {
+    return cached.segments;
+  }
+
+  const segments = processMessageBlocks(message, messageKey);
+  processedMessageSegmentsCache.set(message, {
+    messageKey,
+    content: message.content,
+    isCompactBoundary: message.isCompactBoundary,
+    planContent: message.planContent,
+    msgType: message.msgType,
+    segments,
+  });
+  return segments;
+}
+
 export function buildWorkspaceTranscriptItems(
   messages: ConversationMessageData[],
 ): WorkspaceTranscriptItem[] {
@@ -141,7 +181,7 @@ export function buildWorkspaceTranscriptItems(
       return;
     }
 
-    const segments = processMessageBlocks(message, messageKey);
+    const segments = getProcessedMessageSegments(message, messageKey);
     pendingSegments.push(...segments);
   });
 

@@ -9,6 +9,7 @@ import type {
 import type { HistorySessionItem } from '@/features/conversations/types';
 import type { Session } from '@/store';
 import { appendSessionEvents } from './workspaceEventTranscript';
+import { areNativeSessionSummariesEqual } from './workspaceLiveSessions';
 
 export type WorkspaceSessionVisualState = 'identity' | 'processing' | 'attention';
 export type WorkspaceAttentionKind = 'input_required' | 'plan_review' | 'permission_required';
@@ -56,6 +57,101 @@ type WorkspaceRuntimeDescriptor =
 
 const POLL_INTERVAL_MS = 3000;
 const RUNTIME_HISTORY_FALLBACK_WINDOW_MS = 2 * 60 * 1000;
+
+function areJsonValuesEqual(previous: unknown, next: unknown): boolean {
+  return JSON.stringify(previous) === JSON.stringify(next);
+}
+
+function areUnifiedChannelsEqual(
+  previousChannels: UnifiedSessionInfo['channels'],
+  nextChannels: UnifiedSessionInfo['channels'],
+): boolean {
+  if (previousChannels.length !== nextChannels.length) {
+    return false;
+  }
+
+  return previousChannels.every((previous, index) => {
+    const next = nextChannels[index];
+    return !!next
+      && previous.connected_at === next.connected_at
+      && previous.label === next.label
+      && areJsonValuesEqual(previous.kind, next.kind);
+  });
+}
+
+function areUnifiedSessionInfosEqual(
+  previous: UnifiedSessionInfo,
+  next: UnifiedSessionInfo,
+): boolean {
+  return previous.id === next.id
+    && previous.runtime_kind === next.runtime_kind
+    && previous.status === next.status
+    && previous.project_dir === next.project_dir
+    && previous.env_name === next.env_name
+    && previous.perm_mode === next.perm_mode
+    && previous.created_at === next.created_at
+    && previous.is_active === next.is_active
+    && previous.pid === next.pid
+    && previous.claude_session_id === next.claude_session_id
+    && previous.tmux_target === next.tmux_target
+    && previous.client === next.client
+    && areJsonValuesEqual(previous.source, next.source)
+    && areUnifiedChannelsEqual(previous.channels, next.channels);
+}
+
+function legacySessionStartedAt(session: Session): number {
+  return session.startedAt instanceof Date
+    ? session.startedAt.getTime()
+    : new Date(session.startedAt).getTime();
+}
+
+function areLegacyInteractiveSessionsEqual(previous: Session, next: Session): boolean {
+  return previous.id === next.id
+    && previous.client === next.client
+    && previous.envName === next.envName
+    && previous.configSource === next.configSource
+    && previous.workingDir === next.workingDir
+    && previous.pid === next.pid
+    && legacySessionStartedAt(previous) === legacySessionStartedAt(next)
+    && previous.status === next.status
+    && previous.permMode === next.permMode
+    && previous.terminalType === next.terminalType
+    && previous.windowId === next.windowId
+    && previous.itermSessionId === next.itermSessionId
+    && previous.tmuxTarget === next.tmuxTarget;
+}
+
+function retainStableRuntimeList<T>(
+  previousItems: T[],
+  nextItems: T[],
+  getKey: (item: T) => string,
+  areEqual: (previous: T, next: T) => boolean,
+): T[] {
+  if (previousItems.length === 0 && nextItems.length === 0) {
+    return previousItems;
+  }
+
+  if (previousItems.length === 0 || nextItems.length === 0) {
+    return nextItems;
+  }
+
+  const previousByKey = new Map(previousItems.map((item) => [getKey(item), item]));
+  let hasChanged = previousItems.length !== nextItems.length;
+  const retainedItems = nextItems.map((item, index) => {
+    const previous = previousByKey.get(getKey(item));
+    if (!previous || !areEqual(previous, item)) {
+      hasChanged = true;
+      return item;
+    }
+
+    if (previousItems[index] !== previous) {
+      hasChanged = true;
+    }
+    return previous;
+  });
+
+  return hasChanged ? retainedItems : previousItems;
+}
 
 function toSessionKey(session: Pick<HistorySessionItem, 'id' | 'source'>): string {
   return `${session.source}:${session.id}`;
@@ -357,9 +453,30 @@ export function useWorkspaceSessionDecorations({
       && session.status === 'running'
     );
 
-    setUnifiedSessions(nextUnifiedSessions);
-    setNativeSessions(nextNativeSessions);
-    setLegacyInteractiveSessions(nextLegacyInteractiveSessions);
+    setUnifiedSessions((current) =>
+      retainStableRuntimeList(
+        current,
+        nextUnifiedSessions,
+        (runtime) => runtime.id,
+        areUnifiedSessionInfosEqual,
+      )
+    );
+    setNativeSessions((current) =>
+      retainStableRuntimeList(
+        current,
+        nextNativeSessions,
+        (runtime) => runtime.runtime_id,
+        areNativeSessionSummariesEqual,
+      )
+    );
+    setLegacyInteractiveSessions((current) =>
+      retainStableRuntimeList(
+        current,
+        nextLegacyInteractiveSessions,
+        (session) => session.id,
+        areLegacyInteractiveSessionsEqual,
+      )
+    );
 
     return {
       unifiedSessions: nextUnifiedSessions,

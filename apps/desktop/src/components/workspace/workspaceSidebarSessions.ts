@@ -45,6 +45,59 @@ export function liveSessionSidebarKey(entry: WorkspaceSidebarLiveSessionEntry): 
   return `${toHistorySource(entry.session.provider)}:${liveSessionSidebarId(entry)}`;
 }
 
+function historySessionKey(session: Pick<HistorySessionItem, 'id' | 'source'>): string {
+  return `${session.source}:${session.id}`;
+}
+
+export function areHistorySessionItemsEqual(
+  previous: HistorySessionItem,
+  next: HistorySessionItem,
+) {
+  return previous.id === next.id
+    && previous.source === next.source
+    && previous.display === next.display
+    && previous.timestamp === next.timestamp
+    && previous.project === next.project
+    && previous.projectName === next.projectName
+    && previous.envName === next.envName
+    && previous.configSource === next.configSource
+    && previous.taskStage === next.taskStage
+    && previous.taskSticker === next.taskSticker
+    && previous.taskLabel === next.taskLabel;
+}
+
+export function retainStableHistorySessions(
+  previousSessions: HistorySessionItem[],
+  nextSessions: HistorySessionItem[],
+): HistorySessionItem[] {
+  if (previousSessions.length === 0 && nextSessions.length === 0) {
+    return previousSessions;
+  }
+
+  if (previousSessions.length === 0 || nextSessions.length === 0) {
+    return nextSessions;
+  }
+
+  const previousByKey = new Map(
+    previousSessions.map((session) => [historySessionKey(session), session])
+  );
+  let hasChanged = previousSessions.length !== nextSessions.length;
+  const retainedSessions = nextSessions.map((session, index) => {
+    const previous = previousByKey.get(historySessionKey(session));
+    if (!previous || !areHistorySessionItemsEqual(previous, session)) {
+      hasChanged = true;
+      return session;
+    }
+
+    if (previousSessions[index] !== previous) {
+      hasChanged = true;
+    }
+    return previous;
+  });
+
+  return hasChanged ? retainedSessions : previousSessions;
+}
+
 function isTerminalNativeSession(entry: WorkspaceSidebarLiveSessionEntry): boolean {
   return TERMINAL_NATIVE_STATUSES.has(entry.session.status);
 }
@@ -78,8 +131,17 @@ export function buildWorkspaceSidebarSessions(
   historySessions: HistorySessionItem[],
   liveEntries: WorkspaceSidebarLiveSessionEntry[],
 ): HistorySessionItem[] {
+  if (liveEntries.length === 0) {
+    for (let index = 1; index < historySessions.length; index += 1) {
+      if (historySessions[index - 1].timestamp < historySessions[index].timestamp) {
+        return [...historySessions].sort((left, right) => right.timestamp - left.timestamp);
+      }
+    }
+    return historySessions;
+  }
+
   const nextSessions = [...historySessions];
-  const existingKeys = new Set(historySessions.map((session) => `${session.source}:${session.id}`));
+  const existingKeys = new Set(historySessions.map(historySessionKey));
 
   for (const entry of liveEntries) {
     const liveItem = toLiveHistorySessionItem(entry);
@@ -87,7 +149,7 @@ export function buildWorkspaceSidebarSessions(
       continue;
     }
 
-    const key = `${liveItem.source}:${liveItem.id}`;
+    const key = historySessionKey(liveItem);
     if (existingKeys.has(key)) {
       continue;
     }
