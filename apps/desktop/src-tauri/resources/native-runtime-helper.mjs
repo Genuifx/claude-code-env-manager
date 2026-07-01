@@ -20189,6 +20189,37 @@ async function applyClaudePermissionModeToQuery(query, permMode) {
   return permission;
 }
 
+// src/claudeQuerySnapshotSlot.ts
+var QuerySnapshotSlot = class {
+  currentSnapshot = null;
+  generationCounter = 0;
+  activate(query, inputQueue) {
+    const snapshot = {
+      query,
+      inputQueue,
+      generation: ++this.generationCounter
+    };
+    this.currentSnapshot = snapshot;
+    return snapshot;
+  }
+  capture() {
+    return this.currentSnapshot;
+  }
+  isCurrent(snapshot) {
+    return snapshot != null && this.currentSnapshot === snapshot;
+  }
+  clearIfCurrent(snapshot) {
+    if (!this.isCurrent(snapshot)) {
+      return false;
+    }
+    this.currentSnapshot = null;
+    return true;
+  }
+  clear() {
+    this.currentSnapshot = null;
+  }
+};
+
 // src/claudePlanGuard.ts
 import os3 from "node:os";
 import path3 from "node:path";
@@ -20627,6 +20658,7 @@ function buildClaudeFileCheckpointEvent(message, providerSessionId) {
 
 // src/index.ts
 var DEFAULT_CLAUDE_IDLE_TTL_MS = 10 * 60 * 1e3;
+var DEFAULT_CLAUDE_INTERRUPT_TIMEOUT_MS = 8e3;
 var initCommand = null;
 var stopped = false;
 var activeTurn = false;
@@ -20634,6 +20666,7 @@ var currentProviderSessionId = null;
 var currentAbortController = null;
 var currentClaudeQuery = null;
 var claudeInputQueue = null;
+var claudeQuerySlot = new QuerySnapshotSlot();
 var claudeConsumeLoop = null;
 var claudeIdleCloseTimer = null;
 var claudeLastSessionState = null;
@@ -20719,11 +20752,84 @@ function resolveClaudeIdleTtlMs() {
   const parsed = Number(raw);
   return Number.isFinite(parsed) ? Math.max(0, parsed) : DEFAULT_CLAUDE_IDLE_TTL_MS;
 }
+function resolveClaudeInterruptTimeoutMs() {
+  const raw = process3.env.CCEM_NATIVE_CLAUDE_INTERRUPT_TIMEOUT_MS;
+  if (raw == null || raw.trim() === "") {
+    return DEFAULT_CLAUDE_INTERRUPT_TIMEOUT_MS;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : DEFAULT_CLAUDE_INTERRUPT_TIMEOUT_MS;
+}
+async function withTimeout(promise, ms2, message) {
+  if (ms2 <= 0) {
+    return promise;
+  }
+  let timer = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_3, reject) => {
+        timer = setTimeout(() => {
+          const error = new Error(message);
+          error.name = "TimeoutError";
+          reject(error);
+        }, ms2);
+        timer.unref?.();
+      })
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+async function interruptClaudeWithTimeout(claudeQuery) {
+  const timeoutMs = resolveClaudeInterruptTimeoutMs();
+  return withTimeout(
+    claudeQuery.interrupt(),
+    timeoutMs,
+    `Claude interrupt timed out after ${timeoutMs}ms`
+  );
+}
 function clearClaudeIdleCloseTimer() {
   if (claudeIdleCloseTimer) {
     clearTimeout(claudeIdleCloseTimer);
     claudeIdleCloseTimer = null;
   }
+}
+function captureCurrentClaudeQuerySnapshot() {
+  return claudeQuerySlot.capture();
+}
+function isCurrentClaudeQuerySnapshot(snapshot) {
+  return claudeQuerySlot.isCurrent(snapshot) && currentClaudeQuery === snapshot.query && claudeInputQueue === snapshot.inputQueue;
+}
+function clearCurrentClaudeQuerySnapshot(snapshot) {
+  if (!claudeQuerySlot.clearIfCurrent(snapshot)) {
+    return false;
+  }
+  currentClaudeQuery = null;
+  claudeInputQueue = null;
+  return true;
+}
+function closeClaudeQueryForRecovery(snapshot = captureCurrentClaudeQuerySnapshot()) {
+  clearClaudeIdleCloseTimer();
+  pendingClaudePromptReplay = null;
+  if (!snapshot) {
+    return;
+  }
+  const queueToClose = snapshot.inputQueue;
+  const queryToClose = snapshot.query;
+  if (queueToClose) {
+    queueToClose.close();
+    if (claudeInputQueue === queueToClose && isCurrentClaudeQuerySnapshot(snapshot)) {
+      claudeInputQueue = null;
+    }
+  }
+  queryToClose.close();
+  clearCurrentClaudeQuerySnapshot(snapshot);
+}
+function shouldInterruptCurrentClaudeTurn(snapshot = captureCurrentClaudeQuerySnapshot()) {
+  return snapshot !== null && isCurrentClaudeQuerySnapshot(snapshot) && !claudeTurnCompletionEmitted && claudeLastSessionState !== "idle";
 }
 function scheduleClaudeIdleClose() {
   clearClaudeIdleCloseTimer();
@@ -20734,11 +20840,15 @@ function scheduleClaudeIdleClose() {
   if (ttlMs <= 0) {
     return;
   }
-  const queryToClose = currentClaudeQuery;
-  const queueToClose = claudeInputQueue;
+  const snapshotToClose = captureCurrentClaudeQuerySnapshot();
+  if (!snapshotToClose || !snapshotToClose.inputQueue) {
+    return;
+  }
+  const queryToClose = snapshotToClose.query;
+  const queueToClose = snapshotToClose.inputQueue;
   claudeIdleCloseTimer = setTimeout(() => {
     claudeIdleCloseTimer = null;
-    if (currentClaudeQuery !== queryToClose || claudeInputQueue !== queueToClose) {
+    if (!isCurrentClaudeQuerySnapshot(snapshotToClose) || claudeInputQueue !== queueToClose) {
       return;
     }
     if (!claudeTurnCompletionEmitted && !claudeInterruptCompletionEmitted) {
@@ -20747,6 +20857,9 @@ function scheduleClaudeIdleClose() {
     pendingClaudePromptReplay = null;
     queueToClose.close();
     queryToClose.close();
+    if (isCurrentClaudeQuerySnapshot(snapshotToClose) && claudeInputQueue === queueToClose) {
+      clearCurrentClaudeQuerySnapshot(snapshotToClose);
+    }
   }, ttlMs);
   claudeIdleCloseTimer.unref?.();
 }
@@ -21522,12 +21635,13 @@ async function consumeClaudeMessages() {
   }
   claudeContextUsageFailureKey = null;
   const inputQueue = new AsyncMessageQueue();
-  claudeInputQueue = inputQueue;
   const claudeQuery = lMe({
     prompt: inputQueue,
     options: buildClaudeQueryOptions()
   });
-  currentClaudeQuery = claudeQuery;
+  const querySnapshot = claudeQuerySlot.activate(claudeQuery, inputQueue);
+  currentClaudeQuery = querySnapshot.query;
+  claudeInputQueue = querySnapshot.inputQueue;
   try {
     for await (const message of claudeQuery) {
       const sessionId = message?.session_id;
@@ -21714,9 +21828,9 @@ async function consumeClaudeMessages() {
     if (claudeInputQueue === inputQueue) {
       claudeInputQueue = null;
     }
-    if (currentClaudeQuery === claudeQuery) {
+    if (claudeQuerySlot.isCurrent(querySnapshot)) {
       clearClaudeIdleCloseTimer();
-      currentClaudeQuery = null;
+      clearCurrentClaudeQuerySnapshot(querySnapshot);
     }
     if (initCommand?.provider === "claude" && pendingSettings && !claudeInputQueue && !currentClaudeQuery) {
       applyPendingSettingsToInitCommand();
@@ -22301,21 +22415,66 @@ async function handleCommand(command) {
     denyPendingPermissions();
     denyPendingClaudeInteractivePrompts("Native runtime turn was interrupted before user responded.");
     if (initCommand?.provider === "claude") {
+      const stopTarget = captureCurrentClaudeQuerySnapshot();
+      if (!shouldInterruptCurrentClaudeTurn(stopTarget)) {
+        emitEvent({
+          type: "lifecycle",
+          stage: "idle_stop",
+          detail: "Desktop workspace stopped an idle Claude runtime after the turn had completed."
+        });
+        closeClaudeQueryForRecovery(stopTarget);
+        activeTurn = false;
+        currentAbortController = null;
+        stopped = false;
+        emitStatus("closed_idle", "Claude runtime stopped after completed turn.");
+        return;
+      }
       claudeInterruptRequested = true;
       claudeInterruptCompletionEmitted = false;
       try {
-        if (currentClaudeQuery) {
-          await currentClaudeQuery.interrupt();
+        if (!shouldInterruptCurrentClaudeTurn(stopTarget)) {
+          emitEvent({
+            type: "lifecycle",
+            stage: "idle_stop",
+            detail: "Desktop workspace stopped an idle Claude runtime after the turn had completed."
+          });
+          closeClaudeQueryForRecovery(stopTarget);
+          emitStatus("closed_idle", "Claude runtime stopped after completed turn.");
+          return;
         }
+        emitEvent({
+          type: "lifecycle",
+          stage: "interrupt_requested",
+          detail: "Claude interrupt requested by desktop workspace."
+        });
+        await interruptClaudeWithTimeout(stopTarget.query);
         emitClaudeTurnInterrupted();
       } catch (error) {
         claudeInterruptRequested = false;
         const message = error instanceof Error ? error.message : String(error);
-        emitEvent({
-          type: "stderr_line",
-          line: `Failed to interrupt Claude turn: ${message}`
-        });
-        emitStatus("error", message);
+        if (error instanceof Error && error.name === "TimeoutError") {
+          claudeLastSessionState = "idle";
+          resetClaudeTurnTracking();
+          claudeTurnCompletionEmitted = true;
+          claudeInterruptCompletionEmitted = true;
+          emitEvent({
+            type: "stderr_line",
+            line: `${message}; closing stuck Claude query.`
+          });
+          emitEvent({
+            type: "lifecycle",
+            stage: "interrupt_timeout",
+            detail: message
+          });
+          closeClaudeQueryForRecovery(stopTarget);
+          emitStatus("interrupted", "Claude interrupt timed out; runtime will reconnect on the next prompt.");
+        } else {
+          emitEvent({
+            type: "stderr_line",
+            line: `Failed to interrupt Claude turn: ${message}`
+          });
+          emitStatus("error", message);
+        }
       } finally {
         activeTurn = false;
         currentAbortController = null;

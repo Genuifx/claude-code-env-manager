@@ -274,6 +274,39 @@ test('renders completed turns with only lifecycle detail as visible feedback', a
   );
 });
 
+test('keeps native runtime diagnostics out of visible chat turns', async () => {
+  const {
+    buildMessagesFromEvents,
+    shouldTreatNativeSessionAsProcessing,
+  } = await importWorkspaceEventTranscript();
+
+  const diagnosticEvents = [
+    event(1, { type: 'user_prompt', text: 'continue', image_count: 0 }),
+    event(2, { type: 'lifecycle', stage: 'prompt_send_requested', detail: 'chars=8 images=0' }),
+    event(3, { type: 'lifecycle', stage: 'prompt_send_written', detail: 'helper accepted prompt command' }),
+    event(4, { type: 'lifecycle', stage: 'stop_requested', detail: 'Desktop workspace requested native runtime stop.' }),
+    event(5, { type: 'lifecycle', stage: 'stop_written', detail: 'Native helper accepted stop command.' }),
+    event(6, { type: 'lifecycle', stage: 'interrupt_requested', detail: 'Claude interrupt requested by desktop workspace.' }),
+    event(7, { type: 'lifecycle', stage: 'interrupt_timeout', detail: 'Claude interrupt timed out after 40ms' }),
+    event(8, { type: 'lifecycle', stage: 'stop_force_killed', detail: 'Removed stale helper handle.' }),
+    event(9, { type: 'lifecycle', stage: 'handoff_requested', detail: 'Terminal handoff requested.' }),
+    event(10, { type: 'lifecycle', stage: 'handoff_failed', detail: 'Terminal handoff failed.' }),
+    event(11, { type: 'lifecycle', stage: 'idle_stop', detail: 'Idle helper stopped after completion.' }),
+    event(12, { type: 'lifecycle', stage: 'closed_idle', detail: 'Claude runtime stopped after completed turn.' }),
+  ];
+
+  const messages = buildMessagesFromEvents([], [], diagnosticEvents);
+
+  assert.deepEqual(
+    messages.map((message) => [message.msgType, message.content]),
+    [['user', 'continue']],
+  );
+  assert.equal(
+    shouldTreatNativeSessionAsProcessing('processing', diagnosticEvents),
+    false,
+  );
+});
+
 test('live transcript renders user prompt images from native events', async () => {
   const { buildMessagesFromEvents } = await importWorkspaceEventTranscript();
 

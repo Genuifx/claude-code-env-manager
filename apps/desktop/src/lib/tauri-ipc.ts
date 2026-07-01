@@ -333,6 +333,7 @@ export interface TauriCommands {
   stop_native_session: [
     {
       runtimeId: string;
+      source?: string | null;
     },
     void
   ];

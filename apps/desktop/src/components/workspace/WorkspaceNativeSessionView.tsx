@@ -2435,7 +2435,7 @@ export function WorkspaceNativeSessionView({
   const handleStop = useCallback(async () => {
     setIsStopping(true);
     try {
-      await stopNativeSession(session.runtime_id);
+      await stopNativeSession(session.runtime_id, 'native_session_stop_button');
       await refreshSummary({ force: true });
     } catch (error) {
       console.error('Failed to stop native session:', error);
