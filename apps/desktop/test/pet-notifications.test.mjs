@@ -453,3 +453,22 @@ test('uses concise Chinese status labels for different session states', async ()
   );
   assert.equal(notifications[1].message, '正在思考');
 });
+
+test('labels closed idle native sessions as completed notifications', async () => {
+  const { buildPetNotifications } = await importPetNotifications();
+  const notifications = buildPetNotifications(
+    [
+      session({
+        runtime_id: 'closed-idle-1',
+        status: 'closed_idle',
+        updated_at: '2026-05-01T08:01:30.000Z',
+      }),
+    ],
+    new Set(),
+    Date.parse('2026-05-01T08:02:00.000Z'),
+  );
+
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].statusLabel, '已完成');
+  assert.equal(notifications[0].tone, 'done');
+});

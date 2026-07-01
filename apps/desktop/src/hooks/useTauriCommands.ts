@@ -63,7 +63,7 @@ interface TauriSession {
   perm_mode: string;
   working_dir: string;
   start_time: string;
-  status: string;  // "running" | "stopped" | "interrupted"
+  status: string;  // native runtime status, e.g. "running" | "stopped" | "interrupted" | "closed_idle"
   terminal_type?: string;  // "iterm2" | "terminalapp"
   window_id?: string;      // iTerm2 window ID
   iterm_session_id?: string; // iTerm2 session unique ID for arrange
@@ -850,8 +850,14 @@ export function useTauriCommands() {
     });
   }, []);
 
-  const stopNativeSession = useCallback(async (runtimeId: string): Promise<void> => {
-    await invoke('stop_native_session', { runtimeId });
+  const stopNativeSession = useCallback(async (
+    runtimeId: string,
+    source?: string | null,
+  ): Promise<void> => {
+    await invoke('stop_native_session', {
+      runtimeId,
+      source: source ?? null,
+    });
   }, []);
 
   const updateNativeSessionSettings = useCallback(async (

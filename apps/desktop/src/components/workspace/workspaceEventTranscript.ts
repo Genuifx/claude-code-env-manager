@@ -491,9 +491,15 @@ export function sessionEventsNeedSummaryRefresh(events: SessionEventRecord[]) {
           'compacting',
           'compact_completed',
           'compact_failed',
+          'closed_idle',
+          'handoff_failed',
+          'idle_stop',
           'error',
+          'interrupted',
+          'interrupt_timeout',
           'ready',
           'runtime_resume',
+          'stop_force_killed',
           'turn_completed',
           'turn_interrupted',
         ].includes(event.payload.stage);
@@ -506,17 +512,27 @@ export function sessionEventsNeedSummaryRefresh(events: SessionEventRecord[]) {
 const ACTIVE_TURN_LIFECYCLE_STAGES = new Set([
   'compacting',
   'initializing',
+  'prompt_send_requested',
+  'prompt_send_written',
   'processing',
   'turn_started',
 ]);
 
 const CLOSED_TURN_LIFECYCLE_STAGES = new Set([
   'error',
+  'closed_idle',
   'handoff',
+  'handoff_failed',
   'idle',
+  'idle_stop',
   'interrupted',
+  'interrupt_requested',
+  'interrupt_timeout',
   'ready',
   'stopped',
+  'stop_force_killed',
+  'stop_requested',
+  'stop_written',
   'turn_completed',
   'turn_interrupted',
 ]);

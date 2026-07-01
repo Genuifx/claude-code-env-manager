@@ -1337,8 +1337,9 @@ fn set_native_session_runtime_perm_mode(
 fn stop_native_session(
     native_state: State<'_, Arc<NativeRuntimeManager>>,
     runtime_id: String,
+    source: Option<String>,
 ) -> Result<(), String> {
-    native_state.stop_session(&runtime_id)
+    native_state.stop_session_from(&runtime_id, source.as_deref())
 }
 
 #[tauri::command]

@@ -17,7 +17,9 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
   const settleDelayMsAfterResult = options.settleDelayMsAfterResult ?? 0;
   const yieldIdleBeforeResult = options.yieldIdleBeforeResult ?? false;
   const interruptible = options.interruptible ?? false;
+  const interruptHangs = options.interruptHangs ?? false;
   const logClose = options.logClose ?? false;
+  const logCloseWithTurn = options.logCloseWithTurn ?? false;
   const logInterrupt = options.logInterrupt ?? false;
   const expectedQueryModel = options.expectedQueryModel ?? null;
   const reportModelState = options.reportModelState ?? false;
@@ -45,7 +47,9 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
             const settleDelayMsAfterResult = ${JSON.stringify(settleDelayMsAfterResult)};
             const yieldIdleBeforeResult = ${JSON.stringify(yieldIdleBeforeResult)};
             const interruptible = ${JSON.stringify(interruptible)};
+            const interruptHangs = ${JSON.stringify(interruptHangs)};
             const logClose = ${JSON.stringify(logClose)};
+            const logCloseWithTurn = ${JSON.stringify(logCloseWithTurn)};
             const logInterrupt = ${JSON.stringify(logInterrupt)};
             const expectedQueryModel = ${JSON.stringify(expectedQueryModel)};
             const reportModelState = ${JSON.stringify(reportModelState)};
@@ -68,11 +72,17 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
                   if (logClose) {
                     process.stderr.write('__MOCK_CLAUDE_CLOSE__\\n');
                   }
+                  if (logCloseWithTurn) {
+                    process.stderr.write('__MOCK_CLAUDE_CLOSE_TURN_' + turn + '__\\n');
+                  }
                   interruptResolver?.();
                 },
                 async interrupt() {
                   if (logInterrupt) {
                     process.stderr.write('__MOCK_CLAUDE_INTERRUPT__\\n');
+                  }
+                  if (interruptHangs) {
+                    return new Promise(() => {});
                   }
                   interruptResolver?.();
                 },
@@ -87,7 +97,7 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
                     const next = await iterator.next();
                     if (closed || next.done) return;
                     localTurn += 1;
-                    const responseNumber = interruptible || keepAliveAfterResult ? localTurn : turn;
+                    const responseNumber = (interruptible && !interruptHangs) || keepAliveAfterResult ? localTurn : turn;
                     const text = reportModelState
                       ? 'model=' + (options.model ?? '<none>') + ';setModel=' + setModelCalled
                       : 'mock response ' + responseNumber;
@@ -345,6 +355,180 @@ test('keeps an idle Claude query open for the next prompt instead of closing bac
   );
 
   assert.doesNotMatch(stderrRef.value, /__MOCK_CLAUDE_CLOSE__/);
+});
+
+test('stop closes an idle retained Claude query without interrupting a completed turn', async (t) => {
+  const helperPath = await buildHelperWithMockClaudeSdk({
+    keepAliveAfterResult: true,
+    logClose: true,
+    logInterrupt: true,
+  });
+  const helper = spawn(process.execPath, [helperPath], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  t.after(() => {
+    helper.kill('SIGTERM');
+  });
+
+  const outputs = [];
+  const stderrRef = { value: '' };
+  let stdoutBuffer = '';
+
+  helper.stdout.setEncoding('utf8');
+  helper.stdout.on('data', (chunk) => {
+    stdoutBuffer += chunk;
+    let newlineIndex = stdoutBuffer.indexOf('\n');
+    while (newlineIndex >= 0) {
+      const line = stdoutBuffer.slice(0, newlineIndex).trim();
+      stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+      if (line) {
+        outputs.push(JSON.parse(line));
+      }
+      newlineIndex = stdoutBuffer.indexOf('\n');
+    }
+  });
+
+  helper.stderr.setEncoding('utf8');
+  helper.stderr.on('data', (chunk) => {
+    stderrRef.value += chunk;
+  });
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'init',
+    provider: 'claude',
+    env_name: 'default',
+    perm_mode: 'dev',
+    working_dir: os.tmpdir(),
+    initial_prompt: 'first',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'status'
+      && output.status === 'ready'
+      && output.detail === 'Ready for the next prompt.',
+    stderrRef,
+    'ready status after completed retained Claude turn',
+  );
+
+  helper.stdin.write(`${JSON.stringify({ type: 'stop' })}\n`);
+
+  await waitForStderr(
+    stderrRef,
+    /__MOCK_CLAUDE_CLOSE__/,
+    'idle retained Claude query closed on stop',
+  );
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'event'
+      && output.payload?.type === 'lifecycle'
+      && output.payload.stage === 'idle_stop',
+    stderrRef,
+    'idle_stop lifecycle event',
+  );
+
+  assert.doesNotMatch(stderrRef.value, /__MOCK_CLAUDE_INTERRUPT__/);
+  assert.equal(
+    outputs.some((output) => output.type === 'event'
+      && output.payload?.type === 'lifecycle'
+      && output.payload.stage === 'turn_interrupted'),
+    false,
+  );
+});
+
+test('idle stop closes the captured Claude query without closing a fresh prompt reconnect', async (t) => {
+  const helperPath = await buildHelperWithMockClaudeSdk({
+    keepAliveAfterResult: true,
+    logCloseWithTurn: true,
+    logInterrupt: true,
+  });
+  const helper = spawn(process.execPath, [helperPath], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  t.after(() => {
+    helper.kill('SIGTERM');
+  });
+
+  const outputs = [];
+  const stderrRef = { value: '' };
+  let stdoutBuffer = '';
+
+  helper.stdout.setEncoding('utf8');
+  helper.stdout.on('data', (chunk) => {
+    stdoutBuffer += chunk;
+    let newlineIndex = stdoutBuffer.indexOf('\n');
+    while (newlineIndex >= 0) {
+      const line = stdoutBuffer.slice(0, newlineIndex).trim();
+      stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+      if (line) {
+        outputs.push(JSON.parse(line));
+      }
+      newlineIndex = stdoutBuffer.indexOf('\n');
+    }
+  });
+
+  helper.stderr.setEncoding('utf8');
+  helper.stderr.on('data', (chunk) => {
+    stderrRef.value += chunk;
+  });
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'init',
+    provider: 'claude',
+    env_name: 'default',
+    perm_mode: 'dev',
+    working_dir: os.tmpdir(),
+    initial_prompt: 'first',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'status'
+      && output.status === 'ready'
+      && output.detail === 'Ready for the next prompt.',
+    stderrRef,
+    'ready status after retained Claude turn',
+  );
+
+  helper.stdin.write(`${JSON.stringify({ type: 'stop' })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'status'
+      && output.status === 'closed_idle'
+      && output.detail === 'Claude runtime stopped after completed turn.',
+    stderrRef,
+    'closed_idle status after idle stop',
+  );
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'prompt',
+    text: 'second',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    () => outputs.filter((output) => output.type === 'event'
+      && output.payload?.type === 'assistant_chunk').length >= 2,
+    stderrRef,
+    'fresh Claude response after idle stop',
+  );
+
+  await delay(60);
+  const chunks = outputs
+    .filter((output) => output.type === 'event' && output.payload?.type === 'assistant_chunk')
+    .map((output) => output.payload.text);
+  assert.deepEqual(
+    chunks.slice(0, 2),
+    ['mock response 1', 'mock response 1'],
+    'closed_idle continuation starts from a fresh Claude query',
+  );
+  assert.match(stderrRef.value, /__MOCK_CLAUDE_CLOSE_TURN_1__/);
+  assert.doesNotMatch(stderrRef.value, /__MOCK_CLAUDE_CLOSE_TURN_2__/);
+  assert.doesNotMatch(stderrRef.value, /__MOCK_CLAUDE_INTERRUPT__/);
 });
 
 test('closes an idle Claude query after the retention timeout', async (t) => {
@@ -903,6 +1087,127 @@ test('interrupts an active Claude turn without closing the query process', async
   assert.doesNotMatch(stderrRef.value, /__MOCK_CLAUDE_CLOSE__/);
   assert.equal(
     outputs.some((output) => output.type === 'event' && output.payload?.type === 'session_completed'),
+    false,
+  );
+});
+
+test('times out a stuck Claude interrupt and restarts the next prompt on a fresh query', async (t) => {
+  const helperPath = await buildHelperWithMockClaudeSdk({
+    interruptible: true,
+    interruptHangs: true,
+    logClose: true,
+    logCloseWithTurn: true,
+    logInterrupt: true,
+  });
+  const helper = spawn(process.execPath, [helperPath], {
+    env: {
+      ...process.env,
+      CCEM_NATIVE_CLAUDE_INTERRUPT_TIMEOUT_MS: '40',
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  t.after(() => {
+    helper.kill('SIGTERM');
+  });
+
+  const outputs = [];
+  const stderrRef = { value: '' };
+  let stdoutBuffer = '';
+
+  helper.stdout.setEncoding('utf8');
+  helper.stdout.on('data', (chunk) => {
+    stdoutBuffer += chunk;
+    let newlineIndex = stdoutBuffer.indexOf('\n');
+    while (newlineIndex >= 0) {
+      const line = stdoutBuffer.slice(0, newlineIndex).trim();
+      stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+      if (line) {
+        outputs.push(JSON.parse(line));
+      }
+      newlineIndex = stdoutBuffer.indexOf('\n');
+    }
+  });
+
+  helper.stderr.setEncoding('utf8');
+  helper.stderr.on('data', (chunk) => {
+    stderrRef.value += chunk;
+  });
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'init',
+    provider: 'claude',
+    env_name: 'default',
+    perm_mode: 'dev',
+    working_dir: os.tmpdir(),
+    initial_prompt: 'first',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'event'
+      && output.payload?.type === 'assistant_chunk'
+      && output.payload.text === 'mock response 1',
+    stderrRef,
+    'first Claude response before stuck interrupt',
+  );
+
+  helper.stdin.write(`${JSON.stringify({ type: 'stop' })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'event'
+      && output.payload?.type === 'lifecycle'
+      && output.payload.stage === 'interrupt_requested',
+    stderrRef,
+    'interrupt_requested lifecycle event',
+  );
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'event'
+      && output.payload?.type === 'lifecycle'
+      && output.payload.stage === 'interrupt_timeout',
+    stderrRef,
+    'interrupt_timeout lifecycle event',
+  );
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'status'
+      && output.status === 'interrupted'
+      && output.detail === 'Claude interrupt timed out; runtime will reconnect on the next prompt.',
+    stderrRef,
+    'interrupted status after interrupt timeout',
+  );
+
+  await waitForStderr(
+    stderrRef,
+    /__MOCK_CLAUDE_CLOSE__/,
+    'stuck Claude query closed after interrupt timeout',
+  );
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'prompt',
+    text: 'second',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'event'
+      && output.payload?.type === 'assistant_chunk'
+      && output.payload.text === 'mock response 2',
+    stderrRef,
+    'second Claude response after interrupt timeout',
+  );
+
+  assert.match(stderrRef.value, /__MOCK_CLAUDE_INTERRUPT__/);
+  assert.match(stderrRef.value, /__MOCK_CLAUDE_CLOSE_TURN_1__/);
+  assert.doesNotMatch(stderrRef.value, /__MOCK_CLAUDE_CLOSE_TURN_2__/);
+  assert.equal(
+    outputs.some((output) => output.type === 'event'
+      && output.payload?.type === 'lifecycle'
+      && output.payload.stage === 'turn_interrupted'),
     false,
   );
 });

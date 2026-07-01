@@ -24,7 +24,7 @@ use tauri_plugin_shell::{
     ShellExt,
 };
 
-const NATIVE_STOP_GRACE_PERIOD: Duration = Duration::from_millis(1_500);
+const NATIVE_STOP_GRACE_PERIOD: Duration = Duration::from_secs(10);
 static NATIVE_RUNTIME_STATE_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -271,7 +271,39 @@ fn native_session_allows_dangerously_skip_permissions(options: &NativeSessionOpt
 }
 
 fn native_status_allows_file_rewind(status: &str) -> bool {
-    matches!(status, "idle" | "ready" | "interrupted")
+    matches!(status, "idle" | "ready" | "interrupted" | "closed_idle")
+}
+
+fn helper_command_kind(command: &HelperInputCommand<'_>) -> &'static str {
+    match command {
+        HelperInputCommand::Init { .. } => "init",
+        HelperInputCommand::Prompt { .. } => "prompt",
+        HelperInputCommand::PermissionResponse { .. } => "permission_response",
+        HelperInputCommand::InteractivePromptResponse { .. } => "interactive_prompt_response",
+        HelperInputCommand::UpdateSettings { .. } => "update_settings",
+        HelperInputCommand::RewindFiles { .. } => "rewind_files",
+        HelperInputCommand::Stop => "stop",
+    }
+}
+
+const UNATTRIBUTED_STOP_SOURCE: &str = "unattributed";
+
+fn normalize_stop_source(source: Option<&str>) -> String {
+    let Some(source) = source.map(str::trim).filter(|source| !source.is_empty()) else {
+        return UNATTRIBUTED_STOP_SOURCE.to_string();
+    };
+
+    let normalized: String = source
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':'))
+        .take(80)
+        .collect();
+
+    if normalized.is_empty() {
+        UNATTRIBUTED_STOP_SOURCE.to_string()
+    } else {
+        normalized
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -291,6 +323,7 @@ enum HelperOutputEvent {
 }
 
 struct NativeSessionHandle {
+    generation: u64,
     record: Mutex<NativeSessionRecord>,
     child: Mutex<Option<CommandChild>>,
     events: Mutex<SessionStore>,
@@ -421,6 +454,7 @@ struct NativeRuntimeState {
 pub struct NativeRuntimeManager {
     records: Mutex<HashMap<String, NativeSessionRecord>>,
     handles: Mutex<HashMap<String, Arc<NativeSessionHandle>>>,
+    next_handle_generation: AtomicU64,
     state_path: PathBuf,
     event_log: NativeEventLog,
     prompt_image_store: PromptImageStore,
@@ -438,6 +472,7 @@ impl Default for NativeRuntimeManager {
         Self {
             records: Mutex::new(records),
             handles: Mutex::new(HashMap::new()),
+            next_handle_generation: AtomicU64::new(1),
             state_path,
             event_log: NativeEventLog::default(),
             prompt_image_store: PromptImageStore::default(),
@@ -477,6 +512,7 @@ impl NativeRuntimeManager {
         };
 
         let handle = Arc::new(NativeSessionHandle {
+            generation: self.allocate_handle_generation(),
             record: Mutex::new(record.clone()),
             child: Mutex::new(None),
             events: Mutex::new(SessionStore::new(runtime_id.clone())),
@@ -626,7 +662,32 @@ impl NativeRuntimeManager {
             return Ok(());
         }
 
-        let handle = self.ensure_handle(app.clone(), runtime_id)?;
+        let mut handle = self.ensure_handle(app.clone(), runtime_id)?;
+        let image_count = images.as_ref().map(|imgs| imgs.len()).unwrap_or(0);
+        if !self.mark_handle_live_if_current(runtime_id, &handle)? {
+            handle = self.ensure_handle(app.clone(), runtime_id)?;
+            if !self.mark_handle_live_if_current(runtime_id, &handle)? {
+                return Err("Native runtime helper was replaced while sending prompt".to_string());
+            }
+        }
+        let record = handle
+            .record
+            .lock()
+            .map_err(|_| "Failed to lock native session record".to_string())?
+            .clone();
+        self.append_lifecycle_event(
+            runtime_id,
+            "prompt_send_requested",
+            format!(
+                "runtime_id={} provider={} status={} handle_generation={} chars={} images={}",
+                runtime_id,
+                record.provider.as_str(),
+                record.status,
+                handle.generation,
+                text.chars().count(),
+                image_count
+            ),
+        )?;
         let images_ref = images
             .filter(|imgs| !imgs.is_empty())
             .map(|imgs| imgs.as_slice());
@@ -638,6 +699,15 @@ impl NativeRuntimeManager {
                 text,
                 images: images_ref,
             },
+        )?;
+        self.append_lifecycle_event(
+            runtime_id,
+            "prompt_send_written",
+            format!(
+                "helper accepted prompt command: chars={} images={}",
+                text.chars().count(),
+                image_count
+            ),
         )?;
         self.append_user_prompt_event(runtime_id, display_text.unwrap_or(text), images)
     }
@@ -801,19 +871,50 @@ impl NativeRuntimeManager {
     }
 
     pub fn stop_session(self: &Arc<Self>, runtime_id: &str) -> Result<(), String> {
+        self.stop_session_from(runtime_id, None)
+    }
+
+    pub fn stop_session_from(
+        self: &Arc<Self>,
+        runtime_id: &str,
+        source: Option<&str>,
+    ) -> Result<(), String> {
+        let stop_source = normalize_stop_source(source);
+        let stop_status = self
+            .records
+            .lock()
+            .map_err(|_| "Failed to lock native runtime records".to_string())?
+            .get(runtime_id)
+            .map(|record| record.status.clone())
+            .unwrap_or_else(|| "missing_record".to_string());
+        let stop_handle_generation = self
+            .handles
+            .lock()
+            .map_err(|_| "Failed to lock native runtime handles".to_string())?
+            .get(runtime_id)
+            .map(|handle| handle.generation.to_string())
+            .unwrap_or_else(|| "none".to_string());
         self.append_event(
             runtime_id,
             SessionEventPayload::SessionCompleted {
                 reason: "Stopped from desktop workspace.".to_string(),
             },
         )?;
-        if self.request_child_stop(runtime_id)? {
+        self.append_lifecycle_event(
+            runtime_id,
+            "stop_requested",
+            format!(
+                "Desktop workspace requested native runtime stop. source={stop_source} status={stop_status} handle_generation={stop_handle_generation}"
+            ),
+        )?;
+        if let Some(handle) = self.request_child_stop(runtime_id)? {
             // Graceful stop — the helper aborts the current turn and stays alive.
             // Mark as interrupted so the frontend re-enables the composer for continued use.
             self.update_record(runtime_id, |record| {
                 record.status = "interrupted".to_string();
                 record.updated_at = Utc::now();
             })?;
+            self.schedule_force_kill(runtime_id.to_string(), handle);
         } else {
             // Hard stop — the child process was already gone.
             self.update_record(runtime_id, |record| {
@@ -910,6 +1011,15 @@ impl NativeRuntimeManager {
         };
 
         let terminal = terminal_type.unwrap_or_else(terminal::get_preferred_terminal);
+        self.append_lifecycle_event(
+            runtime_id,
+            "handoff_requested",
+            format!(
+                "Terminal handoff requested for {} in {}.",
+                record.provider.as_str(),
+                terminal.display_name()
+            ),
+        )?;
 
         if record.provider_session_id.is_some() {
             self.complete_terminal_handoff(record, terminal)?;
@@ -1062,7 +1172,7 @@ impl NativeRuntimeManager {
         let mut env_vars = self.terminal_env_vars_for_record(&record)?;
         inject_ccem_runtime_env(&mut env_vars, &runtime_id);
 
-        launch_terminal_for_native_handoff(
+        if let Err(error) = launch_terminal_for_native_handoff(
             terminal,
             env_vars,
             &record.project_dir,
@@ -1074,7 +1184,19 @@ impl NativeRuntimeManager {
             )),
             Some(provider_session_id.as_str()),
             record.provider.as_str(),
-        )?;
+        ) {
+            let _ = self.append_lifecycle_event(
+                &runtime_id,
+                "handoff_failed",
+                format!(
+                    "Failed to open {} session in {}: {}",
+                    record.provider.as_str(),
+                    terminal.display_name(),
+                    error
+                ),
+            );
+            return Err(error);
+        }
 
         self.update_record(&runtime_id, |entry| {
             entry.status = "handoff".to_string();
@@ -1139,6 +1261,7 @@ impl NativeRuntimeManager {
             .unwrap_or(1);
 
         let handle = Arc::new(NativeSessionHandle {
+            generation: self.allocate_handle_generation(),
             record: Mutex::new(record.clone()),
             child: Mutex::new(None),
             events: Mutex::new(SessionStore::with_start_seq(
@@ -1159,7 +1282,10 @@ impl NativeRuntimeManager {
             runtime_id,
             SessionEventPayload::Lifecycle {
                 stage: "runtime_resume".to_string(),
-                detail: "Reconnected native runtime helper.".to_string(),
+                detail: format!(
+                    "Reconnected native runtime helper with generation {}.",
+                    handle.generation
+                ),
             },
         )?;
         self.spawn_helper(app, runtime_id, &options, handle.clone())?;
@@ -1499,7 +1625,9 @@ impl NativeRuntimeManager {
                     SessionEventPayload::Lifecycle {
                         stage: "runtime_resume".to_string(),
                         detail: format!(
-                            "Restarting native runtime helper after write failed: {}",
+                            "Restarting native runtime helper generation {} for {} after write failed: {}",
+                            handle.generation,
+                            helper_command_kind(command),
                             error
                         ),
                     },
@@ -1519,7 +1647,10 @@ impl NativeRuntimeManager {
         }
     }
 
-    fn request_child_stop(&self, runtime_id: &str) -> Result<bool, String> {
+    fn request_child_stop(
+        &self,
+        runtime_id: &str,
+    ) -> Result<Option<Arc<NativeSessionHandle>>, String> {
         let handle = self
             .handles
             .lock()
@@ -1527,7 +1658,7 @@ impl NativeRuntimeManager {
             .get(runtime_id)
             .cloned();
         let Some(handle) = handle else {
-            return Ok(false);
+            return Ok(None);
         };
 
         handle.alive.store(false, Ordering::SeqCst);
@@ -1537,11 +1668,21 @@ impl NativeRuntimeManager {
             .map_err(|_| "Failed to lock native sidecar child".to_string())?
             .is_some();
         if !has_child {
-            return Ok(false);
+            return Ok(None);
         }
 
         match self.write_to_child(&handle, &HelperInputCommand::Stop) {
-            Ok(()) => Ok(true),
+            Ok(()) => {
+                self.append_lifecycle_event(
+                    runtime_id,
+                    "stop_written",
+                    format!(
+                        "Native helper generation {} accepted stop command.",
+                        handle.generation
+                    ),
+                )?;
+                Ok(Some(handle))
+            }
             Err(error) => {
                 let _ = self.append_event(
                     runtime_id,
@@ -1549,18 +1690,70 @@ impl NativeRuntimeManager {
                         line: format!("Failed to request native helper stop: {}", error),
                     },
                 );
-                Ok(false)
+                let _ = self.append_lifecycle_event(
+                    runtime_id,
+                    "stop_write_failed",
+                    format!("Failed to write native helper stop command: {}", error),
+                );
+                Ok(None)
             }
         }
     }
 
-    fn schedule_force_kill(self: &Arc<Self>, runtime_id: String) {
+    fn schedule_force_kill(self: &Arc<Self>, runtime_id: String, handle: Arc<NativeSessionHandle>) {
         let manager = Arc::clone(self);
         tauri::async_runtime::spawn_blocking(move || {
             std::thread::sleep(NATIVE_STOP_GRACE_PERIOD);
-            let _ = manager.kill_child(&runtime_id);
-            let _ = manager.remove_handle(&runtime_id);
+            let _ = manager.force_kill_stopped_handle(&runtime_id, &handle);
         });
+    }
+
+    fn force_kill_stopped_handle(
+        &self,
+        runtime_id: &str,
+        handle: &Arc<NativeSessionHandle>,
+    ) -> Result<bool, String> {
+        // Lock order is handles -> child. The child is stored as Option<CommandChild>,
+        // so take() moves the only manager-owned child handle out before kill().
+        let child_to_kill = {
+            let mut handles = self
+                .handles
+                .lock()
+                .map_err(|_| "Failed to lock native runtime handles".to_string())?;
+            let Some(current) = handles.get(runtime_id) else {
+                return Ok(false);
+            };
+            if !Self::same_handle(current, handle) || handle.alive.load(Ordering::SeqCst) {
+                return Ok(false);
+            }
+
+            let child_to_kill = handle
+                .child
+                .lock()
+                .map_err(|_| "Failed to lock native sidecar child".to_string())?
+                .take();
+            handles.remove(runtime_id);
+            child_to_kill
+        };
+
+        if let Some(child) = child_to_kill {
+            let _ = child.kill();
+        }
+
+        self.update_record(runtime_id, |record| {
+            record.status = "interrupted".to_string();
+            record.is_active = false;
+            record.updated_at = Utc::now();
+        })?;
+        self.append_lifecycle_event(
+            runtime_id,
+            "stop_force_killed",
+            format!(
+                "Native helper generation {} did not settle after stop; removed stale helper handle.",
+                handle.generation
+            ),
+        )?;
+        Ok(true)
     }
 
     fn append_user_prompt_event(
@@ -1627,6 +1820,21 @@ impl NativeRuntimeManager {
         Ok(())
     }
 
+    fn append_lifecycle_event(
+        &self,
+        runtime_id: &str,
+        stage: &str,
+        detail: impl Into<String>,
+    ) -> Result<(), String> {
+        self.append_event(
+            runtime_id,
+            SessionEventPayload::Lifecycle {
+                stage: stage.to_string(),
+                detail: detail.into(),
+            },
+        )
+    }
+
     fn insert_record(&self, record: NativeSessionRecord) -> Result<(), String> {
         let mut records = self
             .records
@@ -1648,6 +1856,40 @@ impl NativeRuntimeManager {
         Ok(())
     }
 
+    fn allocate_handle_generation(&self) -> u64 {
+        self.next_handle_generation.fetch_add(1, Ordering::SeqCst)
+    }
+
+    fn same_handle(current: &Arc<NativeSessionHandle>, handle: &Arc<NativeSessionHandle>) -> bool {
+        let same_generation = current.generation == handle.generation;
+        if same_generation {
+            debug_assert!(
+                Arc::ptr_eq(current, handle),
+                "native handle generation reused for a different Arc"
+            );
+        }
+        same_generation && Arc::ptr_eq(current, handle)
+    }
+
+    fn mark_handle_live_if_current(
+        &self,
+        runtime_id: &str,
+        handle: &Arc<NativeSessionHandle>,
+    ) -> Result<bool, String> {
+        let handles = self
+            .handles
+            .lock()
+            .map_err(|_| "Failed to lock native runtime handles".to_string())?;
+        let is_current = handles
+            .get(runtime_id)
+            .map(|current| Self::same_handle(current, handle))
+            .unwrap_or(false);
+        if is_current {
+            handle.alive.store(true, Ordering::SeqCst);
+        }
+        Ok(is_current)
+    }
+
     fn remove_handle(&self, runtime_id: &str) -> Result<(), String> {
         self.handles
             .lock()
@@ -1667,7 +1909,7 @@ impl NativeRuntimeManager {
             .map_err(|_| "Failed to lock native runtime handles".to_string())?;
         let is_current = handles
             .get(runtime_id)
-            .map(|current| Arc::ptr_eq(current, handle))
+            .map(|current| Self::same_handle(current, handle))
             .unwrap_or(false);
         if is_current {
             handles.remove(runtime_id);
@@ -1685,7 +1927,7 @@ impl NativeRuntimeManager {
             .lock()
             .map_err(|_| "Failed to lock native runtime handles".to_string())?
             .get(runtime_id)
-            .map(|current| Arc::ptr_eq(current, handle))
+            .map(|current| Self::same_handle(current, handle))
             .unwrap_or(false))
     }
 
@@ -1914,7 +2156,10 @@ fn is_context_usage_probe_error(message: &str) -> bool {
 }
 
 fn is_native_terminal_status(status: &str) -> bool {
-    matches!(status, "stopped" | "error" | "handoff" | "interrupted")
+    matches!(
+        status,
+        "stopped" | "error" | "handoff" | "interrupted" | "closed_idle"
+    )
 }
 
 fn is_recoverable_native_process_exit(record: &NativeSessionRecord) -> bool {
@@ -1937,7 +2182,7 @@ fn is_recoverable_native_process_error(message: &str) -> bool {
 }
 
 fn reactivate_record_for_reconnect(record: &mut NativeSessionRecord) -> bool {
-    if !matches!(record.status.as_str(), "error" | "interrupted") {
+    if !matches!(record.status.as_str(), "error" | "interrupted" | "closed_idle") {
         return false;
     }
 
@@ -2136,19 +2381,35 @@ mod tests {
     use chrono::Utc;
     use std::collections::HashMap;
     use std::fs;
-    use std::sync::atomic::AtomicBool;
-    use std::sync::{Arc, Mutex};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::{Arc, Barrier, Mutex};
 
     fn native_session_handle(record: NativeSessionRecord) -> Arc<NativeSessionHandle> {
         native_session_handle_with_terminal_env(record, HashMap::new())
+    }
+
+    fn native_session_handle_with_generation(
+        record: NativeSessionRecord,
+        generation: u64,
+    ) -> Arc<NativeSessionHandle> {
+        native_session_handle_with_terminal_env_and_generation(record, HashMap::new(), generation)
     }
 
     fn native_session_handle_with_terminal_env(
         record: NativeSessionRecord,
         terminal_env_vars: HashMap<String, String>,
     ) -> Arc<NativeSessionHandle> {
+        native_session_handle_with_terminal_env_and_generation(record, terminal_env_vars, 1)
+    }
+
+    fn native_session_handle_with_terminal_env_and_generation(
+        record: NativeSessionRecord,
+        terminal_env_vars: HashMap<String, String>,
+        generation: u64,
+    ) -> Arc<NativeSessionHandle> {
         let runtime_id = record.runtime_id.clone();
         Arc::new(NativeSessionHandle {
+            generation,
             record: Mutex::new(record),
             child: Mutex::new(None),
             events: Mutex::new(SessionStore::new(&runtime_id)),
@@ -2185,6 +2446,7 @@ mod tests {
         let manager = NativeRuntimeManager {
             records: Mutex::new(HashMap::from([(runtime_id.to_string(), record)])),
             handles: Mutex::new(HashMap::from([(runtime_id.to_string(), handle)])),
+            next_handle_generation: AtomicU64::new(2),
             state_path: std::env::temp_dir()
                 .join(format!("ccem-native-runtime-test-{runtime_id}.json")),
             event_log: NativeEventLog::new(
@@ -2210,6 +2472,7 @@ mod tests {
                     .collect(),
             ),
             handles: Mutex::new(HashMap::new()),
+            next_handle_generation: AtomicU64::new(1),
             state_path: std::env::temp_dir().join(format!(
                 "ccem-native-runtime-reconcile-test-{runtime_id}.json"
             )),
@@ -2517,6 +2780,7 @@ mod tests {
         let manager = NativeRuntimeManager {
             records: Mutex::new(HashMap::from([(runtime_id.to_string(), record)])),
             handles: Mutex::new(HashMap::from([(runtime_id.to_string(), handle)])),
+            next_handle_generation: AtomicU64::new(2),
             state_path: std::env::temp_dir().join(format!(
                 "ccem-native-runtime-terminal-env-test-{runtime_id}.json"
             )),
@@ -2666,7 +2930,7 @@ mod tests {
 
     #[test]
     fn file_rewind_is_limited_to_idle_like_native_statuses() {
-        for status in ["idle", "ready", "interrupted"] {
+        for status in ["idle", "ready", "interrupted", "closed_idle"] {
             assert!(native_status_allows_file_rewind(status), "{status}");
         }
         for status in [
@@ -2933,7 +3197,7 @@ mod tests {
             .clone();
 
         let replacement_record = native_record(runtime_id, "ready", true);
-        let replacement_handle = native_session_handle(replacement_record);
+        let replacement_handle = native_session_handle_with_generation(replacement_record, 2);
         manager
             .insert_handle(runtime_id.to_string(), replacement_handle.clone())
             .expect("insert replacement handle");
@@ -2955,6 +3219,216 @@ mod tests {
         assert_eq!(summary.last_error, None);
         assert!(manager
             .is_current_handle(runtime_id, &replacement_handle)
+            .expect("current handle check"));
+    }
+
+    #[test]
+    fn stop_force_kill_removes_only_current_stopped_handle() {
+        let runtime_id = "native-stop-force-kill";
+        let manager = manager_with_handle(runtime_id);
+        let handle = manager
+            .handles
+            .lock()
+            .expect("handles")
+            .get(runtime_id)
+            .expect("handle")
+            .clone();
+        handle.alive.store(false, Ordering::SeqCst);
+
+        let removed = manager
+            .force_kill_stopped_handle(runtime_id, &handle)
+            .expect("force kill stopped handle");
+
+        assert!(removed);
+        assert!(!manager
+            .is_current_handle(runtime_id, &handle)
+            .expect("current handle check"));
+
+        let summary = manager.summary_for(runtime_id).expect("summary");
+        assert_eq!(summary.status, "interrupted");
+        assert!(!summary.is_active);
+
+        let replay = manager
+            .replay_events_limited(runtime_id, None, None)
+            .expect("replay events");
+        assert!(replay.events.iter().any(|event| matches!(
+            &event.payload,
+            SessionEventPayload::Lifecycle { stage, .. } if stage == "stop_force_killed"
+        )));
+    }
+
+    #[test]
+    fn stop_force_kill_does_not_remove_replacement_handle() {
+        let runtime_id = "native-stop-force-kill-stale";
+        let manager = manager_with_handle(runtime_id);
+        let stale_handle = manager
+            .handles
+            .lock()
+            .expect("handles")
+            .get(runtime_id)
+            .expect("stale handle")
+            .clone();
+        stale_handle.alive.store(false, Ordering::SeqCst);
+
+        let replacement_record = native_record(runtime_id, "processing", true);
+        let replacement_handle = native_session_handle_with_generation(replacement_record, 2);
+        manager
+            .insert_handle(runtime_id.to_string(), replacement_handle.clone())
+            .expect("insert replacement handle");
+
+        let removed = manager
+            .force_kill_stopped_handle(runtime_id, &stale_handle)
+            .expect("ignore stale stopped handle");
+
+        assert!(!removed);
+        assert!(manager
+            .is_current_handle(runtime_id, &replacement_handle)
+            .expect("current handle check"));
+    }
+
+    #[test]
+    fn handle_generations_are_monotonic() {
+        let manager = manager_with_records("native-handle-generation", Vec::new());
+
+        let first = manager.allocate_handle_generation();
+        let second = manager.allocate_handle_generation();
+        let third = manager.allocate_handle_generation();
+
+        assert_eq!(first, 1);
+        assert_eq!(second, 2);
+        assert_eq!(third, 3);
+    }
+
+    #[test]
+    fn stop_source_normalization_keeps_lifecycle_details_bounded() {
+        assert_eq!(super::normalize_stop_source(None), "unattributed");
+        assert_eq!(super::normalize_stop_source(Some(" workspace_escape ")), "workspace_escape");
+        assert_eq!(
+            super::normalize_stop_source(Some("native session stop button!")),
+            "nativesessionstopbutton"
+        );
+        assert_eq!(super::normalize_stop_source(Some("!!!")), "unattributed");
+    }
+
+    #[test]
+    fn mark_handle_live_rejects_stale_generation() {
+        let runtime_id = "native-stale-handle-live-mark";
+        let manager = manager_with_handle(runtime_id);
+        let stale_handle = manager
+            .handles
+            .lock()
+            .expect("handles")
+            .get(runtime_id)
+            .expect("stale handle")
+            .clone();
+        stale_handle.alive.store(false, Ordering::SeqCst);
+
+        let replacement_record = native_record(runtime_id, "processing", true);
+        let replacement_handle = native_session_handle_with_generation(replacement_record, 2);
+        replacement_handle.alive.store(false, Ordering::SeqCst);
+        manager
+            .insert_handle(runtime_id.to_string(), replacement_handle.clone())
+            .expect("insert replacement handle");
+
+        assert!(!manager
+            .mark_handle_live_if_current(runtime_id, &stale_handle)
+            .expect("stale live mark"));
+        assert!(!stale_handle.alive.load(Ordering::SeqCst));
+
+        assert!(manager
+            .mark_handle_live_if_current(runtime_id, &replacement_handle)
+            .expect("replacement live mark"));
+        assert!(replacement_handle.alive.load(Ordering::SeqCst));
+        assert!(manager
+            .is_current_handle(runtime_id, &replacement_handle)
+            .expect("current handle check"));
+    }
+
+    #[test]
+    fn mark_handle_live_and_force_kill_race_has_only_safe_outcomes() {
+        let runtime_id = "native-live-force-kill-race";
+        let manager = Arc::new(manager_with_handle(runtime_id));
+        let handle = manager
+            .handles
+            .lock()
+            .expect("handles")
+            .get(runtime_id)
+            .expect("handle")
+            .clone();
+        handle.alive.store(false, Ordering::SeqCst);
+
+        let barrier = Arc::new(Barrier::new(3));
+
+        let mark_manager = Arc::clone(&manager);
+        let mark_barrier = Arc::clone(&barrier);
+        let mark_handle = Arc::clone(&handle);
+        let mark_runtime_id = runtime_id.to_string();
+        let mark_thread = std::thread::spawn(move || {
+            mark_barrier.wait();
+            mark_manager
+                .mark_handle_live_if_current(&mark_runtime_id, &mark_handle)
+                .expect("mark handle live")
+        });
+
+        let kill_manager = Arc::clone(&manager);
+        let kill_barrier = Arc::clone(&barrier);
+        let kill_handle = Arc::clone(&handle);
+        let kill_runtime_id = runtime_id.to_string();
+        let kill_thread = std::thread::spawn(move || {
+            kill_barrier.wait();
+            kill_manager
+                .force_kill_stopped_handle(&kill_runtime_id, &kill_handle)
+                .expect("force kill stopped handle")
+        });
+
+        barrier.wait();
+        let marked_live = mark_thread.join().expect("mark thread");
+        let force_killed = kill_thread.join().expect("kill thread");
+
+        assert_ne!(
+            marked_live, force_killed,
+            "exactly one race participant should win the stopped handle"
+        );
+
+        if marked_live {
+            assert!(handle.alive.load(Ordering::SeqCst));
+            assert!(manager
+                .is_current_handle(runtime_id, &handle)
+                .expect("current handle check"));
+            let summary = manager.summary_for(runtime_id).expect("summary");
+            assert_eq!(summary.status, "processing");
+            assert!(summary.is_active);
+        } else {
+            assert!(force_killed);
+            assert!(!manager
+                .is_current_handle(runtime_id, &handle)
+                .expect("current handle check"));
+            let summary = manager.summary_for(runtime_id).expect("summary");
+            assert_eq!(summary.status, "interrupted");
+            assert!(!summary.is_active);
+        }
+    }
+
+    #[test]
+    fn stop_force_kill_does_not_remove_reused_live_handle() {
+        let runtime_id = "native-stop-force-kill-reused";
+        let manager = manager_with_handle(runtime_id);
+        let handle = manager
+            .handles
+            .lock()
+            .expect("handles")
+            .get(runtime_id)
+            .expect("handle")
+            .clone();
+        handle.alive.store(true, Ordering::SeqCst);
+
+        let removed = manager
+            .force_kill_stopped_handle(runtime_id, &handle)
+            .expect("skip live handle");
+
+        assert!(!removed);
+        assert!(manager
+            .is_current_handle(runtime_id, &handle)
             .expect("current handle check"));
     }
 
@@ -3047,6 +3521,16 @@ mod tests {
         assert_eq!(summary.status, "interrupted");
         assert!(!summary.is_active);
         assert_eq!(summary.last_error.as_deref(), Some("Turn interrupted."));
+    }
+
+    #[test]
+    fn closed_idle_record_reconnects_like_recoverable_terminal_status() {
+        let mut record = native_record("native-closed-idle-reconnect", "closed_idle", false);
+
+        assert!(super::is_native_terminal_status(&record.status));
+        assert!(reactivate_record_for_reconnect(&mut record));
+        assert_eq!(record.status, "initializing");
+        assert!(record.is_active);
     }
 
     #[test]

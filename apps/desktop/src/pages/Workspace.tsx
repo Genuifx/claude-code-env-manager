@@ -146,7 +146,7 @@ function DetailFallback() {
 }
 
 function canRestoreWorkspaceLiveSession(session: NativeSessionSummary): boolean {
-  if (session.status === 'interrupted') {
+  if (session.status === 'interrupted' || session.status === 'closed_idle') {
     return true;
   }
 
@@ -2001,7 +2001,7 @@ export function Workspace({
         activeLiveStatus === 'initializing' ||
         activeLiveStatus === 'processing'
       ) {
-        void stopNativeSession(activeLiveStoppingId!);
+        void stopNativeSession(activeLiveStoppingId!, 'workspace_escape');
       }
     };
 

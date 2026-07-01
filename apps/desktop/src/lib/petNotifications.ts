@@ -7,7 +7,7 @@ const PET_MESSAGE_PREVIEW_LIMIT = 96;
 const PET_COMPLETED_NOTIFICATION_RECENCY_MS = 10 * 60 * 1000;
 const THINKING_MESSAGE = '正在思考';
 
-const TERMINAL_STATUSES = new Set(['stopped', 'error', 'failed', 'interrupted', 'handoff']);
+const TERMINAL_STATUSES = new Set(['stopped', 'error', 'failed', 'interrupted', 'handoff', 'closed_idle']);
 const ATTENTION_STATUSES = new Set([
   'waiting_for_approval',
   'waiting_for_prompt',
