@@ -1,5 +1,11 @@
 # ccem
 
+## 2.39.0
+
+### Minor Changes
+
+- Workspace performance and native handoff stabilization: squeezed workspace hot paths, stabilized native workspace handoff, and hardened project tree refresh.
+
 ## 2.38.0
 
 ### Minor Changes
