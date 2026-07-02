@@ -33,6 +33,7 @@ import {
 
 interface ProjectTreeProps {
   sessions: HistorySessionItem[];
+  precomputedProjectNodes?: ProjectNode[];
   environmentByName?: Record<string, Environment>;
   decorationsBySessionKey?: Record<string, WorkspaceSessionDecoration>;
   isLoading: boolean;
@@ -402,6 +403,7 @@ function SessionAnnotationPopover({
 
 export const ProjectTree = memo(function ProjectTree({
   sessions,
+  precomputedProjectNodes,
   environmentByName = {},
   decorationsBySessionKey = {},
   isLoading,
@@ -582,8 +584,65 @@ export const ProjectTree = memo(function ProjectTree({
     [clearDragState, dropPosition]
   );
 
-  // Build project nodes from sessions
   const projectNodes = useMemo(() => {
+    if (precomputedProjectNodes?.length) {
+      const nodesByProject = new Map<string, ProjectNode>();
+      const seenSessionKeys = new Set<string>();
+
+      for (const node of precomputedProjectNodes) {
+        const unpinnedNodeSessions = node.sessions.filter((session) => {
+          const key = toKey(session);
+          if (pinnedSessionKeySet.has(key)) {
+            return false;
+          }
+          seenSessionKeys.add(key);
+          return true;
+        });
+
+        if (unpinnedNodeSessions.length === 0) {
+          continue;
+        }
+
+        nodesByProject.set(node.project, {
+          ...node,
+          sessions: unpinnedNodeSessions,
+          latestTimestamp: unpinnedNodeSessions.reduce(
+            (latest, session) => Math.max(latest, session.timestamp),
+            0
+          ),
+        });
+      }
+
+      for (const session of unpinnedSessions) {
+        const key = toKey(session);
+        if (seenSessionKeys.has(key)) {
+          continue;
+        }
+
+        let node = nodesByProject.get(session.project);
+        if (!node) {
+          node = {
+            project: session.project,
+            projectName: session.projectName,
+            sessions: [],
+            latestTimestamp: 0,
+          };
+          nodesByProject.set(session.project, node);
+        }
+        node.sessions.push(session);
+        if (session.timestamp > node.latestTimestamp) {
+          node.latestTimestamp = session.timestamp;
+        }
+      }
+
+      const nodes = Array.from(nodesByProject.values());
+      nodes.sort((a, b) => b.latestTimestamp - a.latestTimestamp);
+      for (const node of nodes) {
+        node.sessions.sort((a, b) => b.timestamp - a.timestamp);
+      }
+      return nodes;
+    }
+
     const map = new Map<string, ProjectNode>();
     for (const session of unpinnedSessions) {
       let node = map.get(session.project);
@@ -609,7 +668,7 @@ export const ProjectTree = memo(function ProjectTree({
       node.sessions.sort((a, b) => b.timestamp - a.timestamp);
     }
     return nodes;
-  }, [unpinnedSessions]);
+  }, [pinnedSessionKeySet, precomputedProjectNodes, unpinnedSessions]);
 
   // Auto-expand top 3 projects on first load
   const effectiveExpanded = useMemo(() => {

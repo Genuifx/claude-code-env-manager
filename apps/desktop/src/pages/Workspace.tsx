@@ -40,7 +40,7 @@ import { scheduleAfterFirstPaint } from '@/lib/idle';
 import { cn, getProjectName } from '@/lib/utils';
 import {
   fetchConversationDetail,
-  fetchHistorySessions,
+  fetchWorkspaceOverviewSnapshot,
   invalidateHistoryCache,
 } from '@/features/conversations/historyData';
 import type {
@@ -50,6 +50,7 @@ import type {
   HistorySessionItem,
   SessionStickerId,
   SessionTaskStage,
+  WorkspaceProjectNode,
 } from '@/features/conversations/types';
 import { toSessionKey } from '@/features/conversations/types';
 import { useWorkspaceSessionDecorations } from '@/components/workspace/useWorkspaceSessionDecorations';
@@ -113,6 +114,7 @@ type WorkspaceViewMode = 'compose' | 'live' | 'history';
 
 const ACTIVE_LIVE_RUNTIME_STORAGE_KEY = 'ccem-workspace-live-runtime';
 const LIVE_RUNTIME_SET_STORAGE_KEY = 'ccem-workspace-live-runtimes';
+const WORKSPACE_HISTORY_SESSION_LIMIT = 240;
 
 function readPersistedLiveRuntimeIds(): string[] {
   const raw = localStorage.getItem(LIVE_RUNTIME_SET_STORAGE_KEY);
@@ -305,6 +307,7 @@ export function Workspace({
 
   const [sessions, setSessions] = useState<HistorySessionItem[]>([]);
   const sessionsRef = useRef<HistorySessionItem[]>([]);
+  const [precomputedProjectNodes, setPrecomputedProjectNodes] = useState<WorkspaceProjectNode[]>([]);
   const [isLoadingSessions, setIsLoadingSessions] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -766,13 +769,17 @@ export function Workspace({
       }
 
       try {
-        const nextSessions = await fetchHistorySessions('all', force);
+        const snapshot = await fetchWorkspaceOverviewSnapshot(
+          WORKSPACE_HISTORY_SESSION_LIMIT,
+          force,
+        );
 
         if (requestSeq !== refreshRequestSeqRef.current) {
           return null;
         }
 
-        const retainedSessions = syncSessionState(nextSessions);
+        const retainedSessions = syncSessionState(snapshot.sessions);
+        setPrecomputedProjectNodes(snapshot.projectNodes);
         hasLoadedRef.current = true;
 
         if (includeSelectedConversation) {
@@ -2284,8 +2291,7 @@ export function Workspace({
   ) => {
     await setSessionAnnotation(session.source, session.id, annotation);
     invalidateHistoryCache();
-    replaceSessions(
-      sessionsRef.current.map((currentSession) =>
+    const updateSession = (currentSession: HistorySessionItem): HistorySessionItem =>
         currentSession.source === session.source && currentSession.id === session.id
           ? {
               ...currentSession,
@@ -2293,15 +2299,26 @@ export function Workspace({
               taskSticker: annotation.sticker,
               taskLabel: annotation.label?.trim() || undefined,
             }
-          : currentSession
-      )
+          : currentSession;
+    replaceSessions(
+      sessionsRef.current.map(updateSession)
+    );
+    setPrecomputedProjectNodes((nodes) =>
+      nodes.map((node) => ({
+        ...node,
+        sessions: node.sessions.map(updateSession),
+      }))
     );
   }, [replaceSessions, setSessionAnnotation]);
 
   const handleProjectTreeSessionsChanged = useCallback(async () => {
     invalidateHistoryCache();
-    const refreshed = await fetchHistorySessions('all', true);
-    syncSessionState(refreshed);
+    const snapshot = await fetchWorkspaceOverviewSnapshot(
+      WORKSPACE_HISTORY_SESSION_LIMIT,
+      true,
+    );
+    syncSessionState(snapshot.sessions);
+    setPrecomputedProjectNodes(snapshot.projectNodes);
   }, [syncSessionState]);
 
   const handleProjectTreeNewSession = useCallback(() => {
@@ -2322,6 +2339,7 @@ export function Workspace({
       <div className="workspace-main-container mx-3 mb-3 flex min-h-0 flex-1 overflow-hidden">
         <ProjectTree
           sessions={sidebarSessions}
+          precomputedProjectNodes={precomputedProjectNodes}
           environmentByName={environmentByName}
           decorationsBySessionKey={decorationsBySessionKey}
           isLoading={isLoadingSessions}
