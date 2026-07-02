@@ -140,9 +140,18 @@ export interface TauriCommands {
       workingDir?: string | null;
       resumeSessionId?: string | null;
       client?: 'claude' | 'codex' | 'opencode' | null;
+      launchTraceId?: string | null;
     },
     Session
   ];
+  record_session_launch_trace: [
+    {
+      event: string;
+      details?: Record<string, unknown> | null;
+    },
+    void
+  ];
+  get_session_launch_log_path: [void, string];
   list_interactive_sessions: [void, Session[]];
   list_runtime_recovery_candidates: [void, RuntimeRecoveryCandidate[]];
   dismiss_runtime_recovery_candidate: [{ runtimeId: string }, void];

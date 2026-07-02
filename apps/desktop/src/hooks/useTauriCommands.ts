@@ -44,6 +44,21 @@ import type {
   WorkspaceCommand,
 } from '@/lib/tauri-ipc';
 
+function makeLaunchTraceId(): string {
+  return `launch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function recordSessionLaunchTrace(
+  event: string,
+  details: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await invoke('record_session_launch_trace', { event, details });
+  } catch {
+    // Diagnostic logging must never block the launch path.
+  }
+}
+
 interface TauriEnvConfig {
   ANTHROPIC_BASE_URL?: string;
   ANTHROPIC_AUTH_TOKEN?: string;
@@ -383,9 +398,19 @@ export function useTauriCommands() {
     initialPrompt?: string | null;
   } = {}): Promise<Session> => {
     setLoading(true);
+    const launchTraceId = makeLaunchTraceId();
     try {
       const { currentEnv, permissionMode, selectedWorkingDir } = getSessionDefaults();
       const workDir = options.workingDir ?? selectedWorkingDir ?? null;
+      await recordSessionLaunchTrace('create_interactive_session.invoke_start', {
+        trace_id: launchTraceId,
+        client: options.client ?? 'claude',
+        env_name: options.envName ?? currentEnv,
+        perm_mode: options.permMode ?? permissionMode,
+        working_dir: workDir,
+        resume: Boolean(options.resumeSessionId),
+        initial_prompt: Boolean(options.initialPrompt),
+      });
       const tauriSession = await invoke<TauriSession>('create_interactive_session', {
         envName: options.envName ?? currentEnv,
         permMode: options.permMode ?? permissionMode,
@@ -393,10 +418,24 @@ export function useTauriCommands() {
         resumeSessionId: options.resumeSessionId ?? null,
         client: options.client ?? 'claude',
         initialPrompt: options.initialPrompt ?? null,
+        launchTraceId,
+      });
+      await recordSessionLaunchTrace('create_interactive_session.invoke_ok', {
+        trace_id: launchTraceId,
+        session_id: tauriSession.id,
+        client: tauriSession.client,
+        terminal_type: tauriSession.terminal_type,
+        tmux_target: tauriSession.tmux_target,
       });
       const session = toFrontendSession(tauriSession);
 
       addSession(session);
+      await recordSessionLaunchTrace('store.add_session.ok', {
+        trace_id: launchTraceId,
+        session_id: session.id,
+        terminal_type: session.terminalType,
+        tmux_target: session.tmuxTarget,
+      });
 
       // Add to recent projects if a working directory was used
       if (workDir) {
@@ -408,12 +447,25 @@ export function useTauriCommands() {
 
       if (session.terminalType === 'embedded') {
         try {
+          await recordSessionLaunchTrace('open_terminal.start', {
+            trace_id: launchTraceId,
+            session_id: session.id,
+          });
           await invoke('open_interactive_session_in_terminal', {
             sessionId: session.id,
             terminalType: null,
           });
+          await recordSessionLaunchTrace('open_terminal.ok', {
+            trace_id: launchTraceId,
+            session_id: session.id,
+          });
           await syncInteractiveSessions();
         } catch (openErr) {
+          await recordSessionLaunchTrace('open_terminal.error', {
+            trace_id: launchTraceId,
+            session_id: session.id,
+            error: String(openErr),
+          });
           console.error('Interactive session created but failed to open terminal:', openErr);
           try {
             await syncInteractiveSessions();
@@ -426,6 +478,11 @@ export function useTauriCommands() {
 
       return session;
     } catch (err) {
+      await recordSessionLaunchTrace('create_interactive_session.invoke_error', {
+        trace_id: launchTraceId,
+        client: options.client ?? 'claude',
+        error: String(err),
+      });
       const clientLabel = options.client === 'codex'
         ? 'Codex'
         : options.client === 'opencode'

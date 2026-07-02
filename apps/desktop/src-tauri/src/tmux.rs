@@ -1,3 +1,4 @@
+use crate::diagnostic_log;
 use crate::terminal::{
     resolve_claude_path, resolve_codex_path, resolve_opencode_path, resolve_tmux_path,
 };
@@ -94,6 +95,19 @@ impl TmuxManager {
         })?;
         let launch_environment_target = session_name.clone();
         let tmux_binary = resolve_tmux_binary()?.to_string();
+        diagnostic_log::append_session_launch_event(
+            "tmux.create_session.start",
+            serde_json::json!({
+                "runtime_id": runtime_id,
+                "session_name": &session_name,
+                "client": client,
+                "env_name": env_name,
+                "working_dir": working_dir_str,
+                "tmux_binary": &tmux_binary,
+                "env_keys": sorted_env_keys(env_vars),
+                "client_arg_count": client_args.len(),
+            }),
+        );
         let launch_spec = build_tmux_launch_spec(
             client,
             client_args,
@@ -123,9 +137,27 @@ impl TmuxManager {
         let window_index = match self.run_create_command(&session_name, &create_args) {
             Ok(index) => index,
             Err(error) if is_tmux_session_create_race_error(&error) => {
+                diagnostic_log::append_session_launch_event(
+                    "tmux.create_session.race",
+                    serde_json::json!({
+                        "runtime_id": runtime_id,
+                        "session_name": &session_name,
+                        "error": &error,
+                    }),
+                );
                 self.inspect_target(&session_name)?.window_index
             }
-            Err(error) => return Err(error),
+            Err(error) => {
+                diagnostic_log::append_session_launch_event(
+                    "tmux.create_session.create_error",
+                    serde_json::json!({
+                        "runtime_id": runtime_id,
+                        "session_name": &session_name,
+                        "error": &error,
+                    }),
+                );
+                return Err(error);
+            }
         };
         let target = format!("{}:{}", session_name, window_index);
 
@@ -149,7 +181,31 @@ impl TmuxManager {
             );
         }
 
-        self.verify_target_survived_launch(&window.target)?;
+        match self.verify_target_survived_launch(&window.target) {
+            Ok(()) => diagnostic_log::append_session_launch_event(
+                "tmux.create_session.healthcheck.ok",
+                serde_json::json!({
+                    "runtime_id": runtime_id,
+                    "session_name": &window.session_name,
+                    "target": &window.target,
+                    "pane_pid": window.pane_pid,
+                    "window_name": &window.window_name,
+                    "window_index": window.window_index,
+                }),
+            ),
+            Err(error) => {
+                diagnostic_log::append_session_launch_event(
+                    "tmux.create_session.healthcheck.error",
+                    serde_json::json!({
+                        "runtime_id": runtime_id,
+                        "session_name": &window.session_name,
+                        "target": &window.target,
+                        "error": &error,
+                    }),
+                );
+                return Err(error);
+            }
+        }
 
         Ok(window)
     }
@@ -913,6 +969,12 @@ fn target_matches_info(requested_target: &str, info: &TmuxWindowInfo) -> bool {
     requested_target == info.target
         || requested_target == info.session_name
         || requested_target == format!("{}:{}", info.session_name, info.window_name)
+}
+
+fn sorted_env_keys(env_vars: &HashMap<String, String>) -> Vec<String> {
+    let mut keys = env_vars.keys().cloned().collect::<Vec<_>>();
+    keys.sort();
+    keys
 }
 
 fn build_tmux_launch_command(

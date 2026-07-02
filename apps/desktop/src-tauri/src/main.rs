@@ -11,6 +11,7 @@ mod companion;
 mod config;
 mod cron;
 mod crypto;
+mod diagnostic_log;
 mod doctor;
 mod event_bus;
 mod event_dispatcher;
@@ -1437,6 +1438,7 @@ fn handoff_native_session_to_terminal(
             resume_session_id: Some(handoff.resume_session_id.clone()),
             initial_prompt: None,
             env_vars: handoff.env_vars.clone(),
+            launch_trace_id: format!("handoff-{}", handoff.runtime_id),
         },
     );
 
@@ -1521,11 +1523,33 @@ async fn create_interactive_session(
     resume_session_id: Option<String>,
     client: Option<String>,
     initial_prompt: Option<String>,
+    launch_trace_id: Option<String>,
 ) -> Result<Session, String> {
+    let trace_id = launch_trace_id
+        .unwrap_or_else(|| format!("backend-{}", chrono::Utc::now().timestamp_millis()));
     let client_name = client
         .unwrap_or_else(|| "claude".to_string())
         .to_lowercase();
+    diagnostic_log::append_session_launch_event(
+        "backend.create_interactive_session.entry",
+        serde_json::json!({
+            "trace_id": &trace_id,
+            "client": &client_name,
+            "env_name": &env_name,
+            "perm_mode": &perm_mode,
+            "working_dir": &working_dir,
+            "resume": resume_session_id.as_ref().is_some_and(|value| !value.trim().is_empty()),
+            "initial_prompt": initial_prompt.as_ref().is_some_and(|value| !value.trim().is_empty()),
+        }),
+    );
     if client_name != "claude" && client_name != "codex" && client_name != "opencode" {
+        diagnostic_log::append_session_launch_event(
+            "backend.create_interactive_session.unsupported_client",
+            serde_json::json!({
+                "trace_id": &trace_id,
+                "client": &client_name,
+            }),
+        );
         return Err(format!("Unsupported client '{}'", client_name));
     }
 
@@ -1584,6 +1608,7 @@ async fn create_interactive_session(
                 resume_session_id,
                 initial_prompt: initial_prompt.clone(),
                 env_vars,
+                launch_trace_id: trace_id.clone(),
             },
         );
 
@@ -1591,7 +1616,30 @@ async fn create_interactive_session(
             proxy_state.remove_session_routes(&session_id);
         }
 
-        let session = create_result?;
+        let session = match create_result {
+            Ok(session) => session,
+            Err(error) => {
+                diagnostic_log::append_session_launch_event(
+                    "backend.create_interactive_session.error",
+                    serde_json::json!({
+                        "trace_id": &trace_id,
+                        "session_id": &session_id,
+                        "client": &client_name,
+                        "error": &error,
+                    }),
+                );
+                return Err(error);
+            }
+        };
+        diagnostic_log::append_session_launch_event(
+            "backend.create_interactive_session.ok",
+            serde_json::json!({
+                "trace_id": &trace_id,
+                "session_id": &session.id,
+                "client": &session.client,
+                "tmux_target": &session.tmux_target,
+            }),
+        );
         if let Err(error) = register_launch(SessionProvenanceUpsert {
             ccem_session_id: session.id.clone(),
             client: session.client.clone(),
@@ -1667,10 +1715,34 @@ async fn create_interactive_session(
                 resume_session_id,
                 initial_prompt: initial_prompt.clone(),
                 env_vars,
+                launch_trace_id: trace_id.clone(),
             },
         );
 
-        let session = create_result?;
+        let session = match create_result {
+            Ok(session) => session,
+            Err(error) => {
+                diagnostic_log::append_session_launch_event(
+                    "backend.create_interactive_session.error",
+                    serde_json::json!({
+                        "trace_id": &trace_id,
+                        "session_id": &session_id,
+                        "client": &client_name,
+                        "error": &error,
+                    }),
+                );
+                return Err(error);
+            }
+        };
+        diagnostic_log::append_session_launch_event(
+            "backend.create_interactive_session.ok",
+            serde_json::json!({
+                "trace_id": &trace_id,
+                "session_id": &session.id,
+                "client": &session.client,
+                "tmux_target": &session.tmux_target,
+            }),
+        );
         if let Err(error) = register_launch(SessionProvenanceUpsert {
             ccem_session_id: session.id.clone(),
             client: session.client.clone(),
@@ -1744,6 +1816,7 @@ async fn create_interactive_session(
             resume_session_id,
             initial_prompt,
             env_vars,
+            launch_trace_id: trace_id.clone(),
         },
     );
 
@@ -1751,7 +1824,30 @@ async fn create_interactive_session(
         proxy_state.remove_session_routes(&session_id);
     }
 
-    let session = create_result?;
+    let session = match create_result {
+        Ok(session) => session,
+        Err(error) => {
+            diagnostic_log::append_session_launch_event(
+                "backend.create_interactive_session.error",
+                serde_json::json!({
+                    "trace_id": &trace_id,
+                    "session_id": &session_id,
+                    "client": &client_name,
+                    "error": &error,
+                }),
+            );
+            return Err(error);
+        }
+    };
+    diagnostic_log::append_session_launch_event(
+        "backend.create_interactive_session.ok",
+        serde_json::json!({
+            "trace_id": &trace_id,
+            "session_id": &session.id,
+            "client": &session.client,
+            "tmux_target": &session.tmux_target,
+        }),
+    );
     if let Err(error) = register_launch(SessionProvenanceUpsert {
         ccem_session_id: session.id.clone(),
         client: session.client.clone(),
@@ -1783,6 +1879,21 @@ async fn create_interactive_session(
 #[tauri::command]
 fn list_runtime_recovery_candidates() -> Result<Vec<RuntimeRecoveryCandidate>, String> {
     list_runtime_recovery_candidates_entries().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn record_session_launch_trace(event: String, details: Option<serde_json::Value>) {
+    diagnostic_log::append_session_launch_event(
+        &format!("frontend.{}", event),
+        details.unwrap_or_else(|| serde_json::json!({})),
+    );
+}
+
+#[tauri::command]
+fn get_session_launch_log_path() -> String {
+    diagnostic_log::launch_log_path()
+        .to_string_lossy()
+        .to_string()
 }
 
 #[tauri::command]
@@ -4623,6 +4734,8 @@ fn main() {
             set_preferred_terminal,
             launch_claude_code,
             create_interactive_session,
+            record_session_launch_trace,
+            get_session_launch_log_path,
             list_runtime_recovery_candidates,
             dismiss_runtime_recovery_candidate,
             list_interactive_sessions,

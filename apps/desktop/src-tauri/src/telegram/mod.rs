@@ -4056,7 +4056,7 @@ fn create_interactive_telegram_session(
         app.clone(),
         session_manager,
         InteractiveSessionOptions {
-            session_id: runtime_id,
+            session_id: runtime_id.clone(),
             client: "claude".to_string(),
             env_name: resolved.env_name,
             config_source: Some("ccem".to_string()),
@@ -4065,6 +4065,7 @@ fn create_interactive_telegram_session(
             resume_session_id,
             initial_prompt: None,
             env_vars: resolved.env_vars,
+            launch_trace_id: format!("telegram-{}", runtime_id),
         },
     )?;
 
