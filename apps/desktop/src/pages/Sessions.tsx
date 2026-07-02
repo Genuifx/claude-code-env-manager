@@ -13,7 +13,7 @@ import {
   isLaunchAlreadyInProgressError,
   launchSingleSession,
 } from '@/components/sessions/sessionLaunchAction';
-import { useAppStore, type ArrangeLayout, type Session, type UnifiedSession } from '@/store';
+import { useAppStore, type ArrangeLayout, type LaunchClient, type Session, type UnifiedSession } from '@/store';
 import type { PermissionModeName } from '@ccem/core/browser';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useLocale } from '../locales';
@@ -154,8 +154,8 @@ function unifiedToLegacySession(u: UnifiedSession): Session {
 }
 
 interface SessionsProps {
-  onLaunch: () => Promise<void>;
-  onLaunchWithDir: (dir: string) => Promise<void>;
+  onLaunch: (client?: LaunchClient) => Promise<void>;
+  onLaunchWithDir: (dir: string, client?: LaunchClient) => Promise<void>;
 }
 
 export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {

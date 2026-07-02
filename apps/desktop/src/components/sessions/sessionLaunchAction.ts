@@ -1,7 +1,10 @@
+export type SessionLaunchClient = 'claude' | 'codex' | 'opencode';
+
 export interface LaunchSingleSessionInput {
   selectedWorkingDir?: string | null;
-  onLaunch: () => Promise<void>;
-  onLaunchWithDir: (dir: string) => Promise<void>;
+  client?: SessionLaunchClient;
+  onLaunch: (client?: SessionLaunchClient) => Promise<void>;
+  onLaunchWithDir: (dir: string, client?: SessionLaunchClient) => Promise<void>;
 }
 
 export interface LaunchSingleSessionResult {
@@ -51,10 +54,11 @@ export function formatSessionLaunchError(error: unknown): string {
 export async function launchSingleSession(
   input: LaunchSingleSessionInput,
 ): Promise<LaunchSingleSessionResult> {
+  const client = input.client ?? 'claude';
   if (input.selectedWorkingDir) {
-    await input.onLaunchWithDir(input.selectedWorkingDir);
+    await input.onLaunchWithDir(input.selectedWorkingDir, client);
     return { launched: true, workingDir: input.selectedWorkingDir };
   }
-  await input.onLaunch();
+  await input.onLaunch(client);
   return { launched: true, workingDir: null };
 }

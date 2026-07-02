@@ -548,9 +548,10 @@ function App() {
   }, []);
 
   // Handle launch
-  const handleLaunch = useCallback(async () => {
-    await runLaunchOnce(`default:${launchClient}`, async () => {
-      await launchClaudeCode(undefined, undefined, launchClient);
+  const handleLaunch = useCallback(async (client?: LaunchClient) => {
+    const effectiveClient = client ?? launchClient;
+    await runLaunchOnce(`default:${effectiveClient}`, async () => {
+      await launchClaudeCode(undefined, undefined, effectiveClient);
     });
   }, [launchClaudeCode, launchClient, runLaunchOnce]);
 

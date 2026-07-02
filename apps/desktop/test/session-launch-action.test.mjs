@@ -39,12 +39,12 @@ test('calls onLaunch when no working dir is selected', async () => {
 
   const result = await launchSingleSession({
     selectedWorkingDir: null,
-    onLaunch: async () => { calls.push('onLaunch'); },
+    onLaunch: async (client) => { calls.push(['onLaunch', client]); },
     onLaunchWithDir: async () => { calls.push('onLaunchWithDir'); },
   });
 
   assert.deepEqual(result, { launched: true, workingDir: null });
-  assert.deepEqual(calls, ['onLaunch']);
+  assert.deepEqual(calls, [['onLaunch', 'claude']]);
 });
 
 test('calls onLaunchWithDir when a working dir is selected', async () => {
@@ -54,11 +54,26 @@ test('calls onLaunchWithDir when a working dir is selected', async () => {
   const result = await launchSingleSession({
     selectedWorkingDir: '/tmp/project',
     onLaunch: async () => { calls.push('onLaunch'); },
-    onLaunchWithDir: async (dir) => { calls.push(['onLaunchWithDir', dir]); },
+    onLaunchWithDir: async (dir, client) => { calls.push(['onLaunchWithDir', dir, client]); },
   });
 
   assert.deepEqual(result, { launched: true, workingDir: '/tmp/project' });
-  assert.deepEqual(calls, [['onLaunchWithDir', '/tmp/project']]);
+  assert.deepEqual(calls, [['onLaunchWithDir', '/tmp/project', 'claude']]);
+});
+
+test('uses an explicit launch client when supplied', async () => {
+  const { launchSingleSession } = await importSessionLaunchAction();
+  const calls = [];
+
+  const result = await launchSingleSession({
+    selectedWorkingDir: '/tmp/project',
+    client: 'opencode',
+    onLaunch: async () => { calls.push('onLaunch'); },
+    onLaunchWithDir: async (dir, client) => { calls.push(['onLaunchWithDir', dir, client]); },
+  });
+
+  assert.deepEqual(result, { launched: true, workingDir: '/tmp/project' });
+  assert.deepEqual(calls, [['onLaunchWithDir', '/tmp/project', 'opencode']]);
 });
 
 test('rejects when onLaunch rejects, without calling onLaunchWithDir', async () => {
