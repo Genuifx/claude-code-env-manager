@@ -11,6 +11,7 @@ mod companion;
 mod config;
 mod cron;
 mod crypto;
+mod desktop_instance_lock;
 mod diagnostic_log;
 mod doctor;
 mod event_bus;
@@ -4611,6 +4612,14 @@ fn quit_app(app: tauri::AppHandle) {
 }
 
 fn main() {
+    let desktop_instance_lock = match desktop_instance_lock::acquire_desktop_instance_lock() {
+        Ok(lock) => lock,
+        Err(error) => {
+            eprintln!("{}", error);
+            return;
+        }
+    };
+
     // Create SessionManager from persisted sessions (or empty if first run)
     let session_manager = Arc::new(SessionManager::load_from_disk());
     let interactive_runtime_manager = Arc::new(InteractiveRuntimeManager::default());
@@ -4679,6 +4688,7 @@ fn main() {
         .manage(weixin_bridge_manager.clone())
         .manage(bot_binding_manager.clone())
         .manage(proxy_debug_manager.clone())
+        .manage(desktop_instance_lock)
         .manage(app_updates::PendingUpdate::default())
         .manage(notification_prefs_state)
         .on_page_load(move |webview, payload| {
