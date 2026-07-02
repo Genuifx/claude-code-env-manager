@@ -28,8 +28,17 @@ import {
   PinnedSessionsSection,
   PROJECT_TREE_PAGE_SIZE,
   ProjectTreeContent,
-  type ProjectNode,
 } from './ProjectTreeSections';
+import {
+  buildProjectNodes,
+  classifyProject,
+  isSessionActiveInSidebar,
+  reconcileProjectOrder,
+  sortProjectNodesByOrder,
+  splitProjectNodesForSidebar,
+  type ProjectBucketOverride,
+  type ProjectClassification,
+} from './workspaceProjectTreeModel';
 
 interface ProjectTreeProps {
   sessions: HistorySessionItem[];
@@ -75,6 +84,9 @@ function toKey(session: Pick<HistorySessionItem, 'id' | 'source'>): string {
 
 const MAX_LABEL_LENGTH = 24;
 const PINNED_SESSION_KEYS_STORAGE_KEY = 'ccem-workspace-pinned-sessions';
+const PROJECT_ORDER_STORAGE_KEY = 'ccem-workspace-project-order';
+const PROJECT_CLASSIFICATION_STORAGE_KEY = 'ccem-workspace-project-classification';
+const DISMISSED_ACTIVE_TEMP_PROJECTS_STORAGE_KEY = 'ccem-workspace-dismissed-active-temp-projects';
 
 function readPinnedSessionKeys(): string[] {
   try {
@@ -100,6 +112,65 @@ function readPinnedSessionKeys(): string[] {
     return keys;
   } catch {
     return [];
+  }
+}
+
+function readStringArrayStorage(key: string): string[] {
+  try {
+    const rawValue = localStorage.getItem(key);
+    if (!rawValue) {
+      return [];
+    }
+    const parsed = JSON.parse(rawValue);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    const seen = new Set<string>();
+    const values: string[] = [];
+    for (const value of parsed) {
+      if (typeof value !== 'string' || seen.has(value)) {
+        continue;
+      }
+      seen.add(value);
+      values.push(value);
+    }
+    return values;
+  } catch {
+    return [];
+  }
+}
+
+function readProjectOrder(): string[] {
+  return readStringArrayStorage(PROJECT_ORDER_STORAGE_KEY);
+}
+
+function readDismissedActiveTemporaryProjects(): string[] {
+  return readStringArrayStorage(DISMISSED_ACTIVE_TEMP_PROJECTS_STORAGE_KEY);
+}
+
+function readProjectClassificationOverrides(): Record<string, ProjectBucketOverride> {
+  try {
+    const rawValue = localStorage.getItem(PROJECT_CLASSIFICATION_STORAGE_KEY);
+    if (!rawValue) {
+      return {};
+    }
+    const parsed = JSON.parse(rawValue);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+
+    const result: Record<string, ProjectBucketOverride> = {};
+    for (const [project, bucket] of Object.entries(parsed)) {
+      if (typeof project !== 'string') {
+        continue;
+      }
+      if (bucket === 'main' || bucket === 'temporary') {
+        result[project] = bucket;
+      }
+    }
+    return result;
+  } catch {
+    return {};
   }
 }
 
@@ -419,6 +490,13 @@ export const ProjectTree = memo(function ProjectTree({
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [pinnedSessionKeys, setPinnedSessionKeys] = useState(readPinnedSessionKeys);
+  const [projectOrder, setProjectOrder] = useState(readProjectOrder);
+  const [projectClassificationOverrides, setProjectClassificationOverrides] = useState(
+    readProjectClassificationOverrides
+  );
+  const [dismissedActiveTemporaryProjects, setDismissedActiveTemporaryProjects] = useState(
+    readDismissedActiveTemporaryProjects
+  );
 
   const processingKeysRef = useRef<Set<string>>(new Set());
   const [freshDotKeys, setFreshDotKeys] = useState<Set<string>>(new Set());
@@ -426,6 +504,24 @@ export const ProjectTree = memo(function ProjectTree({
   useEffect(() => {
     localStorage.setItem(PINNED_SESSION_KEYS_STORAGE_KEY, JSON.stringify(pinnedSessionKeys));
   }, [pinnedSessionKeys]);
+
+  useEffect(() => {
+    localStorage.setItem(PROJECT_ORDER_STORAGE_KEY, JSON.stringify(projectOrder));
+  }, [projectOrder]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      PROJECT_CLASSIFICATION_STORAGE_KEY,
+      JSON.stringify(projectClassificationOverrides)
+    );
+  }, [projectClassificationOverrides]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      DISMISSED_ACTIVE_TEMP_PROJECTS_STORAGE_KEY,
+      JSON.stringify(dismissedActiveTemporaryProjects)
+    );
+  }, [dismissedActiveTemporaryProjects]);
 
   // Track which sessions just finished processing
   useEffect(() => {
@@ -582,40 +678,141 @@ export const ProjectTree = memo(function ProjectTree({
     [clearDragState, dropPosition]
   );
 
-  // Build project nodes from sessions
-  const projectNodes = useMemo(() => {
-    const map = new Map<string, ProjectNode>();
-    for (const session of unpinnedSessions) {
-      let node = map.get(session.project);
-      if (!node) {
-        node = {
-          project: session.project,
-          projectName: session.projectName,
-          sessions: [],
-          latestTimestamp: 0,
-        };
-        map.set(session.project, node);
-      }
-      node.sessions.push(session);
-      if (session.timestamp > node.latestTimestamp) {
-        node.latestTimestamp = session.timestamp;
-      }
-    }
-    // Sort nodes by latest timestamp desc
-    const nodes = Array.from(map.values());
-    nodes.sort((a, b) => b.latestTimestamp - a.latestTimestamp);
-    // Sort sessions within each node by timestamp desc
-    for (const node of nodes) {
-      node.sessions.sort((a, b) => b.timestamp - a.timestamp);
-    }
-    return nodes;
-  }, [unpinnedSessions]);
+  const activitySortedProjectNodes = useMemo(
+    () => buildProjectNodes(unpinnedSessions),
+    [unpinnedSessions]
+  );
 
-  // Auto-expand top 3 projects on first load
+  const activityProjectOrder = useMemo(
+    () => activitySortedProjectNodes.map((node) => node.project),
+    [activitySortedProjectNodes]
+  );
+
+  const activityProjectOrderKey = activityProjectOrder.join('\u0000');
+
+  useEffect(() => {
+    setProjectOrder((previous) => {
+      const next = reconcileProjectOrder(previous, activityProjectOrder);
+      if (next.length === previous.length && next.every((project, index) => project === previous[index])) {
+        return previous;
+      }
+      return next;
+    });
+  }, [activityProjectOrder, activityProjectOrderKey]);
+
+  const classificationsByProject = useMemo(() => {
+    const result: Record<string, ProjectClassification> = {};
+    for (const node of activitySortedProjectNodes) {
+      result[node.project] = classifyProject(
+        node.project,
+        activityProjectOrder,
+        projectClassificationOverrides
+      );
+    }
+    return result;
+  }, [activityProjectOrder, activitySortedProjectNodes, projectClassificationOverrides]);
+
+  const projectNodes = useMemo(
+    () => sortProjectNodesByOrder(activitySortedProjectNodes, projectOrder),
+    [activitySortedProjectNodes, projectOrder]
+  );
+
+  const temporaryCandidateProjectNodes = useMemo(
+    () => projectNodes.filter((node) => classificationsByProject[node.project]?.bucket === 'temporary'),
+    [classificationsByProject, projectNodes]
+  );
+
+  const dismissedActiveTemporaryProjectSet = useMemo(
+    () => new Set(dismissedActiveTemporaryProjects),
+    [dismissedActiveTemporaryProjects]
+  );
+
+  const activeTemporaryProjectSet = useMemo(() => {
+    const active = new Set<string>();
+    for (const node of temporaryCandidateProjectNodes) {
+      if (node.sessions.some((session) => isSessionActiveInSidebar(session, decorationsBySessionKey))) {
+        active.add(node.project);
+      }
+    }
+    return active;
+  }, [decorationsBySessionKey, temporaryCandidateProjectNodes]);
+
+  useEffect(() => {
+    setDismissedActiveTemporaryProjects((previous) => {
+      const next = previous.filter((project) => activeTemporaryProjectSet.has(project));
+      if (next.length === previous.length) {
+        return previous;
+      }
+      return next;
+    });
+  }, [activeTemporaryProjectSet]);
+
+  const {
+    mainProjectNodes,
+    temporaryProjectNodes,
+    activeTemporaryProjectNodes,
+  } = useMemo(
+    () => splitProjectNodesForSidebar(
+      projectNodes,
+      classificationsByProject,
+      activeTemporaryProjectSet,
+      dismissedActiveTemporaryProjectSet
+    ),
+    [
+      activeTemporaryProjectSet,
+      classificationsByProject,
+      dismissedActiveTemporaryProjectSet,
+      projectNodes,
+    ]
+  );
+
+  const organizeSidebar = useCallback(() => {
+    setProjectOrder(activityProjectOrder);
+  }, [activityProjectOrder]);
+
+  const projectActions = useMemo(() => ({
+    onMarkTemporary: (project: string) => {
+      setProjectClassificationOverrides((previous) => ({
+        ...previous,
+        [project]: 'temporary',
+      }));
+    },
+    onKeepMain: (project: string) => {
+      setProjectClassificationOverrides((previous) => ({
+        ...previous,
+        [project]: 'main',
+      }));
+      setDismissedActiveTemporaryProjects((previous) =>
+        previous.filter((candidate) => candidate !== project)
+      );
+    },
+    onResetProjectClassification: (project: string) => {
+      setProjectClassificationOverrides((previous) => {
+        if (!previous[project]) {
+          return previous;
+        }
+        const next = { ...previous };
+        delete next[project];
+        return next;
+      });
+    },
+    onOrganizeSidebar: organizeSidebar,
+  }), [organizeSidebar]);
+
+  const dismissActiveTemporaryProject = useCallback((project: string) => {
+    setDismissedActiveTemporaryProjects((previous) => (
+      previous.includes(project) ? previous : [...previous, project]
+    ));
+  }, []);
+
+  // Auto-expand top 3 main projects on first load. Active temporary projects stay visible in their fixed strip.
   const effectiveExpanded = useMemo(() => {
     if (expandedProjects !== null) return expandedProjects;
-    return new Set(projectNodes.slice(0, 3).map((n) => n.project));
-  }, [expandedProjects, projectNodes]);
+    return new Set([
+      ...mainProjectNodes.slice(0, 3).map((node) => node.project),
+      ...activeTemporaryProjectNodes.map((node) => node.project),
+    ]);
+  }, [activeTemporaryProjectNodes, expandedProjects, mainProjectNodes]);
 
   // Per-project visible count helper
   const getVisibleCount = useCallback(
@@ -958,13 +1155,18 @@ export const ProjectTree = memo(function ProjectTree({
 
       {/* Tree content */}
       <ProjectTreeContent
+        activeTemporaryProjectNodes={activeTemporaryProjectNodes}
+        classificationsByProject={classificationsByProject}
         effectiveExpanded={effectiveExpanded}
         getVisibleCount={getVisibleCount}
         isLoading={isLoading}
+        mainProjectNodes={mainProjectNodes}
         onCreateForProject={onCreateForProject}
+        onDismissActiveTemporaryProject={dismissActiveTemporaryProject}
         pinnedSessionsCount={pinnedSessions.length}
-        projectNodes={projectNodes}
+        projectActions={projectActions}
         renderSessionRow={renderSessionRow}
+        temporaryProjectNodes={temporaryProjectNodes}
         toggleProject={toggleProject}
         collapseList={collapseList}
         loadMore={loadMore}

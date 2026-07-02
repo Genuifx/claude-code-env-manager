@@ -6,26 +6,38 @@ import {
   FolderClosed,
   FolderOpen,
   MessageSquare,
+  RefreshCw,
   SquarePen,
+  X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import type { HistorySessionItem } from '@/features/conversations/types';
+import type { ProjectClassification, ProjectNode } from './workspaceProjectTreeModel';
 
 export const PROJECT_TREE_PAGE_SIZE = 6;
-
-export interface ProjectNode {
-  project: string;
-  projectName: string;
-  sessions: HistorySessionItem[];
-  latestTimestamp: number;
-}
 
 type RenderSessionRow = (
   session: HistorySessionItem,
   options?: { pinnedSection?: boolean },
 ) => ReactNode;
+
+type ProjectActionCallbacks = {
+  onMarkTemporary: (project: string) => void;
+  onKeepMain: (project: string) => void;
+  onResetProjectClassification: (project: string) => void;
+  onOrganizeSidebar: () => void;
+};
+
+type ProjectNodeSectionKind = 'main' | 'temporary' | 'activeTemporary';
 
 export const PinnedSessionsSection = memo(function PinnedSessionsSection({
   pinnedSessions,
@@ -62,147 +74,268 @@ export const PinnedSessionsSection = memo(function PinnedSessionsSection({
 });
 
 export const ProjectTreeContent = memo(function ProjectTreeContent({
+  activeTemporaryProjectNodes,
+  classificationsByProject,
   effectiveExpanded,
   getVisibleCount,
   isLoading,
+  mainProjectNodes,
   onCreateForProject,
+  onDismissActiveTemporaryProject,
   pinnedSessionsCount,
-  projectNodes,
+  projectActions,
   renderSessionRow,
+  temporaryProjectNodes,
   toggleProject,
   collapseList,
   loadMore,
   t,
 }: {
+  activeTemporaryProjectNodes: ProjectNode[];
+  classificationsByProject: Record<string, ProjectClassification | undefined>;
   effectiveExpanded: Set<string>;
   getVisibleCount: (project: string) => number;
   isLoading: boolean;
+  mainProjectNodes: ProjectNode[];
   onCreateForProject?: (projectPath: string) => void;
+  onDismissActiveTemporaryProject: (project: string) => void;
   pinnedSessionsCount: number;
-  projectNodes: ProjectNode[];
+  projectActions: ProjectActionCallbacks;
   renderSessionRow: RenderSessionRow;
+  temporaryProjectNodes: ProjectNode[];
   toggleProject: (project: string) => void;
   collapseList: (project: string) => void;
   loadMore: (project: string) => void;
   t: (key: string) => string;
 }) {
-  return (
-    <ScrollArea className="flex-1 min-h-0 py-1">
-      {isLoading ? (
-        <ProjectTreeSkeleton />
-      ) : projectNodes.length === 0 ? (
-        pinnedSessionsCount > 0 ? null : (
-          <div className="flex flex-col items-center justify-center py-12 text-center px-4">
-            <MessageSquare className="w-8 h-8 text-muted-foreground/40 mb-3" />
-            <p className="text-xs text-muted-foreground mb-1">{t('workspace.noHistory')}</p>
-            <p className="text-xs text-muted-foreground/70">{t('workspace.noHistoryHint')}</p>
-          </div>
-        )
-      ) : (
-        projectNodes.map((node) => {
-          const isExpanded = effectiveExpanded.has(node.project);
-          const visibleCount = getVisibleCount(node.project);
-          const visible = node.sessions.slice(0, visibleCount);
-          const hasMore = node.sessions.length > visible.length;
-          const canCollapse = visibleCount > PROJECT_TREE_PAGE_SIZE;
-          return (
-            <div
-              key={node.project}
-              className="mb-0.5 [content-visibility:auto] [contain-intrinsic-size:44px]"
-            >
-              <div
+  const hasProjectNodes =
+    mainProjectNodes.length > 0
+    || temporaryProjectNodes.length > 0
+    || activeTemporaryProjectNodes.length > 0;
+
+  const renderProjectNode = (
+    node: ProjectNode,
+    section: ProjectNodeSectionKind,
+  ) => {
+    const isExpanded = effectiveExpanded.has(node.project);
+    const visibleCount = getVisibleCount(node.project);
+    const visible = node.sessions.slice(0, visibleCount);
+    const hasMore = node.sessions.length > visible.length;
+    const canCollapse = visibleCount > PROJECT_TREE_PAGE_SIZE;
+    const classification = classificationsByProject[node.project];
+    const isTemporary = classification?.bucket === 'temporary';
+    const parentName = classification?.parentProjectName;
+    const metaLabel = isTemporary
+      ? parentName
+        ? t('workspace.temporaryProjectParent').replace('{project}', parentName)
+        : t('workspace.temporaryProjectLabel')
+      : null;
+    const showDismiss = section === 'activeTemporary';
+
+    const header = (
+      <div
+        className={cn(
+          'group/project relative mx-1 flex items-center gap-2 rounded-md px-3 py-2 transition-colors duration-150',
+          'hover:bg-muted/60',
+          isExpanded && 'bg-muted/40',
+          section === 'activeTemporary' && 'mx-2 bg-primary/[0.06] hover:bg-primary/[0.09]'
+        )}
+      >
+        <button
+          type="button"
+          onClick={() => toggleProject(node.project)}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        >
+          <ChevronRight
+            className={cn(
+              'w-4 h-4 text-muted-foreground transition-transform shrink-0',
+              isExpanded && 'rotate-90'
+            )}
+          />
+          {isExpanded ? (
+            <FolderOpen className={cn('w-4 h-4 shrink-0', isTemporary ? 'text-amber-500' : 'text-primary')} />
+          ) : (
+            <FolderClosed className={cn('w-4 h-4 shrink-0', isTemporary ? 'text-amber-500' : 'text-muted-foreground')} />
+          )}
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+            {node.projectName}
+          </span>
+          {metaLabel && (
+            <span className="max-w-[82px] shrink-0 truncate text-[10px] text-muted-foreground/65">
+              {metaLabel}
+            </span>
+          )}
+        </button>
+        {showDismiss && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDismissActiveTemporaryProject(node.project);
+                }}
+                aria-label={t('workspace.dismissActiveTemporaryProject')}
                 className={cn(
-                  'group/project relative mx-1 flex items-center gap-2 rounded-md px-3 py-2 transition-colors duration-150',
-                  'hover:bg-muted/60',
-                  isExpanded && 'bg-muted/40'
+                  'flex h-6 w-6 shrink-0 items-center justify-center rounded-md',
+                  'text-muted-foreground hover:bg-muted/70 hover:text-foreground',
+                  'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground/25'
                 )}
               >
-                <button
-                  type="button"
-                  onClick={() => toggleProject(node.project)}
-                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                >
-                  <ChevronRight
-                    className={cn(
-                      'w-4 h-4 text-muted-foreground transition-transform shrink-0',
-                      isExpanded && 'rotate-90'
-                    )}
-                  />
-                  {isExpanded ? (
-                    <FolderOpen className="w-4 h-4 text-primary shrink-0" />
-                  ) : (
-                    <FolderClosed className="w-4 h-4 text-muted-foreground shrink-0" />
-                  )}
-                  <span className="text-sm font-medium text-foreground truncate flex-1">
-                    {node.projectName}
-                  </span>
-                </button>
-                {onCreateForProject && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onCreateForProject(node.project);
-                        }}
-                        aria-label={t('workspace.createInProject')}
-                        className={cn(
-                          'absolute right-2 top-1/2 z-10 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md',
-                          'pointer-events-none text-foreground/70 opacity-0 transition-opacity duration-150',
-                          'hover:text-foreground focus:text-foreground',
-                          'focus:pointer-events-auto focus:opacity-100 focus-visible:ring-1 focus-visible:ring-foreground/25',
-                          'group-hover/project:pointer-events-auto group-hover/project:opacity-100'
-                        )}
-                      >
-                        <SquarePen className="h-3.5 w-3.5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right" sideOffset={6} className="whitespace-nowrap">
-                      {t('workspace.createInProject')}
-                    </TooltipContent>
-                  </Tooltip>
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right" sideOffset={6} className="whitespace-nowrap">
+              {t('workspace.dismissActiveTemporaryProject')}
+            </TooltipContent>
+          </Tooltip>
+        )}
+        {!showDismiss && onCreateForProject && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onCreateForProject(node.project);
+                }}
+                aria-label={t('workspace.createInProject')}
+                className={cn(
+                  'absolute right-2 top-1/2 z-10 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md',
+                  'pointer-events-none text-foreground/70 opacity-0 transition-opacity duration-150',
+                  'hover:text-foreground focus:text-foreground',
+                  'focus:pointer-events-auto focus:opacity-100 focus-visible:ring-1 focus-visible:ring-foreground/25',
+                  'group-hover/project:pointer-events-auto group-hover/project:opacity-100'
+                )}
+              >
+                <SquarePen className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right" sideOffset={6} className="whitespace-nowrap">
+              {t('workspace.createInProject')}
+            </TooltipContent>
+          </Tooltip>
+        )}
+      </div>
+    );
+
+    return (
+      <div
+        key={node.project}
+        className="mb-0.5 [content-visibility:auto] [contain-intrinsic-size:44px]"
+      >
+        <ContextMenu>
+          <ContextMenuTrigger asChild>{header}</ContextMenuTrigger>
+          <ContextMenuContent className="w-56">
+            {classification?.bucket === 'temporary' ? (
+              <ContextMenuItem onClick={() => projectActions.onKeepMain(node.project)}>
+                <FolderClosed className="mr-2 h-3.5 w-3.5" />
+                {t('workspace.keepProjectInMainList')}
+              </ContextMenuItem>
+            ) : (
+              <ContextMenuItem onClick={() => projectActions.onMarkTemporary(node.project)}>
+                <FolderClosed className="mr-2 h-3.5 w-3.5" />
+                {t('workspace.markProjectTemporary')}
+              </ContextMenuItem>
+            )}
+            {classification?.source === 'manual' && (
+              <ContextMenuItem onClick={() => projectActions.onResetProjectClassification(node.project)}>
+                <RefreshCw className="mr-2 h-3.5 w-3.5" />
+                {t('workspace.resetProjectClassification')}
+              </ContextMenuItem>
+            )}
+            <ContextMenuSeparator />
+            <ContextMenuItem onClick={projectActions.onOrganizeSidebar}>
+              <RefreshCw className="mr-2 h-3.5 w-3.5" />
+              {t('workspace.organizeSidebar')}
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+
+        {isExpanded && (
+          <div className="pb-1">
+            {visible.map((session) => renderSessionRow(session))}
+            {(hasMore || canCollapse) && (
+              <div className="flex items-center gap-3 pl-9 py-1.5 text-[11px]">
+                {canCollapse && (
+                  <button
+                    type="button"
+                    onClick={() => collapseList(node.project)}
+                    className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <ChevronsUp className="h-3 w-3" />
+                    {t('workspace.collapseList')}
+                  </button>
+                )}
+                {hasMore && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => loadMore(node.project)}
+                      className="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {t('workspace.loadMore')}
+                    </button>
+                    <span className="ml-auto text-[10px] tabular-nums text-muted-foreground/50">
+                      {visible.length}/{node.sessions.length}
+                    </span>
+                  </>
                 )}
               </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
-              {isExpanded && (
-                <div className="pb-1">
-                  {visible.map((session) => renderSessionRow(session))}
-                  {(hasMore || canCollapse) && (
-                    <div className="flex items-center gap-3 pl-9 py-1.5 text-[11px]">
-                      {canCollapse && (
-                        <button
-                          type="button"
-                          onClick={() => collapseList(node.project)}
-                          className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          <ChevronsUp className="h-3 w-3" />
-                          {t('workspace.collapseList')}
-                        </button>
-                      )}
-                      {hasMore && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => loadMore(node.project)}
-                            className="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors"
-                          >
-                            {t('workspace.loadMore')}
-                          </button>
-                          <span className="ml-auto text-[10px] tabular-nums text-muted-foreground/50">
-                            {visible.length}/{node.sessions.length}
-                          </span>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
+  return (
+    <>
+      <ScrollArea className="flex-1 min-h-0 py-1">
+        {isLoading ? (
+          <ProjectTreeSkeleton />
+        ) : !hasProjectNodes ? (
+          pinnedSessionsCount > 0 ? null : (
+            <div className="flex flex-col items-center justify-center py-12 text-center px-4">
+              <MessageSquare className="w-8 h-8 text-muted-foreground/40 mb-3" />
+              <p className="text-xs text-muted-foreground mb-1">{t('workspace.noHistory')}</p>
+              <p className="text-xs text-muted-foreground/70">{t('workspace.noHistoryHint')}</p>
             </div>
-          );
-        })
+          )
+        ) : (
+          <>
+            {mainProjectNodes.map((node) => renderProjectNode(node, 'main'))}
+            {temporaryProjectNodes.length > 0 && (
+              <div className="mt-2 border-t border-border/45 pt-2">
+                <div className="mb-1 flex h-5 items-center justify-between px-3">
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                    {t('workspace.temporaryProjects')}
+                  </span>
+                  <span className="rounded-full bg-muted/70 px-1.5 py-0.5 text-[9px] font-medium tabular-nums text-muted-foreground">
+                    {temporaryProjectNodes.length}
+                  </span>
+                </div>
+                {temporaryProjectNodes.map((node) => renderProjectNode(node, 'temporary'))}
+              </div>
+            )}
+          </>
+        )}
+      </ScrollArea>
+
+      {activeTemporaryProjectNodes.length > 0 && (
+        <div className="shrink-0 border-t border-border/50 bg-sidebar/95 px-1 pb-1.5 pt-2">
+          <div className="mb-1 flex h-5 items-center justify-between px-2">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-primary/80">
+              {t('workspace.activeTemporaryProjects')}
+            </span>
+            <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium tabular-nums text-primary">
+              {activeTemporaryProjectNodes.length}
+            </span>
+          </div>
+          {activeTemporaryProjectNodes.map((node) => renderProjectNode(node, 'activeTemporary'))}
+        </div>
       )}
-    </ScrollArea>
+    </>
   );
 });
 
