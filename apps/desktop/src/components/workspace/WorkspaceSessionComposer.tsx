@@ -56,6 +56,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { SelectedSkillContent, WorkspaceFileSuggestion } from '@/lib/tauri-ipc';
+import { ccemMotion, clearMotionProps, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import type { InstalledSkill, LaunchClient } from '@/store';
@@ -355,6 +356,8 @@ function ComposerAttachmentChip({
 
   return (
     <span
+      data-composer-attachment-chip
+      data-attachment-id={attachment.id}
       className="inline-flex max-w-full items-center gap-2 rounded-xl bg-muted/55 px-2.5 py-1.5 text-left text-foreground"
       title={title}
     >
@@ -764,9 +767,13 @@ export function WorkspaceSessionComposer({
 }: WorkspaceSessionComposerProps) {
   const { t } = useLocale();
   const composerShellRef = useRef<HTMLDivElement | null>(null);
+  const attentionDockRef = useRef<HTMLDivElement | null>(null);
+  const attachmentStripRef = useRef<HTMLDivElement | null>(null);
+  const primaryActionButtonRef = useRef<HTMLButtonElement | null>(null);
   const promptAreaRef = useRef<PromptAreaHandle | null>(null);
   const syncedPlainTextRef = useRef(value);
   const syncedValueRevisionRef = useRef(valueRevision);
+  const previousAttachmentIdsRef = useRef<string[]>([]);
   const [composerSegments, setComposerSegments] = useState<Segment[]>(() => plainTextToSegments(value));
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const attachmentsRef = useRef(attachments);
@@ -1335,12 +1342,100 @@ export function WorkspaceSessionComposer({
     composerAttentionPanel,
     triggerAttentionPanel,
   ]);
+  const attentionMotionKey = [
+    aboveComposer ? 'interrupt' : 'base',
+    triggerPanelState ? 'trigger' : 'no-trigger',
+    hasComposerAttentionPanel ? 'queue' : 'no-queue',
+    queuedMessages.length,
+  ].join(':');
+  const attachmentMotionKey = useMemo(
+    () => attachments.map((attachment) => attachment.id).join('|'),
+    [attachments],
+  );
+
+  useGSAP(() => {
+    const dock = attentionDockRef.current;
+    if (!dock) {
+      return;
+    }
+
+    if (shouldReduceMotion()) {
+      clearMotionProps(dock);
+      return;
+    }
+
+    gsap.killTweensOf(dock);
+    gsap.fromTo(
+      dock,
+      { autoAlpha: 0, y: 12, scale: 0.985 },
+      {
+        autoAlpha: 1,
+        y: 0,
+        scale: 1,
+        duration: ccemMotion.duration.base,
+        ease: ccemMotion.ease.standard,
+        clearProps: 'opacity,visibility,transform',
+      },
+    );
+  }, { dependencies: [attentionMotionKey], scope: composerShellRef });
+
+  useGSAP(() => {
+    const strip = attachmentStripRef.current;
+    const currentIds = attachments.map((attachment) => attachment.id);
+    const previousIds = previousAttachmentIdsRef.current;
+    previousAttachmentIdsRef.current = currentIds;
+    if (!strip) {
+      return;
+    }
+
+    const newChips = gsap.utils.toArray<HTMLElement>('[data-composer-attachment-chip]', strip)
+      .filter((element) => {
+        const id = element.dataset.attachmentId;
+        return id ? !previousIds.includes(id) : false;
+      });
+
+    if (shouldReduceMotion() || newChips.length === 0) {
+      return;
+    }
+
+    gsap.fromTo(
+      newChips,
+      { autoAlpha: 0, y: 8, scale: 0.96 },
+      {
+        autoAlpha: 1,
+        y: 0,
+        scale: 1,
+        duration: ccemMotion.duration.base,
+        ease: ccemMotion.ease.standard,
+        stagger: 0.035,
+        clearProps: 'opacity,visibility,transform',
+      },
+    );
+  }, { dependencies: [attachmentMotionKey, isDragTarget], scope: composerShellRef });
+
+  useGSAP(() => {
+    const button = primaryActionButtonRef.current;
+    if (!button || shouldReduceMotion()) {
+      return;
+    }
+
+    gsap.fromTo(
+      button,
+      { scale: 0.94 },
+      {
+        scale: 1,
+        duration: ccemMotion.duration.quick,
+        ease: ccemMotion.ease.standard,
+        clearProps: 'transform',
+      },
+    );
+  }, { dependencies: [resolvedActionLabel, isSubmitting], scope: composerShellRef });
 
   return (
     <div className="px-2 pb-3 pt-2 sm:px-4">
       <div ref={composerShellRef} className="relative mx-auto w-full max-w-5xl">
         {combinedAboveComposer ? (
-          <div className="workspace-attention-dock pointer-events-none absolute inset-x-0 bottom-[calc(100%-18px)] z-10 flex justify-center">
+          <div ref={attentionDockRef} className="workspace-attention-dock pointer-events-none absolute inset-x-0 bottom-[calc(100%-18px)] z-10 flex justify-center">
             <div className="pointer-events-auto w-[95%]">
               {combinedAboveComposer}
             </div>
@@ -1380,11 +1475,14 @@ export function WorkspaceSessionComposer({
           </Popover>
         ) : null}
 
-        <div className={cn(
-          'relative z-20 rounded-[20px] border border-border/40 bg-surface-raised px-5 py-3 shadow-[0_40px_120px_-70px_rgba(0,0,0,0.38)] transition-[border-color,box-shadow] duration-300',
-          isDragTarget && 'border-primary/45 bg-primary/[0.035]',
-          planModeEnabled && 'border-primary/15',
-        )}>
+        <div
+          data-composer-shell-card
+          className={cn(
+            'relative z-20 rounded-[20px] border border-border/40 bg-surface-raised px-5 py-3 shadow-[0_40px_120px_-70px_rgba(0,0,0,0.38)] transition-[border-color,box-shadow] duration-300',
+            isDragTarget && 'border-primary/45 bg-primary/[0.035]',
+            planModeEnabled && 'border-primary/15',
+          )}
+        >
           {planModeEnabled ? (
             <div className="mb-3 flex items-center">
               <span className="inline-flex items-center gap-1.5 rounded-[6px] bg-primary/[0.06] px-2 py-0.5 text-[10px] font-medium leading-5 text-primary/70">
@@ -1400,12 +1498,15 @@ export function WorkspaceSessionComposer({
           ) : null}
 
           {(attachments.length > 0 || isDragTarget) ? (
-            <div className={cn(
-              'mb-3 rounded-xl border border-dashed bg-surface px-3 py-2.5',
-              isDragTarget
-                ? 'border-primary/45 bg-primary/[0.045]'
-                : 'border-border/30',
-            )}>
+            <div
+              ref={attachmentStripRef}
+              className={cn(
+                'mb-3 rounded-xl border border-dashed bg-surface px-3 py-2.5',
+                isDragTarget
+                  ? 'border-primary/45 bg-primary/[0.045]'
+                  : 'border-border/30',
+              )}
+            >
               <div className="flex items-center gap-2 text-[11px] font-medium text-muted-foreground">
                 <Paperclip className="h-3.5 w-3.5" />
                 <span>{isDragTarget ? t('workspace.composerAttachmentDropHint') : t('workspace.composerAttachmentsLabel')}</span>
@@ -1482,6 +1583,7 @@ export function WorkspaceSessionComposer({
               {secondaryActions}
 
               <Button
+                ref={primaryActionButtonRef}
                 type="button"
                 size="icon"
                 variant={primaryActionVariant}

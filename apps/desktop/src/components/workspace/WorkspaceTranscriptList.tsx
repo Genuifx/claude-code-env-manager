@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { mergeToolResults } from '@/features/conversations/messageState';
 import type {
   ConversationMessageData,
 } from '@/features/conversations/types';
 import { cn } from '@/lib/utils';
+import { ccemMotion, clearMotionProps, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';
 import {
   processMessageBlocks,
   WorkspaceMessageBubble,
@@ -199,6 +200,9 @@ export function WorkspaceTranscriptList({
   messages,
   isAwaitingResponse = false,
 }: WorkspaceTranscriptListProps) {
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const seenItemKeysRef = useRef<Set<string>>(new Set());
+  const hasHydratedMotionRef = useRef(false);
   const mergedMessages = useMemo(() => mergeToolResults(messages), [messages]);
   const transcriptItems = useMemo(
     () => buildWorkspaceTranscriptItems(mergedMessages),
@@ -251,9 +255,65 @@ export function WorkspaceTranscriptList({
       } as const,
     ];
   }, [isAwaitingResponse, transcriptItems]);
+  const displayItemKey = useMemo(
+    () => displayItems.map((item) => item.key).join('|'),
+    [displayItems],
+  );
+
+  useGSAP(() => {
+    const list = listRef.current;
+    const currentKeys = displayItems.map((item) => item.key);
+    if (!list) {
+      seenItemKeysRef.current = new Set(currentKeys);
+      hasHydratedMotionRef.current = true;
+      return;
+    }
+
+    const previousKeys = seenItemKeysRef.current;
+    const newKeys = currentKeys.filter((key) => !previousKeys.has(key));
+    seenItemKeysRef.current = new Set(currentKeys);
+
+    if (!hasHydratedMotionRef.current) {
+      hasHydratedMotionRef.current = true;
+      return;
+    }
+
+    if (newKeys.length === 0) {
+      return;
+    }
+
+    const targets = gsap.utils.toArray<HTMLElement>('[data-transcript-item-key]', list)
+      .filter((element) => {
+        const key = element.dataset.transcriptItemKey;
+        return key ? newKeys.includes(key) : false;
+      });
+
+    if (targets.length === 0) {
+      return;
+    }
+
+    if (shouldReduceMotion()) {
+      clearMotionProps(targets);
+      return;
+    }
+
+    gsap.fromTo(
+      targets,
+      { autoAlpha: 0, y: 12, scale: 0.992 },
+      {
+        autoAlpha: 1,
+        y: 0,
+        scale: 1,
+        duration: ccemMotion.duration.base,
+        ease: ccemMotion.ease.standard,
+        stagger: 0.025,
+        clearProps: 'opacity,visibility,transform',
+      },
+    );
+  }, { dependencies: [displayItemKey], scope: listRef });
 
   return (
-    <div>
+    <div ref={listRef}>
       {displayItems.map((item, index) => {
         const prevRole = index > 0 ? displayItems[index - 1].role : null;
 
@@ -261,6 +321,7 @@ export function WorkspaceTranscriptList({
           return (
             <div
               key={item.key}
+              data-transcript-item-key={item.key}
               className={cn(
                 'max-w-[760px] workspace-tool-digest-virtualized',
                 getWorkspaceTranscriptSpacing(prevRole, item.role, item.type),
@@ -279,6 +340,7 @@ export function WorkspaceTranscriptList({
           return (
             <div
               key={item.key}
+              data-transcript-item-key={item.key}
               className={cn(
                 'max-w-[760px]',
                 getWorkspaceTranscriptSpacing(prevRole, item.role, item.type),
@@ -290,11 +352,12 @@ export function WorkspaceTranscriptList({
         }
 
         return (
-          <WorkspaceMessageBubble
-            key={item.key}
-            message={item.message}
-            prevRole={prevRole}
-          />
+          <div key={item.key} data-transcript-item-key={item.key}>
+            <WorkspaceMessageBubble
+              message={item.message}
+              prevRole={prevRole}
+            />
+          </div>
         );
       })}
     </div>

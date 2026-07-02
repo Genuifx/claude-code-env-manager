@@ -40,6 +40,7 @@ import {
   COMPACT_FAILED_SUMMARY_TOKEN,
   COMPACTING_SUMMARY_TOKEN,
 } from './workspaceEventTranscript';
+import { ccemMotion, clearMotionProps, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';
 
 interface WorkspaceMessageBubbleProps {
   message: ConversationMessageData;
@@ -742,6 +743,7 @@ const ToolCallRow = memo(function ToolCallRow({
   const { t } = useLocale();
   const [open, setOpen] = useState(false);
   const [hasRenderedBody, setHasRenderedBody] = useState(false);
+  const detailBodyRef = useRef<HTMLDivElement | null>(null);
   const hasResult = '_result' in block;
   const isError = block._resultError === true;
   const detail = useMemo(() => extractToolSummary(block.name, block.input), [block.input, block.name]);
@@ -761,6 +763,30 @@ const ToolCallRow = memo(function ToolCallRow({
   const toolLabel = detail
     ? `${block.name || 'Tool'}(${detail})`
     : (block.name || 'Tool');
+
+  useGSAP(() => {
+    const body = detailBodyRef.current;
+    if (!body || !open) {
+      return;
+    }
+
+    if (shouldReduceMotion()) {
+      clearMotionProps(body);
+      return;
+    }
+
+    gsap.fromTo(
+      body,
+      { autoAlpha: 0, y: -4 },
+      {
+        autoAlpha: 1,
+        y: 0,
+        duration: ccemMotion.duration.quick,
+        ease: ccemMotion.ease.soft,
+        clearProps: 'opacity,visibility,transform',
+      },
+    );
+  }, { dependencies: [open, hasRenderedBody], scope: detailBodyRef });
 
   return (
     <div className="workspace-tool-row-virtualized">
@@ -816,7 +842,7 @@ const ToolCallRow = memo(function ToolCallRow({
             open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
           )}
         >
-          <div className="overflow-hidden pt-1">
+          <div ref={detailBodyRef} className="overflow-hidden pt-1">
             {editDiff ? (
               <EditDiff oldText={editDiff.oldText} newText={editDiff.newText} />
             ) : (
@@ -850,6 +876,7 @@ function WorkspaceToolDigestComponent({
   const [hasRenderedBody, setHasRenderedBody] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const previousAutoExpandedRef = useRef(autoExpanded);
+  const digestBodyRef = useRef<HTMLDivElement | null>(null);
   const { summary, toolCount, thinkingCount } = useMemo(() => {
     const toolEntries = entries.filter((e) => e.type === 'tool_use');
     const thinkingEntriesList = entries.filter((e) => e.type === 'thinking');
@@ -912,6 +939,30 @@ function WorkspaceToolDigestComponent({
     return () => window.clearInterval(intervalId);
   }, [isActive, timeRange]);
 
+  useGSAP(() => {
+    const body = digestBodyRef.current;
+    if (!body || !open) {
+      return;
+    }
+
+    if (shouldReduceMotion()) {
+      clearMotionProps(body);
+      return;
+    }
+
+    gsap.fromTo(
+      body,
+      { autoAlpha: 0, y: -6 },
+      {
+        autoAlpha: 1,
+        y: 0,
+        duration: ccemMotion.duration.base,
+        ease: ccemMotion.ease.soft,
+        clearProps: 'opacity,visibility,transform',
+      },
+    );
+  }, { dependencies: [open, hasRenderedBody], scope: digestBodyRef });
+
   return (
     <div className={cn('max-w-[760px]', className)}>
       <button
@@ -953,7 +1004,7 @@ function WorkspaceToolDigestComponent({
           )}
         >
           <div className="overflow-hidden">
-            <div className="pt-3 space-y-2.5">
+            <div ref={digestBodyRef} className="pt-3 space-y-2.5">
               {entries.map((entry, entryIndex) => {
                 if (entry.type === 'thinking' && entry.thinking) {
                   return (
@@ -995,9 +1046,34 @@ export const WorkspaceToolDigest = memo(
 
 export const WorkspacePendingResponse = memo(function WorkspacePendingResponse() {
   const { t } = useLocale();
+  const pendingRef = useRef<HTMLDivElement | null>(null);
+
+  useGSAP(() => {
+    const pending = pendingRef.current;
+    if (!pending) {
+      return;
+    }
+
+    if (shouldReduceMotion()) {
+      clearMotionProps(pending);
+      return;
+    }
+
+    gsap.fromTo(
+      pending,
+      { autoAlpha: 0, y: 6 },
+      {
+        autoAlpha: 1,
+        y: 0,
+        duration: ccemMotion.duration.base,
+        ease: ccemMotion.ease.standard,
+        clearProps: 'opacity,visibility,transform',
+      },
+    );
+  }, { scope: pendingRef });
 
   return (
-    <div className="flex items-center gap-2.5 py-1">
+    <div ref={pendingRef} className="flex items-center gap-2.5 py-1">
       <LoaderCircle className="h-3.5 w-3.5 animate-spin text-muted-foreground/50" />
       <span className="text-[12px] text-muted-foreground/60">
         {t('workspace.nativeThinking')}
