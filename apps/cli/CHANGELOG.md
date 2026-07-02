@@ -1,5 +1,17 @@
 # ccem
 
+## 2.40.0
+
+### Minor Changes
+
+- Aggregate release covering desktop stability and diagnostics work since v2.39.1:
+
+  - **feat(desktop):** add Doctor perf smoke diagnostics
+  - **fix(desktop):** prevent concurrent app instances
+  - **fix(desktop):** stabilize tmux session target healthcheck
+  - **chore(desktop):** satisfy rust clippy gate, add session launch diagnostics
+  - **docs(desktop):** add external control research
+
 ## 2.39.1
 
 ### Patch Changes
