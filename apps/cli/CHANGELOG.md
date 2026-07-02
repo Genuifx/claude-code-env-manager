@@ -1,5 +1,11 @@
 # ccem
 
+## 2.39.1
+
+### Patch Changes
+
+- Fix desktop Sessions page new session launch so the top-level New Session button always starts the Claude runtime instead of inheriting an unrelated workspace client selection.
+
 ## 2.39.0
 
 ### Minor Changes
