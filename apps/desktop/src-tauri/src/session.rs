@@ -7,6 +7,7 @@ use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
+use crate::diagnostic_log;
 use crate::notifications::{self, NotificationContext};
 use crate::terminal;
 
@@ -135,6 +136,14 @@ impl SessionManager {
 
         // 在锁内完成读取-序列化-写入
         let sessions = self.lock_sessions().clone();
+        diagnostic_log::append_session_launch_event(
+            "session.save_to_disk.start",
+            serde_json::json!({
+                "path": &path,
+                "temp_path": &temp_path,
+                "count": sessions.len(),
+            }),
+        );
 
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -162,6 +171,13 @@ impl SessionManager {
         // 原子替换
         fs::rename(&temp_path, &path)
             .map_err(|e| format!("Failed to rename temp sessions file: {}", e))?;
+        diagnostic_log::append_session_launch_event(
+            "session.save_to_disk.ok",
+            serde_json::json!({
+                "path": &path,
+                "count": sessions.len(),
+            }),
+        );
         // 锁会在 lock_file drop 时自动释放
         Ok(())
     }

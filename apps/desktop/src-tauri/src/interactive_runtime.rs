@@ -1,5 +1,6 @@
 use crate::channel::{ChannelKind, InteractiveOutputChunk};
 use crate::config::resolve_claude_env;
+use crate::diagnostic_log;
 use crate::event_bus::{ReplayBatch, SessionEventPayload, SessionStore, TerminalPromptKind};
 use crate::event_dispatcher::EventDispatcher;
 use crate::jsonl_watcher::{JsonlPollResult, JsonlWatcher};
@@ -36,6 +37,7 @@ pub struct InteractiveSessionOptions {
     pub resume_session_id: Option<String>,
     pub initial_prompt: Option<String>,
     pub env_vars: HashMap<String, String>,
+    pub launch_trace_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -140,9 +142,30 @@ impl InteractiveRuntimeManager {
         session_manager: Arc<SessionManager>,
         options: InteractiveSessionOptions,
     ) -> Result<Session, String> {
+        diagnostic_log::append_session_launch_event(
+            "runtime.create_session.entry",
+            serde_json::json!({
+                "trace_id": &options.launch_trace_id,
+                "session_id": &options.session_id,
+                "client": &options.client,
+                "env_name": &options.env_name,
+                "perm_mode": &options.perm_mode,
+                "working_dir": &options.working_dir,
+                "resume": options.resume_session_id.as_ref().is_some_and(|value| !value.trim().is_empty()),
+                "initial_prompt": options.initial_prompt.as_ref().is_some_and(|value| !value.trim().is_empty()),
+            }),
+        );
         let mut env_vars = options.env_vars.clone();
         env_vars.insert("CCEM_RUNTIME_ID".to_string(), options.session_id.clone());
         env_vars.insert("CCEM_SESSION_ID".to_string(), options.session_id.clone());
+        diagnostic_log::append_session_launch_event(
+            "runtime.tmux_create.start",
+            serde_json::json!({
+                "trace_id": &options.launch_trace_id,
+                "session_id": &options.session_id,
+                "env_keys": sorted_env_keys(&env_vars),
+            }),
+        );
         let window = self.tmux.create_session(
             &options.session_id,
             &options.client,
@@ -156,6 +179,18 @@ impl InteractiveRuntimeManager {
             &env_vars,
             Path::new(&options.working_dir),
         )?;
+        diagnostic_log::append_session_launch_event(
+            "runtime.tmux_create.ok",
+            serde_json::json!({
+                "trace_id": &options.launch_trace_id,
+                "session_id": &options.session_id,
+                "tmux_session": &window.session_name,
+                "tmux_target": &window.target,
+                "window_name": &window.window_name,
+                "window_index": window.window_index,
+                "pane_pid": window.pane_pid,
+            }),
+        );
 
         let session = Session {
             id: options.session_id.clone(),
@@ -191,6 +226,14 @@ impl InteractiveRuntimeManager {
         });
 
         if let Err(error) = self.insert_handle(session.id.clone(), handle.clone()) {
+            diagnostic_log::append_session_launch_event(
+                "runtime.insert_handle.error",
+                serde_json::json!({
+                    "trace_id": &options.launch_trace_id,
+                    "session_id": &session.id,
+                    "error": &error,
+                }),
+            );
             if let Err(stop_error) = self.tmux.stop_session(&session.id) {
                 eprintln!(
                     "Failed to clean tmux session {} after registration error: {}",
@@ -199,7 +242,29 @@ impl InteractiveRuntimeManager {
             }
             return Err(error);
         }
+        diagnostic_log::append_session_launch_event(
+            "runtime.insert_handle.ok",
+            serde_json::json!({
+                "trace_id": &options.launch_trace_id,
+                "session_id": &session.id,
+            }),
+        );
+        diagnostic_log::append_session_launch_event(
+            "runtime.session_registry.persist.start",
+            serde_json::json!({
+                "trace_id": &options.launch_trace_id,
+                "session_id": &session.id,
+            }),
+        );
         if let Err(error) = session_manager.try_add_session(session.clone()) {
+            diagnostic_log::append_session_launch_event(
+                "runtime.session_registry.persist.error",
+                serde_json::json!({
+                    "trace_id": &options.launch_trace_id,
+                    "session_id": &session.id,
+                    "error": &error,
+                }),
+            );
             if let Err(stop_error) = self.tmux.stop_session(&session.id) {
                 eprintln!(
                     "Failed to clean tmux session {} after persistence error: {}",
@@ -212,7 +277,22 @@ impl InteractiveRuntimeManager {
                 error
             ));
         }
+        diagnostic_log::append_session_launch_event(
+            "runtime.session_registry.persist.ok",
+            serde_json::json!({
+                "trace_id": &options.launch_trace_id,
+                "session_id": &session.id,
+                "tmux_target": &session.tmux_target,
+            }),
+        );
         self.persist_state_best_effort();
+        diagnostic_log::append_session_launch_event(
+            "runtime.runtime_state.persist.requested",
+            serde_json::json!({
+                "trace_id": &options.launch_trace_id,
+                "session_id": &session.id,
+            }),
+        );
 
         self.append_output(
             &app,
@@ -228,6 +308,13 @@ impl InteractiveRuntimeManager {
         }
         self.sample_tmux_output(&app, &session.id).ok();
         self.spawn_capture_poller(app, session_manager, session.id.clone());
+        diagnostic_log::append_session_launch_event(
+            "runtime.create_session.ok",
+            serde_json::json!({
+                "trace_id": &options.launch_trace_id,
+                "session_id": &session.id,
+            }),
+        );
 
         Ok(session)
     }
@@ -783,10 +870,34 @@ impl InteractiveRuntimeManager {
     }
 
     fn persist_state_best_effort(&self) {
-        if let Err(error) = self.persist_default_state() {
-            eprintln!("Failed to persist interactive runtime state: {}", error);
+        let active_count = self.active_state_entries().len();
+        match self.persist_default_state() {
+            Ok(()) => diagnostic_log::append_session_launch_event(
+                "runtime.runtime_state.persist.ok",
+                serde_json::json!({
+                    "path": runtime_state_file_path(),
+                    "active_count": active_count,
+                }),
+            ),
+            Err(error) => {
+                diagnostic_log::append_session_launch_event(
+                    "runtime.runtime_state.persist.error",
+                    serde_json::json!({
+                        "path": runtime_state_file_path(),
+                        "active_count": active_count,
+                        "error": error.to_string(),
+                    }),
+                );
+                eprintln!("Failed to persist interactive runtime state: {}", error);
+            }
         }
     }
+}
+
+fn sorted_env_keys(env_vars: &HashMap<String, String>) -> Vec<String> {
+    let mut keys = env_vars.keys().cloned().collect::<Vec<_>>();
+    keys.sort();
+    keys
 }
 
 fn dispatch_session_event(

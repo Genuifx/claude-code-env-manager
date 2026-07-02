@@ -1,3 +1,4 @@
+use crate::diagnostic_log;
 use crate::terminal::{
     resolve_claude_path, resolve_codex_path, resolve_opencode_path, resolve_tmux_path,
 };
@@ -92,10 +93,28 @@ impl TmuxManager {
                 working_dir.display()
             )
         })?;
-        let target = format!("{}:{}", session_name, window_name);
+        let launch_environment_target = session_name.clone();
         let tmux_binary = resolve_tmux_binary()?.to_string();
-        let launch_spec =
-            build_tmux_launch_spec(client, client_args, env_vars, &target, &tmux_binary);
+        diagnostic_log::append_session_launch_event(
+            "tmux.create_session.start",
+            serde_json::json!({
+                "runtime_id": runtime_id,
+                "session_name": &session_name,
+                "client": client,
+                "env_name": env_name,
+                "working_dir": working_dir_str,
+                "tmux_binary": &tmux_binary,
+                "env_keys": sorted_env_keys(env_vars),
+                "client_arg_count": client_args.len(),
+            }),
+        );
+        let launch_spec = build_tmux_launch_spec(
+            client,
+            client_args,
+            env_vars,
+            &launch_environment_target,
+            &tmux_binary,
+        );
         let mut create_args = vec![
             "new-session".to_string(),
             "-d".to_string(),
@@ -118,10 +137,29 @@ impl TmuxManager {
         let window_index = match self.run_create_command(&session_name, &create_args) {
             Ok(index) => index,
             Err(error) if is_tmux_session_create_race_error(&error) => {
-                self.inspect_target(&target)?.window_index
+                diagnostic_log::append_session_launch_event(
+                    "tmux.create_session.race",
+                    serde_json::json!({
+                        "runtime_id": runtime_id,
+                        "session_name": &session_name,
+                        "error": &error,
+                    }),
+                );
+                self.inspect_target(&session_name)?.window_index
             }
-            Err(error) => return Err(error),
+            Err(error) => {
+                diagnostic_log::append_session_launch_event(
+                    "tmux.create_session.create_error",
+                    serde_json::json!({
+                        "runtime_id": runtime_id,
+                        "session_name": &session_name,
+                        "error": &error,
+                    }),
+                );
+                return Err(error);
+            }
         };
+        let target = format!("{}:{}", session_name, window_index);
 
         let window = match self.inspect_target(&target) {
             Ok(window) => window,
@@ -143,7 +181,31 @@ impl TmuxManager {
             );
         }
 
-        self.verify_target_survived_launch(&window.target)?;
+        match self.verify_target_survived_launch(&window.target) {
+            Ok(()) => diagnostic_log::append_session_launch_event(
+                "tmux.create_session.healthcheck.ok",
+                serde_json::json!({
+                    "runtime_id": runtime_id,
+                    "session_name": &window.session_name,
+                    "target": &window.target,
+                    "pane_pid": window.pane_pid,
+                    "window_name": &window.window_name,
+                    "window_index": window.window_index,
+                }),
+            ),
+            Err(error) => {
+                diagnostic_log::append_session_launch_event(
+                    "tmux.create_session.healthcheck.error",
+                    serde_json::json!({
+                        "runtime_id": runtime_id,
+                        "session_name": &window.session_name,
+                        "target": &window.target,
+                        "error": &error,
+                    }),
+                );
+                return Err(error);
+            }
+        }
 
         Ok(window)
     }
@@ -487,7 +549,7 @@ impl TmuxManager {
 
         let info = parse_target_line(&String::from_utf8_lossy(&output.stdout))
             .ok_or_else(|| format!("Failed to parse tmux target metadata for {}", target))?;
-        if info.target == target {
+        if target_matches_info(target, &info) {
             Ok(info)
         } else {
             Err(format!(
@@ -514,7 +576,7 @@ impl TmuxManager {
         }
 
         Ok(parse_target_line(&String::from_utf8_lossy(&output.stdout))
-            .is_some_and(|info| info.target == target))
+            .is_some_and(|info| target_matches_info(target, &info)))
     }
 
     fn verify_target_survived_launch(&self, target: &str) -> Result<(), String> {
@@ -717,11 +779,9 @@ fn window_name_candidates_for_runtime(runtime_id: &str) -> Vec<String> {
 }
 
 fn target_candidates_for_runtime(runtime_id: &str, session_prefix: &str) -> Vec<String> {
-    let mut targets = vec![format!(
-        "{}:{}",
-        session_name_for_runtime(runtime_id, session_prefix),
-        DEFAULT_TMUX_WINDOW
-    )];
+    let session_name = session_name_for_runtime(runtime_id, session_prefix);
+    let mut targets = vec![format!("{}:{}", session_name, DEFAULT_TMUX_WINDOW)];
+    targets.push(session_name);
     targets.extend(
         window_name_candidates_for_runtime(runtime_id)
             .into_iter()
@@ -896,13 +956,25 @@ fn parse_target_line(line: &str) -> Option<TmuxWindowInfo> {
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(0);
     Some(TmuxWindowInfo {
-        target: format!("{}:{}", session_name, window_name),
+        target: format!("{}:{}", session_name, window_index),
         session_name,
         window_name,
         window_index,
         pane_pid,
         session_attached_clients,
     })
+}
+
+fn target_matches_info(requested_target: &str, info: &TmuxWindowInfo) -> bool {
+    requested_target == info.target
+        || requested_target == info.session_name
+        || requested_target == format!("{}:{}", info.session_name, info.window_name)
+}
+
+fn sorted_env_keys(env_vars: &HashMap<String, String>) -> Vec<String> {
+    let mut keys = env_vars.keys().cloned().collect::<Vec<_>>();
+    keys.sort();
+    keys
 }
 
 fn build_tmux_launch_command(
@@ -1095,8 +1167,8 @@ mod tests {
         compact_model_label, detect_state_from_capture, is_managed_session_name,
         is_missing_tmux_session_error, is_tmux_session_create_race_error, merge_path_entries,
         orphaned_managed_tmux_targets, parse_target_line, parse_window_line, resolve_tmux_binary,
-        session_name_for_runtime, shell_quote, target_candidates_for_runtime, tmux_command,
-        tmux_integration_test_lock, window_name_for_runtime, ClaudeTerminalState,
+        session_name_for_runtime, shell_quote, target_candidates_for_runtime, target_matches_info,
+        tmux_command, tmux_integration_test_lock, window_name_for_runtime, ClaudeTerminalState,
         ManagedTmuxTargetAction, TmuxManager, TmuxWindowInfo,
     };
     use std::collections::HashMap;
@@ -1195,6 +1267,7 @@ mod tests {
             target_candidates_for_runtime("session-1772984434305", "ccem"),
             vec![
                 "ccem-session1772984434305:main".to_string(),
+                "ccem-session1772984434305".to_string(),
                 "ccem:ccem-84434305".to_string(),
                 "ccem:ccem-session-".to_string(),
             ]
@@ -1211,6 +1284,7 @@ mod tests {
             ),
             vec![
                 "ccem-session1772984434305:main".to_string(),
+                "ccem-session1772984434305".to_string(),
                 "ccem:ccem-84434305".to_string(),
                 "ccem:ccem-session-".to_string(),
             ]
@@ -1225,6 +1299,7 @@ mod tests {
             vec![
                 "ccem:legacy-window".to_string(),
                 "ccem-session1772984434305:main".to_string(),
+                "ccem-session1772984434305".to_string(),
                 "ccem:ccem-84434305".to_string(),
                 "ccem:ccem-session-".to_string(),
             ]
@@ -1242,7 +1317,7 @@ mod tests {
         let runtime_id = format!("session-test-{}", std::process::id());
         let session_prefix = format!("ccem-test-{}", std::process::id());
         let session_name = session_name_for_runtime(&runtime_id, &session_prefix);
-        let target = format!("{session_name}:main");
+        let target = session_name.clone();
 
         let _ = tmux_command().and_then(|mut command| {
             command
@@ -1366,6 +1441,118 @@ mod tests {
             .verify_target_survived_launch(&target)
             .expect_err("exited tmux target should fail launch healthcheck");
         assert!(error.contains("exited immediately after launch"));
+    }
+
+    #[test]
+    fn target_parsing_uses_window_index_not_renamable_window_name() {
+        let window = parse_window_line("ccem-session222", "3\tclaude\t202\t1").unwrap();
+        assert_eq!(window.target, "ccem-session222:claude");
+        assert_eq!(window.window_name, "claude");
+
+        let target = parse_target_line("ccem-session222\tclaude\t3\t202\t2").unwrap();
+        assert_eq!(target.target, "ccem-session222:3");
+        assert!(target_matches_info("ccem-session222", &target));
+        assert!(target_matches_info("ccem-session222:claude", &target));
+        assert!(target_matches_info("ccem-session222:3", &target));
+    }
+
+    #[test]
+    fn launch_healthcheck_survives_tmux_window_rename() {
+        let _tmux_guard = tmux_integration_test_lock();
+
+        if TmuxManager::check_tmux_installed().is_err() {
+            return;
+        }
+
+        let runtime_id = format!("session-rename-test-{}", std::process::id());
+        let session_prefix = format!("ccem-rename-test-{}", std::process::id());
+        let session_name = session_name_for_runtime(&runtime_id, &session_prefix);
+
+        let _ = tmux_command().and_then(|mut command| {
+            command
+                .args(["kill-session", "-t", &session_name])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map(|_| ())
+                .map_err(|error| {
+                    format!(
+                        "Failed to clean stale test tmux session {}: {}",
+                        session_name, error
+                    )
+                })
+        });
+
+        struct TmuxSessionGuard {
+            session_name: String,
+        }
+
+        impl Drop for TmuxSessionGuard {
+            fn drop(&mut self) {
+                let _ = tmux_command().and_then(|mut command| {
+                    command
+                        .args(["kill-session", "-t", &self.session_name])
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .status()
+                        .map(|_| ())
+                        .map_err(|error| {
+                            format!(
+                                "Failed to clean test tmux session {}: {}",
+                                self.session_name, error
+                            )
+                        })
+                });
+            }
+        }
+
+        let output = tmux_command()
+            .expect("tmux command should be available")
+            .args([
+                "new-session",
+                "-d",
+                "-P",
+                "-F",
+                "#{window_index}",
+                "-s",
+                &session_name,
+                "-n",
+                "main",
+                "sleep 30",
+            ])
+            .output()
+            .expect("test tmux session should be created");
+        assert!(output.status.success());
+        let _guard = TmuxSessionGuard {
+            session_name: session_name.clone(),
+        };
+        let window_index = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        assert!(!window_index.is_empty());
+
+        let rename_status = tmux_command()
+            .expect("tmux command should be available")
+            .args([
+                "rename-window",
+                "-t",
+                &format!("{session_name}:{window_index}"),
+                "claude",
+            ])
+            .status()
+            .expect("test tmux window should be renamed");
+        assert!(rename_status.success());
+
+        let manager = TmuxManager { session_prefix };
+        let stable_target = format!("{session_name}:{window_index}");
+        manager
+            .verify_target_survived_launch(&stable_target)
+            .expect("stable index target should survive window rename");
+        let info = manager
+            .get_window_info(&runtime_id)
+            .expect("renamed dedicated session should still resolve");
+        assert_eq!(info.target, stable_target);
+        assert_eq!(info.window_name, "claude");
     }
 
     #[test]
@@ -1577,7 +1764,7 @@ mod tests {
 
         let target = parse_target_line("ccem-session222\tmain\t0\t202\t2").unwrap();
         assert_eq!(target.session_attached_clients, 2);
-        assert_eq!(target.target, "ccem-session222:main");
+        assert_eq!(target.target, "ccem-session222:0");
     }
 
     #[test]
