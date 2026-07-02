@@ -1,5 +1,6 @@
 import type {
   ConversationContentBlock,
+  ConversationMessageList,
   ConversationMessageData,
 } from './types';
 
@@ -10,6 +11,10 @@ export interface SessionTokenUsage {
 }
 
 export function mergeToolResults(msgs: ConversationMessageData[]): ConversationMessageData[] {
+  if ((msgs as ConversationMessageList).toolResultsMerged) {
+    return msgs;
+  }
+
   const toolUseMap = new Map<string, ConversationContentBlock>();
   const prepared = msgs.map((msg) => {
     if ((msg.msgType === 'assistant' || msg.msgType === 'ai') && Array.isArray(msg.content)) {

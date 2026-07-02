@@ -16,6 +16,8 @@ const SOURCE_CLAUDE: &str = "claude";
 const SOURCE_CODEX: &str = "codex";
 const SOURCE_OPENCODE: &str = "opencode";
 const HISTORY_NEAR_DUPLICATE_WINDOW_MS: u64 = 1_500;
+const HISTORY_LIMIT_MAX: usize = 1_000;
+const HISTORY_SCAN_LIMIT_MULTIPLIER: usize = 2;
 
 // ============================================================================
 // Output types — sent to frontend (camelCase for TypeScript)
@@ -44,6 +46,38 @@ pub struct HistorySession {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkspaceProjectNode {
+    pub project: String,
+    pub project_name: String,
+    pub session_keys: Vec<String>,
+    pub latest_timestamp: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceOverviewSnapshot {
+    pub sessions: Vec<HistorySession>,
+    pub project_nodes: Vec<WorkspaceProjectNode>,
+    pub total_sessions: usize,
+    pub total_projects: usize,
+}
+
+struct WorkspaceProjectNodeDraft {
+    project: String,
+    project_name: String,
+    session_refs: Vec<WorkspaceProjectSessionRef>,
+    latest_timestamp: u64,
+}
+
+struct WorkspaceProjectSessionRef {
+    session_key: String,
+    timestamp: u64,
+    source: String,
+    id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct ConversationMessage {
     pub msg_type: String,
     pub uuid: Option<String>,
@@ -68,6 +102,14 @@ pub struct CompactSegment {
     pub trigger: Option<String>,
     pub pre_tokens: Option<u64>,
     pub message_count: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationDetailPayload {
+    pub messages: Vec<ConversationMessage>,
+    pub segments: Vec<CompactSegment>,
+    pub tool_results_merged: bool,
 }
 
 /// Metadata for a single Claude Code sub-agent (Task/Agent sidechain).
@@ -103,6 +145,22 @@ pub struct SessionSubagentsPayload {
     /// Full message transcript for the requested `detail_agent_id`, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<Vec<ConversationMessage>>,
+}
+
+fn normalize_history_limit(limit: Option<usize>) -> Option<usize> {
+    limit.and_then(|value| {
+        if value == 0 {
+            None
+        } else {
+            Some(value.min(HISTORY_LIMIT_MAX))
+        }
+    })
+}
+
+fn history_scan_limit(limit: usize) -> usize {
+    limit
+        .saturating_mul(HISTORY_SCAN_LIMIT_MULTIPLIER)
+        .max(limit)
 }
 
 // ============================================================================
@@ -248,47 +306,251 @@ where
 #[tauri::command]
 pub async fn get_conversation_history(
     source: Option<String>,
+    limit: Option<usize>,
 ) -> Result<Vec<HistorySession>, String> {
+    run_blocking(move || load_history_sessions(source, limit)).await
+}
+
+#[tauri::command]
+pub async fn get_workspace_overview_snapshot(
+    limit: Option<usize>,
+) -> Result<WorkspaceOverviewSnapshot, String> {
     run_blocking(move || {
-        let source_filter = normalize_history_source(source.as_deref())?;
-        let mut sessions = Vec::new();
-
-        if source_filter.is_none() || source_filter == Some(SOURCE_CLAUDE) {
-            sessions.extend(load_claude_history()?);
-        }
-
-        if source_filter.is_none() || source_filter == Some(SOURCE_CODEX) {
-            sessions.extend(load_codex_history()?);
-        }
-
-        if source_filter.is_none() || source_filter == Some(SOURCE_OPENCODE) {
-            sessions.extend(load_opencode_history()?);
-        }
-
-        sessions = dedupe_history_sessions(sessions);
-        sessions.sort_by_key(|session| std::cmp::Reverse(session.timestamp));
-
-        // Overlay user-edited title overrides
-        let overrides = crate::title_overrides::TitleOverrides::load();
-        for session in &mut sessions {
-            if let Some(ov) = overrides.get(&session.source, &session.id) {
-                session.display = ov.title.clone();
-            }
-        }
-
-        // Overlay user-edited task stage, expressive sticker, and short label.
-        let annotations = crate::session_annotations::SessionAnnotations::load();
-        for session in &mut sessions {
-            if let Some(annotation) = annotations.get(&session.source, &session.id) {
-                session.task_stage = annotation.stage.clone();
-                session.task_sticker = annotation.sticker.clone();
-                session.task_label = annotation.label.clone();
-            }
-        }
-
-        Ok(sessions)
+        let sessions = load_history_sessions(None, limit)?;
+        Ok(build_workspace_overview_snapshot(sessions))
     })
     .await
+}
+
+#[tauri::command]
+pub async fn search_conversation_history(
+    query: String,
+    source: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<HistorySession>, String> {
+    run_blocking(move || {
+        let result_limit = normalize_history_limit(limit).unwrap_or(120);
+        let mut sessions = load_history_sessions(source, Some(HISTORY_LIMIT_MAX))?;
+        let normalized_query = normalize_history_search_text(&query);
+
+        if normalized_query.is_empty() {
+            sessions.truncate(result_limit);
+            return Ok(sessions);
+        }
+
+        let terms = normalized_query
+            .split_whitespace()
+            .filter(|term| !term.is_empty())
+            .map(|term| term.to_string())
+            .collect::<Vec<_>>();
+        let mut scored = sessions
+            .into_iter()
+            .filter_map(|session| {
+                score_history_search_match(&session, &normalized_query, &terms)
+                    .map(|score| (score, session))
+            })
+            .collect::<Vec<_>>();
+
+        scored.sort_by(|(left_score, left), (right_score, right)| {
+            right_score
+                .cmp(left_score)
+                .then_with(|| right.timestamp.cmp(&left.timestamp))
+                .then_with(|| left.source.cmp(&right.source))
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        scored.truncate(result_limit);
+
+        Ok(scored
+            .into_iter()
+            .map(|(_, session)| session)
+            .collect::<Vec<_>>())
+    })
+    .await
+}
+
+fn load_history_sessions(
+    source: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<HistorySession>, String> {
+    let source_filter = normalize_history_source(source.as_deref())?;
+    let limit = normalize_history_limit(limit);
+    let scan_limit = limit.map(history_scan_limit);
+    let mut sessions = Vec::new();
+
+    if source_filter.is_none() || source_filter == Some(SOURCE_CLAUDE) {
+        sessions.extend(load_claude_history_limited(scan_limit)?);
+    }
+
+    if source_filter.is_none() || source_filter == Some(SOURCE_CODEX) {
+        sessions.extend(load_codex_history_limited(scan_limit)?);
+    }
+
+    if source_filter.is_none() || source_filter == Some(SOURCE_OPENCODE) {
+        sessions.extend(load_opencode_history()?);
+    }
+
+    sessions = dedupe_history_sessions(sessions);
+    sessions.sort_by_key(|session| std::cmp::Reverse(session.timestamp));
+
+    // Overlay user-edited title overrides
+    let overrides = crate::title_overrides::TitleOverrides::load();
+    for session in &mut sessions {
+        if let Some(ov) = overrides.get(&session.source, &session.id) {
+            session.display = ov.title.clone();
+        }
+    }
+
+    // Overlay user-edited task stage, expressive sticker, and short label.
+    let annotations = crate::session_annotations::SessionAnnotations::load();
+    for session in &mut sessions {
+        if let Some(annotation) = annotations.get(&session.source, &session.id) {
+            session.task_stage = annotation.stage.clone();
+            session.task_sticker = annotation.sticker.clone();
+            session.task_label = annotation.label.clone();
+        }
+    }
+
+    if let Some(limit) = limit {
+        sessions.truncate(limit);
+    }
+
+    Ok(sessions)
+}
+
+pub fn build_workspace_overview_snapshot(
+    sessions: Vec<HistorySession>,
+) -> WorkspaceOverviewSnapshot {
+    let project_nodes = build_workspace_project_nodes(&sessions);
+    let total_projects = project_nodes.len();
+    let total_sessions = sessions.len();
+
+    WorkspaceOverviewSnapshot {
+        sessions,
+        project_nodes,
+        total_sessions,
+        total_projects,
+    }
+}
+
+fn build_workspace_project_nodes(sessions: &[HistorySession]) -> Vec<WorkspaceProjectNode> {
+    let mut nodes_by_project: HashMap<String, WorkspaceProjectNodeDraft> = HashMap::new();
+
+    for session in sessions {
+        let node = nodes_by_project
+            .entry(session.project.clone())
+            .or_insert_with(|| WorkspaceProjectNodeDraft {
+                project: session.project.clone(),
+                project_name: session.project_name.clone(),
+                session_refs: Vec::new(),
+                latest_timestamp: 0,
+            });
+
+        node.session_refs.push(WorkspaceProjectSessionRef {
+            session_key: history_session_key(session),
+            timestamp: session.timestamp,
+            source: session.source.clone(),
+            id: session.id.clone(),
+        });
+        if session.timestamp > node.latest_timestamp {
+            node.latest_timestamp = session.timestamp;
+        }
+    }
+
+    let mut nodes = nodes_by_project
+        .into_values()
+        .map(|mut draft| {
+            draft.session_refs.sort_by(|left, right| {
+                right
+                    .timestamp
+                    .cmp(&left.timestamp)
+                    .then_with(|| left.source.cmp(&right.source))
+                    .then_with(|| left.id.cmp(&right.id))
+            });
+
+            WorkspaceProjectNode {
+                project: draft.project,
+                project_name: draft.project_name,
+                session_keys: draft
+                    .session_refs
+                    .into_iter()
+                    .map(|session_ref| session_ref.session_key)
+                    .collect(),
+                latest_timestamp: draft.latest_timestamp,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    nodes.sort_by(|left, right| {
+        right
+            .latest_timestamp
+            .cmp(&left.latest_timestamp)
+            .then_with(|| left.project.cmp(&right.project))
+    });
+
+    nodes
+}
+
+fn history_session_key(session: &HistorySession) -> String {
+    format!("{}:{}", session.source, session.id)
+}
+
+fn normalize_history_search_text(value: &str) -> String {
+    value
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn score_history_search_match(
+    session: &HistorySession,
+    normalized_query: &str,
+    terms: &[String],
+) -> Option<u32> {
+    let display = normalize_history_search_text(&session.display);
+    let project_name = normalize_history_search_text(&session.project_name);
+    let project = normalize_history_search_text(&session.project);
+    let source = normalize_history_search_text(&session.source);
+
+    let fields = [
+        display.as_str(),
+        project_name.as_str(),
+        project.as_str(),
+        source.as_str(),
+    ];
+    if !terms
+        .iter()
+        .all(|term| fields.iter().any(|field| field.contains(term)))
+    {
+        return None;
+    }
+
+    let mut score = 0;
+    score += score_history_search_field(&display, normalized_query, 240);
+    score += score_history_search_field(&project_name, normalized_query, 70);
+    score += score_history_search_field(&project, normalized_query, 25);
+    score += score_history_search_field(&source, normalized_query, 20);
+
+    for term in terms {
+        score += score_history_search_field(&display, term, 24);
+        score += score_history_search_field(&project_name, term, 7);
+        score += score_history_search_field(&project, term, 3);
+        score += score_history_search_field(&source, term, 2);
+    }
+
+    Some(score)
+}
+
+fn score_history_search_field(field: &str, query: &str, weight: u32) -> u32 {
+    if field == query {
+        weight * 3
+    } else if field.starts_with(query) {
+        weight * 2
+    } else if field.contains(query) {
+        weight
+    } else {
+        0
+    }
 }
 
 /// Find and read conversation messages for a given session ID/source.
@@ -298,45 +560,196 @@ pub async fn get_conversation_messages(
     source: Option<String>,
 ) -> Result<Vec<ConversationMessage>, String> {
     run_blocking(move || {
-        let source_hint = normalize_history_source(source.as_deref())?;
-        let resolved_source = match resolve_history_source_for_session(&session_id, source_hint) {
-            Some(s) => s,
-            None => return Ok(vec![]),
-        };
-
-        let (messages, _) = match resolved_source {
-            SOURCE_CLAUDE => {
-                let home = dirs::home_dir().ok_or("Could not find home directory")?;
-                let projects_dir = home.join(".claude").join("projects");
-                if !projects_dir.exists() {
-                    return Ok(vec![]);
-                }
-                let path = match find_claude_session_file(&projects_dir, &session_id) {
-                    Some(p) => p,
-                    None => return Ok(vec![]),
-                };
-                parse_claude_conversation_file(&path)?
-            }
-            SOURCE_CODEX => {
-                let path = match find_codex_session_file(&session_id) {
-                    Some(p) => p,
-                    None => return Ok(vec![]),
-                };
-                parse_codex_conversation_file(&path)?
-            }
-            SOURCE_OPENCODE => {
-                let export = match load_opencode_export(&session_id)? {
-                    Some(value) => value,
-                    None => return Ok(vec![]),
-                };
-                parse_opencode_conversation_export(&export)?
-            }
-            _ => return Ok(vec![]),
-        };
-
+        let (messages, _) = load_conversation_detail(&session_id, source.as_deref())?;
         Ok(messages)
     })
     .await
+}
+
+#[tauri::command]
+pub async fn get_conversation_detail(
+    session_id: String,
+    source: Option<String>,
+) -> Result<ConversationDetailPayload, String> {
+    run_blocking(move || {
+        let (messages, segments) = load_conversation_detail(&session_id, source.as_deref())?;
+        Ok(ConversationDetailPayload {
+            messages: merge_tool_results_into_messages(messages),
+            segments,
+            tool_results_merged: true,
+        })
+    })
+    .await
+}
+
+fn load_conversation_detail(
+    session_id: &str,
+    source: Option<&str>,
+) -> Result<(Vec<ConversationMessage>, Vec<CompactSegment>), String> {
+    let source_hint = normalize_history_source(source)?;
+    let resolved_source = match resolve_history_source_for_session(session_id, source_hint) {
+        Some(s) => s,
+        None => return Ok((vec![], vec![])),
+    };
+
+    match resolved_source {
+        SOURCE_CLAUDE => {
+            let home = dirs::home_dir().ok_or("Could not find home directory")?;
+            let projects_dir = home.join(".claude").join("projects");
+            if !projects_dir.exists() {
+                return Ok((vec![], vec![]));
+            }
+            let path = match find_claude_session_file(&projects_dir, session_id) {
+                Some(p) => p,
+                None => return Ok((vec![], vec![])),
+            };
+            parse_claude_conversation_file(&path)
+        }
+        SOURCE_CODEX => {
+            let path = match find_codex_session_file(session_id) {
+                Some(p) => p,
+                None => return Ok((vec![], vec![])),
+            };
+            parse_codex_conversation_file(&path)
+        }
+        SOURCE_OPENCODE => {
+            let export = match load_opencode_export(session_id)? {
+                Some(value) => value,
+                None => return Ok((vec![], vec![])),
+            };
+            parse_opencode_conversation_export(&export)
+        }
+        _ => Ok((vec![], vec![])),
+    }
+}
+
+fn merge_tool_results_into_messages(
+    mut messages: Vec<ConversationMessage>,
+) -> Vec<ConversationMessage> {
+    let mut tool_use_positions: HashMap<String, (usize, usize)> = HashMap::new();
+
+    for (message_index, message) in messages.iter().enumerate() {
+        if !is_assistant_message_type(&message.msg_type) {
+            continue;
+        }
+        let Some(blocks) = message.content.as_array() else {
+            continue;
+        };
+        for (block_index, block) in blocks.iter().enumerate() {
+            if block.get("type").and_then(|value| value.as_str()) != Some("tool_use") {
+                continue;
+            }
+            let Some(tool_use_id) = block.get("id").and_then(|value| value.as_str()) else {
+                continue;
+            };
+            tool_use_positions.insert(tool_use_id.to_string(), (message_index, block_index));
+        }
+    }
+
+    let mut tool_results: Vec<(usize, usize, serde_json::Value, bool)> = Vec::new();
+    let mut message_content_updates: Vec<Option<Vec<serde_json::Value>>> =
+        vec![None; messages.len()];
+    let mut omit_message = vec![false; messages.len()];
+
+    for (message_index, message) in messages.iter().enumerate() {
+        if !is_user_message_type(&message.msg_type) {
+            continue;
+        }
+        let Some(blocks) = message.content.as_array() else {
+            continue;
+        };
+
+        let mut remaining_blocks: Option<Vec<serde_json::Value>> = None;
+        for (block_index, block) in blocks.iter().enumerate() {
+            let is_tool_result =
+                block.get("type").and_then(|value| value.as_str()) == Some("tool_result");
+            let target = block
+                .get("tool_use_id")
+                .and_then(|value| value.as_str())
+                .and_then(|tool_use_id| tool_use_positions.get(tool_use_id).copied());
+
+            if is_tool_result {
+                if let Some((target_message_index, target_block_index)) = target {
+                    tool_results.push((
+                        target_message_index,
+                        target_block_index,
+                        block
+                            .get("content")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Null),
+                        block
+                            .get("is_error")
+                            .and_then(|value| value.as_bool())
+                            .unwrap_or(false),
+                    ));
+                    if remaining_blocks.is_none() {
+                        remaining_blocks = Some(blocks[..block_index].to_vec());
+                    }
+                    continue;
+                }
+            }
+
+            if let Some(items) = remaining_blocks.as_mut() {
+                items.push(block.clone());
+            }
+        }
+
+        if let Some(items) = remaining_blocks {
+            if items.is_empty() {
+                omit_message[message_index] = true;
+            } else {
+                message_content_updates[message_index] = Some(items);
+            }
+        }
+    }
+
+    for (target_message_index, target_block_index, content, is_error) in tool_results {
+        let Some(blocks) = messages
+            .get_mut(target_message_index)
+            .and_then(|message| message.content.as_array_mut())
+        else {
+            continue;
+        };
+        let Some(block) = blocks.get_mut(target_block_index) else {
+            continue;
+        };
+        let Some(object) = block.as_object_mut() else {
+            continue;
+        };
+        object.insert("_result".to_string(), content);
+        object.insert(
+            "_resultError".to_string(),
+            serde_json::Value::Bool(is_error),
+        );
+    }
+
+    for (message_index, content_update) in message_content_updates.into_iter().enumerate() {
+        if let Some(content) = content_update {
+            if let Some(message) = messages.get_mut(message_index) {
+                message.content = serde_json::Value::Array(content);
+            }
+        }
+    }
+
+    messages
+        .into_iter()
+        .enumerate()
+        .filter_map(|(message_index, message)| {
+            if omit_message[message_index] {
+                None
+            } else {
+                Some(message)
+            }
+        })
+        .collect()
+}
+
+fn is_assistant_message_type(msg_type: &str) -> bool {
+    msg_type == "assistant" || msg_type == "ai"
+}
+
+fn is_user_message_type(msg_type: &str) -> bool {
+    msg_type == "user" || msg_type == "human"
 }
 
 /// List sub-agents (Task/Agent sidechains) for a Claude session and optionally
@@ -911,29 +1324,7 @@ pub async fn get_conversation_segments(
     source: Option<String>,
 ) -> Result<Vec<CompactSegment>, String> {
     run_blocking(move || {
-        let source_hint = normalize_history_source(source.as_deref())?;
-        let resolved_source = resolve_history_source_for_session(&session_id, source_hint)
-            .ok_or("Session file not found")?;
-
-        let (_, segments) = match resolved_source {
-            SOURCE_CLAUDE => {
-                let home = dirs::home_dir().ok_or("Could not find home directory")?;
-                let projects_dir = home.join(".claude").join("projects");
-                let path = find_claude_session_file(&projects_dir, &session_id)
-                    .ok_or("Session file not found")?;
-                parse_claude_conversation_file(&path)?
-            }
-            SOURCE_CODEX => {
-                let path = find_codex_session_file(&session_id).ok_or("Session file not found")?;
-                parse_codex_conversation_file(&path)?
-            }
-            SOURCE_OPENCODE => {
-                let export = load_opencode_export(&session_id)?.ok_or("Session file not found")?;
-                parse_opencode_conversation_export(&export)?
-            }
-            _ => return Err("Unsupported source".to_string()),
-        };
-
+        let (_, segments) = load_conversation_detail(&session_id, source.as_deref())?;
         Ok(segments)
     })
     .await
@@ -944,77 +1335,126 @@ pub async fn get_conversation_segments(
 // ============================================================================
 
 fn load_claude_history() -> Result<Vec<HistorySession>, String> {
+    load_claude_history_limited(None)
+}
+
+fn load_claude_history_limited(
+    project_scan_limit: Option<usize>,
+) -> Result<Vec<HistorySession>, String> {
     let home = dirs::home_dir().ok_or("Could not find home directory")?;
     let history_path = home.join(".claude").join("history.jsonl");
     let projects_dir = home.join(".claude").join("projects");
 
-    load_claude_history_from_paths(&history_path, &projects_dir)
+    load_claude_history_from_paths_limited(&history_path, &projects_dir, project_scan_limit)
 }
 
 fn load_claude_history_from_paths(
     history_path: &Path,
     projects_dir: &Path,
 ) -> Result<Vec<HistorySession>, String> {
+    load_claude_history_from_paths_limited(history_path, projects_dir, None)
+}
+
+fn load_claude_history_from_paths_limited(
+    history_path: &Path,
+    projects_dir: &Path,
+    project_scan_limit: Option<usize>,
+) -> Result<Vec<HistorySession>, String> {
     let mut session_map: HashMap<String, HistorySession> = HashMap::new();
 
-    if history_path.exists() {
-        let file = fs::File::open(history_path)
-            .map_err(|e| format!("Failed to open history.jsonl: {}", e))?;
+    load_claude_history_index(history_path, &mut session_map, project_scan_limit)?;
 
-        let reader = BufReader::new(file);
-        for line_result in reader.lines() {
-            let line = match line_result {
-                Ok(l) => l,
-                Err(_) => continue,
-            };
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            let parsed: HistoryLine = match serde_json::from_str(&line) {
-                Ok(p) => p,
-                Err(_) => continue,
-            };
-
-            let id = match parsed.session_id {
-                Some(id) => id,
-                None => continue,
-            };
-
-            let display = normalize_history_display(parsed.display);
-            let timestamp = parse_timestamp_value(&parsed.timestamp);
-            let project = parsed.project.unwrap_or_default();
-            let project_name = parsed.project_name.unwrap_or_else(|| {
-                project
-                    .split('/')
-                    .next_back()
-                    .unwrap_or("unknown")
-                    .to_string()
-            });
-
-            merge_claude_history_session(
-                &mut session_map,
-                HistorySession {
-                    id,
-                    source: SOURCE_CLAUDE.to_string(),
-                    display,
-                    timestamp,
-                    project,
-                    project_name,
-                    env_name: None,
-                    config_source: None,
-                    task_stage: None,
-                    task_sticker: None,
-                    task_label: None,
-                },
-            );
-        }
+    let should_scan_projects = project_scan_limit.is_none() || session_map.is_empty();
+    if should_scan_projects {
+        supplement_claude_history_from_projects(
+            projects_dir,
+            &mut session_map,
+            project_scan_limit,
+        )?;
     }
 
-    supplement_claude_history_from_projects(projects_dir, &mut session_map)?;
     supplement_claude_history_from_runtime_state(&mut session_map);
     supplement_history_from_provenance(&mut session_map, SOURCE_CLAUDE);
     Ok(session_map.into_values().collect())
+}
+
+fn load_claude_history_index(
+    history_path: &Path,
+    session_map: &mut HashMap<String, HistorySession>,
+    history_entry_limit: Option<usize>,
+) -> Result<(), String> {
+    if !history_path.exists() {
+        return Ok(());
+    }
+
+    if let Some(limit) = history_entry_limit {
+        let content = fs::read_to_string(history_path)
+            .map_err(|e| format!("Failed to read history.jsonl: {}", e))?;
+        for line in content.lines().rev() {
+            merge_claude_history_line(session_map, line);
+            if session_map.len() >= limit {
+                break;
+            }
+        }
+        return Ok(());
+    }
+
+    let file =
+        fs::File::open(history_path).map_err(|e| format!("Failed to open history.jsonl: {}", e))?;
+    let reader = BufReader::new(file);
+    for line_result in reader.lines() {
+        let line = match line_result {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        merge_claude_history_line(session_map, &line);
+    }
+
+    Ok(())
+}
+
+fn merge_claude_history_line(session_map: &mut HashMap<String, HistorySession>, line: &str) {
+    if line.trim().is_empty() {
+        return;
+    }
+
+    let parsed: HistoryLine = match serde_json::from_str(line) {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+
+    let id = match parsed.session_id {
+        Some(id) => id,
+        None => return,
+    };
+
+    let display = normalize_history_display(parsed.display);
+    let timestamp = parse_timestamp_value(&parsed.timestamp);
+    let project = parsed.project.unwrap_or_default();
+    let project_name = parsed.project_name.unwrap_or_else(|| {
+        project
+            .split('/')
+            .next_back()
+            .unwrap_or("unknown")
+            .to_string()
+    });
+
+    merge_claude_history_session(
+        session_map,
+        HistorySession {
+            id,
+            source: SOURCE_CLAUDE.to_string(),
+            display,
+            timestamp,
+            project,
+            project_name,
+            env_name: None,
+            config_source: None,
+            task_stage: None,
+            task_sticker: None,
+            task_label: None,
+        },
+    );
 }
 
 fn supplement_claude_history_from_runtime_state(session_map: &mut HashMap<String, HistorySession>) {
@@ -1394,6 +1834,7 @@ fn merge_claude_history_session(
 fn supplement_claude_history_from_projects(
     projects_dir: &Path,
     session_map: &mut HashMap<String, HistorySession>,
+    project_scan_limit: Option<usize>,
 ) -> Result<(), String> {
     if !projects_dir.exists() {
         return Ok(());
@@ -1401,6 +1842,8 @@ fn supplement_claude_history_from_projects(
 
     let projects = fs::read_dir(projects_dir)
         .map_err(|error| format!("Failed to read Claude projects dir: {}", error))?;
+
+    let mut project_session_paths: Vec<(u64, String, PathBuf)> = Vec::new();
 
     for project_entry in projects.flatten() {
         let project_path = project_entry.path();
@@ -1418,6 +1861,21 @@ fn supplement_claude_history_from_projects(
             if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
                 continue;
             }
+            if project_scan_limit.is_some() {
+                let path_key = path.to_string_lossy().to_string();
+                project_session_paths.push((file_modified_at_millis(&path), path_key, path));
+            } else if let Some(candidate) = parse_claude_project_session_index(&path) {
+                merge_claude_history_session(session_map, candidate);
+            }
+        }
+    }
+
+    if let Some(limit) = project_scan_limit {
+        project_session_paths
+            .sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+        project_session_paths.truncate(limit);
+
+        for (_, _, path) in project_session_paths {
             if let Some(candidate) = parse_claude_project_session_index(&path) {
                 merge_claude_history_session(session_map, candidate);
             }
@@ -1810,8 +2268,14 @@ fn extract_plain_text_content(content: &serde_json::Value) -> Option<String> {
 // ============================================================================
 
 fn load_codex_history() -> Result<Vec<HistorySession>, String> {
+    load_codex_history_limited(None)
+}
+
+fn load_codex_history_limited(
+    session_scan_limit: Option<usize>,
+) -> Result<Vec<HistorySession>, String> {
     let config = resolve_codex_path_config()?;
-    load_codex_history_from_config(&config)
+    load_codex_history_from_config_limited(&config, session_scan_limit)
 }
 
 #[cfg(test)]
@@ -1939,7 +2403,14 @@ fn read_codex_sqlite_home_from_config(codex_home: &Path) -> Option<String> {
 }
 
 fn load_codex_history_from_config(config: &CodexPathConfig) -> Result<Vec<HistorySession>, String> {
-    let session_map = build_codex_session_records(config)?;
+    load_codex_history_from_config_limited(config, None)
+}
+
+fn load_codex_history_from_config_limited(
+    config: &CodexPathConfig,
+    session_scan_limit: Option<usize>,
+) -> Result<Vec<HistorySession>, String> {
+    let session_map = build_codex_session_records_limited(config, session_scan_limit)?;
     let mut sessions = session_map
         .into_values()
         .filter_map(|record| {
@@ -1978,7 +2449,15 @@ fn load_codex_history_from_config(config: &CodexPathConfig) -> Result<Vec<Histor
 fn build_codex_session_records(
     config: &CodexPathConfig,
 ) -> Result<HashMap<String, CodexSessionRecord>, String> {
-    let session_files = collect_codex_session_files(&config.sessions_root);
+    build_codex_session_records_limited(config, None)
+}
+
+fn build_codex_session_records_limited(
+    config: &CodexPathConfig,
+    session_scan_limit: Option<usize>,
+) -> Result<HashMap<String, CodexSessionRecord>, String> {
+    let session_files =
+        collect_codex_session_files_limited(&config.sessions_root, session_scan_limit);
     let history_entries = load_codex_history_index(&config.history_path);
     let session_index_entries = load_codex_session_index(&config.session_index_path);
     let sqlite_threads = load_codex_threads_from_state_db(config);
@@ -2320,12 +2799,20 @@ fn normalize_project_for_dedupe(project: &str) -> String {
 }
 
 fn collect_codex_session_files(root: &Path) -> CodexSessionFileCollection {
+    collect_codex_session_files_limited(root, None)
+}
+
+fn collect_codex_session_files_limited(
+    root: &Path,
+    session_scan_limit: Option<usize>,
+) -> CodexSessionFileCollection {
     let mut collection = CodexSessionFileCollection::default();
     if !root.exists() {
         return collection;
     }
 
     let mut stack = vec![root.to_path_buf()];
+    let mut candidates: Vec<(u64, String, String, PathBuf)> = Vec::new();
 
     while let Some(dir) = stack.pop() {
         let entries = match fs::read_dir(&dir) {
@@ -2345,29 +2832,40 @@ fn collect_codex_session_files(root: &Path) -> CodexSessionFileCollection {
             }
 
             if let Some(path_session_id) = extract_codex_session_id_from_path(&path) {
-                let meta = read_codex_session_meta(&path);
-                let subagent_parent_thread_id = meta
-                    .as_ref()
-                    .and_then(|meta| meta.subagent_parent_thread_id.as_deref())
-                    .filter(|parent_id| *parent_id != path_session_id && looks_like_uuid(parent_id))
-                    .map(|parent_id| parent_id.to_string());
-
-                if let Some(parent_thread_id) = subagent_parent_thread_id {
-                    collection
-                        .subagent_parent_by_id
-                        .insert(path_session_id.clone(), parent_thread_id);
-                }
-
-                collection.files.push((
-                    path_session_id,
-                    CodexSessionFileInfo {
-                        cwd: meta.and_then(|meta| meta.cwd),
-                        modified_at: file_modified_at_millis(&path),
-                        rollout_path: path,
-                    },
-                ));
+                let modified_at = file_modified_at_millis(&path);
+                let path_key = path.to_string_lossy().to_string();
+                candidates.push((modified_at, path_key, path_session_id, path));
             }
         }
+    }
+
+    if let Some(limit) = session_scan_limit {
+        candidates.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+        candidates.truncate(limit);
+    }
+
+    for (modified_at, _, path_session_id, path) in candidates {
+        let meta = read_codex_session_meta(&path);
+        let subagent_parent_thread_id = meta
+            .as_ref()
+            .and_then(|meta| meta.subagent_parent_thread_id.as_deref())
+            .filter(|parent_id| *parent_id != path_session_id && looks_like_uuid(parent_id))
+            .map(|parent_id| parent_id.to_string());
+
+        if let Some(parent_thread_id) = subagent_parent_thread_id {
+            collection
+                .subagent_parent_by_id
+                .insert(path_session_id.clone(), parent_thread_id);
+        }
+
+        collection.files.push((
+            path_session_id,
+            CodexSessionFileInfo {
+                cwd: meta.and_then(|meta| meta.cwd),
+                modified_at,
+                rollout_path: path,
+            },
+        ));
     }
 
     collection
@@ -3797,15 +4295,18 @@ fn extract_usage_fields(
 #[cfg(test)]
 mod tests {
     use super::{
+        build_workspace_overview_snapshot, collect_codex_session_files_limited,
         dedupe_history_sessions_with_provenance_records, dedupe_near_duplicate_history_sessions,
         discover_subagent_metas, discover_subagent_records, enrich_subagent_metas,
         enrich_subagent_records, find_codex_session_file_with_config, is_noise_display,
-        load_claude_history_from_paths, load_codex_history_from_config,
-        merge_opencode_history_session, normalize_history_display, normalize_history_source,
-        parse_claude_conversation_file, parse_codex_history_timestamp,
+        load_claude_history_from_paths, load_claude_history_from_paths_limited,
+        load_codex_history_from_config, merge_opencode_history_session,
+        merge_tool_results_into_messages, normalize_history_display, normalize_history_limit,
+        normalize_history_source, parse_claude_conversation_file, parse_codex_history_timestamp,
         parse_opencode_conversation_export, parse_opencode_history_session,
-        resolve_codex_path_config_from, upsert_codex_history_session, CodexHistoryLine,
-        CodexPathConfig, HistorySession, SOURCE_CLAUDE,
+        resolve_codex_path_config_from, score_history_search_match, upsert_codex_history_session,
+        CodexHistoryLine, CodexPathConfig, ConversationMessage, HistorySession, HISTORY_LIMIT_MAX,
+        SOURCE_CLAUDE,
     };
     use crate::session_provenance::SessionProvenanceRecord;
     use rusqlite::Connection;
@@ -4049,6 +4550,298 @@ mod tests {
             Some("opencode")
         );
         assert!(normalize_history_source(Some("other")).is_err());
+    }
+
+    #[test]
+    fn test_history_limit_normalization_clamps_untrusted_values() {
+        assert_eq!(normalize_history_limit(None), None);
+        assert_eq!(normalize_history_limit(Some(0)), None);
+        assert_eq!(normalize_history_limit(Some(24)), Some(24));
+        assert_eq!(
+            normalize_history_limit(Some(HISTORY_LIMIT_MAX + 50)),
+            Some(HISTORY_LIMIT_MAX)
+        );
+    }
+
+    #[test]
+    fn test_workspace_overview_snapshot_groups_projects_in_recency_order() {
+        let sessions = vec![
+            HistorySession {
+                id: "older-alpha".to_string(),
+                source: "claude".to_string(),
+                display: "Older alpha".to_string(),
+                timestamp: 100,
+                project: "/repo/alpha".to_string(),
+                project_name: "alpha".to_string(),
+                env_name: None,
+                config_source: None,
+                task_stage: None,
+                task_sticker: None,
+                task_label: None,
+            },
+            HistorySession {
+                id: "newer-beta".to_string(),
+                source: "codex".to_string(),
+                display: "Newer beta".to_string(),
+                timestamp: 300,
+                project: "/repo/beta".to_string(),
+                project_name: "beta".to_string(),
+                env_name: None,
+                config_source: None,
+                task_stage: None,
+                task_sticker: None,
+                task_label: None,
+            },
+            HistorySession {
+                id: "newer-alpha".to_string(),
+                source: "claude".to_string(),
+                display: "Newer alpha".to_string(),
+                timestamp: 200,
+                project: "/repo/alpha".to_string(),
+                project_name: "alpha".to_string(),
+                env_name: None,
+                config_source: None,
+                task_stage: None,
+                task_sticker: None,
+                task_label: None,
+            },
+        ];
+
+        let snapshot = build_workspace_overview_snapshot(sessions);
+
+        assert_eq!(snapshot.total_sessions, 3);
+        assert_eq!(snapshot.total_projects, 2);
+        assert_eq!(
+            snapshot
+                .project_nodes
+                .iter()
+                .map(|node| node.project.as_str())
+                .collect::<Vec<_>>(),
+            vec!["/repo/beta", "/repo/alpha"]
+        );
+        assert_eq!(snapshot.project_nodes[1].latest_timestamp, 200);
+        assert_eq!(
+            snapshot.project_nodes[1]
+                .session_keys
+                .iter()
+                .map(|session_key| session_key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["claude:newer-alpha", "claude:older-alpha"]
+        );
+    }
+
+    #[test]
+    fn test_history_search_score_prefers_title_matches() {
+        let session = |display: &str, project_name: &str| HistorySession {
+            id: display.to_string(),
+            source: SOURCE_CLAUDE.to_string(),
+            display: display.to_string(),
+            timestamp: 100,
+            project: format!("/repo/{project_name}"),
+            project_name: project_name.to_string(),
+            env_name: None,
+            config_source: None,
+            task_stage: None,
+            task_sticker: None,
+            task_label: None,
+        };
+        let title_match = session("Optimize workspace performance", "ccem");
+        let project_match = session("Refactor UI", "workspace-performance");
+        let miss = session("Refactor UI", "ccem");
+        let terms = vec!["workspace".to_string()];
+
+        let title_score =
+            score_history_search_match(&title_match, "workspace", &terms).expect("title match");
+        let project_score =
+            score_history_search_match(&project_match, "workspace", &terms).expect("project match");
+
+        assert!(title_score > project_score);
+        assert!(score_history_search_match(&miss, "workspace", &terms).is_none());
+    }
+
+    #[test]
+    fn test_merge_tool_results_into_messages_attaches_results_to_tool_use() {
+        let message = |msg_type: &str, content: serde_json::Value| ConversationMessage {
+            msg_type: msg_type.to_string(),
+            uuid: None,
+            content,
+            model: None,
+            summary: None,
+            plan_content: None,
+            timestamp: 0,
+            input_tokens: None,
+            output_tokens: None,
+            cache_creation_tokens: None,
+            cache_read_tokens: None,
+            segment_index: 0,
+            is_compact_boundary: false,
+        };
+
+        let merged = merge_tool_results_into_messages(vec![
+            message(
+                "assistant",
+                serde_json::json!([
+                    {
+                        "type": "tool_use",
+                        "id": "call_1",
+                        "name": "Read",
+                        "input": { "file_path": "src/main.rs" }
+                    }
+                ]),
+            ),
+            message(
+                "user",
+                serde_json::json!([
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "call_1",
+                        "content": "done",
+                        "is_error": true
+                    }
+                ]),
+            ),
+            message(
+                "user",
+                serde_json::json!([
+                    { "type": "text", "text": "keep me" },
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "missing",
+                        "content": "left alone"
+                    }
+                ]),
+            ),
+        ]);
+
+        assert_eq!(merged.len(), 2);
+        let tool_use = merged[0]
+            .content
+            .as_array()
+            .and_then(|blocks| blocks.first())
+            .expect("tool use block");
+        assert_eq!(
+            tool_use.get("_result").and_then(|value| value.as_str()),
+            Some("done")
+        );
+        assert_eq!(
+            tool_use
+                .get("_resultError")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert_eq!(merged[1].msg_type, "user");
+        assert_eq!(
+            merged[1]
+                .content
+                .as_array()
+                .expect("remaining content")
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn test_limited_claude_history_scans_only_recent_project_files() {
+        let root = temp_history_dir("claude-limited");
+        let history_path = root.join("history.jsonl");
+        let projects_dir = root.join("projects");
+        let project_dir = projects_dir.join("-Users-g-cc-home");
+        fs::create_dir_all(&project_dir).expect("create project dir");
+
+        fs::write(
+            project_dir.join("a-old-session.jsonl"),
+            concat!(
+                "{\"type\":\"progress\",\"cwd\":\"/Users/g/old\",\"sessionId\":\"old-session\",\"timestamp\":\"2026-03-11T15:43:34.800Z\"}\n",
+                "{\"type\":\"last-prompt\",\"sessionId\":\"old-session\",\"lastPrompt\":\"Old prompt\",\"timestamp\":\"2026-03-11T15:44:22.971Z\"}\n"
+            ),
+        )
+        .expect("write old session file");
+        fs::write(
+            project_dir.join("z-new-session.jsonl"),
+            concat!(
+                "{\"type\":\"progress\",\"cwd\":\"/Users/g/new\",\"sessionId\":\"new-session\",\"timestamp\":\"2026-03-12T15:43:34.800Z\"}\n",
+                "{\"type\":\"last-prompt\",\"sessionId\":\"new-session\",\"lastPrompt\":\"New prompt\",\"timestamp\":\"2026-03-12T15:44:22.971Z\"}\n"
+            ),
+        )
+        .expect("write new session file");
+
+        let sessions =
+            load_claude_history_from_paths_limited(&history_path, &projects_dir, Some(1))
+                .expect("load limited history");
+        let session_ids = sessions
+            .iter()
+            .map(|session| session.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(session_ids.contains(&"new-session"));
+        assert!(!session_ids.contains(&"old-session"));
+        assert_eq!(
+            sessions
+                .iter()
+                .find(|session| session.id == "new-session")
+                .map(|session| session.display.as_str()),
+            Some("New prompt")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_limited_claude_history_uses_recent_index_without_project_scan() {
+        let root = temp_history_dir("claude-index-limited");
+        let history_path = root.join("history.jsonl");
+        let projects_dir = root.join("projects");
+        let project_dir = projects_dir.join("-Users-g-cc-home");
+        fs::create_dir_all(&project_dir).expect("create project dir");
+
+        fs::write(
+            &history_path,
+            concat!(
+                "{\"sessionId\":\"indexed-session\",\"display\":\"Indexed prompt\",",
+                "\"timestamp\":\"2026-03-12T15:44:22.971Z\",\"project\":\"/Users/g/indexed\",",
+                "\"projectName\":\"indexed\"}\n"
+            ),
+        )
+        .expect("write history index");
+        fs::write(
+            project_dir.join("z-project-only.jsonl"),
+            concat!(
+                "{\"type\":\"progress\",\"cwd\":\"/Users/g/project\",\"sessionId\":\"project-only\",\"timestamp\":\"2026-03-13T15:43:34.800Z\"}\n",
+                "{\"type\":\"last-prompt\",\"sessionId\":\"project-only\",\"lastPrompt\":\"Project prompt\",\"timestamp\":\"2026-03-13T15:44:22.971Z\"}\n"
+            ),
+        )
+        .expect("write project session file");
+
+        let sessions =
+            load_claude_history_from_paths_limited(&history_path, &projects_dir, Some(2))
+                .expect("load limited history");
+        let session_ids = sessions
+            .iter()
+            .map(|session| session.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(session_ids, vec!["indexed-session"]);
+        assert_eq!(sessions[0].display, "Indexed prompt");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_limited_codex_session_collection_reads_only_recent_candidates() {
+        let root = temp_history_dir("codex-limited");
+        let old_session_id = "00000000-0000-4000-8000-000000000001";
+        let new_session_id = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+
+        write_codex_session_file(&root, old_session_id, "/Users/g/old");
+        write_codex_session_file(&root, new_session_id, "/Users/g/new");
+
+        let collection = collect_codex_session_files_limited(&root.join("sessions"), Some(1));
+
+        assert_eq!(collection.files.len(), 1);
+        assert_eq!(collection.files[0].0, new_session_id);
+        assert_eq!(collection.files[0].1.cwd.as_deref(), Some("/Users/g/new"));
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

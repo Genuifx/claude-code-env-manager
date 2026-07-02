@@ -32,6 +32,35 @@ export interface HistorySessionItem {
   taskLabel?: string;
 }
 
+export interface WorkspaceProjectNode {
+  project: string;
+  projectName: string;
+  sessions: HistorySessionItem[];
+  latestTimestamp: number;
+}
+
+export interface WorkspaceProjectNodePayload {
+  project: string;
+  projectName: string;
+  sessionKeys?: string[];
+  sessions?: HistorySessionItem[];
+  latestTimestamp: number;
+}
+
+export interface WorkspaceOverviewSnapshot {
+  sessions: HistorySessionItem[];
+  projectNodes: WorkspaceProjectNode[];
+  totalSessions: number;
+  totalProjects: number;
+}
+
+export interface WorkspaceOverviewSnapshotPayload {
+  sessions: HistorySessionItem[];
+  projectNodes: WorkspaceProjectNodePayload[];
+  totalSessions: number;
+  totalProjects: number;
+}
+
 export interface ConversationContentBlock {
   type: string;
   text?: string;
@@ -61,6 +90,16 @@ export interface ConversationMessageData {
   segmentIndex: number;
   isCompactBoundary: boolean;
   planContent?: string;
+}
+
+export type ConversationMessageList = ConversationMessageData[] & {
+  toolResultsMerged?: boolean;
+};
+
+export interface ConversationDetailPayload {
+  messages: ConversationMessageData[];
+  segments: HistorySegment[];
+  toolResultsMerged?: boolean;
 }
 
 export interface HistorySegment {

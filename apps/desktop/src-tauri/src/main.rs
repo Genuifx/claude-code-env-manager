@@ -47,6 +47,7 @@ mod unified_runtime;
 mod unified_session;
 mod wecom;
 mod weixin;
+mod workspace_decorations;
 mod workspace_search;
 
 use analytics::{
@@ -66,8 +67,9 @@ use cron::{start_cron_scheduler, CronScheduler};
 use event_dispatcher::EventDispatcher;
 use external_control::ExternalControlManager;
 use history::{
-    get_conversation_history, get_conversation_messages, get_conversation_segments,
-    get_session_subagents,
+    get_conversation_detail, get_conversation_history, get_conversation_messages,
+    get_conversation_segments, get_session_subagents, get_workspace_overview_snapshot,
+    search_conversation_history,
 };
 use interactive_runtime::{
     InteractiveReplayBatch, InteractiveRuntimeManager, InteractiveSessionOptions,
@@ -98,6 +100,7 @@ use session_provenance::{
     SessionProvenanceUpsert, DEFAULT_CONFIG_SOURCE,
 };
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fs;
 use std::process::Command;
 use std::process::Stdio;
@@ -113,6 +116,11 @@ use unified_session::{RuntimeInput, UnifiedSessionDebugComparison, UnifiedSessio
 use wecom::{WecomBridgeManager, WecomBridgeStatus, WecomSettings, WecomTaskBindingTargetType};
 use weixin::{WeixinBridgeManager, WeixinBridgeStatus, WeixinLoginSession, WeixinSettings};
 use workspace_search::search_workspace_files;
+use workspace_decorations::{
+    build_workspace_session_decorations, legacy_interactive_runtime_descriptor,
+    native_runtime_descriptor, unified_runtime_descriptor, WorkspaceDecorationSessionInput,
+    WorkspaceSessionDecoration,
+};
 
 /// Global flag: when true, CloseRequested should NOT be intercepted.
 static FORCE_QUIT: AtomicBool = AtomicBool::new(false);
@@ -910,6 +918,61 @@ fn get_session_events(
     since_seq: Option<u64>,
 ) -> Result<event_bus::ReplayBatch, String> {
     unified_state.get_session_events(&app, &runtime_id, since_seq)
+}
+
+#[tauri::command]
+fn get_workspace_session_decorations(
+    app: tauri::AppHandle,
+    unified_state: State<'_, Arc<UnifiedSessionManager>>,
+    native_state: State<'_, Arc<NativeRuntimeManager>>,
+    session_state: State<'_, Arc<SessionManager>>,
+    sessions: Vec<WorkspaceDecorationSessionInput>,
+) -> Result<Vec<WorkspaceSessionDecoration>, String> {
+    let unified_sessions = unified_state.list_sessions();
+    let native_sessions = native_state.list_sessions();
+    let unified_runtime_ids = unified_sessions
+        .iter()
+        .map(|runtime| runtime.id.as_str())
+        .collect::<HashSet<_>>();
+    let legacy_interactive_sessions = session_state
+        .list_sessions()
+        .into_iter()
+        .filter(|session| {
+            !unified_runtime_ids.contains(session.id.as_str())
+                && session.terminal_type.as_deref() != Some("embedded")
+                && session.status == "running"
+        })
+        .collect::<Vec<_>>();
+
+    let mut runtimes = Vec::new();
+    runtimes.extend(unified_sessions.iter().map(unified_runtime_descriptor));
+    runtimes.extend(native_sessions.iter().map(native_runtime_descriptor));
+    runtimes.extend(
+        legacy_interactive_sessions
+            .iter()
+            .map(legacy_interactive_runtime_descriptor),
+    );
+
+    let events_by_runtime = unified_sessions
+        .iter()
+        .filter(|runtime| !is_workspace_decoration_terminal_status(&runtime.status))
+        .filter_map(|runtime| {
+            unified_state
+                .get_session_events(&app, &runtime.id, None)
+                .ok()
+                .map(|batch| (runtime.id.clone(), batch.events))
+        })
+        .collect::<HashMap<_, _>>();
+
+    Ok(build_workspace_session_decorations(
+        &sessions,
+        &runtimes,
+        &events_by_runtime,
+    ))
+}
+
+fn is_workspace_decoration_terminal_status(status: &str) -> bool {
+    matches!(status, "stopped" | "completed" | "error" | "closed_idle")
 }
 
 #[tauri::command]
@@ -4611,6 +4674,7 @@ fn main() {
             launch_opencode_web,
             list_unified_sessions,
             get_session_events,
+            get_workspace_session_decorations,
             send_session_input,
             stop_unified_session,
             attach_channel,
@@ -4643,10 +4707,13 @@ fn main() {
             load_from_remote,
             arrange_sessions,
             check_arrange_support,
+            get_conversation_detail,
             get_conversation_history,
+            get_workspace_overview_snapshot,
             get_conversation_messages,
             get_conversation_segments,
             get_session_subagents,
+            search_conversation_history,
             title_overrides::set_session_title,
             session_titles::generate_workspace_session_title,
             session_annotations::set_session_annotation,

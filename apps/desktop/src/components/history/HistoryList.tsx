@@ -4,6 +4,7 @@ import { Claude, Codex, OpenCode } from '@lobehub/icons';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { searchHistorySessions } from '@/features/conversations/historyData';
 import type { HistorySessionItem, HistorySource } from '@/features/conversations/types';
 import { getHistorySessionDisplay } from './historySession';
 
@@ -100,6 +101,8 @@ export function HistoryList({
   const { t } = useLocale();
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
+  const normalizedDeferredSearch = deferredSearch.trim();
+  const [searchResults, setSearchResults] = useState<HistorySessionItem[] | null>(null);
   const [projectFilter, setProjectFilter] = useState<string>('all');
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -112,10 +115,43 @@ export function HistoryList({
     return Array.from(names).sort();
   }, [sessions]);
 
+  useEffect(() => {
+    if (!normalizedDeferredSearch) {
+      setSearchResults(null);
+      return;
+    }
+
+    let cancelled = false;
+    setSearchResults(null);
+    searchHistorySessions(normalizedDeferredSearch, sourceFilter, 120)
+      .then((results) => {
+        if (!cancelled) {
+          setSearchResults(results);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.error('Failed to search conversation history:', error);
+          setSearchResults(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [normalizedDeferredSearch, sourceFilter]);
+
+  const searchBaseSessions = normalizedDeferredSearch && searchResults
+    ? searchResults
+    : sessions;
+  const shouldFilterSearchLocally = !normalizedDeferredSearch || searchResults === null;
+
   // Filter sessions
   const filtered = useMemo(() => {
-    const normalizedSearch = deferredSearch.toLowerCase();
-    return sessions.filter(s => {
+    const normalizedSearch = shouldFilterSearchLocally
+      ? normalizedDeferredSearch.toLowerCase()
+      : '';
+    return searchBaseSessions.filter(s => {
       const matchesSearch = !normalizedSearch ||
         getHistorySessionDisplay(s, '').toLowerCase().includes(normalizedSearch) ||
         s.projectName.toLowerCase().includes(normalizedSearch) ||
@@ -123,7 +159,7 @@ export function HistoryList({
       const matchesProject = projectFilter === 'all' || s.projectName === projectFilter;
       return matchesSearch && matchesProject;
     });
-  }, [sessions, deferredSearch, projectFilter]);
+  }, [searchBaseSessions, normalizedDeferredSearch, projectFilter, shouldFilterSearchLocally]);
 
   // Time-grouped sessions
   const timeGroups = useMemo(() => groupByTime(filtered), [filtered]);

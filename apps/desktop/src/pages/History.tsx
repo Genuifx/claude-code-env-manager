@@ -174,6 +174,11 @@ export function History() {
 
   const handleSelect = useCallback(async (session: HistorySessionItem) => {
     const key = toSessionKey(session);
+    setSessions((prev) => (
+      prev.some((currentSession) => toSessionKey(currentSession) === key)
+        ? prev
+        : [session, ...prev]
+    ));
     setSelectedKey(key);
     setFocusedSessionKey(key);
     setActiveSegment(null);
