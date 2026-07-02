@@ -310,9 +310,9 @@ fn parse_cron_field(field: &str, min: u32, max: u32) -> Result<Vec<u32>, String>
 /// Parse and validate all 5 fields of a cron expression, returning the
 /// resolved value sets. Used as the single shared validator across
 /// create/update/preview/scheduler boundaries.
-fn parse_cron_expression(
-    expression: &str,
-) -> Result<(Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>), String> {
+type CronFieldSets = (Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>);
+
+fn parse_cron_expression(expression: &str) -> Result<CronFieldSets, String> {
     let fields: Vec<&str> = expression.split_whitespace().collect();
     if fields.len() != 5 {
         return Err(
@@ -1187,9 +1187,7 @@ pub fn add_cron_task(
     wecom_notification: Option<CronWecomNotification>,
 ) -> Result<CronTask, String> {
     // Validate cron expression (5 fields + per-field token/range checks)
-    if let Err(e) = validate_cron_expression(&cron_expression) {
-        return Err(e);
-    }
+    validate_cron_expression(&cron_expression)?;
 
     let now = chrono::Utc::now().to_rfc3339();
     let task = CronTask {
@@ -1248,9 +1246,7 @@ pub fn update_cron_task(
         task.name = v;
     }
     if let Some(v) = cron_expression {
-        if let Err(e) = validate_cron_expression(&v) {
-            return Err(e);
-        }
+        validate_cron_expression(&v)?;
         task.cron_expression = v;
     }
     if let Some(v) = prompt {

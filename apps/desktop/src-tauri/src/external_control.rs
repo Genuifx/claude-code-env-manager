@@ -937,7 +937,7 @@ fn write_descriptor_at(path: &Path, descriptor: &ExternalControlDescriptor) -> R
         .map_err(|error| format!("Failed to encode control descriptor: {}", error))?;
     let temp_path = path.with_extension(format!("json.{}.tmp", std::process::id()));
     write_private_file(&temp_path, &content)?;
-    fs::rename(&temp_path, &path)
+    fs::rename(&temp_path, path)
         .map_err(|error| format!("Failed to publish control descriptor: {}", error))?;
     apply_private_file_permissions(path);
     Ok(())

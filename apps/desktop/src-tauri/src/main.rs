@@ -1440,10 +1440,7 @@ fn handoff_native_session_to_terminal(
         },
     );
 
-    let session = match create_result {
-        Ok(session) => session,
-        Err(error) => return Err(error),
-    };
+    let session = create_result?;
 
     if let Err(error) =
         open_tmux_backed_session_in_terminal(state.inner(), &session.id, attach_terminal)
@@ -4173,8 +4170,7 @@ mod workspace_guard_tests {
             project.to_str().unwrap(),
             "../../secret.txt",
         )
-        .err()
-        .expect("../ escape should be rejected");
+        .expect_err("../ escape should be rejected");
         assert!(
             err.contains("escapes working dir"),
             "unexpected error: {}",
@@ -4197,8 +4193,7 @@ mod workspace_guard_tests {
             project.to_str().unwrap(),
             evil_file.to_str().unwrap(),
         )
-        .err()
-        .expect("sibling-prefix absolute path must be rejected");
+        .expect_err("sibling-prefix absolute path must be rejected");
         assert!(
             err.contains("escapes working dir"),
             "unexpected error: {}",
@@ -4221,8 +4216,7 @@ mod workspace_guard_tests {
             project.to_str().unwrap(),
             candidate.to_str().unwrap(),
         )
-        .err()
-        .expect("symlink escape must be rejected");
+        .expect_err("symlink escape must be rejected");
         assert!(
             err.contains("escapes working dir"),
             "unexpected error: {}",
@@ -4275,8 +4269,7 @@ mod workspace_guard_tests {
             bogus.to_str().unwrap(),
             "anything.ts",
         )
-        .err()
-        .expect("invalid working_dir should be rejected");
+        .expect_err("invalid working_dir should be rejected");
         assert!(
             err.contains("Invalid working_dir"),
             "unexpected error: {}",

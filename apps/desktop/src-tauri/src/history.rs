@@ -1085,7 +1085,7 @@ fn enrich_subagent_metas(metas: &mut [SubagentMeta], main_path: &Path) {
             read_first_user_prompt(&record.path).map(|prompt| normalize_prompt_key(&prompt));
     }
     enrich_subagent_records(&mut records, main_path);
-    for (target, record) in metas.iter_mut().zip(records.into_iter()) {
+    for (target, record) in metas.iter_mut().zip(records) {
         *target = record.meta;
     }
 }

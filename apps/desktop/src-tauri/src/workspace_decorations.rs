@@ -4,6 +4,7 @@ use crate::session::Session;
 use crate::unified_session::UnifiedSessionInfo;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 
 const RUNTIME_HISTORY_FALLBACK_WINDOW_MS: u64 = 2 * 60 * 1000;
@@ -216,9 +217,9 @@ fn build_runtime_match_map(
     let mut matched_by_key = HashMap::new();
     let mut used_runtime_ids = HashSet::new();
     let mut history_by_timestamp = sessions.to_vec();
-    history_by_timestamp.sort_by(|left, right| right.timestamp.cmp(&left.timestamp));
+    history_by_timestamp.sort_by_key(|session| Reverse(session.timestamp));
     let mut runtimes_by_recency = runtimes.to_vec();
-    runtimes_by_recency.sort_by(|left, right| right.created_at().cmp(&left.created_at()));
+    runtimes_by_recency.sort_by_key(|runtime| Reverse(runtime.created_at()));
 
     for session in &history_by_timestamp {
         let direct_match = runtimes_by_recency.iter().find(|runtime| {
@@ -292,25 +293,23 @@ fn resolve_attention_kind(events: &[SessionEventRecord]) -> Option<String> {
             }
             SessionEventPayload::ToolUseStarted {
                 tool_use_id,
-                needs_response,
+                needs_response: true,
                 prompt,
                 ..
             } => {
-                if *needs_response {
-                    let attention_kind = match prompt {
-                        Some(InteractiveToolPrompt::PlanExit { .. }) => "plan_review",
-                        _ => "input_required",
-                    };
-                    pending_responses.insert(tool_use_id.clone(), attention_kind.to_string());
-                }
+                let attention_kind = match prompt {
+                    Some(InteractiveToolPrompt::PlanExit { .. }) => "plan_review",
+                    _ => "input_required",
+                };
+                pending_responses.insert(tool_use_id.clone(), attention_kind.to_string());
             }
             SessionEventPayload::ToolUseCompleted {
                 tool_use_id,
                 success,
                 ..
             } => {
-                let pending_kind = pending_responses.get(tool_use_id);
-                if !(pending_kind == Some(&"plan_review".to_string()) && !success) {
+                let pending_kind = pending_responses.get(tool_use_id).map(String::as_str);
+                if pending_kind != Some("plan_review") || *success {
                     pending_responses.remove(tool_use_id);
                 }
             }

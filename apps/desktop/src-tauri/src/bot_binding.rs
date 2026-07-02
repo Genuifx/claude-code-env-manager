@@ -200,7 +200,7 @@ impl BotBindingManager {
                 &info,
                 BotBindingOutboxFrameKind::TaskCard,
                 "Task bound to bot",
-                &format_task_card(&info),
+                format_task_card(&info),
                 None,
             )?;
         }
@@ -249,7 +249,7 @@ impl BotBindingManager {
                 &info,
                 BotBindingOutboxFrameKind::TaskCard,
                 "Task bound to bot",
-                &format_task_card(&info),
+                format_task_card(&info),
                 None,
             )?;
         }

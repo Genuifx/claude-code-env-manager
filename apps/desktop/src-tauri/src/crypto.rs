@@ -1,4 +1,4 @@
-use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
+use aes::cipher::{BlockDecryptMut, KeyIvInit};
 use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit};
 use rand::Rng;
 use scrypt::{scrypt, Params};
@@ -255,6 +255,7 @@ pub fn decrypt_remote(encrypted_base64: &str, secret: &str) -> Result<String, St
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aes::cipher::BlockEncryptMut;
 
     #[test]
     fn test_encrypt_decrypt_roundtrip() {
