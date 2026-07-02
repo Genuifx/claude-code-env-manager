@@ -10,6 +10,7 @@
     "test": "node --test test/*.test.mjs",
     "test:run": "node --test test/*.test.mjs",
     "test:e2e": "node test/opencode.mcp.e2e.mjs",
+    "perf:smoke": "node scripts/perf-smoke.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Moon, Sun, MonitorSmartphone, Lightbulb, Terminal, CheckCircle2, XCircle, Copy, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search, FolderOpen, X, Sparkles, Clock, Image, BellRing, RefreshCw, Download, RotateCw, Palette, AppWindow, Info, Bot } from 'lucide-react';
+import { Moon, Sun, MonitorSmartphone, Lightbulb, Terminal, CheckCircle2, XCircle, Copy, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search, FolderOpen, X, Sparkles, Clock, Image, BellRing, RefreshCw, Download, RotateCw, Palette, AppWindow, Info, Bot, Gauge } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { useAppStore } from '@/store';
@@ -21,6 +21,11 @@ import {
   recordPerfMark,
   type PerfSummary,
 } from '@/lib/perf-log';
+import {
+  runDoctorPerfSmoke,
+  type DoctorPerfSmokeReport,
+  type DoctorPerfSmokeRun,
+} from '@/lib/doctor-perf-smoke';
 import { shallow } from 'zustand/shallow';
 import type { CcemAgentSkillStatus, PlatformCapabilities } from '@/lib/tauri-ipc';
 
@@ -1080,7 +1085,9 @@ function AgentSkillStatusBadge({ state }: { state: 'loading' | 'current' | 'upda
 function DiagnosticsPanel({ active }: { active: boolean }) {
   const { t } = useLocale();
   const [summary, setSummary] = useState<PerfSummary>(() => getPerfSummary());
+  const [perfSmoke, setPerfSmoke] = useState<DoctorPerfSmokeReport | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [isRunningSmoke, setIsRunningSmoke] = useState(false);
 
   // Auto-refresh while the About section is visible so the user can see
   // events accumulate without manually clicking Refresh.
@@ -1112,6 +1119,7 @@ function DiagnosticsPanel({ active }: { active: boolean }) {
       const json = exportDoctorReportAsJson({
         backend: backendReport,
         backendError,
+        perfSmoke: perfSmoke ?? undefined,
       });
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
       const saved = await invoke<boolean>('save_file_dialog', {
@@ -1127,6 +1135,34 @@ function DiagnosticsPanel({ active }: { active: boolean }) {
       toast.error(t('settings.diagnosticsExportFailed').replace('{error}', String(error)));
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const handleRunPerfSmoke = async () => {
+    setIsRunningSmoke(true);
+    recordPerfMark('doctor:perf-smoke-start');
+
+    try {
+      const report = await runDoctorPerfSmoke({
+        invoke,
+        perfSummary: getPerfSummary(),
+      });
+      setPerfSmoke(report);
+      setSummary(getPerfSummary());
+      recordPerfMark('doctor:perf-smoke-finished', {
+        verdict: report.verdict,
+        totalDurationMs: report.totalDurationMs,
+      });
+
+      if (report.verdict === 'pass') {
+        toast.success(t('settings.diagnosticsPerfSmokePassed'));
+      } else {
+        toast.error(t('settings.diagnosticsPerfSmokeFailed'));
+      }
+    } catch (error) {
+      toast.error(t('settings.diagnosticsPerfSmokeError').replace('{error}', String(error)));
+    } finally {
+      setIsRunningSmoke(false);
     }
   };
 
@@ -1149,6 +1185,54 @@ function DiagnosticsPanel({ active }: { active: boolean }) {
     { type: 'lcp', label: t('settings.diagnosticsLcp') },
     { type: 'error', label: t('settings.diagnosticsError') },
   ];
+
+  const smokeRunLabels: Record<DoctorPerfSmokeRun['name'], string> = {
+    workspaceOverview: t('settings.diagnosticsPerfSmokeWorkspaceOverview'),
+    runtimeDecorations: t('settings.diagnosticsPerfSmokeRuntimeDecorations'),
+    historySearch: t('settings.diagnosticsPerfSmokeHistorySearch'),
+    conversationDetail: t('settings.diagnosticsPerfSmokeConversationDetail'),
+    frontendLongTask: t('settings.diagnosticsPerfSmokeFrontendLongTask'),
+  };
+
+  const smokeStatusLabel = (status: DoctorPerfSmokeRun['status']) => {
+    if (status === 'pass') return t('settings.diagnosticsPerfSmokeStatusPass');
+    if (status === 'fail') return t('settings.diagnosticsPerfSmokeStatusFail');
+    return t('settings.diagnosticsPerfSmokeStatusSkip');
+  };
+
+  const smokeStatusClass = (status: DoctorPerfSmokeRun['status']) => {
+    if (status === 'pass') return 'text-emerald-600 dark:text-emerald-400';
+    if (status === 'fail') return 'text-destructive';
+    return 'text-muted-foreground';
+  };
+
+  const smokeVerdictLabel = isRunningSmoke
+    ? t('settings.diagnosticsPerfSmokeRunning')
+    : perfSmoke?.verdict === 'pass'
+      ? t('settings.diagnosticsPerfSmokePassedShort')
+      : perfSmoke?.verdict === 'fail'
+        ? t('settings.diagnosticsPerfSmokeFailedShort')
+        : t('settings.diagnosticsPerfSmokeIdle');
+
+  const smokeVerdictClass = isRunningSmoke
+    ? 'bg-primary/10 text-primary'
+    : perfSmoke?.verdict === 'pass'
+      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+      : perfSmoke?.verdict === 'fail'
+        ? 'bg-destructive/10 text-destructive'
+        : 'bg-muted text-muted-foreground';
+
+  const formatSmokeDuration = (run: DoctorPerfSmokeRun) => {
+    if (run.status === 'skip') return '—';
+    if (typeof run.durationMs !== 'number' || !Number.isFinite(run.durationMs)) {
+      return smokeStatusLabel(run.status);
+    }
+    const duration = `${Math.round(run.durationMs)}ms`;
+    if (typeof run.budgetMs === 'number' && Number.isFinite(run.budgetMs)) {
+      return `${duration} / ${Math.round(run.budgetMs)}ms`;
+    }
+    return duration;
+  };
 
   return (
     <div className="space-y-3">
@@ -1182,12 +1266,57 @@ function DiagnosticsPanel({ active }: { active: boolean }) {
           );
         })}
       </div>
+      <div className="rounded-lg border border-border-subtle bg-muted/30 px-3 py-2 space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <Gauge className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            <span className="text-xs font-medium text-foreground truncate">
+              {t('settings.diagnosticsPerfSmokeTitle')}
+            </span>
+          </div>
+          <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium shrink-0 ${smokeVerdictClass}`}>
+            {smokeVerdictLabel}
+          </span>
+        </div>
+        {perfSmoke && (
+          <div className="space-y-1.5">
+            {perfSmoke.runs.map((run) => (
+              <div
+                key={run.name}
+                className="flex items-center justify-between gap-3 text-xs"
+              >
+                <span className="text-muted-foreground truncate">
+                  {smokeRunLabels[run.name]}
+                </span>
+                <span className="font-mono tabular-nums text-right shrink-0">
+                  <span className={smokeStatusClass(run.status)}>
+                    {smokeStatusLabel(run.status)}
+                  </span>
+                  <span className="text-muted-foreground ml-2">
+                    {formatSmokeDuration(run)}
+                  </span>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
       <div className="flex flex-wrap gap-2">
         <Button
           variant="outline"
           size="sm"
           className="active:scale-[0.97] transition-transform"
-          disabled={isExporting}
+          disabled={isRunningSmoke || isExporting}
+          onClick={handleRunPerfSmoke}
+        >
+          <Gauge className="w-3.5 h-3.5 mr-1.5" />
+          {isRunningSmoke ? t('settings.diagnosticsPerfSmokeRunning') : t('settings.diagnosticsPerfSmokeRun')}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="active:scale-[0.97] transition-transform"
+          disabled={isExporting || isRunningSmoke}
           onClick={handleExport}
         >
           <Download className="w-3.5 h-3.5 mr-1.5" />

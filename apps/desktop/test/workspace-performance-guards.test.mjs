@@ -232,3 +232,46 @@ test('workspace runtime decorations use a Rust snapshot command', async () => {
     'Tauri handler should register the workspace decoration snapshot command',
   );
 });
+
+test('doctor perf smoke is explicit, budgeted, and exportable', async () => {
+  const settings = await readSource('src', 'pages', 'Settings.tsx');
+  const perfSmoke = await readSource('src', 'lib', 'doctor-perf-smoke.ts');
+  const perfLog = await readSource('src', 'lib', 'perf-log.ts');
+  const packageJson = JSON.parse(await readSource('package.json'));
+
+  assert.match(
+    settings,
+    /runDoctorPerfSmoke/,
+    'Settings Doctor panel should expose the perf smoke runner',
+  );
+  assert.match(
+    settings,
+    /onClick=\{handleRunPerfSmoke\}/,
+    'Doctor perf smoke should run from an explicit user action',
+  );
+  assert.match(
+    settings,
+    /perfSmoke: perfSmoke \?\? undefined/,
+    'Doctor export should include the most recent perf smoke report',
+  );
+  assert.match(
+    perfLog,
+    /perfSmoke\?: unknown/,
+    'Doctor envelope should reserve a perfSmoke section',
+  );
+  assert.match(
+    perfSmoke,
+    /DOCTOR_PERF_SMOKE_HISTORY_LIMIT = 240/,
+    'Perf smoke should reuse the Workspace overview session cap',
+  );
+  assert.match(
+    perfSmoke,
+    /\{ name: 'workspaceOverview', budgetMs: 500 \}/,
+    'Perf smoke should codify the Workspace overview budget',
+  );
+  assert.equal(
+    packageJson.scripts['perf:smoke'],
+    'node scripts/perf-smoke.mjs',
+    'Desktop package should expose the perf smoke report gate',
+  );
+});

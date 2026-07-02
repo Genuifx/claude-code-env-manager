@@ -163,6 +163,7 @@ export interface DoctorEnvelope {
   kind: 'ccem-doctor-report';
   generatedAt: string;
   frontend: DiagnosticsEnvelope;
+  perfSmoke?: unknown;
   backend?: unknown;
   backendError?: string;
 }
@@ -193,6 +194,7 @@ export function exportPerfLogAsJson(): string {
 export function buildDoctorEnvelope(options: {
   backend?: unknown;
   backendError?: string;
+  perfSmoke?: unknown;
 } = {}): DoctorEnvelope {
   const envelope: DoctorEnvelope = {
     schemaVersion: 1,
@@ -203,6 +205,9 @@ export function buildDoctorEnvelope(options: {
 
   if (options.backend !== undefined) {
     envelope.backend = options.backend;
+  }
+  if (options.perfSmoke !== undefined) {
+    envelope.perfSmoke = options.perfSmoke;
   }
   if (options.backendError) {
     envelope.backendError = options.backendError;
@@ -215,6 +220,7 @@ export function buildDoctorEnvelope(options: {
 export function exportDoctorReportAsJson(options: {
   backend?: unknown;
   backendError?: string;
+  perfSmoke?: unknown;
 } = {}): string {
   return JSON.stringify(buildDoctorEnvelope(options), null, 2);
 }
