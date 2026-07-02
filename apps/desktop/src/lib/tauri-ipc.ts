@@ -60,6 +60,7 @@ export interface TauriCommands {
   get_pet_notification_read_state: [void, PetNotificationReadState];
   mark_pet_notification_read: [{ notificationId: string }, PetNotificationReadState];
   open_pet_notification: [{ request: PetOpenSessionRequest }, void];
+  open_tray_cockpit: [{ x?: number | null; y?: number | null }, void];
   get_telegram_settings: [void, TelegramSettings];
   save_telegram_settings: [{ settings: TelegramSettings }, void];
   get_telegram_bridge_status: [void, TelegramBridgeStatus];

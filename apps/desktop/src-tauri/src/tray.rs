@@ -3,8 +3,9 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
-    tray::{TrayIcon, TrayIconBuilder, TrayIconId},
-    AppHandle, Emitter, Manager,
+    tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent, TrayIconId},
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
 };
 
 use crate::config;
@@ -240,6 +241,14 @@ fn build_tray_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
 
 /// Tray icon ID constant for rebuilding
 const TRAY_ID: &str = "main_tray";
+pub const TRAY_COCKPIT_LABEL: &str = "tray-cockpit";
+
+const TRAY_COCKPIT_PANEL_WIDTH: f64 = 390.0;
+const TRAY_COCKPIT_PANEL_HEIGHT: f64 = 700.0;
+const TRAY_COCKPIT_SHADOW_MARGIN: f64 = 64.0;
+const TRAY_COCKPIT_WIDTH: f64 = TRAY_COCKPIT_PANEL_WIDTH + TRAY_COCKPIT_SHADOW_MARGIN * 2.0;
+const TRAY_COCKPIT_HEIGHT: f64 = TRAY_COCKPIT_PANEL_HEIGHT + TRAY_COCKPIT_SHADOW_MARGIN * 2.0;
+const TRAY_COCKPIT_MARGIN: f64 = 10.0;
 
 pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, tauri::Error> {
     let menu = build_tray_menu(app)?;
@@ -247,7 +256,20 @@ pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, tauri::Error> {
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(app.default_window_icon().unwrap().clone())
         .menu(&menu)
-        .show_menu_on_left_click(true)
+        .show_menu_on_left_click(false)
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                position,
+                ..
+            } = event
+            {
+                if let Err(error) = toggle_tray_cockpit(tray.app_handle(), position) {
+                    eprintln!("Failed to toggle tray cockpit: {}", error);
+                }
+            }
+        })
         .on_menu_event(|app, event| match event.id.as_ref() {
             "launch" => {
                 println!("Launch Claude from tray");
@@ -289,6 +311,224 @@ pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, tauri::Error> {
             _ => {}
         })
         .build(app)
+}
+
+pub fn hide_tray_cockpit(app: &AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(TRAY_COCKPIT_LABEL) {
+        window
+            .hide()
+            .map_err(|e| format!("hide tray cockpit: {e}"))?;
+    }
+    Ok(())
+}
+
+fn toggle_tray_cockpit(app: &AppHandle, anchor: PhysicalPosition<f64>) -> Result<(), String> {
+    let window = match app.get_webview_window(TRAY_COCKPIT_LABEL) {
+        Some(window) => window,
+        None => build_tray_cockpit_window(app)?,
+    };
+
+    if window.is_visible().unwrap_or(false) {
+        window
+            .hide()
+            .map_err(|e| format!("hide tray cockpit: {e}"))?;
+        return Ok(());
+    }
+
+    show_tray_cockpit_window(&window, anchor)
+}
+
+#[tauri::command]
+pub fn open_tray_cockpit(app: AppHandle, x: Option<f64>, y: Option<f64>) -> Result<(), String> {
+    let anchor = match (x, y) {
+        (Some(x), Some(y)) => PhysicalPosition { x, y },
+        _ => app
+            .cursor_position()
+            .unwrap_or(PhysicalPosition { x: 0.0, y: 0.0 }),
+    };
+    let window = match app.get_webview_window(TRAY_COCKPIT_LABEL) {
+        Some(window) => window,
+        None => build_tray_cockpit_window(&app)?,
+    };
+
+    show_tray_cockpit_window(&window, anchor)
+}
+
+fn show_tray_cockpit_window(
+    window: &WebviewWindow,
+    anchor: PhysicalPosition<f64>,
+) -> Result<(), String> {
+    configure_tray_cockpit_window(window)?;
+    window
+        .set_size(tauri::Size::Logical(tauri::LogicalSize {
+            width: TRAY_COCKPIT_WIDTH,
+            height: TRAY_COCKPIT_HEIGHT,
+        }))
+        .map_err(|e| format!("resize tray cockpit: {e}"))?;
+    position_tray_cockpit_window(window, anchor)?;
+    window
+        .show()
+        .map_err(|e| format!("show tray cockpit: {e}"))?;
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+    let _ = window.emit("tray-cockpit-refresh", ());
+    Ok(())
+}
+
+fn build_tray_cockpit_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    let builder = WebviewWindowBuilder::new(
+        app,
+        TRAY_COCKPIT_LABEL,
+        WebviewUrl::App("index.html?window=tray-cockpit".into()),
+    )
+    .title("CCEM Tray")
+    .decorations(cfg!(target_os = "macos"))
+    .resizable(false)
+    .shadow(false)
+    .always_on_top(true)
+    .visible_on_all_workspaces(true)
+    .skip_taskbar(true)
+    .inner_size(TRAY_COCKPIT_WIDTH, TRAY_COCKPIT_HEIGHT)
+    .visible(false);
+
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.transparent(true);
+
+    let window = builder
+        .build()
+        .map_err(|e| format!("build tray cockpit: {e}"))?;
+
+    #[cfg(target_os = "macos")]
+    {
+        use tauri_plugin_decorum::WebviewWindowExt;
+
+        window
+            .make_transparent()
+            .map_err(|e| format!("make tray cockpit transparent: {e}"))?;
+    }
+
+    Ok(window)
+}
+
+fn configure_tray_cockpit_window(window: &WebviewWindow) -> Result<(), String> {
+    window
+        .set_decorations(false)
+        .map_err(|e| format!("tray cockpit decorations: {e}"))?;
+    window
+        .set_always_on_top(true)
+        .map_err(|e| format!("tray cockpit always on top: {e}"))?;
+    window
+        .set_visible_on_all_workspaces(true)
+        .map_err(|e| format!("tray cockpit all workspaces: {e}"))?;
+    Ok(())
+}
+
+fn position_tray_cockpit_window(
+    window: &WebviewWindow,
+    anchor: PhysicalPosition<f64>,
+) -> Result<(), String> {
+    let monitor = window
+        .monitor_from_point(anchor.x, anchor.y)
+        .map_err(|e| format!("tray cockpit monitor: {e}"))?
+        .or(window
+            .primary_monitor()
+            .map_err(|e| format!("tray cockpit primary monitor: {e}"))?);
+
+    let Some(monitor) = monitor else {
+        return Ok(());
+    };
+
+    let position = tray_cockpit_position(
+        anchor,
+        *monitor.position(),
+        *monitor.size(),
+        monitor.scale_factor(),
+        TRAY_COCKPIT_WIDTH,
+        TRAY_COCKPIT_HEIGHT,
+    );
+
+    window
+        .set_position(tauri::Position::Logical(position))
+        .map_err(|e| format!("position tray cockpit: {e}"))?;
+    Ok(())
+}
+
+fn tray_cockpit_position(
+    anchor: PhysicalPosition<f64>,
+    monitor_position: PhysicalPosition<i32>,
+    monitor_size: PhysicalSize<u32>,
+    scale: f64,
+    window_width: f64,
+    window_height: f64,
+) -> tauri::LogicalPosition<f64> {
+    let safe_scale = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
+    let monitor_x = monitor_position.x as f64 / safe_scale;
+    let monitor_y = monitor_position.y as f64 / safe_scale;
+    let monitor_width = monitor_size.width as f64 / safe_scale;
+    let monitor_height = monitor_size.height as f64 / safe_scale;
+    let anchor_x = anchor.x / safe_scale;
+    let anchor_y = anchor.y / safe_scale;
+
+    let min_x = monitor_x + TRAY_COCKPIT_MARGIN;
+    let max_x = monitor_x + monitor_width - window_width - TRAY_COCKPIT_MARGIN;
+    let min_y = monitor_y + TRAY_COCKPIT_MARGIN;
+    let max_y = monitor_y + monitor_height - window_height - TRAY_COCKPIT_MARGIN;
+
+    let x = (anchor_x - window_width + 48.0).clamp(min_x, max_x.max(min_x));
+    let opens_down = anchor_y < monitor_y + monitor_height / 2.0;
+    let desired_y = if opens_down {
+        anchor_y + TRAY_COCKPIT_MARGIN
+    } else {
+        anchor_y - window_height - TRAY_COCKPIT_MARGIN
+    };
+    let y = desired_y.clamp(min_y, max_y.max(min_y));
+
+    tauri::LogicalPosition { x, y }
+}
+
+#[cfg(test)]
+mod tray_cockpit_tests {
+    use super::*;
+
+    #[test]
+    fn tray_cockpit_position_clamps_to_right_monitor_edge() {
+        let position = tray_cockpit_position(
+            PhysicalPosition { x: 3008.0, y: 32.0 },
+            PhysicalPosition { x: 0, y: 0 },
+            PhysicalSize {
+                width: 3024,
+                height: 1964,
+            },
+            2.0,
+            TRAY_COCKPIT_WIDTH,
+            TRAY_COCKPIT_HEIGHT,
+        );
+
+        assert_eq!(position.x, 984.0);
+        assert_eq!(position.y, 26.0);
+    }
+
+    #[test]
+    fn tray_cockpit_position_opens_above_lower_anchor() {
+        let position = tray_cockpit_position(
+            PhysicalPosition { x: 900.0, y: 1720.0 },
+            PhysicalPosition { x: 0, y: 0 },
+            PhysicalSize {
+                width: 1800,
+                height: 1800,
+            },
+            1.0,
+            TRAY_COCKPIT_WIDTH,
+            520.0,
+        );
+
+        assert_eq!(position.x, 430.0);
+        assert_eq!(position.y, 1190.0);
+    }
 }
 
 /// Rebuild the tray menu to reflect updated configuration
