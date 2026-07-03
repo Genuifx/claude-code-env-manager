@@ -1,5 +1,11 @@
 # ccem
 
+## 2.40.1
+
+### Patch Changes
+
+- Improve WeCom bot binding output relay and route handling.
+
 ## 2.40.0
 
 ### Minor Changes
