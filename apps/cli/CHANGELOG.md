@@ -1,5 +1,14 @@
 # ccem
 
+## 2.42.0
+
+### Minor Changes
+
+- Aggregate release shipping GSAP-driven motion prototypes and stabilizing WeCom bot binding progress streaming.
+
+  - **feat(desktop):** add GSAP motion prototypes
+  - **fix(desktop):** stabilize WeCom binding progress stream
+
 ## 2.41.0
 
 ### Minor Changes
