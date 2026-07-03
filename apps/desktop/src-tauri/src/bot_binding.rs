@@ -6,9 +6,11 @@ use crate::unified_runtime::UnifiedSessionManager;
 use crate::unified_session::RuntimeInput;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -73,6 +75,8 @@ pub struct BotBindingInfo {
     pub task_title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_label: Option<String>,
     #[serde(default = "default_true", skip_serializing_if = "is_false")]
     pub send_task_card: bool,
     pub correlation_marker: String,
@@ -190,7 +194,8 @@ impl BotBindingManager {
             return Err(format!("Unified session not found: {}", runtime_id));
         }
 
-        let (info, created) = self.ensure_binding_record(request, &runtime_id)?;
+        let project_label = unified_project_label(unified, &runtime_id);
+        let (info, created) = self.ensure_binding_record(request, &runtime_id, project_label)?;
 
         let channel = BotBindingChannel::new(self.clone(), info.clone());
         unified.attach_output_channel(&runtime_id, Arc::new(channel))?;
@@ -242,7 +247,8 @@ impl BotBindingManager {
         }
         native.replay_events(&runtime_id, None)?;
 
-        let (info, created) = self.ensure_binding_record(request, &runtime_id)?;
+        let project_label = native_project_label(&native, &runtime_id);
+        let (info, created) = self.ensure_binding_record(request, &runtime_id, project_label)?;
 
         if created {
             self.append_frame(
@@ -323,6 +329,32 @@ impl BotBindingManager {
                     )
             })
             .cloned()
+    }
+
+    pub(crate) fn find_bindings_for_target(
+        &self,
+        platform: RemotePlatform,
+        bot_id: Option<&str>,
+        peer_id: &str,
+    ) -> Vec<BotBindingInfo> {
+        let peer_id = peer_id.trim();
+        if peer_id.is_empty() {
+            return Vec::new();
+        }
+
+        let bot_id = normalize_optional_str(bot_id);
+        let Ok(bindings) = self.bindings.lock() else {
+            return Vec::new();
+        };
+        let mut items = bindings
+            .values()
+            .filter(|binding| {
+                binding_target_matches(binding, platform, bot_id.as_deref(), peer_id)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        items.sort_by_key(|binding| binding.connected_at);
+        items
     }
 
     pub(crate) fn mark_task_card_delivery_pending(
@@ -544,6 +576,7 @@ impl BotBindingManager {
         &self,
         request: BindSessionToBotRequest,
         runtime_id: &str,
+        project_label: Option<String>,
     ) -> Result<(BotBindingInfo, bool), String> {
         let mut request = request;
         request.runtime_id = runtime_id.to_string();
@@ -573,6 +606,7 @@ impl BotBindingManager {
             task_title: normalize_optional(request.task_title)
                 .unwrap_or_else(|| format!("CCEM session {}", short_runtime_id(runtime_id))),
             task_summary: normalize_optional(request.task_summary),
+            project_label: normalize_optional(project_label),
             send_task_card: request.send_task_card,
             correlation_marker: build_correlation_marker(&binding_id, &task_id),
             task_card_message_id: None,
@@ -796,14 +830,39 @@ fn route_marker_matches(
     quoted_task_id: Option<&str>,
     correlation_marker: Option<&str>,
 ) -> bool {
-    quoted_task_id.is_some_and(|quoted| quoted == binding.task_id.as_str())
-        || correlation_marker.is_some_and(|marker| {
-            marker == binding.correlation_marker.as_str()
-                || binding
-                    .task_card_message_id
-                    .as_deref()
-                    .is_some_and(|message_id| marker == message_id)
-        })
+    let route_id = bot_binding_route_id(binding);
+    quoted_task_id.is_some_and(|quoted| {
+        quoted == binding.task_id.as_str() || route_token_matches(quoted, &route_id)
+    }) || correlation_marker.is_some_and(|marker| {
+        marker == binding.correlation_marker.as_str()
+            || route_token_matches(marker, &route_id)
+            || binding
+                .task_card_message_id
+                .as_deref()
+                .is_some_and(|message_id| marker == message_id)
+    })
+}
+
+pub(crate) fn bot_binding_route_id(binding: &BotBindingInfo) -> String {
+    route_id_from_parts(&binding.binding_id, &binding.task_id)
+}
+
+pub(crate) fn route_id_from_parts(binding_id: &str, task_id: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(binding_id.as_bytes());
+    hasher.update(b":");
+    hasher.update(task_id.as_bytes());
+    let digest = hasher.finalize();
+    hex::encode_upper(&digest[..4])
+}
+
+fn route_token_matches(candidate: &str, route_id: &str) -> bool {
+    candidate
+        .trim()
+        .trim_start_matches('#')
+        .strip_prefix("ccem:")
+        .unwrap_or_else(|| candidate.trim().trim_start_matches('#'))
+        .eq_ignore_ascii_case(route_id)
 }
 
 fn stable_binding_id(request: &BindSessionToBotRequest) -> String {
@@ -819,6 +878,35 @@ fn stable_binding_id(request: &BindSessionToBotRequest) -> String {
         sanitize_id(&request.peer_id),
         sanitize_id(thread)
     )
+}
+
+fn unified_project_label(unified: &UnifiedSessionManager, runtime_id: &str) -> Option<String> {
+    unified
+        .list_sessions()
+        .into_iter()
+        .find(|session| session.id == runtime_id)
+        .and_then(|session| compact_project_label(&session.project_dir))
+}
+
+fn native_project_label(native: &NativeRuntimeManager, runtime_id: &str) -> Option<String> {
+    native
+        .list_sessions()
+        .into_iter()
+        .find(|session| session.runtime_id == runtime_id)
+        .and_then(|session| compact_project_label(&session.project_dir))
+}
+
+fn compact_project_label(project_dir: &str) -> Option<String> {
+    let trimmed = project_dir.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Path::new(trimmed)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+        .or_else(|| Some(trimmed.to_string()))
 }
 
 fn runtime_slug(runtime_id: &str) -> String {

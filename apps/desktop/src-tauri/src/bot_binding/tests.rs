@@ -27,6 +27,7 @@ fn test_binding_info() -> BotBindingInfo {
         bot_id: None,
         task_title: "Task".to_string(),
         task_summary: None,
+        project_label: Some("claude-code-env-manager".to_string()),
         send_task_card: true,
         correlation_marker: build_correlation_marker(&binding_id, &task_id),
         task_card_message_id: None,
@@ -60,7 +61,11 @@ fn stable_binding_id_uses_wecom_bot_id_as_thread_identity() {
 fn binding_record_normalizes_wecom_target_and_adds_delivery_metadata() {
     let manager = BotBindingManager::default();
     let (info, created) = manager
-        .ensure_binding_record(wecom_request(), "runtime-abcdef")
+        .ensure_binding_record(
+            wecom_request(),
+            "runtime-abcdef",
+            Some("claude-code-env-manager".to_string()),
+        )
         .expect("binding");
 
     assert!(created);
@@ -69,6 +74,10 @@ fn binding_record_normalizes_wecom_target_and_adds_delivery_metadata() {
     assert_eq!(info.delivery_status, BotBindingDeliveryStatus::BoundOnly);
     assert_eq!(info.task_card_message_id, None);
     assert_eq!(info.last_delivery_error, None);
+    assert_eq!(
+        info.project_label.as_deref(),
+        Some("claude-code-env-manager")
+    );
     assert!(info
         .correlation_marker
         .starts_with("ccem-bot-binding:botbind-runtime-abcdef-wecom-group-1-webot:"));
@@ -81,7 +90,11 @@ fn wecom_binding_requires_target_bot_id() {
     request.bot_id = None;
 
     let error = manager
-        .ensure_binding_record(request, "runtime-abcdef")
+        .ensure_binding_record(
+            request,
+            "runtime-abcdef",
+            Some("claude-code-env-manager".to_string()),
+        )
         .expect_err("missing bot id should fail");
 
     assert_eq!(error, "bot_id is required for WeCom bot bindings");
@@ -91,7 +104,11 @@ fn wecom_binding_requires_target_bot_id() {
 fn delivery_metadata_can_be_marked_delivered_or_failed() {
     let manager = BotBindingManager::default();
     let (info, _) = manager
-        .ensure_binding_record(wecom_request(), "runtime-abcdef")
+        .ensure_binding_record(
+            wecom_request(),
+            "runtime-abcdef",
+            Some("claude-code-env-manager".to_string()),
+        )
         .expect("binding");
 
     let pending = manager
@@ -132,7 +149,11 @@ fn persisted_binding_state_restores_delivery_route_metadata() {
     let info = {
         let manager = BotBindingManager::with_storage_path_for_test(path.clone());
         let (info, _) = manager
-            .ensure_binding_record(wecom_request(), "runtime-abcdef")
+            .ensure_binding_record(
+                wecom_request(),
+                "runtime-abcdef",
+                Some("claude-code-env-manager".to_string()),
+            )
             .expect("binding");
         manager
             .mark_task_card_delivered(&info.binding_id, "msg-123")
@@ -177,7 +198,11 @@ fn native_relay_claim_dedupes_and_can_be_released_after_restart() {
 fn route_lookup_matches_quoted_task_or_correlation_marker() {
     let manager = BotBindingManager::default();
     let (info, _) = manager
-        .ensure_binding_record(wecom_request(), "runtime-abcdef")
+        .ensure_binding_record(
+            wecom_request(),
+            "runtime-abcdef",
+            Some("claude-code-env-manager".to_string()),
+        )
         .expect("binding");
     manager
         .mark_task_card_delivered(&info.binding_id, "msg-123")
@@ -216,6 +241,29 @@ fn route_lookup_matches_quoted_task_or_correlation_marker() {
         .expect("route by delivered message id");
     assert_eq!(by_message_id.binding_id, info.binding_id);
 
+    let route_id = bot_binding_route_id(&info);
+    let by_route_id = manager
+        .find_binding_for_route(
+            RemotePlatform::Wecom,
+            Some("webot"),
+            "group-1",
+            None,
+            Some(&format!("#{route_id}")),
+        )
+        .expect("route by short id");
+    assert_eq!(by_route_id.binding_id, info.binding_id);
+
+    let by_route_prefix = manager
+        .find_binding_for_route(
+            RemotePlatform::Wecom,
+            Some("webot"),
+            "group-1",
+            None,
+            Some(&format!("ccem:{route_id}")),
+        )
+        .expect("route by ccem short id");
+    assert_eq!(by_route_prefix.binding_id, info.binding_id);
+
     assert!(manager
         .find_binding_for_route(
             RemotePlatform::Wecom,
@@ -244,7 +292,21 @@ fn inbound_prompt_carries_quoted_task_context() {
     let info = test_binding_info();
 
     let prompt = format_inbound_prompt(&info, "continue", Some("quoted-task"));
+    assert!(prompt.contains("route_id: "));
     assert!(prompt.contains("quoted_task_id: quoted-task"));
     assert!(prompt.contains("correlation_marker: ccem-bot-binding:binding:ccem-task-runtime"));
     assert!(prompt.contains("continue"));
+}
+
+#[test]
+fn task_card_exposes_short_route_id_without_internal_markers() {
+    let info = test_binding_info();
+    let card = formatting::format_task_card(&info);
+    let route_id = bot_binding_route_id(&info);
+
+    assert!(card.contains(&format!("id: {route_id}")));
+    assert!(card.contains("project: claude-code-env-manager"));
+    assert!(!card.contains("runtime_id:"));
+    assert!(!card.contains("task_id:"));
+    assert!(!card.contains("correlation_marker:"));
 }
