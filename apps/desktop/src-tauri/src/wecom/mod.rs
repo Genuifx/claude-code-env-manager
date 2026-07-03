@@ -339,13 +339,15 @@ impl WecomBridgeManager {
         &self,
         bot_id: Option<&str>,
         peer_id: &str,
+        req_id: &str,
         stream_id: &str,
         content: &str,
         finish: bool,
     ) -> Result<String, String> {
         let started_at = Instant::now();
         loop {
-            match self.try_send_stream_message(bot_id, peer_id, stream_id, content, finish) {
+            match self.try_send_stream_message(bot_id, peer_id, req_id, stream_id, content, finish)
+            {
                 Ok(message_id) => return Ok(message_id),
                 Err(error)
                     if wecom_markdown_send_error_is_retryable(&error)
@@ -363,6 +365,7 @@ impl WecomBridgeManager {
         &self,
         bot_id: Option<&str>,
         peer_id: &str,
+        req_id: &str,
         stream_id: &str,
         content: &str,
         finish: bool,
@@ -373,6 +376,7 @@ impl WecomBridgeManager {
         }
         connection.send_stream_message(
             &wecom_chatid_from_peer_id(peer_id),
+            req_id,
             stream_id,
             content,
             finish,
@@ -508,14 +512,14 @@ impl WecomConnection {
     pub fn send_stream_message(
         &self,
         chatid: &str,
+        req_id: &str,
         stream_id: &str,
         content: &str,
         finish: bool,
     ) -> Result<String, String> {
-        let req_id = generate_req_id("aibot_send_msg");
         match self.send_frame_waiting_for_ack(
-            &req_id,
-            build_active_stream_message_frame(&req_id, chatid, stream_id, content, finish),
+            req_id,
+            build_active_stream_message_frame(req_id, chatid, stream_id, content, finish),
         ) {
             Ok(()) => {}
             Err(error) if error.starts_with("WeCom send ack timed out:") => {
@@ -523,7 +527,7 @@ impl WecomConnection {
             }
             Err(error) => return Err(error),
         }
-        Ok(req_id)
+        Ok(req_id.to_string())
     }
 
     fn send_frame_waiting_for_ack(&self, req_id: &str, frame: Value) -> Result<(), String> {
@@ -1650,7 +1654,6 @@ pub fn start_bot_binding_markdown_relay(
     const POLL_MS: u64 = 750;
     const MAX_MS: u64 = 6 * 60 * 60 * 1_000;
     const TEXT_LIMIT: usize = 18_000;
-    const FALLBACK_PROGRESS_DIGEST_MS: u64 = 5_000;
 
     let binding_id = binding.binding_id.clone();
     let bot_id = binding.bot_id.clone();
@@ -1663,11 +1666,11 @@ pub fn start_bot_binding_markdown_relay(
             let mut sent_any = false;
             let mut skipping_streamed_reply = false;
             let route_id = crate::bot_binding::bot_binding_route_id(&binding);
+            let progress_req_id = generate_req_id("aibot_send_msg");
             let progress_stream_id = generate_req_id("botbind_active_stream");
             let mut progress_content = String::new();
             let mut last_progress_sent = String::new();
             let mut progress_mode = BotBindingActiveProgressMode::Stream;
-            let mut last_progress_digest_at: Option<Instant> = None;
             let mut turn_text = String::new();
 
             loop {
@@ -1741,17 +1744,18 @@ pub fn start_bot_binding_markdown_relay(
                             break;
                         }
                     }
-                    if should_finish
-                        && normal_blocks.is_empty()
-                        && next_turn_text.trim().is_empty()
-                        && next_progress_content.trim().is_empty()
-                        && !skipped_streamed_reply_finished
-                    {
+                    if bot_binding_should_emit_completion_fallback(
+                        should_finish,
+                        normal_blocks.is_empty(),
+                        &next_turn_text,
+                        &next_progress_content,
+                        progress_mode,
+                        skipped_streamed_reply_finished,
+                    ) {
                         normal_blocks.push("完成。".to_string());
                     }
 
                     let mut progress_delivered = true;
-                    let mut force_progress_digest = false;
                     if (progress_changed && next_progress_content != last_progress_sent)
                         || (should_finish && !next_progress_content.trim().is_empty())
                     {
@@ -1765,6 +1769,7 @@ pub fn start_bot_binding_markdown_relay(
                             match manager.send_stream_message(
                                 bot_id.as_deref(),
                                 &peer_id,
+                                &progress_req_id,
                                 &progress_stream_id,
                                 &payload,
                                 should_finish,
@@ -1778,51 +1783,10 @@ pub fn start_bot_binding_markdown_relay(
                                         error
                                     );
                                     if bot_binding_active_stream_error_is_unsupported(&error) {
-                                        progress_mode =
-                                            BotBindingActiveProgressMode::MarkdownDigest;
-                                        force_progress_digest = true;
+                                        progress_mode = BotBindingActiveProgressMode::Unsupported;
+                                        last_progress_sent = next_progress_content.clone();
                                     } else {
                                         progress_delivered = false;
-                                    }
-                                }
-                            }
-                        }
-                        if progress_mode == BotBindingActiveProgressMode::MarkdownDigest
-                            && progress_delivered
-                        {
-                            let should_send_digest = force_progress_digest
-                                || should_finish
-                                || last_progress_digest_at.is_none_or(|sent_at| {
-                                    sent_at.elapsed()
-                                        >= Duration::from_millis(FALLBACK_PROGRESS_DIGEST_MS)
-                                });
-                            if should_send_digest {
-                                match manager.send_markdown_message(
-                                    bot_id.as_deref(),
-                                    &peer_id,
-                                    &payload,
-                                ) {
-                                    Ok(_) => {
-                                        last_progress_sent = next_progress_content.clone();
-                                        last_progress_digest_at = Some(Instant::now());
-                                    }
-                                    Err(error) => {
-                                        eprintln!(
-                                            "WeCom bot binding progress digest warning: {}",
-                                            error
-                                        );
-                                        match bot_binding_markdown_send_outcome(&error) {
-                                            BotBindingMarkdownSendOutcome::AssumeDelivered => {
-                                                last_progress_sent = next_progress_content.clone();
-                                                last_progress_digest_at = Some(Instant::now());
-                                            }
-                                            BotBindingMarkdownSendOutcome::RetryLater => {
-                                                progress_delivered = false;
-                                            }
-                                            BotBindingMarkdownSendOutcome::Fatal => {
-                                                progress_delivered = false;
-                                            }
-                                        }
                                     }
                                 }
                             }
@@ -2172,6 +2136,22 @@ fn bot_binding_progress_payload(content: &str, finish: bool) -> String {
     }
 }
 
+fn bot_binding_should_emit_completion_fallback(
+    should_finish: bool,
+    normal_blocks_empty: bool,
+    turn_text: &str,
+    progress_content: &str,
+    progress_mode: BotBindingActiveProgressMode,
+    skipped_streamed_reply_finished: bool,
+) -> bool {
+    should_finish
+        && normal_blocks_empty
+        && turn_text.trim().is_empty()
+        && (progress_mode == BotBindingActiveProgressMode::Unsupported
+            || progress_content.trim().is_empty())
+        && !skipped_streamed_reply_finished
+}
+
 fn bot_binding_active_stream_error_is_unsupported(error: &str) -> bool {
     error.starts_with("WeCom send ack failed:")
 }
@@ -2179,7 +2159,7 @@ fn bot_binding_active_stream_error_is_unsupported(error: &str) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BotBindingActiveProgressMode {
     Stream,
-    MarkdownDigest,
+    Unsupported,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2641,6 +2621,45 @@ mod tests {
     }
 
     #[test]
+    fn active_stream_updates_keep_the_same_send_request_id() {
+        let first = build_active_stream_message_frame(
+            "aibot_send_msg_stable",
+            "chat-1",
+            "stream-1",
+            "处理中：Read 文件",
+            false,
+        );
+        let second = build_active_stream_message_frame(
+            "aibot_send_msg_stable",
+            "chat-1",
+            "stream-1",
+            "处理中：Bash 完成",
+            false,
+        );
+        let final_frame = build_active_stream_message_frame(
+            "aibot_send_msg_stable",
+            "chat-1",
+            "stream-1",
+            "中间过程已完成。",
+            true,
+        );
+
+        assert_eq!(first["headers"]["req_id"], second["headers"]["req_id"]);
+        assert_eq!(
+            second["headers"]["req_id"],
+            final_frame["headers"]["req_id"]
+        );
+        assert_eq!(
+            first["body"]["stream"]["id"],
+            second["body"]["stream"]["id"]
+        );
+        assert_eq!(
+            second["body"]["stream"]["id"],
+            final_frame["body"]["stream"]["id"]
+        );
+    }
+
+    #[test]
     fn bot_binding_progress_payload_finishes_without_transcript() {
         assert_eq!(
             bot_binding_progress_payload("处理中：Read 文件", false),
@@ -2650,6 +2669,26 @@ mod tests {
             bot_binding_progress_payload("处理中：Read 文件", true),
             "处理中：Read 文件\n\n中间过程已完成。"
         );
+    }
+
+    #[test]
+    fn unsupported_active_stream_allows_completion_fallback() {
+        assert!(bot_binding_should_emit_completion_fallback(
+            true,
+            true,
+            "",
+            "处理中：Read 文件",
+            BotBindingActiveProgressMode::Unsupported,
+            false,
+        ));
+        assert!(!bot_binding_should_emit_completion_fallback(
+            true,
+            true,
+            "",
+            "处理中：Read 文件",
+            BotBindingActiveProgressMode::Stream,
+            false,
+        ));
     }
 
     #[test]
