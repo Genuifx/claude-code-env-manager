@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent, TrayIconId},
-    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Rect, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder,
 };
 
@@ -245,10 +245,35 @@ pub const TRAY_COCKPIT_LABEL: &str = "tray-cockpit";
 
 const TRAY_COCKPIT_PANEL_WIDTH: f64 = 390.0;
 const TRAY_COCKPIT_PANEL_HEIGHT: f64 = 700.0;
-const TRAY_COCKPIT_SHADOW_MARGIN: f64 = 64.0;
-const TRAY_COCKPIT_WIDTH: f64 = TRAY_COCKPIT_PANEL_WIDTH + TRAY_COCKPIT_SHADOW_MARGIN * 2.0;
-const TRAY_COCKPIT_HEIGHT: f64 = TRAY_COCKPIT_PANEL_HEIGHT + TRAY_COCKPIT_SHADOW_MARGIN * 2.0;
+const TRAY_COCKPIT_SHADOW_MARGIN_X: f64 = 32.0;
+const TRAY_COCKPIT_SHADOW_MARGIN_TOP: f64 = 8.0;
+const TRAY_COCKPIT_SHADOW_MARGIN_BOTTOM: f64 = 48.0;
+const TRAY_COCKPIT_WIDTH: f64 = TRAY_COCKPIT_PANEL_WIDTH + TRAY_COCKPIT_SHADOW_MARGIN_X * 2.0;
+const TRAY_COCKPIT_HEIGHT: f64 =
+    TRAY_COCKPIT_PANEL_HEIGHT + TRAY_COCKPIT_SHADOW_MARGIN_TOP + TRAY_COCKPIT_SHADOW_MARGIN_BOTTOM;
 const TRAY_COCKPIT_MARGIN: f64 = 10.0;
+
+#[derive(Clone, Copy)]
+struct TrayCockpitAnchor {
+    position: PhysicalPosition<f64>,
+    rect: Option<Rect>,
+}
+
+impl TrayCockpitAnchor {
+    fn point(position: PhysicalPosition<f64>) -> Self {
+        Self {
+            position,
+            rect: None,
+        }
+    }
+
+    fn icon_rect(position: PhysicalPosition<f64>, rect: Rect) -> Self {
+        Self {
+            position,
+            rect: Some(rect),
+        }
+    }
+}
 
 pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, tauri::Error> {
     let menu = build_tray_menu(app)?;
@@ -262,10 +287,12 @@ pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, tauri::Error> {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
                 position,
+                rect,
                 ..
             } = event
             {
-                if let Err(error) = toggle_tray_cockpit(tray.app_handle(), position) {
+                let anchor = TrayCockpitAnchor::icon_rect(position, rect);
+                if let Err(error) = toggle_tray_cockpit(tray.app_handle(), anchor) {
                     eprintln!("Failed to toggle tray cockpit: {}", error);
                 }
             }
@@ -322,7 +349,7 @@ pub fn hide_tray_cockpit(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn toggle_tray_cockpit(app: &AppHandle, anchor: PhysicalPosition<f64>) -> Result<(), String> {
+fn toggle_tray_cockpit(app: &AppHandle, anchor: TrayCockpitAnchor) -> Result<(), String> {
     let window = match app.get_webview_window(TRAY_COCKPIT_LABEL) {
         Some(window) => window,
         None => build_tray_cockpit_window(app)?,
@@ -340,12 +367,13 @@ fn toggle_tray_cockpit(app: &AppHandle, anchor: PhysicalPosition<f64>) -> Result
 
 #[tauri::command]
 pub fn open_tray_cockpit(app: AppHandle, x: Option<f64>, y: Option<f64>) -> Result<(), String> {
-    let anchor = match (x, y) {
+    let position = match (x, y) {
         (Some(x), Some(y)) => PhysicalPosition { x, y },
         _ => app
             .cursor_position()
             .unwrap_or(PhysicalPosition { x: 0.0, y: 0.0 }),
     };
+    let anchor = TrayCockpitAnchor::point(position);
     let window = match app.get_webview_window(TRAY_COCKPIT_LABEL) {
         Some(window) => window,
         None => build_tray_cockpit_window(&app)?,
@@ -356,7 +384,7 @@ pub fn open_tray_cockpit(app: AppHandle, x: Option<f64>, y: Option<f64>) -> Resu
 
 fn show_tray_cockpit_window(
     window: &WebviewWindow,
-    anchor: PhysicalPosition<f64>,
+    anchor: TrayCockpitAnchor,
 ) -> Result<(), String> {
     configure_tray_cockpit_window(window)?;
     window
@@ -425,10 +453,10 @@ fn configure_tray_cockpit_window(window: &WebviewWindow) -> Result<(), String> {
 
 fn position_tray_cockpit_window(
     window: &WebviewWindow,
-    anchor: PhysicalPosition<f64>,
+    anchor: TrayCockpitAnchor,
 ) -> Result<(), String> {
     let monitor = window
-        .monitor_from_point(anchor.x, anchor.y)
+        .monitor_from_point(anchor.position.x, anchor.position.y)
         .map_err(|e| format!("tray cockpit monitor: {e}"))?
         .or(window
             .primary_monitor()
@@ -443,8 +471,6 @@ fn position_tray_cockpit_window(
         *monitor.position(),
         *monitor.size(),
         monitor.scale_factor(),
-        TRAY_COCKPIT_WIDTH,
-        TRAY_COCKPIT_HEIGHT,
     );
 
     window
@@ -454,12 +480,10 @@ fn position_tray_cockpit_window(
 }
 
 fn tray_cockpit_position(
-    anchor: PhysicalPosition<f64>,
+    anchor: TrayCockpitAnchor,
     monitor_position: PhysicalPosition<i32>,
     monitor_size: PhysicalSize<u32>,
     scale: f64,
-    window_width: f64,
-    window_height: f64,
 ) -> tauri::LogicalPosition<f64> {
     let safe_scale = if scale.is_finite() && scale > 0.0 {
         scale
@@ -470,22 +494,42 @@ fn tray_cockpit_position(
     let monitor_y = monitor_position.y as f64 / safe_scale;
     let monitor_width = monitor_size.width as f64 / safe_scale;
     let monitor_height = monitor_size.height as f64 / safe_scale;
-    let anchor_x = anchor.x / safe_scale;
-    let anchor_y = anchor.y / safe_scale;
 
-    let min_x = monitor_x + TRAY_COCKPIT_MARGIN;
-    let max_x = monitor_x + monitor_width - window_width - TRAY_COCKPIT_MARGIN;
-    let min_y = monitor_y + TRAY_COCKPIT_MARGIN;
-    let max_y = monitor_y + monitor_height - window_height - TRAY_COCKPIT_MARGIN;
+    let fallback_position = anchor.position.to_logical::<f64>(safe_scale);
+    let (anchor_left, anchor_top, anchor_width, anchor_height) = anchor
+        .rect
+        .map(|rect| {
+            let rect_position = rect.position.to_logical::<f64>(safe_scale);
+            let rect_size = rect.size.to_logical::<f64>(safe_scale);
+            (
+                rect_position.x,
+                rect_position.y,
+                rect_size.width,
+                rect_size.height,
+            )
+        })
+        .filter(|(_, _, width, height)| *width > 0.0 && *height > 0.0)
+        .unwrap_or((fallback_position.x, fallback_position.y, 0.0, 0.0));
 
-    let x = (anchor_x - window_width + 48.0).clamp(min_x, max_x.max(min_x));
-    let opens_down = anchor_y < monitor_y + monitor_height / 2.0;
-    let desired_y = if opens_down {
-        anchor_y + TRAY_COCKPIT_MARGIN
+    let anchor_center_x = anchor_left + anchor_width / 2.0;
+    let anchor_bottom = anchor_top + anchor_height;
+    let panel_min_x = monitor_x + TRAY_COCKPIT_MARGIN;
+    let panel_max_x = monitor_x + monitor_width - TRAY_COCKPIT_PANEL_WIDTH - TRAY_COCKPIT_MARGIN;
+    let panel_min_y = monitor_y + TRAY_COCKPIT_MARGIN;
+    let panel_max_y = monitor_y + monitor_height - TRAY_COCKPIT_PANEL_HEIGHT - TRAY_COCKPIT_MARGIN;
+
+    let panel_x = (anchor_center_x - TRAY_COCKPIT_PANEL_WIDTH / 2.0)
+        .clamp(panel_min_x, panel_max_x.max(panel_min_x));
+    let opens_down = anchor_bottom < monitor_y + monitor_height / 2.0;
+    let desired_panel_y = if opens_down {
+        anchor_bottom + TRAY_COCKPIT_MARGIN
     } else {
-        anchor_y - window_height - TRAY_COCKPIT_MARGIN
+        anchor_top - TRAY_COCKPIT_PANEL_HEIGHT - TRAY_COCKPIT_MARGIN
     };
-    let y = desired_y.clamp(min_y, max_y.max(min_y));
+    let panel_y = desired_panel_y.clamp(panel_min_y, panel_max_y.max(panel_min_y));
+
+    let x = panel_x - TRAY_COCKPIT_SHADOW_MARGIN_X;
+    let y = panel_y - TRAY_COCKPIT_SHADOW_MARGIN_TOP;
 
     tauri::LogicalPosition { x, y }
 }
@@ -494,40 +538,63 @@ fn tray_cockpit_position(
 mod tray_cockpit_tests {
     use super::*;
 
+    fn anchor_with_rect(
+        position: PhysicalPosition<f64>,
+        rect_position: PhysicalPosition<f64>,
+        rect_size: PhysicalSize<u32>,
+    ) -> TrayCockpitAnchor {
+        TrayCockpitAnchor::icon_rect(
+            position,
+            Rect {
+                position: rect_position.into(),
+                size: rect_size.into(),
+            },
+        )
+    }
+
     #[test]
-    fn tray_cockpit_position_clamps_to_right_monitor_edge() {
+    fn tray_cockpit_position_clamps_visible_panel_to_right_monitor_edge() {
         let position = tray_cockpit_position(
-            PhysicalPosition { x: 3008.0, y: 32.0 },
+            anchor_with_rect(
+                PhysicalPosition { x: 3008.0, y: 32.0 },
+                PhysicalPosition { x: 2976.0, y: 0.0 },
+                PhysicalSize {
+                    width: 48,
+                    height: 44,
+                },
+            ),
             PhysicalPosition { x: 0, y: 0 },
             PhysicalSize {
                 width: 3024,
                 height: 1964,
             },
             2.0,
-            TRAY_COCKPIT_WIDTH,
-            TRAY_COCKPIT_HEIGHT,
         );
 
-        assert_eq!(position.x, 984.0);
-        assert_eq!(position.y, 26.0);
+        assert_eq!(
+            position.x + TRAY_COCKPIT_SHADOW_MARGIN_X + TRAY_COCKPIT_PANEL_WIDTH,
+            1502.0
+        );
+        assert_eq!(position.y + TRAY_COCKPIT_SHADOW_MARGIN_TOP, 32.0);
     }
 
     #[test]
     fn tray_cockpit_position_opens_above_lower_anchor() {
         let position = tray_cockpit_position(
-            PhysicalPosition { x: 900.0, y: 1720.0 },
+            TrayCockpitAnchor::point(PhysicalPosition {
+                x: 900.0,
+                y: 1720.0,
+            }),
             PhysicalPosition { x: 0, y: 0 },
             PhysicalSize {
                 width: 1800,
                 height: 1800,
             },
             1.0,
-            TRAY_COCKPIT_WIDTH,
-            520.0,
         );
 
-        assert_eq!(position.x, 430.0);
-        assert_eq!(position.y, 1190.0);
+        assert_eq!(position.x + TRAY_COCKPIT_SHADOW_MARGIN_X, 705.0);
+        assert_eq!(position.y + TRAY_COCKPIT_SHADOW_MARGIN_TOP, 1010.0);
     }
 }
 

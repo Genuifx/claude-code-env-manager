@@ -509,7 +509,7 @@ function TrayCockpitContent() {
   const monthCostLabel = t('trayCockpit.monthCost').replace('{cost}', formatCost(snapshot.usage.month.cost));
 
   return (
-    <div className="tray-cockpit-window flex min-h-screen w-full items-start justify-center bg-transparent px-[64px] py-[64px] font-sans">
+    <div className="tray-cockpit-window flex min-h-screen w-full items-start justify-center bg-transparent px-[32px] pb-[48px] pt-2 font-sans">
       <section className="tray-cockpit-panel relative flex h-[700px] w-[390px] flex-col overflow-hidden rounded-[16px] bg-[var(--tray-bg)] text-[var(--tray-text-1)]">
         <header className="relative flex items-center gap-2.5 px-4 pb-1 pt-3.5">
           <div className="flex min-w-0 flex-1 items-center gap-2.5">

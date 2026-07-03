@@ -370,7 +370,7 @@
 .tray-cockpit-panel {
   box-shadow:
     0 0 0 0.5px var(--tray-hairline),
-    0 20px 60px hsl(220 30% 4% / 0.60);
+    0 14px 36px hsl(220 30% 4% / 0.48);
   transform-origin: 92% 0%;
 }
 
@@ -442,7 +442,7 @@
 .light .tray-cockpit-panel {
   box-shadow:
     0 0 0 0.5px var(--tray-hairline),
-    0 12px 40px hsl(218 35% 30% / 0.16);
+    0 12px 32px hsl(218 35% 30% / 0.14);
 }
 
 .light .tray-logo-image {

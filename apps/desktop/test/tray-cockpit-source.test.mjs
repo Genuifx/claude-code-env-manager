@@ -27,14 +27,18 @@ test('tray cockpit owns left-click while preserving the native context menu', as
   assert.match(traySource, /\.show_menu_on_left_click\(false\)/);
   assert.match(
     traySource,
-    /on_tray_icon_event[\s\S]*MouseButton::Left[\s\S]*MouseButtonState::Up[\s\S]*toggle_tray_cockpit/,
+    /on_tray_icon_event[\s\S]*MouseButton::Left[\s\S]*MouseButtonState::Up[\s\S]*rect[\s\S]*TrayCockpitAnchor::icon_rect[\s\S]*toggle_tray_cockpit/,
   );
   assert.match(traySource, /WebviewWindowBuilder::new[\s\S]*TRAY_COCKPIT_LABEL[\s\S]*index\.html\?window=tray-cockpit/);
   assert.match(traySource, /const TRAY_COCKPIT_PANEL_WIDTH: f64 = 390\.0/);
   assert.match(traySource, /const TRAY_COCKPIT_PANEL_HEIGHT: f64 = 700\.0/);
-  assert.match(traySource, /const TRAY_COCKPIT_SHADOW_MARGIN: f64 = 64\.0/);
-  assert.match(traySource, /const TRAY_COCKPIT_WIDTH: f64 = TRAY_COCKPIT_PANEL_WIDTH \+ TRAY_COCKPIT_SHADOW_MARGIN \* 2\.0/);
+  assert.match(traySource, /const TRAY_COCKPIT_SHADOW_MARGIN_X: f64 = 32\.0/);
+  assert.match(traySource, /const TRAY_COCKPIT_SHADOW_MARGIN_TOP: f64 = 8\.0/);
+  assert.match(traySource, /const TRAY_COCKPIT_SHADOW_MARGIN_BOTTOM: f64 = 48\.0/);
+  assert.match(traySource, /const TRAY_COCKPIT_WIDTH: f64 = TRAY_COCKPIT_PANEL_WIDTH \+ TRAY_COCKPIT_SHADOW_MARGIN_X \* 2\.0/);
   assert.match(traySource, /inner_size\(TRAY_COCKPIT_WIDTH, TRAY_COCKPIT_HEIGHT\)/);
+  assert.match(traySource, /panel_x - TRAY_COCKPIT_SHADOW_MARGIN_X/);
+  assert.match(traySource, /panel_y - TRAY_COCKPIT_SHADOW_MARGIN_TOP/);
   assert.match(traySource, /#\[tauri::command\][\s\S]*pub fn open_tray_cockpit/);
 
   assert.match(mainSource, /use tray::\{create_tray, TRAY_COCKPIT_LABEL\}/);
@@ -59,6 +63,7 @@ test('tray cockpit owns left-click while preserving the native context menu', as
   assert.match(cssSource, /@keyframes tray-bar-sweep/);
   assert.match(cssSource, /prefers-reduced-motion/);
   assert.match(cssSource, /tray-logo-image/);
+  assert.match(cockpitSource, /px-\[32px\] pb-\[48px\] pt-2/);
   assert.match(cockpitSource, /function StatStrip/);
   assert.match(cockpitSource, /function ActivityChart/);
   assert.match(cockpitSource, /function ProviderSplit/);
