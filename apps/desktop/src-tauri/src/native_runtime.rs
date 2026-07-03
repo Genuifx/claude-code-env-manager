@@ -1732,6 +1732,24 @@ impl NativeRuntimeManager {
                 .lock()
                 .map_err(|_| "Failed to lock native sidecar child".to_string())?
                 .take();
+            let detail = format!(
+                "Native helper generation {} did not settle after stop; removed stale helper handle.",
+                handle.generation
+            );
+            let record = handle
+                .events
+                .lock()
+                .map_err(|_| "Failed to lock native session store".to_string())?
+                .append(SessionEventPayload::Lifecycle {
+                    stage: "stop_force_killed".to_string(),
+                    detail,
+                });
+            if let Err(error) = self.event_log.append(&record) {
+                eprintln!(
+                    "Failed to persist native event {}:{}: {}",
+                    record.runtime_id, record.seq, error
+                );
+            }
             handles.remove(runtime_id);
             child_to_kill
         };
@@ -1745,14 +1763,6 @@ impl NativeRuntimeManager {
             record.is_active = false;
             record.updated_at = Utc::now();
         })?;
-        self.append_lifecycle_event(
-            runtime_id,
-            "stop_force_killed",
-            format!(
-                "Native helper generation {} did not settle after stop; removed stale helper handle.",
-                handle.generation
-            ),
-        )?;
         Ok(true)
     }
 
