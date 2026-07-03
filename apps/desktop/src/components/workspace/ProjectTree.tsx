@@ -954,13 +954,17 @@ export const ProjectTree = memo(function ProjectTree({
 
   const renderSessionRow = useCallback((
     session: HistorySessionItem,
-    options: { pinnedSection?: boolean } = {},
+    options: { pinnedSection?: boolean; activeTemporarySection?: boolean } = {},
   ) => {
     const key = toKey(session);
     const isSelected = key === selectedKey;
     const isEditing = editingKey === key;
     const isPinned = pinnedSessionKeySet.has(key);
     const pinLabel = isPinned ? t('workspace.unpinSession') : t('workspace.pinSession');
+    // activeTemporarySection is intentionally a no-op visually: session rows
+    // share one vocabulary across sections. The option remains in the type so
+    // callers can mark intent without reintroducing a side-stripe / nested-card
+    // treatment. Do NOT branch on it for chrome, padding, or selected state.
     const rowChrome = options.pinnedSection ? 'mx-0' : 'mx-1';
     const rowPadding = options.pinnedSection ? 'pl-2 pr-2' : 'pl-9 pr-2';
     const editPadding = options.pinnedSection ? 'pl-2 pr-2' : 'pl-9 pr-3';
@@ -1074,10 +1078,10 @@ export const ProjectTree = memo(function ProjectTree({
               </>
             )}
           </span>
-          <span className="min-w-0 flex-1 truncate text-sm leading-tight font-medium">
+          <span className="min-w-0 flex-1 truncate text-sm font-medium leading-tight">
             {getHistorySessionDisplay(session, t('history.untitledSession'))}
           </span>
-          <span className="inline-flex w-10 shrink-0 items-center justify-end gap-1.5 text-[10px] tabular-nums transition-opacity duration-150 group-hover/session:opacity-0">
+          <span className="inline-flex w-10 shrink-0 items-center justify-end gap-1.5 whitespace-nowrap text-[10px] tabular-nums transition-opacity duration-150 group-hover/session:opacity-0">
             {freshDotKeys.has(key) ? (
               <span className="relative inline-flex h-3.5 w-5 shrink-0 items-center justify-center">
                 <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-amber-500/25 opacity-75" />
