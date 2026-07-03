@@ -1,5 +1,11 @@
 # ccem
 
+## 2.41.0
+
+### Minor Changes
+
+- Stabilize live workspace transcript rendering by keeping streaming message and tool rows eagerly painted, preventing browser estimated-height corrections from making active sessions flicker or jump.
+
 ## 2.40.1
 
 ### Patch Changes
