@@ -4911,7 +4911,7 @@ fn main() {
             if window.label() == TRAY_COCKPIT_LABEL {
                 if let WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
-                    if let Err(error) = tray::hide_tray_cockpit(&window.app_handle()) {
+                    if let Err(error) = tray::hide_tray_cockpit(window.app_handle()) {
                         eprintln!("Tray cockpit close warning: {}", error);
                     }
                 }
