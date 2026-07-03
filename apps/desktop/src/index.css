@@ -352,19 +352,8 @@
   --ease-accelerate: cubic-bezier(0.4, 0.0, 1.0, 1.0);
 }
 
-@keyframes tray-cockpit-enter {
-  from {
-    opacity: 0;
-    transform: translateY(-6px) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
 .tray-cockpit-window {
-  animation: tray-cockpit-enter var(--tray-duration) var(--tray-ease) both;
+  will-change: transform, opacity;
 }
 
 .tray-cockpit-panel {
@@ -372,17 +361,12 @@
     0 0 0 0.5px var(--tray-hairline),
     0 14px 36px hsl(220 30% 4% / 0.48);
   transform-origin: 92% 0%;
+  will-change: transform, opacity;
 }
 
-@keyframes tray-reveal {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+.tray-cockpit-body > *,
+.tray-cockpit-panel > footer {
+  will-change: transform, opacity;
 }
 
 .tray-logo-ring {
@@ -396,44 +380,35 @@
   filter: drop-shadow(0 1px 1.5px hsl(220 30% 4% / 0.18));
 }
 
-@keyframes tray-chart-draw {
-  from { stroke-dashoffset: 1; }
-  to { stroke-dashoffset: 0; }
-}
-
-@keyframes tray-dot-rise {
-  from { opacity: 0; }
-  to { opacity: 1; }
+.tray-chart-area {
+  opacity: 0;
 }
 
 .tray-chart-line {
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
-  animation: tray-chart-draw 420ms 80ms var(--tray-ease) both;
 }
 
 .tray-chart-dot {
-  animation: tray-dot-rise var(--tray-duration) 420ms var(--tray-ease) both;
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
 }
 
-@keyframes tray-bar-sweep {
-  from { transform: scaleX(0); }
-  to { transform: scaleX(1); }
+.tray-chart-cursor,
+.tray-chart-tooltip {
+  will-change: transform, opacity;
+}
+
+.tray-chart-hitbox {
+  cursor: crosshair;
+  touch-action: none;
 }
 
 .tray-provider-bar {
   transform-origin: left center;
-  animation: tray-bar-sweep 420ms 120ms var(--tray-ease) both;
+  will-change: transform;
 }
-
-.tray-dock-button {
-  animation: tray-reveal 220ms var(--tray-ease) both;
-}
-
-.tray-dock-button:nth-child(1) { animation-delay: 60ms; }
-.tray-dock-button:nth-child(2) { animation-delay: 80ms; }
-.tray-dock-button:nth-child(3) { animation-delay: 100ms; }
-.tray-dock-button:nth-child(4) { animation-delay: 120ms; }
 
 .tray-dock-button:focus-visible {
   outline: none;
@@ -452,13 +427,15 @@
 @media (prefers-reduced-motion: reduce) {
   .tray-cockpit-window,
   .tray-logo-ring,
+  .tray-chart-area,
   .tray-chart-line,
   .tray-chart-dot,
+  .tray-chart-cursor,
+  .tray-chart-tooltip,
   .tray-provider-bar,
   .tray-dock-button {
-    animation-duration: 1ms;
-    animation-iteration-count: 1;
-    animation-delay: 0ms;
+    animation: none !important;
+    transition-duration: 1ms !important;
   }
 }
 

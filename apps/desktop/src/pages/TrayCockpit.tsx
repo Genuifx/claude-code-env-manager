@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { emit, listen } from '@tauri-apps/api/event';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { gsap } from 'gsap';
+import { useGSAP } from '@gsap/react';
 import {
   Activity,
   Bot,
@@ -21,6 +23,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import type { CronTask, DesktopSettings, PlatformCapabilities, TelegramBridgeStatus } from '@/lib/tauri-ipc';
 import type { UsageStats } from '@/types/analytics';
 import { cn, formatTokens } from '@/lib/utils';
+
+gsap.registerPlugin(useGSAP);
 
 interface TraySession {
   id: string;
@@ -54,6 +58,16 @@ interface TraySnapshot {
   source: 'live' | 'fallback';
   loadedAt: number;
 }
+
+interface ChartPoint {
+  x: number;
+  y: number;
+  value: number;
+  index: number;
+}
+
+type QuickTween = (value: number) => void;
+type ChartHoverTarget = HTMLDivElement | SVGGElement;
 
 const REFRESH_INTERVAL_MS = 7000;
 
@@ -240,17 +254,22 @@ function buildHourlySeries(usage: UsageStats): number[] {
   return [4, 9, 7, 15, 13, 26, 21, 31, 28, 37, 34, 43].map((value) => value * 1000);
 }
 
-function chartPath(values: number[]): string {
+function chartPoints(values: number[]): ChartPoint[] {
   const width = 320;
   const height = 88;
   const max = Math.max(...values, 1);
   const step = width / Math.max(values.length - 1, 1);
-  return values
-    .map((value, index) => {
-      const x = index * step;
-      const y = height - (value / max) * (height - 8) - 4;
-      return `${index === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
-    })
+  return values.map((value, index) => ({
+    x: index * step,
+    y: height - (value / max) * (height - 8) - 4,
+    value,
+    index,
+  }));
+}
+
+function chartPath(points: ChartPoint[]): string {
+  return points
+    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`)
     .join(' ');
 }
 
@@ -388,6 +407,7 @@ async function showMainTab(tab: string) {
 
 function TrayCockpitContent() {
   const { t } = useLocale();
+  const cockpitRef = useRef<HTMLDivElement>(null);
   const [snapshot, setSnapshot] = useState<TraySnapshot>(INITIAL_SNAPSHOT);
   const [refreshing, setRefreshing] = useState(false);
   const [launching, setLaunching] = useState(false);
@@ -448,13 +468,10 @@ function TrayCockpitContent() {
   const visibleSessions = snapshot.sessions.length > 0 ? snapshot.sessions.slice(0, 3) : [];
   const visibleCronTasks = snapshot.cronTasks.filter((task) => task.enabled).slice(0, 3);
   const chartValues = useMemo(() => buildHourlySeries(snapshot.usage), [snapshot.usage]);
-  const path = useMemo(() => chartPath(chartValues), [chartValues]);
+  const points = useMemo(() => chartPoints(chartValues), [chartValues]);
+  const path = useMemo(() => chartPath(points), [points]);
   const providers = useMemo(() => providerBreakdown(snapshot.sessions), [snapshot.sessions]);
   const todayTokens = usageTokenTotal(snapshot.usage.today);
-  const lastPoint = chartValues[chartValues.length - 1] ?? 0;
-  const maxValue = Math.max(...chartValues, 1);
-  const lastX = 320;
-  const lastY = 88 - (lastPoint / maxValue) * (88 - 8) - 4;
 
   const healthItems = useMemo(() => [
     {
@@ -487,6 +504,47 @@ function TrayCockpitContent() {
     },
   ], [snapshot, visibleCronTasks.length, t]);
 
+  useGSAP(() => {
+    const mm = gsap.matchMedia();
+
+    mm.add('(prefers-reduced-motion: reduce)', () => {
+      gsap.set(
+        '.tray-cockpit-panel, .tray-cockpit-panel > header, .tray-cockpit-body > *, .tray-cockpit-panel > footer, .tray-provider-bar',
+        { autoAlpha: 1, y: 0, scale: 1, scaleX: 1 },
+      );
+    });
+
+    mm.add('(prefers-reduced-motion: no-preference)', () => {
+      const tl = gsap.timeline({ defaults: { ease: 'power3.out' } });
+
+      tl.fromTo(
+        '.tray-cockpit-panel',
+        { autoAlpha: 0, y: -8, scale: 0.985 },
+        { autoAlpha: 1, y: 0, scale: 1, duration: 0.22, clearProps: 'transform,opacity,visibility' },
+      )
+        .fromTo(
+          '.tray-cockpit-panel > header, .tray-cockpit-body > *, .tray-cockpit-panel > footer',
+          { autoAlpha: 0, y: 8 },
+          {
+            autoAlpha: 1,
+            y: 0,
+            duration: 0.28,
+            stagger: 0.035,
+            clearProps: 'transform,opacity,visibility',
+          },
+          '<0.05',
+        )
+        .fromTo(
+          '.tray-provider-bar',
+          { scaleX: 0 },
+          { scaleX: 1, duration: 0.34, stagger: 0.04, clearProps: 'transform' },
+          '<0.08',
+        );
+    });
+
+    return () => mm.revert();
+  }, { scope: cockpitRef });
+
   const handleLaunch = async () => {
     setLaunching(true);
     try {
@@ -509,7 +567,7 @@ function TrayCockpitContent() {
   const monthCostLabel = t('trayCockpit.monthCost').replace('{cost}', formatCost(snapshot.usage.month.cost));
 
   return (
-    <div className="tray-cockpit-window flex min-h-screen w-full items-start justify-center bg-transparent px-[32px] pb-[48px] pt-2 font-sans">
+    <div ref={cockpitRef} className="tray-cockpit-window flex min-h-screen w-full items-start justify-center bg-transparent px-[32px] pb-[48px] pt-2 font-sans">
       <section className="tray-cockpit-panel relative flex h-[700px] w-[390px] flex-col overflow-hidden rounded-[16px] bg-[var(--tray-bg)] text-[var(--tray-text-1)]">
         <header className="relative flex items-center gap-2.5 px-4 pb-1 pt-3.5">
           <div className="flex min-w-0 flex-1 items-center gap-2.5">
@@ -544,7 +602,7 @@ function TrayCockpitContent() {
           </button>
         </header>
 
-        <div className="relative flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pb-2 pt-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="tray-cockpit-body relative flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pb-2 pt-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <StatStrip
             items={[
               { label: t('trayCockpit.env'), value: snapshot.currentEnv, icon: <Compass className="h-3 w-3" /> },
@@ -567,7 +625,7 @@ function TrayCockpitContent() {
             />
           </div>
 
-          <ActivityChart path={path} label={t('trayCockpit.activity')} lastX={lastX} lastY={lastY} />
+          <ActivityChart points={points} path={path} label={t('trayCockpit.activity')} />
 
           <ProviderSplit providers={providers} label={t('trayCockpit.providerSplit')} caption={t('trayCockpit.sessions')} />
 
@@ -692,18 +750,141 @@ function MetricTile({
 }
 
 function ActivityChart({
+  points,
   path,
   label,
-  lastX,
-  lastY,
 }: {
+  points: ChartPoint[];
   path: string;
   label: string;
-  lastX: number;
-  lastY: number;
 }) {
+  const chartRef = useRef<HTMLDivElement>(null);
+  const cursorLineRef = useRef<SVGGElement>(null);
+  const cursorDotRef = useRef<SVGGElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const cursorLineXTo = useRef<QuickTween | null>(null);
+  const cursorDotXTo = useRef<QuickTween | null>(null);
+  const cursorDotYTo = useRef<QuickTween | null>(null);
+  const tooltipXTo = useRef<QuickTween | null>(null);
+  const tooltipYTo = useRef<QuickTween | null>(null);
+  const [hovered, setHovered] = useState<ChartPoint | null>(null);
+  const lastPoint = points[points.length - 1] ?? { x: 320, y: 84, value: 0, index: 0 };
+
+  useGSAP(() => {
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const quickDuration = reducedMotion ? 0 : 0.16;
+
+    if (cursorLineRef.current) {
+      gsap.set(cursorLineRef.current, { x: lastPoint.x, autoAlpha: 0 });
+      cursorLineXTo.current = gsap.quickTo(cursorLineRef.current, 'x', { duration: quickDuration, ease: 'power3.out' });
+    }
+    if (cursorDotRef.current) {
+      gsap.set(cursorDotRef.current, { x: lastPoint.x, y: lastPoint.y, autoAlpha: 0 });
+      cursorDotXTo.current = gsap.quickTo(cursorDotRef.current, 'x', { duration: quickDuration, ease: 'power3.out' });
+      cursorDotYTo.current = gsap.quickTo(cursorDotRef.current, 'y', { duration: quickDuration, ease: 'power3.out' });
+    }
+    if (tooltipRef.current) {
+      gsap.set(tooltipRef.current, { autoAlpha: 0, x: 0, y: 0 });
+      tooltipXTo.current = gsap.quickTo(tooltipRef.current, 'x', { duration: quickDuration, ease: 'power3.out' });
+      tooltipYTo.current = gsap.quickTo(tooltipRef.current, 'y', { duration: quickDuration, ease: 'power3.out' });
+    }
+
+    if (reducedMotion) {
+      gsap.set('.tray-chart-area, .tray-chart-line, .tray-chart-dot', {
+        autoAlpha: 1,
+        scale: 1,
+        strokeDashoffset: 0,
+      });
+      return () => {
+        cursorLineXTo.current = null;
+        cursorDotXTo.current = null;
+        cursorDotYTo.current = null;
+        tooltipXTo.current = null;
+        tooltipYTo.current = null;
+      };
+    }
+
+    const tl = gsap.timeline({ defaults: { ease: 'power2.out' } });
+    tl.fromTo('.tray-chart-area', { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.24 }, 0)
+      .fromTo('.tray-chart-line', { strokeDashoffset: 1 }, { strokeDashoffset: 0, duration: 0.56 }, 0.04)
+      .fromTo(
+        '.tray-chart-dot',
+        { autoAlpha: 0, scale: 0.65, transformOrigin: 'center center' },
+        { autoAlpha: 1, scale: 1, duration: 0.24 },
+        0.38,
+      );
+
+    return () => {
+      cursorLineXTo.current = null;
+      cursorDotXTo.current = null;
+      cursorDotYTo.current = null;
+      tooltipXTo.current = null;
+      tooltipYTo.current = null;
+    };
+  }, { scope: chartRef, dependencies: [path], revertOnUpdate: true });
+
+  const updateHoverPoint = useCallback((event: PointerEvent<SVGRectElement>) => {
+    if (points.length === 0) {
+      return null;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const chartX = Math.min(320, Math.max(0, ((event.clientX - rect.left) / rect.width) * 320));
+    const point = points.reduce((best, candidate) => (
+      Math.abs(candidate.x - chartX) < Math.abs(best.x - chartX) ? candidate : best
+    ), points[0]);
+    const tooltipWidth = 92;
+    const tooltipHeight = 32;
+    const tooltipX = Math.min(
+      Math.max(0, rect.width - tooltipWidth),
+      Math.max(0, (point.x / 320) * rect.width - tooltipWidth / 2),
+    );
+    const tooltipY = Math.min(
+      Math.max(0, rect.height - tooltipHeight),
+      Math.max(0, (point.y / 88) * rect.height - tooltipHeight - 4),
+    );
+
+    setHovered((previous) => (previous?.index === point.index ? previous : point));
+    cursorLineXTo.current?.(point.x);
+    cursorDotXTo.current?.(point.x);
+    cursorDotYTo.current?.(point.y);
+    tooltipXTo.current?.(tooltipX);
+    tooltipYTo.current?.(tooltipY);
+
+    return point;
+  }, [points]);
+
+  const showHover = useCallback((event: PointerEvent<SVGRectElement>) => {
+    updateHoverPoint(event);
+    const targets = [cursorLineRef.current, cursorDotRef.current, tooltipRef.current]
+      .filter((target): target is ChartHoverTarget => Boolean(target));
+    gsap.to(targets, {
+      autoAlpha: 1,
+      duration: 0.12,
+      ease: 'power2.out',
+      overwrite: 'auto',
+    });
+  }, [updateHoverPoint]);
+
+  const moveHover = useCallback((event: PointerEvent<SVGRectElement>) => {
+    updateHoverPoint(event);
+  }, [updateHoverPoint]);
+
+  const hideHover = useCallback(() => {
+    setHovered(null);
+    const targets = [cursorLineRef.current, cursorDotRef.current, tooltipRef.current]
+      .filter((target): target is ChartHoverTarget => Boolean(target));
+    gsap.to(targets, {
+      autoAlpha: 0,
+      duration: 0.14,
+      ease: 'power2.out',
+      overwrite: 'auto',
+    });
+  }, []);
+  const tooltipPoint = hovered ?? lastPoint;
+
   return (
-    <div className="rounded-[12px] bg-[var(--tray-surface-2)] px-3.5 pb-2 pt-3">
+    <div ref={chartRef} className="tray-chart-card rounded-[12px] bg-[var(--tray-surface-2)] px-3.5 pb-2 pt-3">
       <div className="mb-1 flex items-center justify-between">
         <div className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--tray-text-2)]">
           <Activity className="h-3 w-3 text-[var(--tray-accent)]" />
@@ -713,34 +894,77 @@ function ActivityChart({
           12h
         </span>
       </div>
-      <svg viewBox="0 0 320 88" className="h-[88px] w-full overflow-visible" aria-hidden="true">
-        <defs>
-          <linearGradient id="tray-cockpit-area" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="var(--tray-accent)" stopOpacity="0.18" />
-            <stop offset="100%" stopColor="var(--tray-accent)" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <path d={`${path} L ${lastX.toFixed(1)} 88 L 0 88 Z`} fill="url(#tray-cockpit-area)" />
-        <path
-          className="tray-chart-line"
-          d={path}
-          fill="none"
-          pathLength={1}
-          stroke="var(--tray-accent)"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="1.75"
-        />
-        <circle
-          className="tray-chart-dot"
-          cx={lastX}
-          cy={lastY}
-          r={2.5}
-          fill="var(--tray-bg)"
-          stroke="var(--tray-accent)"
-          strokeWidth="1.5"
-        />
-      </svg>
+      <div className="relative h-[88px]">
+        <div
+          ref={tooltipRef}
+          className="tray-chart-tooltip pointer-events-none absolute left-0 top-0 z-10 flex w-[92px] flex-col rounded-[9px] bg-[var(--tray-bg)] px-2 py-1 opacity-0 shadow-[0_8px_24px_hsl(220_30%_4%_/_0.2)] ring-1 ring-[var(--tray-hairline)]"
+          aria-hidden="true"
+        >
+          <span className="text-[9.5px] font-medium uppercase leading-none tracking-normal text-[var(--tray-text-3)]">
+            {`${tooltipPoint.index + 1}/12`}
+          </span>
+          <span className="mt-0.5 truncate text-[11px] font-semibold leading-none tabular-nums text-[var(--tray-text-1)]">
+            {formatTokens(tooltipPoint.value)}
+          </span>
+        </div>
+        <svg viewBox="0 0 320 88" className="h-[88px] w-full overflow-visible" aria-hidden="true">
+          <defs>
+            <linearGradient id="tray-cockpit-area" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor="var(--tray-accent)" stopOpacity="0.18" />
+              <stop offset="100%" stopColor="var(--tray-accent)" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path className="tray-chart-area" d={`${path} L ${lastPoint.x.toFixed(1)} 88 L 0 88 Z`} fill="url(#tray-cockpit-area)" />
+          <path
+            className="tray-chart-line"
+            d={path}
+            fill="none"
+            pathLength={1}
+            stroke="var(--tray-accent)"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="1.75"
+          />
+          <circle
+            className="tray-chart-dot"
+            cx={lastPoint.x}
+            cy={lastPoint.y}
+            r={2.5}
+            fill="var(--tray-bg)"
+            stroke="var(--tray-accent)"
+            strokeWidth="1.5"
+          />
+          <g ref={cursorLineRef} className="tray-chart-cursor" opacity={0}>
+            <line
+              y1="0"
+              y2="88"
+              stroke="var(--tray-accent)"
+              strokeDasharray="3 4"
+              strokeOpacity="0.34"
+              strokeWidth="1"
+            />
+          </g>
+          <g ref={cursorDotRef} className="tray-chart-cursor" opacity={0}>
+            <circle
+              r={3.8}
+              fill="var(--tray-bg)"
+              stroke="var(--tray-accent)"
+              strokeWidth="1.6"
+            />
+          </g>
+          <rect
+            className="tray-chart-hitbox"
+            x="0"
+            y="0"
+            width="320"
+            height="88"
+            fill="transparent"
+            onPointerEnter={showHover}
+            onPointerMove={moveHover}
+            onPointerLeave={hideHover}
+          />
+        </svg>
+      </div>
     </div>
   );
 }

@@ -10,7 +10,7 @@ const sourceDir = path.join(desktopDir, 'src');
 const tauriSrcDir = path.join(desktopDir, 'src-tauri', 'src');
 
 test('tray cockpit owns left-click while preserving the native context menu', async () => {
-  const [traySource, mainSource, entrySource, appSource, capabilitySource, cssSource, cockpitSource] =
+  const [traySource, mainSource, entrySource, appSource, capabilitySource, cssSource, cockpitSource, packageSource] =
     await Promise.all([
       fs.readFile(path.join(tauriSrcDir, 'tray.rs'), 'utf8'),
       fs.readFile(path.join(tauriSrcDir, 'main.rs'), 'utf8'),
@@ -19,9 +19,11 @@ test('tray cockpit owns left-click while preserving the native context menu', as
       fs.readFile(path.join(desktopDir, 'src-tauri', 'capabilities', 'default.json'), 'utf8'),
       fs.readFile(path.join(sourceDir, 'index.css'), 'utf8'),
       fs.readFile(path.join(sourceDir, 'pages', 'TrayCockpit.tsx'), 'utf8'),
+      fs.readFile(path.join(desktopDir, 'package.json'), 'utf8'),
     ]);
 
   const capabilities = JSON.parse(capabilitySource);
+  const packageJson = JSON.parse(packageSource);
 
   assert.match(traySource, /pub const TRAY_COCKPIT_LABEL: &str = "tray-cockpit"/);
   assert.match(traySource, /\.show_menu_on_left_click\(false\)/);
@@ -58,12 +60,25 @@ test('tray cockpit owns left-click while preserving the native context menu', as
   }
 
   assert.match(cssSource, /html\[data-window='tray-cockpit'\]/);
-  assert.match(cssSource, /@keyframes tray-cockpit-enter/);
-  assert.match(cssSource, /@keyframes tray-chart-draw/);
-  assert.match(cssSource, /@keyframes tray-bar-sweep/);
   assert.match(cssSource, /prefers-reduced-motion/);
   assert.match(cssSource, /tray-logo-image/);
+  assert.match(cssSource, /tray-chart-hitbox/);
+  assert.match(cssSource, /tray-chart-tooltip/);
+  assert.match(cssSource, /tray-chart-cursor/);
+  assert.match(cssSource, /stroke-dashoffset: 1/);
   assert.match(cockpitSource, /px-\[32px\] pb-\[48px\] pt-2/);
+  assert.equal(packageJson.dependencies.gsap, '^3.15.0');
+  assert.equal(packageJson.dependencies['@gsap/react'], '^2.1.2');
+  assert.match(cockpitSource, /import \{ gsap \} from 'gsap'/);
+  assert.match(cockpitSource, /import \{ useGSAP \} from '@gsap\/react'/);
+  assert.match(cockpitSource, /gsap\.registerPlugin\(useGSAP\)/);
+  assert.match(cockpitSource, /gsap\.timeline/);
+  assert.match(cockpitSource, /gsap\.quickTo/);
+  assert.match(cockpitSource, /chartPoints/);
+  assert.match(cockpitSource, /onPointerMove=\{moveHover\}/);
+  assert.match(cockpitSource, /tray-chart-hitbox/);
+  assert.match(cockpitSource, /tray-chart-tooltip/);
+  assert.match(cockpitSource, /tray-chart-cursor/);
   assert.match(cockpitSource, /function StatStrip/);
   assert.match(cockpitSource, /function ActivityChart/);
   assert.match(cockpitSource, /function ProviderSplit/);
