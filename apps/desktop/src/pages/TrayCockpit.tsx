@@ -568,24 +568,24 @@ function TrayCockpitContent() {
 
   return (
     <div ref={cockpitRef} className="tray-cockpit-window flex min-h-screen w-full items-start justify-center bg-transparent px-[32px] pb-[48px] pt-2 font-sans">
-      <section className="tray-cockpit-panel relative flex h-[700px] w-[390px] flex-col overflow-hidden rounded-[16px] bg-[var(--tray-bg)] text-[var(--tray-text-1)]">
-        <header className="relative flex items-center gap-2.5 px-4 pb-1 pt-3.5">
+      <section className="tray-cockpit-panel relative flex h-[700px] w-[390px] flex-col overflow-hidden rounded-[14px] text-[var(--tray-text-1)]">
+        <header className="relative flex items-center gap-2.5 px-4 pb-2 pt-3.5">
           <div className="flex min-w-0 flex-1 items-center gap-2.5">
             <TrayLogo />
             <div className="min-w-0 leading-none">
               <div className="flex items-center gap-1.5">
-                <h1 className="truncate text-[15px] font-semibold tracking-normal text-[var(--tray-text-1)]">
+                <h1 className="truncate text-[14.5px] font-semibold tracking-[-0.01em] text-[var(--tray-text-1)]">
                   {t('trayCockpit.title')}
                 </h1>
                 <span
                   className={cn(
-                    'inline-block h-1.5 w-1.5 shrink-0 rounded-full',
+                    'inline-block h-1.5 w-1.5 shrink-0 rounded-full ring-2 ring-[var(--tray-bg-solid)]',
                     snapshot.source === 'live' ? 'bg-[var(--tray-accent)]' : 'bg-[var(--tray-text-3)]',
                   )}
                   aria-hidden="true"
                 />
               </div>
-              <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-[var(--tray-text-3)]">
+              <div className="mt-1 flex min-w-0 items-center gap-1 text-[10.5px] text-[var(--tray-text-3)]">
                 <span className="truncate">{liveLabel}</span>
                 <span aria-hidden="true">·</span>
                 <span className="tabular-nums">{updatedLabel}</span>
@@ -596,13 +596,13 @@ function TrayCockpitContent() {
             type="button"
             aria-label={t('trayCockpit.refresh')}
             onClick={() => void refresh()}
-            className="tray-icon-button grid h-7 w-7 shrink-0 place-items-center rounded-[10px] text-[var(--tray-text-3)] transition-[background-color,color] duration-[var(--tray-duration)] ease-[var(--tray-ease)] hover:bg-[var(--tray-surface-2)] hover:text-[var(--tray-text-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            className="tray-icon-button grid h-7 w-7 shrink-0 place-items-center rounded-[10px] text-[var(--tray-text-3)] hover:bg-[var(--tray-surface-3)] hover:text-[var(--tray-text-1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
           </button>
         </header>
 
-        <div className="tray-cockpit-body relative flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pb-2 pt-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="tray-cockpit-body relative flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-3 pb-2 pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <StatStrip
             items={[
               { label: t('trayCockpit.env'), value: snapshot.currentEnv, icon: <Compass className="h-3 w-3" /> },
@@ -611,7 +611,7 @@ function TrayCockpitContent() {
             ]}
           />
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2">
             <MetricTile
               label={t('trayCockpit.tokensToday')}
               value={formatTokens(todayTokens)}
@@ -629,7 +629,7 @@ function TrayCockpitContent() {
 
           <ProviderSplit providers={providers} label={t('trayCockpit.providerSplit')} caption={t('trayCockpit.sessions')} />
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2">
             <InfoColumn
               title={t('trayCockpit.activeProjects')}
               count={visibleSessions.length}
@@ -638,12 +638,12 @@ function TrayCockpitContent() {
               {visibleSessions.slice(0, 2).map((session) => {
                 const tone = statusTone(session.status);
                 return (
-                  <div key={session.id} className="flex min-w-0 items-center gap-2 py-1">
+                  <div key={session.id} className="flex min-w-0 items-center gap-2 py-[3px]">
                     <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', statusDotClass(tone))} aria-hidden="true" />
                     <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-[var(--tray-text-1)]">
                       {getProjectName(session.workingDir)}
                     </span>
-                    <span className={cn('shrink-0 rounded-[8px] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-normal', statusBadgeClass(tone))}>
+                    <span className={cn('shrink-0 rounded-full px-1.5 py-[1px] text-[9px] font-bold uppercase tracking-[0.04em]', statusBadgeClass(tone))}>
                       {session.status}
                     </span>
                   </div>
@@ -657,7 +657,7 @@ function TrayCockpitContent() {
               empty={t('trayCockpit.noCron')}
             >
               {visibleCronTasks.slice(0, 2).map((task) => (
-                <div key={task.id} className="flex min-w-0 items-center gap-2 py-1">
+                <div key={task.id} className="flex min-w-0 items-center gap-2 py-[3px]">
                   <Clock3 className="h-3 w-3 shrink-0 text-[var(--tray-text-3)]" aria-hidden="true" />
                   <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-[var(--tray-text-1)]">{task.name}</span>
                   <span className="shrink-0 font-mono text-[10px] tabular-nums text-[var(--tray-text-3)]">
@@ -671,7 +671,7 @@ function TrayCockpitContent() {
           <HealthRow items={healthItems} />
         </div>
 
-        <footer className="flex items-center gap-1 border-t border-[var(--tray-hairline)] bg-transparent px-2 py-1.5">
+        <footer className="flex items-center gap-1 border-t border-[var(--tray-hairline)] bg-[var(--tray-surface-1)] px-2 py-1.5">
           <DockButton icon={<Play className="h-3.5 w-3.5" />} label={t('trayCockpit.launch')} busy={launching} onClick={handleLaunch} primary />
           <DockButton icon={<Workflow className="h-3.5 w-3.5" />} label={t('trayCockpit.workspace')} onClick={() => void showMainTab('workspace')} />
           <DockButton icon={<Bot className="h-3.5 w-3.5" />} label={t('trayCockpit.sessionsPage')} onClick={() => void showMainTab('sessions')} />
@@ -698,20 +698,20 @@ function TrayLogo() {
 
 function StatStrip({ items }: { items: Array<{ label: string; value: string; icon: ReactNode }> }) {
   return (
-    <div className="grid grid-cols-3 rounded-[12px] bg-[var(--tray-surface-2)] px-3.5 py-2.5">
+    <div className="flex items-stretch rounded-[12px] bg-[var(--tray-surface-2)] px-1 py-2">
       {items.map((item, index) => (
         <div
           key={item.label}
           className={cn(
-            'flex min-w-0 flex-col gap-0.5',
-            index > 0 && 'pl-3.5',
+            'relative flex min-w-0 flex-1 flex-col gap-1 px-3',
+            index > 0 && 'before:absolute before:left-0 before:top-1/2 before:h-3/5 before:w-px before:-translate-y-1/2 before:bg-[var(--tray-divider)]',
           )}
         >
-          <div className="flex items-center gap-1 text-[10.5px] font-medium uppercase tracking-normal text-[var(--tray-text-3)]">
-            <span className="text-[var(--tray-text-3)]">{item.icon}</span>
+          <div className="flex items-center gap-1 text-[9.5px] font-semibold uppercase tracking-[0.06em] text-[var(--tray-text-3)]">
+            <span className="[&>svg]:h-[10px] [&>svg]:w-[10px] [&>svg]:stroke-[1.75]">{item.icon}</span>
             <span className="truncate">{item.label}</span>
           </div>
-          <div className="truncate text-[12.5px] font-medium leading-tight text-[var(--tray-text-1)] tabular-nums">
+          <div className="truncate text-[13px] font-semibold leading-none tracking-[-0.01em] text-[var(--tray-text-1)] tabular-nums">
             {item.value}
           </div>
         </div>
@@ -732,19 +732,30 @@ function MetricTile({
   accent?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-1 rounded-[12px] bg-[var(--tray-surface-2)] px-3.5 py-3">
-      <div className="text-[10.5px] font-medium uppercase tracking-normal text-[var(--tray-text-3)]">
+    <div className={cn(
+      'relative flex flex-col gap-1 overflow-hidden rounded-[12px] px-3.5 py-3',
+      accent
+        ? 'bg-[var(--tray-accent-soft)] before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-[var(--tray-accent)] before:opacity-40'
+        : 'bg-[var(--tray-surface-2)]',
+    )}>
+      <div className={cn(
+        'text-[9.5px] font-semibold uppercase tracking-[0.06em]',
+        accent ? 'text-[var(--tray-accent)] opacity-80' : 'text-[var(--tray-text-3)]',
+      )}>
         {label}
       </div>
       <div
         className={cn(
-          'text-[22px] font-semibold leading-none tracking-normal tabular-nums',
+          'text-[22px] font-semibold leading-none tracking-[-0.02em] tabular-nums',
           accent ? 'text-[var(--tray-accent)]' : 'text-[var(--tray-text-1)]',
         )}
       >
         {value}
       </div>
-      <div className="truncate text-[10.5px] text-[var(--tray-text-3)]">{detail}</div>
+      <div className={cn(
+        'truncate text-[10px] font-medium',
+        accent ? 'text-[var(--tray-text-2)]' : 'text-[var(--tray-text-3)]',
+      )}>{detail}</div>
     </div>
   );
 }
@@ -884,23 +895,25 @@ function ActivityChart({
   const tooltipPoint = hovered ?? lastPoint;
 
   return (
-    <div ref={chartRef} className="tray-chart-card rounded-[12px] bg-[var(--tray-surface-2)] px-3.5 pb-2 pt-3">
-      <div className="mb-1 flex items-center justify-between">
-        <div className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--tray-text-2)]">
-          <Activity className="h-3 w-3 text-[var(--tray-accent)]" />
+    <div ref={chartRef} className="tray-chart-card group rounded-[12px] bg-[var(--tray-surface-2)] px-3 pb-2 pt-2.5 transition-[background-color] duration-[var(--tray-duration)] ease-[var(--tray-ease)] hover:bg-[var(--tray-surface-3)]">
+      <div className="mb-1.5 flex items-center justify-between">
+        <div className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[var(--tray-text-1)]">
+          <span className="grid h-4 w-4 place-items-center rounded-full bg-[var(--tray-accent-soft)] text-[var(--tray-accent)]">
+            <Activity className="h-2.5 w-2.5" />
+          </span>
           {label}
         </div>
-        <span className="text-[10.5px] font-medium uppercase tracking-normal text-[var(--tray-text-3)]">
+        <span className="text-[9.5px] font-semibold uppercase tracking-[0.06em] text-[var(--tray-text-3)]">
           12h
         </span>
       </div>
       <div className="relative h-[88px]">
         <div
           ref={tooltipRef}
-          className="tray-chart-tooltip pointer-events-none absolute left-0 top-0 z-10 flex w-[92px] flex-col rounded-[9px] bg-[var(--tray-bg)] px-2 py-1 opacity-0 shadow-[0_8px_24px_hsl(220_30%_4%_/_0.2)] ring-1 ring-[var(--tray-hairline)]"
+          className="tray-chart-tooltip pointer-events-none absolute left-0 top-0 z-10 flex w-[92px] flex-col rounded-[9px] bg-[var(--tray-bg-solid)] px-2 py-1 opacity-0 shadow-[0_8px_24px_hsl(220_30%_4%_/_0.4)] ring-1 ring-[var(--tray-hairline)]"
           aria-hidden="true"
         >
-          <span className="text-[9.5px] font-medium uppercase leading-none tracking-normal text-[var(--tray-text-3)]">
+          <span className="text-[9px] font-semibold uppercase leading-none tracking-[0.06em] text-[var(--tray-text-3)]">
             {`${tooltipPoint.index + 1}/12`}
           </span>
           <span className="mt-0.5 truncate text-[11px] font-semibold leading-none tabular-nums text-[var(--tray-text-1)]">
@@ -910,10 +923,18 @@ function ActivityChart({
         <svg viewBox="0 0 320 88" className="h-[88px] w-full overflow-visible" aria-hidden="true">
           <defs>
             <linearGradient id="tray-cockpit-area" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="var(--tray-accent)" stopOpacity="0.18" />
+              <stop offset="0%" stopColor="var(--tray-accent)" stopOpacity="0.22" />
               <stop offset="100%" stopColor="var(--tray-accent)" stopOpacity="0" />
             </linearGradient>
           </defs>
+          <line
+            x1="0"
+            x2="320"
+            y1="88"
+            y2="88"
+            stroke="var(--tray-divider)"
+            strokeWidth="1"
+          />
           <path className="tray-chart-area" d={`${path} L ${lastPoint.x.toFixed(1)} 88 L 0 88 Z`} fill="url(#tray-cockpit-area)" />
           <path
             className="tray-chart-line"
@@ -923,16 +944,16 @@ function ActivityChart({
             stroke="var(--tray-accent)"
             strokeLinecap="round"
             strokeLinejoin="round"
-            strokeWidth="1.75"
+            strokeWidth="2"
           />
           <circle
             className="tray-chart-dot"
             cx={lastPoint.x}
             cy={lastPoint.y}
-            r={2.5}
-            fill="var(--tray-bg)"
+            r={3}
+            fill="var(--tray-bg-solid)"
             stroke="var(--tray-accent)"
-            strokeWidth="1.5"
+            strokeWidth="1.75"
           />
           <g ref={cursorLineRef} className="tray-chart-cursor" opacity={0}>
             <line
@@ -940,16 +961,16 @@ function ActivityChart({
               y2="88"
               stroke="var(--tray-accent)"
               strokeDasharray="3 4"
-              strokeOpacity="0.34"
+              strokeOpacity="0.4"
               strokeWidth="1"
             />
           </g>
           <g ref={cursorDotRef} className="tray-chart-cursor" opacity={0}>
             <circle
-              r={3.8}
-              fill="var(--tray-bg)"
+              r={4}
+              fill="var(--tray-bg-solid)"
               stroke="var(--tray-accent)"
-              strokeWidth="1.6"
+              strokeWidth="1.75"
             />
           </g>
           <rect
@@ -979,27 +1000,29 @@ function ProviderSplit({
   caption: string;
 }) {
   return (
-    <div className="rounded-[12px] bg-[var(--tray-surface-2)] px-3.5 py-3">
-      <div className="mb-2 flex items-center justify-between text-[12px] font-medium text-[var(--tray-text-2)]">
+    <div className="rounded-[12px] bg-[var(--tray-surface-2)] px-3 py-2.5">
+      <div className="mb-1.5 flex items-center justify-between text-[11.5px] font-semibold text-[var(--tray-text-1)]">
         <span className="flex items-center gap-1.5">
-          <Workflow className="h-3 w-3 text-[var(--tray-accent)]" />
+          <span className="grid h-4 w-4 place-items-center rounded-full bg-[var(--tray-accent-soft)] text-[var(--tray-accent)]">
+            <Workflow className="h-2.5 w-2.5" />
+          </span>
           {label}
         </span>
-        <span className="text-[10.5px] font-medium uppercase tracking-normal text-[var(--tray-text-3)]">
+        <span className="text-[9.5px] font-semibold uppercase tracking-[0.06em] text-[var(--tray-text-3)]">
           {caption}
         </span>
       </div>
       <div className="space-y-1.5">
         {providers.map((item) => (
-          <div key={item.key} className="grid grid-cols-[64px_1fr_36px] items-center gap-2 text-[11px]">
-            <span className="truncate text-[var(--tray-text-2)]">{item.label}</span>
-            <div className="h-1.5 overflow-hidden rounded-full bg-[var(--tray-hairline)]">
+          <div key={item.key} className="grid grid-cols-[68px_1fr_34px] items-center gap-2 text-[11px]">
+            <span className="truncate font-medium text-[var(--tray-text-2)]">{item.label}</span>
+            <div className="h-1 overflow-hidden rounded-full bg-[var(--tray-divider)]">
               <div
                 className="tray-provider-bar h-full rounded-full bg-[var(--tray-accent)] transition-[width] duration-[var(--tray-duration)] ease-[var(--tray-ease)]"
-                style={{ width: `${item.value}%`, opacity: 0.55 + (item.value / 100) * 0.45 }}
+                style={{ width: `${item.value}%`, opacity: 0.6 + (item.value / 100) * 0.4 }}
               />
             </div>
-            <span className="text-right font-medium tabular-nums text-[var(--tray-text-3)]">{item.value}%</span>
+            <span className="text-right text-[10.5px] font-semibold tabular-nums text-[var(--tray-text-3)]">{item.value}%</span>
           </div>
         ))}
       </div>
@@ -1020,16 +1043,16 @@ function InfoColumn({
 }) {
   const hasChildren = Array.isArray(children) ? children.length > 0 : Boolean(children);
   return (
-    <div className="flex min-w-0 flex-col rounded-[12px] bg-[var(--tray-surface-2)] px-3.5 py-3">
+    <div className="flex min-w-0 flex-col rounded-[12px] bg-[var(--tray-surface-2)] px-3 py-2.5">
       <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="truncate text-[12px] font-medium text-[var(--tray-text-2)]">{title}</span>
-        <span className="shrink-0 rounded-[8px] bg-[var(--tray-surface-1)] px-1.5 py-0.5 text-[9.5px] font-semibold tabular-nums text-[var(--tray-text-3)]">
+        <span className="truncate text-[11.5px] font-semibold text-[var(--tray-text-1)]">{title}</span>
+        <span className="grid h-4 min-w-4 place-items-center rounded-full bg-[var(--tray-divider)] px-1 text-[9.5px] font-bold tabular-nums text-[var(--tray-text-2)]">
           {count}
         </span>
       </div>
       <div className="min-h-0 flex-1">
         {hasChildren ? children : (
-          <div className="rounded-[10px] bg-[var(--tray-surface-1)] px-2 py-1.5 text-[11px] text-[var(--tray-text-3)]">{empty}</div>
+          <div className="rounded-[8px] bg-[var(--tray-surface-1)] px-2 py-1 text-[10.5px] text-[var(--tray-text-3)]">{empty}</div>
         )}
       </div>
     </div>
@@ -1038,22 +1061,26 @@ function InfoColumn({
 
 function HealthRow({ items }: { items: Array<{ key: string; label: string; ok: boolean; detail: string }> }) {
   return (
-    <div className="flex items-center gap-1 rounded-[12px] bg-[var(--tray-surface-2)] px-2 py-1.5">
-      {items.map((item, index) => (
+    <div className="grid grid-cols-2 gap-1 rounded-[12px] bg-[var(--tray-surface-2)] p-1">
+      {items.map((item) => (
         <div
           key={item.key}
-          className={cn(
-            'flex min-w-0 flex-1 items-center justify-center gap-1 rounded-[10px] px-1 py-0.5',
-            index > 0 && 'border-l border-[var(--tray-hairline)]',
-          )}
+          className="flex min-w-0 items-center gap-1.5 rounded-[9px] bg-[var(--tray-surface-1)] px-2 py-1"
           title={item.detail}
         >
-          {item.ok ? (
-            <Check className="h-3 w-3 shrink-0 text-success" aria-hidden="true" />
-          ) : (
-            <Minus className="h-3 w-3 shrink-0 text-warning" aria-hidden="true" />
-          )}
-          <span className="truncate text-[10px] font-medium text-[var(--tray-text-3)]">{item.label}</span>
+          <span
+            className={cn(
+              'grid h-4 w-4 shrink-0 place-items-center rounded-full',
+              item.ok ? 'bg-success/20 text-success' : 'bg-warning/20 text-warning',
+            )}
+            aria-hidden="true"
+          >
+            {item.ok ? <Check className="h-2.5 w-2.5" strokeWidth={3} /> : <Minus className="h-2.5 w-2.5" strokeWidth={3} />}
+          </span>
+          <div className="flex min-w-0 flex-col leading-none">
+            <span className="truncate text-[10px] font-semibold text-[var(--tray-text-2)]">{item.label}</span>
+            <span className="mt-0.5 truncate text-[9px] font-medium text-[var(--tray-text-3)]">{item.detail}</span>
+          </div>
         </div>
       ))}
     </div>
@@ -1081,16 +1108,16 @@ function DockButton({
           aria-label={label}
           onClick={onClick}
           className={cn(
-            'tray-dock-button group flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-[10px] px-1 py-1.5 text-[var(--tray-text-3)] transition-[background-color,color,opacity] duration-[var(--tray-duration)] ease-[var(--tray-ease)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+            'tray-dock-button group relative flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-[10px] px-1 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
             primary
-              ? 'bg-[var(--tray-surface-2)] text-[var(--tray-accent)] hover:bg-[var(--tray-surface-1)]'
-              : 'hover:bg-[var(--tray-surface-2)] hover:text-[var(--tray-text-2)]',
+              ? 'bg-[var(--tray-accent-soft)] text-[var(--tray-accent)] before:absolute before:inset-x-2 before:top-0 before:h-px before:bg-[var(--tray-accent)] before:opacity-50 hover:bg-[var(--tray-accent-softer)]'
+              : 'text-[var(--tray-text-3)] hover:bg-[var(--tray-surface-3)] hover:text-[var(--tray-text-1)]',
           )}
         >
-          <span className="flex h-[18px] w-[18px] items-center justify-center [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:stroke-[1.75]">
+          <span className="flex h-[18px] w-[18px] items-center justify-center [&>svg]:h-[18px] [&>svg]:w-[18px] [&>svg]:stroke-[1.75]">
             {busy ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : icon}
           </span>
-          <span className="max-w-full truncate text-[10px] font-medium">{label}</span>
+          <span className="max-w-full truncate text-[9.5px] font-semibold tracking-[0.01em]">{label}</span>
         </button>
       </TooltipTrigger>
       <TooltipContent side="top">{label}</TooltipContent>
