@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@ccem/core": "workspace:*",
+    "@gsap/react": "^2.1.2",
     "@lobehub/icons": "^5.6.0",
     "@radix-ui/react-context-menu": "^2.3.1",
     "@radix-ui/react-dialog": "^1.1.15",
@@ -35,6 +36,7 @@
     "@xterm/xterm": "^6.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "gsap": "^3.15.0",
     "lucide-react": "^0.563.0",
     "modern-screenshot": "^4.6.8",
     "qrcode.react": "^4.2.0",

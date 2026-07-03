@@ -47,6 +47,7 @@ import type {
 } from '@/lib/tauri-ipc';
 import { cn } from '@/lib/utils';
 import { scheduleAfterFirstPaint } from '@/lib/idle';
+import { ccemMotion, clearMotionProps, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useLocale } from '@/locales';
 import { useAppStore } from '@/store';
@@ -671,6 +672,12 @@ function WorkspaceAttentionPanel({
 }) {
   const { t } = useLocale();
   const [promptStates, setPromptStates] = useState<Record<string, InteractivePromptState>>({});
+  const attentionPanelRef = useRef<HTMLDivElement | null>(null);
+  const attentionMotionKey = useMemo(() => [
+    attentionState.permissions.map((request) => request.requestId).join('|'),
+    attentionState.prompts.map((prompt) => prompt.toolUseId).join('|'),
+    attentionState.terminalPrompt ? 'terminal' : 'no-terminal',
+  ].join('::'), [attentionState.permissions, attentionState.prompts, attentionState.terminalPrompt]);
 
   useEffect(() => {
     const activePromptIds = new Set(attentionState.prompts.map((prompt) => prompt.toolUseId));
@@ -688,6 +695,37 @@ function WorkspaceAttentionPanel({
       return Object.fromEntries(nextEntries);
     });
   }, [attentionState.prompts]);
+
+  useGSAP(() => {
+    const panel = attentionPanelRef.current;
+    if (!panel) {
+      return;
+    }
+
+    const cards = gsap.utils.toArray<HTMLElement>('[data-native-attention-card]', panel);
+    if (cards.length === 0) {
+      return;
+    }
+
+    if (shouldReduceMotion()) {
+      clearMotionProps(cards);
+      return;
+    }
+
+    gsap.fromTo(
+      cards,
+      { autoAlpha: 0, y: 8, scale: 0.985 },
+      {
+        autoAlpha: 1,
+        y: 0,
+        scale: 1,
+        duration: ccemMotion.duration.base,
+        ease: ccemMotion.ease.standard,
+        stagger: 0.035,
+        clearProps: 'opacity,visibility,transform',
+      },
+    );
+  }, { dependencies: [attentionMotionKey], scope: attentionPanelRef });
 
   const updatePromptState = useCallback((
     toolUseId: string,
@@ -715,10 +753,11 @@ function WorkspaceAttentionPanel({
   }
 
   return (
-    <div className="space-y-2">
+    <div ref={attentionPanelRef} className="space-y-2">
       {attentionState.permissions.map((request) => (
         <div
           key={request.requestId}
+          data-native-attention-card
           className="flex items-center gap-2.5 rounded-xl bg-muted/35 px-3 py-2.5 transition-colors duration-300"
         >
           <div className="rounded-md bg-muted/60 p-1.5">
@@ -818,6 +857,7 @@ function WorkspaceAttentionPanel({
           return (
             <div
               key={entry.toolUseId}
+              data-native-attention-card
               className="rounded-xl bg-muted/30 px-3.5 py-3"
             >
               <div className="flex items-start gap-2.5">
@@ -1050,6 +1090,7 @@ function WorkspaceAttentionPanel({
         return (
           <div
             key={entry.toolUseId}
+            data-native-attention-card
             className="rounded-xl bg-surface-raised/60 px-3 py-2.5 backdrop-blur-sm"
           >
             <div className="flex items-center gap-2">
@@ -1139,7 +1180,7 @@ function WorkspaceAttentionPanel({
       })}
 
       {attentionState.terminalPrompt ? (
-        <div className="rounded-xl bg-surface-raised/60 px-3 py-2.5 backdrop-blur-sm">
+        <div data-native-attention-card className="rounded-xl bg-surface-raised/60 px-3 py-2.5 backdrop-blur-sm">
           <div className="flex items-center gap-2">
             <div className="rounded-md bg-muted/60 p-1">
               <Terminal className="h-3 w-3 text-muted-foreground" />

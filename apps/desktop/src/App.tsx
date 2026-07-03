@@ -15,6 +15,7 @@ import type { UsageStats } from '@/types/analytics';
 import { shallow } from 'zustand/shallow';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { scheduleAfterFirstPaint } from '@/lib/idle';
+import { ccemMotion, clearMotionProps, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';
 import { EnvironmentsSkeleton } from '@/components/ui/skeleton-states';
 import { StartupSplash } from '@/components/layout/StartupSplash';
 import type { PetOpenSessionRequest } from '@/types/pet';
@@ -94,9 +95,12 @@ function App() {
   const [editingEnvName, setEditingEnvName] = useState<string | undefined>();
   const [pendingDeleteEnv, setPendingDeleteEnv] = useState<string | null>(null);
   const [startupReady, setStartupReady] = useState(false);
+  const [startupSplashVisible, setStartupSplashVisible] = useState(true);
   const [petOpenRequest, setPetOpenRequest] = useState<PetOpenSessionRequest | null>(null);
   const [workspaceSessionLinkRequest, setWorkspaceSessionLinkRequest] = useState<{ id: number; link: string } | null>(null);
   const [workspaceComposeSeed, setWorkspaceComposeSeed] = useState<{ id: number; value: string } | null>(null);
+  const appPageMotionRef = useRef<HTMLDivElement | null>(null);
+  const hasAnimatedAppPageRef = useRef(false);
   const lastFocusSyncAtRef = useRef(0);
   const launchInFlightRef = useRef<Set<string>>(new Set());
   const [, startTransition] = useTransition();
@@ -188,6 +192,49 @@ function App() {
       setActiveTab(tab);
     });
   }, [prefetchTab, startTransition]);
+
+  const handleStartupSplashExitComplete = useCallback(() => {
+    setStartupSplashVisible(false);
+  }, []);
+
+  useEffect(() => {
+    if (!startupReady) {
+      setStartupSplashVisible(true);
+    }
+  }, [startupReady]);
+
+  useGSAP(() => {
+    const page = appPageMotionRef.current;
+    if (!startupReady || !page) {
+      return;
+    }
+
+    if (shouldReduceMotion()) {
+      clearMotionProps(page);
+      hasAnimatedAppPageRef.current = true;
+      return;
+    }
+
+    const firstRun = !hasAnimatedAppPageRef.current;
+    hasAnimatedAppPageRef.current = true;
+    gsap.killTweensOf(page);
+    gsap.fromTo(
+      page,
+      {
+        autoAlpha: firstRun ? 0 : 0.72,
+        y: firstRun ? 14 : 8,
+        scale: firstRun ? 0.992 : 0.998,
+      },
+      {
+        autoAlpha: 1,
+        y: 0,
+        scale: 1,
+        duration: firstRun ? ccemMotion.duration.handoff : ccemMotion.duration.base,
+        ease: ccemMotion.ease.standard,
+        clearProps: 'opacity,visibility,transform',
+      },
+    );
+  }, { dependencies: [activeTab, startupReady], scope: appPageMotionRef });
 
   const openWorkspaceCronCreate = useCallback(() => {
     setWorkspaceComposeSeed({ id: Date.now(), value: '/ccem-cron ' });
@@ -683,6 +730,8 @@ function App() {
     }
   };
 
+  const isFullBleedTab = activeTab === 'history' || activeTab === 'workspace' || activeTab === 'settings';
+
   return (
     <LocaleProvider>
       <AppUpdateProvider>
@@ -692,9 +741,13 @@ function App() {
               activeTab={activeTab}
               onTabChange={navigateToTab}
               onTabPrefetch={prefetchTab}
-              fullBleed={activeTab === 'history' || activeTab === 'workspace' || activeTab === 'settings'}
+              fullBleed={isFullBleedTab}
             >
-              <>
+              <div
+                ref={appPageMotionRef}
+                data-motion-page={activeTab}
+                className={isFullBleedTab ? 'h-full w-full' : 'w-full min-w-0'}
+              >
                 <div
                   className={activeTab === 'workspace' ? 'h-full w-full' : 'hidden'}
                   hidden={activeTab !== 'workspace'}
@@ -717,11 +770,16 @@ function App() {
                     {renderActivePage()}
                   </Suspense>
                 ) : null}
-              </>
+              </div>
             </AppLayout>
-          ) : (
-            <StartupSplash />
-          )}
+          ) : null}
+
+          {startupSplashVisible ? (
+            <StartupSplash
+              exiting={startupReady}
+              onExitComplete={handleStartupSplashExitComplete}
+            />
+          ) : null}
 
           {/* Environment Dialog */}
           {dialogOpen ? (

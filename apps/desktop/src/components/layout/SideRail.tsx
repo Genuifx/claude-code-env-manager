@@ -1,5 +1,7 @@
+import { useCallback, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
+import { ccemMotion, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';
 import { Home, Terminal, Globe, BarChart3, Box, Settings, MessageSquare, MessageCircleMore, Clock, Bug } from 'lucide-react';
 // import { PetEntry } from '@/components/pet/PetEntry';
 
@@ -59,18 +61,22 @@ function NavButton({
   isActive,
   onClick,
   onPrefetch,
+  buttonRef,
 }: {
   item: NavItemDef;
   label: string;
   isActive: boolean;
   onClick: () => void;
   onPrefetch?: () => void;
+  buttonRef?: (node: HTMLButtonElement | null) => void;
 }) {
   const Icon = item.icon;
   return (
     <button
       type="button"
+      ref={buttonRef}
       data-testid={`nav-${item.id}`}
+      data-sidebar-nav-item={item.id}
       aria-label={label}
       onClick={onClick}
       onMouseEnter={onPrefetch}
@@ -95,13 +101,66 @@ function NavButton({
 
 export function SideRail({ activeTab, onTabChange, onTabPrefetch, glassMuted }: SideRailProps) {
   const { t } = useLocale();
+  const railRef = useRef<HTMLElement | null>(null);
+  const activeIndicatorRef = useRef<HTMLSpanElement | null>(null);
+  const buttonRefs = useRef(new Map<string, HTMLButtonElement>());
+
+  const setButtonRef = useCallback((id: string) => (node: HTMLButtonElement | null) => {
+    if (node) {
+      buttonRefs.current.set(id, node);
+      return;
+    }
+    buttonRefs.current.delete(id);
+  }, []);
+
+  useGSAP(() => {
+    const rail = railRef.current;
+    const indicator = activeIndicatorRef.current;
+    const activeButton = buttonRefs.current.get(activeTab);
+    if (!rail || !indicator || !activeButton) {
+      if (indicator) {
+        gsap.set(indicator, { autoAlpha: 0 });
+      }
+      return;
+    }
+
+    const railRect = rail.getBoundingClientRect();
+    const buttonRect = activeButton.getBoundingClientRect();
+    const y = buttonRect.top - railRect.top;
+
+    if (shouldReduceMotion()) {
+      gsap.set(indicator, {
+        autoAlpha: 1,
+        y,
+        height: buttonRect.height,
+        width: buttonRect.width,
+      });
+      return;
+    }
+
+    gsap.to(indicator, {
+      autoAlpha: 1,
+      y,
+      height: buttonRect.height,
+      width: buttonRect.width,
+      duration: ccemMotion.duration.base,
+      ease: ccemMotion.ease.standard,
+      overwrite: 'auto',
+    });
+  }, { dependencies: [activeTab], scope: railRef });
 
   return (
-    <aside className={cn(
+    <aside ref={railRef} className={cn(
       'h-full shrink-0 flex flex-col glass-sidebar-panel glass-noise relative rounded-xl overflow-hidden',
       'w-[200px] transition-[opacity,transform,background,border-color,box-shadow] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]',
       glassMuted && "glass-sidebar-muted"
     )}>
+      <span
+        ref={activeIndicatorRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute left-3 top-0 z-[1] rounded-lg border border-white/[0.08] bg-white/[0.065] shadow-[0_14px_34px_-26px_hsl(var(--primary)/0.65)]"
+      />
+
       {/* Liquid glass aurora blobs */}
       <div className="sidebar-aurora" aria-hidden="true">
         <div className="sidebar-aurora-blob sidebar-aurora-blob-1" />
@@ -115,7 +174,7 @@ export function SideRail({ activeTab, onTabChange, onTabPrefetch, glassMuted }: 
       </div>
 
       {/* Nav groups */}
-      <nav className="flex-1 flex flex-col gap-4 overflow-y-auto px-3">
+      <nav className="relative z-10 flex-1 flex flex-col gap-4 overflow-y-auto px-3">
         {navGroupDefs.map((group, gi) => (
           <div key={gi}>
             {group.titleKey && (
@@ -132,6 +191,7 @@ export function SideRail({ activeTab, onTabChange, onTabPrefetch, glassMuted }: 
                   isActive={activeTab === item.id}
                   onClick={() => onTabChange(item.id)}
                   onPrefetch={() => onTabPrefetch?.(item.id)}
+                  buttonRef={setButtonRef(item.id)}
                 />
               ))}
             </div>
@@ -140,7 +200,7 @@ export function SideRail({ activeTab, onTabChange, onTabPrefetch, glassMuted }: 
       </nav>
 
       {/* Bottom items */}
-      <div className="flex flex-col gap-0.5 px-3 py-3 border-t border-white/[0.08]">
+      <div className="relative z-10 flex flex-col gap-0.5 px-3 py-3 border-t border-white/[0.08]">
         {/* <PetEntry /> */}
         {bottomItemDefs.map((item) => (
           <NavButton
@@ -150,6 +210,7 @@ export function SideRail({ activeTab, onTabChange, onTabPrefetch, glassMuted }: 
             isActive={activeTab === item.id}
             onClick={() => onTabChange(item.id)}
             onPrefetch={() => onTabPrefetch?.(item.id)}
+            buttonRef={setButtonRef(item.id)}
           />
         ))}
       </div>
