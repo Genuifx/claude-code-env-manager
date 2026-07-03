@@ -1,11 +1,15 @@
 {
   "identifier": "default",
   "description": "Default capabilities for CCEM Desktop",
-  "windows": ["main", "desktop-pet"],
+  "windows": ["main", "desktop-pet", "tray-cockpit"],
   "permissions": [
     "core:default",
     "core:webview:allow-set-webview-zoom",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-show",
     "core:window:allow-start-dragging",
+    "core:window:allow-unminimize",
     "shell:allow-open",
     {
       "identifier": "shell:allow-spawn",

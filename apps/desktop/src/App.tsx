@@ -26,6 +26,10 @@ interface CcemControlRequest {
   link?: string;
 }
 
+interface TrayOpenTabRequest {
+  tab?: string;
+}
+
 const AnalyticsPage = lazy(async () =>
   import('@/pages/Analytics').then((m) => ({ default: m.Analytics }))
 );
@@ -290,6 +294,17 @@ function App() {
           return;
         }
         unlisteners.push(listener6);
+
+        const listener7 = await listen<TrayOpenTabRequest>('tray-open-tab', (event) => {
+          if (typeof event.payload?.tab === 'string') {
+            navigateToTab(event.payload.tab);
+          }
+        });
+        if (cancelled) {
+          listener7();
+          return;
+        }
+        unlisteners.push(listener7);
       } catch (err) {
         console.error('Failed to setup tray event listeners:', err);
       }

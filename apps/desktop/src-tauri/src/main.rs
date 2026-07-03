@@ -133,7 +133,7 @@ use terminal::{
     ArrangeLayout, ArrangeSessionInfo, TerminalInfo, TerminalType, TmuxAttachTerminalInfo,
     TmuxAttachTerminalType,
 };
-use tray::create_tray;
+use tray::{create_tray, TRAY_COCKPIT_LABEL};
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
 struct LoadedEnv {
@@ -4721,6 +4721,7 @@ fn main() {
             pet_notifications::open_pet_notification,
             pet_window::resize_pet_window,
             pet_window::set_pet_window_content_visible,
+            tray::open_tray_cockpit,
             app_updates::get_app_version,
             app_updates::check_app_update,
             app_updates::install_app_update,
@@ -4900,6 +4901,16 @@ fn main() {
             quit_app
         ])
         .on_window_event(|window, event| {
+            if window.label() == TRAY_COCKPIT_LABEL {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    if let Err(error) = tray::hide_tray_cockpit(&window.app_handle()) {
+                        eprintln!("Tray cockpit close warning: {}", error);
+                    }
+                }
+                return;
+            }
+
             if window.label() != "main" {
                 return;
             }

@@ -1,0 +1,885 @@
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { emit, listen } from '@tauri-apps/api/event';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import {
+  Activity,
+  Bot,
+  Check,
+  Clock3,
+  Compass,
+  Minus,
+  Play,
+  RefreshCw,
+  Settings2,
+  TerminalSquare,
+  Workflow,
+  Zap,
+} from 'lucide-react';
+import { LocaleProvider, useLocale } from '@/locales';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import type { CronTask, DesktopSettings, PlatformCapabilities, TelegramBridgeStatus } from '@/lib/tauri-ipc';
+import type { UsageStats } from '@/types/analytics';
+import { cn, formatTokens } from '@/lib/utils';
+
+interface TraySession {
+  id: string;
+  client?: string | null;
+  envName: string;
+  permMode: string;
+  workingDir: string;
+  status: string;
+  startedAt: string;
+}
+
+interface TauriSession {
+  id: string;
+  client?: string | null;
+  env_name: string;
+  perm_mode: string;
+  working_dir: string;
+  start_time: string;
+  status: string;
+}
+
+interface TraySnapshot {
+  currentEnv: string;
+  permissionMode: string;
+  usage: UsageStats;
+  sessions: TraySession[];
+  cronTasks: CronTask[];
+  platform: PlatformCapabilities | null;
+  telegram: TelegramBridgeStatus | null;
+  version: string | null;
+  source: 'live' | 'fallback';
+  loadedAt: number;
+}
+
+const REFRESH_INTERVAL_MS = 7000;
+
+const FALLBACK_USAGE: UsageStats = {
+  today: {
+    inputTokens: 92_400,
+    outputTokens: 41_200,
+    cacheReadTokens: 21_300,
+    cacheCreationTokens: 1_900,
+    cost: 3.12,
+  },
+  week: {
+    inputTokens: 620_000,
+    outputTokens: 288_000,
+    cacheReadTokens: 130_000,
+    cacheCreationTokens: 10_000,
+    cost: 21.4,
+  },
+  month: {
+    inputTokens: 2_100_000,
+    outputTokens: 930_000,
+    cacheReadTokens: 480_000,
+    cacheCreationTokens: 38_000,
+    cost: 72.8,
+  },
+  total: {
+    inputTokens: 8_200_000,
+    outputTokens: 3_400_000,
+    cacheReadTokens: 1_900_000,
+    cacheCreationTokens: 124_000,
+    cost: 286.5,
+  },
+  dailyHistory: {},
+  hourlyHistory: {},
+  byModel: {},
+  byEnvironment: {},
+  lastUpdated: new Date().toISOString(),
+};
+
+const FALLBACK_SESSIONS: TraySession[] = [
+  {
+    id: 'preview-ccem',
+    client: 'codex',
+    envName: 'official',
+    permMode: 'dev',
+    workingDir: '/Users/wzt/G/Github/claude-code-env-manager',
+    status: 'running',
+    startedAt: new Date().toISOString(),
+  },
+  {
+    id: 'preview-baymax',
+    client: 'claude',
+    envName: 'official',
+    permMode: 'safe',
+    workingDir: '/Users/wzt/Documents/baymax',
+    status: 'idle',
+    startedAt: new Date(Date.now() - 24 * 60 * 1000).toISOString(),
+  },
+];
+
+const FALLBACK_CRON_TASKS: CronTask[] = [
+  {
+    id: 'preview-radar',
+    name: 'upstream radar',
+    cronExpression: '0 */2 * * *',
+    prompt: '',
+    workingDir: '/Users/wzt/G/Github/claude-code-env-manager',
+    envName: 'official',
+    executionProfile: 'standard',
+    enabled: true,
+    timeoutSecs: 600,
+    templateId: null,
+    triggerType: 'schedule',
+    parentTaskId: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: 'preview-release',
+    name: 'release check',
+    cronExpression: '0 */6 * * *',
+    prompt: '',
+    workingDir: '/Users/wzt/G/Github/claude-code-env-manager',
+    envName: 'official',
+    executionProfile: 'conservative',
+    enabled: true,
+    timeoutSecs: 600,
+    templateId: null,
+    triggerType: 'schedule',
+    parentTaskId: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+];
+
+const INITIAL_SNAPSHOT: TraySnapshot = {
+  currentEnv: 'official',
+  permissionMode: 'dev',
+  usage: FALLBACK_USAGE,
+  sessions: [],
+  cronTasks: [],
+  platform: null,
+  telegram: null,
+  version: null,
+  source: 'fallback',
+  loadedAt: Date.now(),
+};
+
+function toTraySession(session: TauriSession): TraySession {
+  return {
+    id: session.id,
+    client: session.client,
+    envName: session.env_name,
+    permMode: session.perm_mode,
+    workingDir: session.working_dir,
+    status: session.status,
+    startedAt: session.start_time,
+  };
+}
+
+function usageTokenTotal(usage: UsageStats['today']): number {
+  return usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
+}
+
+function formatCost(cost: number): string {
+  if (!Number.isFinite(cost)) {
+    return '$0.00';
+  }
+  return `$${cost.toFixed(cost >= 10 ? 1 : 2)}`;
+}
+
+function getProjectName(path: string): string {
+  const parts = path.split('/').filter(Boolean);
+  return parts[parts.length - 1] || path;
+}
+
+function formatRelativeTime(value: string): string {
+  const date = new Date(value);
+  const diffMs = Date.now() - date.getTime();
+  if (!Number.isFinite(diffMs) || diffMs < 0) {
+    return 'now';
+  }
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 1) {
+    return 'now';
+  }
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h`;
+  }
+  return `${Math.floor(hours / 24)}d`;
+}
+
+function hourlyKey(date: Date): string {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-') + `T${String(date.getHours()).padStart(2, '0')}`;
+}
+
+function buildHourlySeries(usage: UsageStats): number[] {
+  const now = new Date();
+  const values: number[] = [];
+  for (let index = 11; index >= 0; index -= 1) {
+    const date = new Date(now);
+    date.setHours(now.getHours() - index, 0, 0, 0);
+    values.push(usageTokenTotal(usage.hourlyHistory[hourlyKey(date)] ?? {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      cost: 0,
+    }));
+  }
+
+  if (values.some((value) => value > 0)) {
+    return values;
+  }
+
+  return [4, 9, 7, 15, 13, 26, 21, 31, 28, 37, 34, 43].map((value) => value * 1000);
+}
+
+function chartPath(values: number[]): string {
+  const width = 320;
+  const height = 88;
+  const max = Math.max(...values, 1);
+  const step = width / Math.max(values.length - 1, 1);
+  return values
+    .map((value, index) => {
+      const x = index * step;
+      const y = height - (value / max) * (height - 8) - 4;
+      return `${index === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+    })
+    .join(' ');
+}
+
+function providerBreakdown(sessions: TraySession[]) {
+  const counts = [
+    { key: 'codex', label: 'Codex', value: 0 },
+    { key: 'claude', label: 'Claude', value: 0 },
+    { key: 'opencode', label: 'OpenCode', value: 0 },
+  ];
+
+  sessions.forEach((session) => {
+    const client = (session.client || '').toLowerCase();
+    const target = counts.find((item) => client.includes(item.key)) ?? counts[1];
+    target.value += 1;
+  });
+
+  const total = counts.reduce((sum, item) => sum + item.value, 0);
+  if (total === 0) {
+    return [
+      { ...counts[0], value: 45 },
+      { ...counts[1], value: 35 },
+      { ...counts[2], value: 20 },
+    ];
+  }
+
+  return counts.map((item) => ({
+    ...item,
+    value: Math.max(6, Math.round((item.value / total) * 100)),
+  }));
+}
+
+type StatusTone = 'success' | 'warning' | 'destructive' | 'muted';
+
+function statusTone(status: string): StatusTone {
+  const normalized = status.toLowerCase();
+  if (normalized === 'running') {
+    return 'success';
+  }
+  if (normalized === 'idle' || normalized === 'interrupted') {
+    return 'warning';
+  }
+  if (normalized === 'error' || normalized === 'failed') {
+    return 'destructive';
+  }
+  return 'muted';
+}
+
+function statusDotClass(tone: StatusTone): string {
+  switch (tone) {
+    case 'success':
+      return 'bg-success';
+    case 'warning':
+      return 'bg-warning';
+    case 'destructive':
+      return 'bg-destructive';
+    default:
+      return 'bg-[var(--tray-text-3)]';
+  }
+}
+
+function statusBadgeClass(tone: StatusTone): string {
+  switch (tone) {
+    case 'success':
+      return 'bg-success/15 text-success';
+    case 'warning':
+      return 'bg-warning/15 text-warning';
+    case 'destructive':
+      return 'bg-destructive/15 text-destructive';
+    default:
+      return 'bg-[var(--tray-surface-2)] text-[var(--tray-text-3)]';
+  }
+}
+
+async function readSnapshot(): Promise<TraySnapshot> {
+  const [envResult, settingsResult, usageResult, sessionResult, cronResult, platformResult, telegramResult, versionResult] =
+    await Promise.allSettled([
+      invoke<string | null>('get_current_env'),
+      invoke<DesktopSettings>('get_settings'),
+      invoke<UsageStats>('get_usage_stats'),
+      invoke<TauriSession[]>('list_interactive_sessions'),
+      invoke<CronTask[]>('list_cron_tasks'),
+      invoke<PlatformCapabilities>('get_platform_capabilities'),
+      invoke<TelegramBridgeStatus>('get_telegram_bridge_status'),
+      invoke<string>('get_app_version'),
+    ]);
+
+  const settings = settingsResult.status === 'fulfilled' ? settingsResult.value : null;
+  const liveSessions = sessionResult.status === 'fulfilled'
+    ? sessionResult.value.map(toTraySession)
+    : FALLBACK_SESSIONS;
+  const liveCronTasks = cronResult.status === 'fulfilled' ? cronResult.value : FALLBACK_CRON_TASKS;
+
+  return {
+    currentEnv: envResult.status === 'fulfilled' && envResult.value ? envResult.value : 'official',
+    permissionMode: settings?.defaultMode || 'dev',
+    usage: usageResult.status === 'fulfilled' ? usageResult.value : FALLBACK_USAGE,
+    sessions: liveSessions,
+    cronTasks: liveCronTasks,
+    platform: platformResult.status === 'fulfilled' ? platformResult.value : null,
+    telegram: telegramResult.status === 'fulfilled' ? telegramResult.value : null,
+    version: versionResult.status === 'fulfilled' ? versionResult.value : null,
+    source: usageResult.status === 'fulfilled' || sessionResult.status === 'fulfilled' ? 'live' : 'fallback',
+    loadedAt: Date.now(),
+  };
+}
+
+function applyTheme(theme: string | null | undefined) {
+  const root = document.documentElement;
+  const previewTheme = new URLSearchParams(window.location.search).get('theme');
+  const effectiveTheme = previewTheme === 'dark' || previewTheme === 'light'
+    ? previewTheme
+    : theme || 'system';
+  if (effectiveTheme === 'dark') {
+    root.classList.remove('light');
+    return;
+  }
+  if (effectiveTheme === 'light') {
+    root.classList.add('light');
+    return;
+  }
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  root.classList.toggle('light', !prefersDark);
+}
+
+async function showMainTab(tab: string) {
+  const main = await WebviewWindow.getByLabel('main');
+  if (main) {
+    await main.show();
+    await main.unminimize();
+    await emit('tray-open-tab', { tab });
+    await main.setFocus();
+  }
+  await WebviewWindow.getCurrent().hide();
+}
+
+function TrayCockpitContent() {
+  const { t } = useLocale();
+  const [snapshot, setSnapshot] = useState<TraySnapshot>(INITIAL_SNAPSHOT);
+  const [refreshing, setRefreshing] = useState(false);
+  const [launching, setLaunching] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const next = await readSnapshot();
+      setSnapshot(next);
+      const settings = await invoke<DesktopSettings>('get_settings').catch(() => null);
+      applyTheme(settings?.theme);
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const intervalId = window.setInterval(() => {
+      void refresh();
+    }, REFRESH_INTERVAL_MS);
+
+    let disposed = false;
+    const unlisteners: Array<() => void> = [];
+    const setupListeners = async () => {
+      for (const eventName of [
+        'tray-cockpit-refresh',
+        'session-updated',
+        'native-session-updated',
+        'task-completed',
+        'task-error',
+        'env-changed',
+        'perm-changed',
+      ]) {
+        const unlisten = await listen(eventName, () => {
+          void refresh();
+        });
+        if (disposed) {
+          unlisten();
+        } else {
+          unlisteners.push(unlisten);
+        }
+      }
+    };
+    void setupListeners();
+
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+      unlisteners.forEach((unlisten) => unlisten());
+    };
+  }, [refresh]);
+
+  const runningSessions = useMemo(
+    () => snapshot.sessions.filter((session) => session.status.toLowerCase() === 'running'),
+    [snapshot.sessions],
+  );
+  const visibleSessions = snapshot.sessions.length > 0 ? snapshot.sessions.slice(0, 3) : [];
+  const visibleCronTasks = snapshot.cronTasks.filter((task) => task.enabled).slice(0, 3);
+  const chartValues = useMemo(() => buildHourlySeries(snapshot.usage), [snapshot.usage]);
+  const path = useMemo(() => chartPath(chartValues), [chartValues]);
+  const providers = useMemo(() => providerBreakdown(snapshot.sessions), [snapshot.sessions]);
+  const todayTokens = usageTokenTotal(snapshot.usage.today);
+  const lastPoint = chartValues[chartValues.length - 1] ?? 0;
+  const maxValue = Math.max(...chartValues, 1);
+  const lastX = 320;
+  const lastY = 88 - (lastPoint / maxValue) * (88 - 8) - 4;
+
+  const healthItems = useMemo(() => [
+    {
+      key: 'tmux',
+      label: t('trayCockpit.healthTmux'),
+      ok: snapshot.platform?.tmuxInstalled ?? true,
+      detail: snapshot.platform?.tmuxInstalled === false ? t('trayCockpit.healthMissing') : t('trayCockpit.healthOk'),
+    },
+    {
+      key: 'bridge',
+      label: t('trayCockpit.healthBridge'),
+      ok: snapshot.telegram?.running ?? false,
+      detail: snapshot.telegram?.running
+        ? t('trayCockpit.healthOnline')
+        : snapshot.telegram?.configured
+          ? t('trayCockpit.healthOffline')
+          : t('trayCockpit.healthNotSet'),
+    },
+    {
+      key: 'cron',
+      label: t('trayCockpit.healthCron'),
+      ok: visibleCronTasks.length > 0,
+      detail: `${visibleCronTasks.length}`,
+    },
+    {
+      key: 'version',
+      label: t('trayCockpit.healthVersion'),
+      ok: Boolean(snapshot.version),
+      detail: snapshot.version ? `v${snapshot.version}` : t('trayCockpit.healthUnknown'),
+    },
+  ], [snapshot, visibleCronTasks.length, t]);
+
+  const handleLaunch = async () => {
+    setLaunching(true);
+    try {
+      const main = await WebviewWindow.getByLabel('main');
+      if (main) {
+        await main.show();
+        await main.unminimize();
+        await emit('tray-open-tab', { tab: 'workspace' });
+        await main.setFocus();
+      }
+      await emit('tray-launch-claude', {});
+      await WebviewWindow.getCurrent().hide();
+    } finally {
+      setLaunching(false);
+    }
+  };
+
+  const liveLabel = snapshot.source === 'live' ? t('trayCockpit.live') : t('trayCockpit.preview');
+  const updatedLabel = t('trayCockpit.updated').replace('{time}', formatRelativeTime(snapshot.usage.lastUpdated));
+  const monthCostLabel = t('trayCockpit.monthCost').replace('{cost}', formatCost(snapshot.usage.month.cost));
+
+  return (
+    <div className="tray-cockpit-window flex min-h-screen w-full items-start justify-center bg-transparent px-[64px] py-[64px] font-sans">
+      <section className="tray-cockpit-panel relative flex h-[700px] w-[390px] flex-col overflow-hidden rounded-[16px] bg-[var(--tray-bg)] text-[var(--tray-text-1)]">
+        <header className="relative flex items-center gap-2.5 px-4 pb-1 pt-3.5">
+          <div className="flex min-w-0 flex-1 items-center gap-2.5">
+            <TrayLogo />
+            <div className="min-w-0 leading-none">
+              <div className="flex items-center gap-1.5">
+                <h1 className="truncate text-[15px] font-semibold tracking-normal text-[var(--tray-text-1)]">
+                  {t('trayCockpit.title')}
+                </h1>
+                <span
+                  className={cn(
+                    'inline-block h-1.5 w-1.5 shrink-0 rounded-full',
+                    snapshot.source === 'live' ? 'bg-[var(--tray-accent)]' : 'bg-[var(--tray-text-3)]',
+                  )}
+                  aria-hidden="true"
+                />
+              </div>
+              <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-[var(--tray-text-3)]">
+                <span className="truncate">{liveLabel}</span>
+                <span aria-hidden="true">·</span>
+                <span className="tabular-nums">{updatedLabel}</span>
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            aria-label={t('trayCockpit.refresh')}
+            onClick={() => void refresh()}
+            className="tray-icon-button grid h-7 w-7 shrink-0 place-items-center rounded-[10px] text-[var(--tray-text-3)] transition-[background-color,color] duration-[var(--tray-duration)] ease-[var(--tray-ease)] hover:bg-[var(--tray-surface-2)] hover:text-[var(--tray-text-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          >
+            <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
+          </button>
+        </header>
+
+        <div className="relative flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pb-2 pt-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <StatStrip
+            items={[
+              { label: t('trayCockpit.env'), value: snapshot.currentEnv, icon: <Compass className="h-3 w-3" /> },
+              { label: t('trayCockpit.perm'), value: snapshot.permissionMode, icon: <Zap className="h-3 w-3" /> },
+              { label: t('trayCockpit.sessions'), value: `${runningSessions.length}`, icon: <TerminalSquare className="h-3 w-3" /> },
+            ]}
+          />
+
+          <div className="grid grid-cols-2 gap-3">
+            <MetricTile
+              label={t('trayCockpit.tokensToday')}
+              value={formatTokens(todayTokens)}
+              detail={updatedLabel}
+            />
+            <MetricTile
+              accent
+              label={t('trayCockpit.costToday')}
+              value={formatCost(snapshot.usage.today.cost)}
+              detail={monthCostLabel}
+            />
+          </div>
+
+          <ActivityChart path={path} label={t('trayCockpit.activity')} lastX={lastX} lastY={lastY} />
+
+          <ProviderSplit providers={providers} label={t('trayCockpit.providerSplit')} caption={t('trayCockpit.sessions')} />
+
+          <div className="grid grid-cols-2 gap-3">
+            <InfoColumn
+              title={t('trayCockpit.activeProjects')}
+              count={visibleSessions.length}
+              empty={t('trayCockpit.noSessions')}
+            >
+              {visibleSessions.slice(0, 2).map((session) => {
+                const tone = statusTone(session.status);
+                return (
+                  <div key={session.id} className="flex min-w-0 items-center gap-2 py-1">
+                    <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', statusDotClass(tone))} aria-hidden="true" />
+                    <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-[var(--tray-text-1)]">
+                      {getProjectName(session.workingDir)}
+                    </span>
+                    <span className={cn('shrink-0 rounded-[8px] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-normal', statusBadgeClass(tone))}>
+                      {session.status}
+                    </span>
+                  </div>
+                );
+              })}
+            </InfoColumn>
+
+            <InfoColumn
+              title={t('trayCockpit.scheduled')}
+              count={visibleCronTasks.length}
+              empty={t('trayCockpit.noCron')}
+            >
+              {visibleCronTasks.slice(0, 2).map((task) => (
+                <div key={task.id} className="flex min-w-0 items-center gap-2 py-1">
+                  <Clock3 className="h-3 w-3 shrink-0 text-[var(--tray-text-3)]" aria-hidden="true" />
+                  <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-[var(--tray-text-1)]">{task.name}</span>
+                  <span className="shrink-0 font-mono text-[10px] tabular-nums text-[var(--tray-text-3)]">
+                    {task.cronExpression}
+                  </span>
+                </div>
+              ))}
+            </InfoColumn>
+          </div>
+
+          <HealthRow items={healthItems} />
+        </div>
+
+        <footer className="flex items-center gap-1 border-t border-[var(--tray-hairline)] bg-transparent px-2 py-1.5">
+          <DockButton icon={<Play className="h-3.5 w-3.5" />} label={t('trayCockpit.launch')} busy={launching} onClick={handleLaunch} primary />
+          <DockButton icon={<Workflow className="h-3.5 w-3.5" />} label={t('trayCockpit.workspace')} onClick={() => void showMainTab('workspace')} />
+          <DockButton icon={<Bot className="h-3.5 w-3.5" />} label={t('trayCockpit.sessionsPage')} onClick={() => void showMainTab('sessions')} />
+          <DockButton icon={<Settings2 className="h-3.5 w-3.5" />} label={t('trayCockpit.diagnostics')} onClick={() => void showMainTab('proxy-debug')} />
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function TrayLogo() {
+  return (
+    <div className="tray-logo relative flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px]">
+      <span className="tray-logo-ring absolute inset-0 rounded-[10px]" aria-hidden="true" />
+      <img
+        src="/logo_preview.png"
+        alt="CCEM"
+        className="tray-logo-image relative h-7 w-7 object-contain"
+        draggable={false}
+      />
+    </div>
+  );
+}
+
+function StatStrip({ items }: { items: Array<{ label: string; value: string; icon: ReactNode }> }) {
+  return (
+    <div className="grid grid-cols-3 rounded-[12px] bg-[var(--tray-surface-2)] px-3.5 py-2.5">
+      {items.map((item, index) => (
+        <div
+          key={item.label}
+          className={cn(
+            'flex min-w-0 flex-col gap-0.5',
+            index > 0 && 'pl-3.5',
+          )}
+        >
+          <div className="flex items-center gap-1 text-[10.5px] font-medium uppercase tracking-normal text-[var(--tray-text-3)]">
+            <span className="text-[var(--tray-text-3)]">{item.icon}</span>
+            <span className="truncate">{item.label}</span>
+          </div>
+          <div className="truncate text-[12.5px] font-medium leading-tight text-[var(--tray-text-1)] tabular-nums">
+            {item.value}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MetricTile({
+  label,
+  value,
+  detail,
+  accent = false,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  accent?: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-1 rounded-[12px] bg-[var(--tray-surface-2)] px-3.5 py-3">
+      <div className="text-[10.5px] font-medium uppercase tracking-normal text-[var(--tray-text-3)]">
+        {label}
+      </div>
+      <div
+        className={cn(
+          'text-[22px] font-semibold leading-none tracking-normal tabular-nums',
+          accent ? 'text-[var(--tray-accent)]' : 'text-[var(--tray-text-1)]',
+        )}
+      >
+        {value}
+      </div>
+      <div className="truncate text-[10.5px] text-[var(--tray-text-3)]">{detail}</div>
+    </div>
+  );
+}
+
+function ActivityChart({
+  path,
+  label,
+  lastX,
+  lastY,
+}: {
+  path: string;
+  label: string;
+  lastX: number;
+  lastY: number;
+}) {
+  return (
+    <div className="rounded-[12px] bg-[var(--tray-surface-2)] px-3.5 pb-2 pt-3">
+      <div className="mb-1 flex items-center justify-between">
+        <div className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--tray-text-2)]">
+          <Activity className="h-3 w-3 text-[var(--tray-accent)]" />
+          {label}
+        </div>
+        <span className="text-[10.5px] font-medium uppercase tracking-normal text-[var(--tray-text-3)]">
+          12h
+        </span>
+      </div>
+      <svg viewBox="0 0 320 88" className="h-[88px] w-full overflow-visible" aria-hidden="true">
+        <defs>
+          <linearGradient id="tray-cockpit-area" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="var(--tray-accent)" stopOpacity="0.18" />
+            <stop offset="100%" stopColor="var(--tray-accent)" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={`${path} L ${lastX.toFixed(1)} 88 L 0 88 Z`} fill="url(#tray-cockpit-area)" />
+        <path
+          className="tray-chart-line"
+          d={path}
+          fill="none"
+          pathLength={1}
+          stroke="var(--tray-accent)"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="1.75"
+        />
+        <circle
+          className="tray-chart-dot"
+          cx={lastX}
+          cy={lastY}
+          r={2.5}
+          fill="var(--tray-bg)"
+          stroke="var(--tray-accent)"
+          strokeWidth="1.5"
+        />
+      </svg>
+    </div>
+  );
+}
+
+function ProviderSplit({
+  providers,
+  label,
+  caption,
+}: {
+  providers: Array<{ key: string; label: string; value: number }>;
+  label: string;
+  caption: string;
+}) {
+  return (
+    <div className="rounded-[12px] bg-[var(--tray-surface-2)] px-3.5 py-3">
+      <div className="mb-2 flex items-center justify-between text-[12px] font-medium text-[var(--tray-text-2)]">
+        <span className="flex items-center gap-1.5">
+          <Workflow className="h-3 w-3 text-[var(--tray-accent)]" />
+          {label}
+        </span>
+        <span className="text-[10.5px] font-medium uppercase tracking-normal text-[var(--tray-text-3)]">
+          {caption}
+        </span>
+      </div>
+      <div className="space-y-1.5">
+        {providers.map((item) => (
+          <div key={item.key} className="grid grid-cols-[64px_1fr_36px] items-center gap-2 text-[11px]">
+            <span className="truncate text-[var(--tray-text-2)]">{item.label}</span>
+            <div className="h-1.5 overflow-hidden rounded-full bg-[var(--tray-hairline)]">
+              <div
+                className="tray-provider-bar h-full rounded-full bg-[var(--tray-accent)] transition-[width] duration-[var(--tray-duration)] ease-[var(--tray-ease)]"
+                style={{ width: `${item.value}%`, opacity: 0.55 + (item.value / 100) * 0.45 }}
+              />
+            </div>
+            <span className="text-right font-medium tabular-nums text-[var(--tray-text-3)]">{item.value}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function InfoColumn({
+  title,
+  count,
+  empty,
+  children,
+}: {
+  title: string;
+  count: number;
+  empty: string;
+  children: ReactNode;
+}) {
+  const hasChildren = Array.isArray(children) ? children.length > 0 : Boolean(children);
+  return (
+    <div className="flex min-w-0 flex-col rounded-[12px] bg-[var(--tray-surface-2)] px-3.5 py-3">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="truncate text-[12px] font-medium text-[var(--tray-text-2)]">{title}</span>
+        <span className="shrink-0 rounded-[8px] bg-[var(--tray-surface-1)] px-1.5 py-0.5 text-[9.5px] font-semibold tabular-nums text-[var(--tray-text-3)]">
+          {count}
+        </span>
+      </div>
+      <div className="min-h-0 flex-1">
+        {hasChildren ? children : (
+          <div className="rounded-[10px] bg-[var(--tray-surface-1)] px-2 py-1.5 text-[11px] text-[var(--tray-text-3)]">{empty}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function HealthRow({ items }: { items: Array<{ key: string; label: string; ok: boolean; detail: string }> }) {
+  return (
+    <div className="flex items-center gap-1 rounded-[12px] bg-[var(--tray-surface-2)] px-2 py-1.5">
+      {items.map((item, index) => (
+        <div
+          key={item.key}
+          className={cn(
+            'flex min-w-0 flex-1 items-center justify-center gap-1 rounded-[10px] px-1 py-0.5',
+            index > 0 && 'border-l border-[var(--tray-hairline)]',
+          )}
+          title={item.detail}
+        >
+          {item.ok ? (
+            <Check className="h-3 w-3 shrink-0 text-success" aria-hidden="true" />
+          ) : (
+            <Minus className="h-3 w-3 shrink-0 text-warning" aria-hidden="true" />
+          )}
+          <span className="truncate text-[10px] font-medium text-[var(--tray-text-3)]">{item.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DockButton({
+  icon,
+  label,
+  busy = false,
+  primary = false,
+  onClick,
+}: {
+  icon: ReactNode;
+  label: string;
+  busy?: boolean;
+  primary?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          onClick={onClick}
+          className={cn(
+            'tray-dock-button group flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-[10px] px-1 py-1.5 text-[var(--tray-text-3)] transition-[background-color,color,opacity] duration-[var(--tray-duration)] ease-[var(--tray-ease)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+            primary
+              ? 'bg-[var(--tray-surface-2)] text-[var(--tray-accent)] hover:bg-[var(--tray-surface-1)]'
+              : 'hover:bg-[var(--tray-surface-2)] hover:text-[var(--tray-text-2)]',
+          )}
+        >
+          <span className="flex h-[18px] w-[18px] items-center justify-center [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:stroke-[1.75]">
+            {busy ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : icon}
+          </span>
+          <span className="max-w-full truncate text-[10px] font-medium">{label}</span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+export function TrayCockpit() {
+  return (
+    <LocaleProvider>
+      <TooltipProvider>
+        <TrayCockpitContent />
+      </TooltipProvider>
+    </LocaleProvider>
+  );
+}
