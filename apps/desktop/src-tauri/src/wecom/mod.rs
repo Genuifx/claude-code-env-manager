@@ -335,6 +335,50 @@ impl WecomBridgeManager {
         connection.send_markdown_message(&wecom_chatid_from_peer_id(peer_id), content)
     }
 
+    pub fn send_stream_message(
+        &self,
+        bot_id: Option<&str>,
+        peer_id: &str,
+        stream_id: &str,
+        content: &str,
+        finish: bool,
+    ) -> Result<String, String> {
+        let started_at = Instant::now();
+        loop {
+            match self.try_send_stream_message(bot_id, peer_id, stream_id, content, finish) {
+                Ok(message_id) => return Ok(message_id),
+                Err(error)
+                    if wecom_markdown_send_error_is_retryable(&error)
+                        && started_at.elapsed()
+                            < Duration::from_millis(WECOM_MARKDOWN_SEND_RETRY_TIMEOUT_MS) =>
+                {
+                    thread::sleep(Duration::from_millis(WECOM_MARKDOWN_SEND_RETRY_MS));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    fn try_send_stream_message(
+        &self,
+        bot_id: Option<&str>,
+        peer_id: &str,
+        stream_id: &str,
+        content: &str,
+        finish: bool,
+    ) -> Result<String, String> {
+        let connection = self.connection_for_bot(bot_id)?;
+        if !connection.is_connected() {
+            return Err("WeCom bot connection is not active.".to_string());
+        }
+        connection.send_stream_message(
+            &wecom_chatid_from_peer_id(peer_id),
+            stream_id,
+            content,
+            finish,
+        )
+    }
+
     fn connection_for_bot(&self, bot_id: Option<&str>) -> Result<Arc<WecomConnection>, String> {
         let connections = self
             .connections
@@ -461,6 +505,27 @@ impl WecomConnection {
         Ok(req_id)
     }
 
+    pub fn send_stream_message(
+        &self,
+        chatid: &str,
+        stream_id: &str,
+        content: &str,
+        finish: bool,
+    ) -> Result<String, String> {
+        let req_id = generate_req_id("aibot_send_msg");
+        match self.send_frame_waiting_for_ack(
+            &req_id,
+            build_active_stream_message_frame(&req_id, chatid, stream_id, content, finish),
+        ) {
+            Ok(()) => {}
+            Err(error) if error.starts_with("WeCom send ack timed out:") => {
+                eprintln!("WeCom send active stream ack timeout warning: {}", error);
+            }
+            Err(error) => return Err(error),
+        }
+        Ok(req_id)
+    }
+
     fn send_frame_waiting_for_ack(&self, req_id: &str, frame: Value) -> Result<(), String> {
         let (sender, receiver) = mpsc::channel();
         self.pending_acks
@@ -510,6 +575,28 @@ impl WecomConnection {
         let _ = sender.send(result);
         true
     }
+}
+
+fn build_active_stream_message_frame(
+    req_id: &str,
+    chatid: &str,
+    stream_id: &str,
+    content: &str,
+    finish: bool,
+) -> Value {
+    json!({
+        "cmd": "aibot_send_msg",
+        "headers": { "req_id": req_id },
+        "body": {
+            "chatid": chatid,
+            "msgtype": "stream",
+            "stream": {
+                "id": stream_id,
+                "finish": finish,
+                "content": truncate_utf8(content, WECOM_TEXT_LIMIT),
+            }
+        }
+    })
 }
 
 fn run_bot_loop(
@@ -1153,27 +1240,46 @@ fn extract_bot_binding_route_markers(
         quoted_task_id: texts
             .iter()
             .find_map(|text| extract_marker_token(text, "ccem-task-")),
-        correlation_marker: texts
-            .iter()
-            .find_map(|text| extract_marker_token(text, "ccem-bot-binding:")),
+        correlation_marker: texts.iter().find_map(|text| {
+            extract_marker_token(text, "ccem-bot-binding:")
+                .or_else(|| extract_marker_token(text, "ccem:"))
+                .or_else(|| extract_hash_route_token(text))
+        }),
     }
 }
 
 fn extract_marker_token(text: &str, prefix: &str) -> Option<String> {
     let start = text.find(prefix)?;
     let token = text[start..]
-        .split(|ch: char| {
-            ch.is_whitespace()
-                || matches!(
-                    ch,
-                    '`' | '"' | '\'' | '<' | '>' | '(' | ')' | '[' | ']' | '，' | '。' | '；'
-                )
-        })
+        .split(is_route_token_separator)
         .next()
         .unwrap_or("")
-        .trim_matches(|ch: char| matches!(ch, '.' | ',' | ':' | ';' | '。' | '，'))
+        .trim_matches(|ch: char| matches!(ch, '.' | ',' | ':' | ';' | '。' | '，' | '：'))
         .to_string();
     (!token.is_empty()).then_some(token)
+}
+
+fn extract_hash_route_token(text: &str) -> Option<String> {
+    text.split(is_route_token_separator).find_map(|token| {
+        let candidate = token
+            .trim()
+            .trim_matches(|ch: char| matches!(ch, '.' | ',' | ':' | ';' | '。' | '，' | '：'))
+            .strip_prefix('#')?;
+        is_short_route_id(candidate).then(|| candidate.to_string())
+    })
+}
+
+fn is_route_token_separator(ch: char) -> bool {
+    ch.is_whitespace()
+        || matches!(
+            ch,
+            '`' | '"' | '\'' | '<' | '>' | '(' | ')' | '[' | ']' | '，' | '。' | '；' | '：'
+        )
+}
+
+fn is_short_route_id(value: &str) -> bool {
+    let len = value.chars().count();
+    (6..=8).contains(&len) && value.chars().all(|ch| ch.is_ascii_alphanumeric())
 }
 
 fn reply_text(connection: &WecomConnection, frame: &WecomFrame, text: &str) -> Result<(), String> {
@@ -1270,19 +1376,43 @@ fn try_route_bot_binding_message(
     stream_id: &str,
 ) -> Result<bool, String> {
     let markers = extract_bot_binding_route_markers(normalized);
-    if markers.quoted_task_id.is_none() && markers.correlation_marker.is_none() {
-        return Ok(false);
-    }
-
     let bot_binding_manager = app.state::<Arc<crate::bot_binding::BotBindingManager>>();
-    let Some(binding) = bot_binding_manager.find_binding_for_route(
-        RemotePlatform::Wecom,
-        Some(&bot.bot_id),
-        peer_id,
-        markers.quoted_task_id.as_deref(),
-        markers.correlation_marker.as_deref(),
-    ) else {
-        return Ok(false);
+    let has_route_marker = markers.quoted_task_id.is_some() || markers.correlation_marker.is_some();
+    let binding = if has_route_marker {
+        match bot_binding_manager.find_binding_for_route(
+            RemotePlatform::Wecom,
+            Some(&bot.bot_id),
+            peer_id,
+            markers.quoted_task_id.as_deref(),
+            markers.correlation_marker.as_deref(),
+        ) {
+            Some(binding) => binding,
+            None => {
+                connection.send_stream(
+                    &frame.headers.req_id,
+                    stream_id,
+                    "没有找到这个 CCEM 绑定会话。请确认回复里带的是最新的 #短ID。",
+                    true,
+                )?;
+                return Ok(true);
+            }
+        }
+    } else {
+        let candidates =
+            active_bot_bindings_for_target(app, bot_binding_manager.inner(), &bot.bot_id, peer_id);
+        match candidates.as_slice() {
+            [binding] => binding.clone(),
+            [] => return Ok(false),
+            _ => {
+                connection.send_stream(
+                    &frame.headers.req_id,
+                    stream_id,
+                    &format_ambiguous_bot_binding_reply(&candidates),
+                    true,
+                )?;
+                return Ok(true);
+            }
+        }
     };
 
     let prompt = match role {
@@ -1359,6 +1489,7 @@ fn try_route_bot_binding_message(
         bot_binding_manager.inner().clone(),
         binding.binding_id.clone(),
         binding.bot_id.clone(),
+        crate::bot_binding::bot_binding_route_id(&binding),
         frame.headers.req_id.clone(),
         stream_id.to_string(),
         outbox_cursor,
@@ -1366,11 +1497,49 @@ fn try_route_bot_binding_message(
     Ok(true)
 }
 
+fn active_bot_bindings_for_target(
+    app: &AppHandle,
+    bot_binding_manager: &crate::bot_binding::BotBindingManager,
+    bot_id: &str,
+    peer_id: &str,
+) -> Vec<crate::bot_binding::BotBindingInfo> {
+    let unified_state = app.state::<Arc<crate::unified_runtime::UnifiedSessionManager>>();
+    let native_state = app.state::<Arc<crate::native_runtime::NativeRuntimeManager>>();
+    let unified_sessions = unified_state.inner().list_sessions();
+    let native_sessions = native_state.inner().list_sessions();
+
+    bot_binding_manager
+        .find_bindings_for_target(RemotePlatform::Wecom, Some(bot_id), peer_id)
+        .into_iter()
+        .filter(|binding| {
+            unified_sessions
+                .iter()
+                .any(|session| session.id == binding.runtime_id && session.is_active)
+                || native_sessions
+                    .iter()
+                    .any(|session| session.runtime_id == binding.runtime_id && session.is_active)
+        })
+        .collect()
+}
+
+fn format_ambiguous_bot_binding_reply(bindings: &[crate::bot_binding::BotBindingInfo]) -> String {
+    let mut lines = vec!["当前会话里有多个活跃的 CCEM 绑定任务，请带 #短ID 回复：".to_string()];
+    for binding in bindings.iter().rev().take(6) {
+        lines.push(format!(
+            "- #{} {}",
+            crate::bot_binding::bot_binding_route_id(binding),
+            binding.task_title
+        ));
+    }
+    lines.join("\n")
+}
+
 fn spawn_bot_binding_stream_relay(
     manager: Arc<WecomBridgeManager>,
     bot_binding_manager: Arc<crate::bot_binding::BotBindingManager>,
     binding_id: String,
     bot_id: Option<String>,
+    route_id: String,
     req_id: String,
     stream_id: String,
     start_cursor: usize,
@@ -1413,7 +1582,10 @@ fn spawn_bot_binding_stream_relay(
                     }
 
                     if should_finish || content != last_sent {
-                        let payload = truncate_utf8(&content, TEXT_LIMIT);
+                        let payload = truncate_utf8(
+                            &with_bot_binding_route_footer(&content, &route_id),
+                            TEXT_LIMIT,
+                        );
                         match send_bot_binding_stream_update(
                             &manager,
                             bot_id.as_deref(),
@@ -1441,7 +1613,10 @@ fn spawn_bot_binding_stream_relay(
                         "绑定会话仍在运行，企微本次推送窗口已结束。",
                         false,
                     );
-                    let payload = truncate_utf8(&content, TEXT_LIMIT);
+                    let payload = truncate_utf8(
+                        &with_bot_binding_route_footer(&content, &route_id),
+                        TEXT_LIMIT,
+                    );
                     if let Err(error) = send_bot_binding_stream_update(
                         &manager,
                         bot_id.as_deref(),
@@ -1475,6 +1650,7 @@ pub fn start_bot_binding_markdown_relay(
     const POLL_MS: u64 = 750;
     const MAX_MS: u64 = 6 * 60 * 60 * 1_000;
     const TEXT_LIMIT: usize = 18_000;
+    const FALLBACK_PROGRESS_DIGEST_MS: u64 = 5_000;
 
     let binding_id = binding.binding_id.clone();
     let bot_id = binding.bot_id.clone();
@@ -1486,13 +1662,24 @@ pub fn start_bot_binding_markdown_relay(
             let mut cursor = start_cursor;
             let mut sent_any = false;
             let mut skipping_streamed_reply = false;
+            let route_id = crate::bot_binding::bot_binding_route_id(&binding);
+            let progress_stream_id = generate_req_id("botbind_active_stream");
+            let mut progress_content = String::new();
+            let mut last_progress_sent = String::new();
+            let mut progress_mode = BotBindingActiveProgressMode::Stream;
+            let mut last_progress_digest_at: Option<Instant> = None;
+            let mut turn_text = String::new();
 
             loop {
                 let frames = bot_binding_manager.outbox(Some(binding_id.clone()));
-                let mut blocks = Vec::<String>::new();
+                let mut normal_blocks = Vec::<String>::new();
                 let mut should_finish = false;
                 let mut skipped_streamed_reply_finished = false;
                 let mut next_cursor = cursor;
+                let mut next_skipping_streamed_reply = skipping_streamed_reply;
+                let mut next_turn_text = turn_text.clone();
+                let mut next_progress_content = progress_content.clone();
+                let mut progress_changed = false;
 
                 if cursor < frames.len() {
                     for (index, frame) in frames.iter().enumerate().skip(cursor) {
@@ -1501,13 +1688,13 @@ pub fn start_bot_binding_markdown_relay(
                             &frame.kind,
                             crate::bot_binding::BotBindingOutboxFrameKind::InboundCommand
                         ) {
-                            skipping_streamed_reply = true;
+                            next_skipping_streamed_reply = true;
                             continue;
                         }
                         let frame_finishes = bot_binding_frame_finishes_stream(frame);
-                        if skipping_streamed_reply {
+                        if next_skipping_streamed_reply {
                             if frame_finishes {
-                                skipping_streamed_reply = false;
+                                next_skipping_streamed_reply = false;
                                 skipped_streamed_reply_finished = true;
                                 should_finish = true;
                                 break;
@@ -1515,29 +1702,140 @@ pub fn start_bot_binding_markdown_relay(
                             continue;
                         }
 
-                        let has_prior_content = sent_any || !blocks.is_empty();
-                        if let Some(block) =
-                            format_bot_binding_stream_block(frame, has_prior_content)
-                        {
-                            append_bot_binding_stream_vec_block(
-                                &mut blocks,
-                                block,
-                                bot_binding_frame_is_inline_text(frame),
-                            );
+                        let delivery_kind = bot_binding_markdown_relay_frame_kind(frame);
+                        let has_prior_content = sent_any
+                            || !normal_blocks.is_empty()
+                            || !next_turn_text.trim().is_empty();
+                        let block = format_bot_binding_stream_block(frame, has_prior_content);
+                        match delivery_kind {
+                            BotBindingRelayFrameKind::Skip => {}
+                            BotBindingRelayFrameKind::Progress => {
+                                if bot_binding_frame_is_inline_text(frame) {
+                                    append_bot_binding_turn_text(&mut next_turn_text, frame);
+                                } else if bot_binding_frame_is_active_progress_message(frame) {
+                                    if let Some(block) = block {
+                                        append_bot_binding_stream_block(
+                                            &mut next_progress_content,
+                                            &block,
+                                            false,
+                                        );
+                                        progress_changed = true;
+                                    }
+                                }
+                            }
+                            BotBindingRelayFrameKind::Key => {
+                                if let Some(block) = block {
+                                    normal_blocks.push(block);
+                                }
+                            }
+                            BotBindingRelayFrameKind::TurnComplete => {
+                                if let Some(final_text) =
+                                    take_bot_binding_turn_text(&mut next_turn_text, block)
+                                {
+                                    normal_blocks.push(final_text);
+                                }
+                            }
                         }
                         if frame_finishes {
                             should_finish = true;
                             break;
                         }
                     }
-                    if should_finish && blocks.is_empty() && !skipped_streamed_reply_finished {
-                        blocks.push("完成。".to_string());
+                    if should_finish
+                        && normal_blocks.is_empty()
+                        && next_turn_text.trim().is_empty()
+                        && next_progress_content.trim().is_empty()
+                        && !skipped_streamed_reply_finished
+                    {
+                        normal_blocks.push("完成。".to_string());
                     }
 
-                    let mut batch_delivered = blocks.is_empty();
+                    let mut progress_delivered = true;
+                    let mut force_progress_digest = false;
+                    if (progress_changed && next_progress_content != last_progress_sent)
+                        || (should_finish && !next_progress_content.trim().is_empty())
+                    {
+                        let progress_payload =
+                            bot_binding_progress_payload(&next_progress_content, should_finish);
+                        let payload = truncate_utf8(
+                            &with_bot_binding_route_footer(&progress_payload, &route_id),
+                            TEXT_LIMIT,
+                        );
+                        if progress_mode == BotBindingActiveProgressMode::Stream {
+                            match manager.send_stream_message(
+                                bot_id.as_deref(),
+                                &peer_id,
+                                &progress_stream_id,
+                                &payload,
+                                should_finish,
+                            ) {
+                                Ok(_) => {
+                                    last_progress_sent = next_progress_content.clone();
+                                }
+                                Err(error) => {
+                                    eprintln!(
+                                        "WeCom bot binding active stream relay warning: {}",
+                                        error
+                                    );
+                                    if bot_binding_active_stream_error_is_unsupported(&error) {
+                                        progress_mode =
+                                            BotBindingActiveProgressMode::MarkdownDigest;
+                                        force_progress_digest = true;
+                                    } else {
+                                        progress_delivered = false;
+                                    }
+                                }
+                            }
+                        }
+                        if progress_mode == BotBindingActiveProgressMode::MarkdownDigest
+                            && progress_delivered
+                        {
+                            let should_send_digest = force_progress_digest
+                                || should_finish
+                                || last_progress_digest_at.is_none_or(|sent_at| {
+                                    sent_at.elapsed()
+                                        >= Duration::from_millis(FALLBACK_PROGRESS_DIGEST_MS)
+                                });
+                            if should_send_digest {
+                                match manager.send_markdown_message(
+                                    bot_id.as_deref(),
+                                    &peer_id,
+                                    &payload,
+                                ) {
+                                    Ok(_) => {
+                                        last_progress_sent = next_progress_content.clone();
+                                        last_progress_digest_at = Some(Instant::now());
+                                    }
+                                    Err(error) => {
+                                        eprintln!(
+                                            "WeCom bot binding progress digest warning: {}",
+                                            error
+                                        );
+                                        match bot_binding_markdown_send_outcome(&error) {
+                                            BotBindingMarkdownSendOutcome::AssumeDelivered => {
+                                                last_progress_sent = next_progress_content.clone();
+                                                last_progress_digest_at = Some(Instant::now());
+                                            }
+                                            BotBindingMarkdownSendOutcome::RetryLater => {
+                                                progress_delivered = false;
+                                            }
+                                            BotBindingMarkdownSendOutcome::Fatal => {
+                                                progress_delivered = false;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let mut batch_delivered = normal_blocks.is_empty();
                     let mut stop_relay = false;
-                    if !blocks.is_empty() {
-                        let payload = truncate_utf8(&blocks.join("\n\n"), TEXT_LIMIT);
+                    if !normal_blocks.is_empty() {
+                        let payload = truncate_utf8(
+                            &with_bot_binding_route_footer(&normal_blocks.join("\n\n"), &route_id),
+                            TEXT_LIMIT,
+                        );
                         match manager.send_markdown_message(bot_id.as_deref(), &peer_id, &payload) {
                             Ok(_) => {
                                 sent_any = true;
@@ -1559,10 +1857,13 @@ pub fn start_bot_binding_markdown_relay(
                         }
                     }
 
-                    if batch_delivered {
+                    if progress_delivered && batch_delivered {
                         cursor = next_cursor;
+                        skipping_streamed_reply = next_skipping_streamed_reply;
+                        turn_text = next_turn_text;
+                        progress_content = next_progress_content;
                     }
-                    if stop_relay || (should_finish && batch_delivered) {
+                    if stop_relay || (should_finish && progress_delivered && batch_delivered) {
                         break;
                     }
                 }
@@ -1629,6 +1930,22 @@ fn format_bot_binding_stream_block(
             (!frame.text.trim().is_empty()).then(|| frame.text.clone())
         }
         crate::bot_binding::BotBindingOutboxFrameKind::EventUpdate
+            if frame.title.starts_with("Tool started · ") =>
+        {
+            format_tool_started_stream_block(
+                frame.title.trim_start_matches("Tool started · "),
+                text,
+            )
+        }
+        crate::bot_binding::BotBindingOutboxFrameKind::EventUpdate
+            if frame.title.starts_with("Tool completed · ") =>
+        {
+            format_tool_completed_stream_block(
+                frame.title.trim_start_matches("Tool completed · "),
+                text,
+            )
+        }
+        crate::bot_binding::BotBindingOutboxFrameKind::EventUpdate
             if frame.title == "Lifecycle · turn_completed" =>
         {
             if has_prior_content || text.is_empty() {
@@ -1641,7 +1958,7 @@ fn format_bot_binding_stream_block(
             format_titled_bot_binding_block(&frame.title, text)
         }
         crate::bot_binding::BotBindingOutboxFrameKind::InteractiveOutput => {
-            Some(format!("{}\n```text\n{}\n```", frame.title, text))
+            Some(format!("{}\n{}", frame.title, text))
         }
         crate::bot_binding::BotBindingOutboxFrameKind::PermissionPrompt => {
             format_titled_bot_binding_block(&format!("需要处理：{}", frame.title), text)
@@ -1659,6 +1976,47 @@ fn format_bot_binding_stream_block(
     }
 }
 
+fn format_tool_started_stream_block(tool_name: &str, text: &str) -> Option<String> {
+    let display_text = text.trim();
+    match tool_name {
+        "Plan" if display_text.is_empty() || display_text == "进入计划模式" => {
+            Some("计划：已进入计划模式。".to_string())
+        }
+        "Plan" => Some(format!("计划：\n{display_text}")),
+        "Plan review" => Some(format!("计划待确认：\n{display_text}")),
+        "Question" => Some(format!("需要确认：\n{display_text}")),
+        "Subagent" => Some(format!("子 Agent：{}", compact_progress_text(display_text))),
+        _ => Some(
+            format!(
+                "处理中：{} {}",
+                tool_name,
+                compact_progress_text(display_text)
+            )
+            .trim()
+            .to_string(),
+        ),
+    }
+}
+
+fn format_tool_completed_stream_block(tool_name: &str, text: &str) -> Option<String> {
+    let display_text = text.trim();
+    match tool_name {
+        "Subagent" if !display_text.is_empty() => Some(format!("子 Agent 结果：\n{display_text}")),
+        "Plan review" | "Question" => None,
+        _ => Some(format!("处理中：{} 完成", tool_name)),
+    }
+}
+
+fn compact_progress_text(text: &str) -> String {
+    let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.chars().count() <= 120 {
+        return compact;
+    }
+    let mut value = compact.chars().take(119).collect::<String>();
+    value.push('…');
+    value
+}
+
 fn format_titled_bot_binding_block(title: &str, text: &str) -> Option<String> {
     if title.trim().is_empty() && text.is_empty() {
         None
@@ -1667,13 +2025,14 @@ fn format_titled_bot_binding_block(title: &str, text: &str) -> Option<String> {
     } else if title.trim().is_empty() {
         Some(text.to_string())
     } else {
-        Some(format!("**{}**\n{}", title.trim(), text))
+        Some(format!("{}：\n{}", title.trim(), text))
     }
 }
 
 fn append_bot_binding_stream_block(content: &mut String, block: &str, inline: bool) {
     if inline {
         if !block.trim().is_empty() {
+            remove_trailing_progress_block(content);
             content.push_str(block);
         }
         return;
@@ -1682,6 +2041,13 @@ fn append_bot_binding_stream_block(content: &mut String, block: &str, inline: bo
     let trimmed = block.trim();
     if trimmed.is_empty() {
         return;
+    }
+    if is_progress_block(trimmed) {
+        if replace_trailing_progress_block(content, trimmed) {
+            return;
+        }
+    } else {
+        remove_trailing_progress_block(content);
     }
     if !content.trim().is_empty() {
         content.push_str("\n\n");
@@ -1694,8 +2060,9 @@ fn append_bot_binding_stream_vec_block(blocks: &mut Vec<String>, block: String, 
         if block.trim().is_empty() {
             return;
         }
+        remove_trailing_progress_vec_block(blocks);
         match blocks.last_mut() {
-            Some(last) if !last.starts_with("**") && !last.contains("\n```") => {
+            Some(last) if !last.contains('\n') => {
                 last.push_str(&block);
             }
             _ => blocks.push(block),
@@ -1705,7 +2072,69 @@ fn append_bot_binding_stream_vec_block(blocks: &mut Vec<String>, block: String, 
 
     let trimmed = block.trim();
     if !trimmed.is_empty() {
+        if is_progress_block(trimmed) {
+            if let Some(last) = blocks.last_mut() {
+                if is_progress_block(last) {
+                    *last = trimmed.to_string();
+                    return;
+                }
+            }
+        } else {
+            remove_trailing_progress_vec_block(blocks);
+        }
         blocks.push(trimmed.to_string());
+    }
+}
+
+fn is_progress_block(block: &str) -> bool {
+    block.trim_start().starts_with("处理中：")
+}
+
+fn replace_trailing_progress_block(content: &mut String, next: &str) -> bool {
+    let trimmed = content.trim_end();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let start = trimmed.rfind("\n\n").map(|index| index + 2).unwrap_or(0);
+    if !is_progress_block(&trimmed[start..]) {
+        return false;
+    }
+    content.truncate(start);
+    content.push_str(next);
+    true
+}
+
+fn remove_trailing_progress_block(content: &mut String) {
+    let trimmed = content.trim_end();
+    if trimmed.is_empty() {
+        content.clear();
+        return;
+    }
+    let start = trimmed.rfind("\n\n").map(|index| index + 2).unwrap_or(0);
+    if !is_progress_block(&trimmed[start..]) {
+        return;
+    }
+    content.truncate(start.saturating_sub(2));
+}
+
+fn remove_trailing_progress_vec_block(blocks: &mut Vec<String>) {
+    if blocks.last().is_some_and(|block| is_progress_block(block)) {
+        blocks.pop();
+    }
+}
+
+fn with_bot_binding_route_footer(content: &str, route_id: &str) -> String {
+    let trimmed = content.trim();
+    if route_id.trim().is_empty() {
+        return trimmed.to_string();
+    }
+    if trimmed.contains(&format!("#{route_id}")) {
+        return trimmed.to_string();
+    }
+    if trimmed.is_empty() {
+        format!("ID：#{route_id}")
+    } else {
+        format!("{trimmed}\n\nID：#{route_id}")
     }
 }
 
@@ -1714,6 +2143,140 @@ fn bot_binding_frame_is_inline_text(frame: &crate::bot_binding::BotBindingOutbox
         &frame.kind,
         crate::bot_binding::BotBindingOutboxFrameKind::EventUpdate
     ) && frame.title == "Assistant update"
+}
+
+fn bot_binding_frame_is_active_progress_message(
+    frame: &crate::bot_binding::BotBindingOutboxFrame,
+) -> bool {
+    matches!(
+        &frame.kind,
+        crate::bot_binding::BotBindingOutboxFrameKind::EventUpdate
+    ) && (frame.title.starts_with("Tool started · ")
+        || frame.title.starts_with("Tool completed · "))
+        && bot_binding_markdown_relay_frame_kind(frame) == BotBindingRelayFrameKind::Progress
+}
+
+fn bot_binding_progress_payload(content: &str, finish: bool) -> String {
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return if finish {
+            "中间过程已完成。".to_string()
+        } else {
+            "处理中。".to_string()
+        };
+    }
+    if finish {
+        format!("{trimmed}\n\n中间过程已完成。")
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn bot_binding_active_stream_error_is_unsupported(error: &str) -> bool {
+    error.starts_with("WeCom send ack failed:")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BotBindingActiveProgressMode {
+    Stream,
+    MarkdownDigest,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BotBindingRelayFrameKind {
+    Skip,
+    Progress,
+    Key,
+    TurnComplete,
+}
+
+fn bot_binding_markdown_relay_frame_kind(
+    frame: &crate::bot_binding::BotBindingOutboxFrame,
+) -> BotBindingRelayFrameKind {
+    match &frame.kind {
+        crate::bot_binding::BotBindingOutboxFrameKind::TaskCard
+        | crate::bot_binding::BotBindingOutboxFrameKind::InboundCommand => {
+            BotBindingRelayFrameKind::Skip
+        }
+        crate::bot_binding::BotBindingOutboxFrameKind::EventUpdate
+            if matches!(
+                frame.title.as_str(),
+                "User prompt" | "System message" | "Token usage" | "Context usage"
+            ) =>
+        {
+            BotBindingRelayFrameKind::Skip
+        }
+        crate::bot_binding::BotBindingOutboxFrameKind::EventUpdate
+            if frame.title == "Lifecycle · turn_completed" =>
+        {
+            BotBindingRelayFrameKind::TurnComplete
+        }
+        crate::bot_binding::BotBindingOutboxFrameKind::SessionCompleted => {
+            BotBindingRelayFrameKind::TurnComplete
+        }
+        crate::bot_binding::BotBindingOutboxFrameKind::EventUpdate
+            if frame.title == "Assistant update" =>
+        {
+            BotBindingRelayFrameKind::Progress
+        }
+        crate::bot_binding::BotBindingOutboxFrameKind::EventUpdate
+            if frame.title.starts_with("Tool started · ") =>
+        {
+            match frame.title.trim_start_matches("Tool started · ") {
+                "Plan" | "Plan review" | "Question" => BotBindingRelayFrameKind::Key,
+                _ => BotBindingRelayFrameKind::Progress,
+            }
+        }
+        crate::bot_binding::BotBindingOutboxFrameKind::EventUpdate
+            if frame.title.starts_with("Tool completed · ") =>
+        {
+            match frame.title.trim_start_matches("Tool completed · ") {
+                "Subagent" if !frame.text.trim().is_empty() => BotBindingRelayFrameKind::Key,
+                "Plan review" | "Question" => BotBindingRelayFrameKind::Skip,
+                _ => BotBindingRelayFrameKind::Progress,
+            }
+        }
+        crate::bot_binding::BotBindingOutboxFrameKind::EventUpdate => {
+            BotBindingRelayFrameKind::Progress
+        }
+        crate::bot_binding::BotBindingOutboxFrameKind::InteractiveOutput
+        | crate::bot_binding::BotBindingOutboxFrameKind::PermissionPrompt
+        | crate::bot_binding::BotBindingOutboxFrameKind::Error => BotBindingRelayFrameKind::Key,
+    }
+}
+
+fn append_bot_binding_turn_text(
+    turn_text: &mut String,
+    frame: &crate::bot_binding::BotBindingOutboxFrame,
+) {
+    if !bot_binding_frame_is_inline_text(frame) {
+        return;
+    }
+    let text = frame.text.as_str();
+    if text.is_empty() {
+        return;
+    }
+    if !turn_text.is_empty() && text.starts_with(turn_text.as_str()) {
+        *turn_text = text.to_string();
+        return;
+    }
+    turn_text.push_str(text);
+}
+
+fn take_bot_binding_turn_text(
+    turn_text: &mut String,
+    fallback_block: Option<String>,
+) -> Option<String> {
+    let text = turn_text.trim();
+    if !text.is_empty() {
+        let output = text.to_string();
+        turn_text.clear();
+        return Some(output);
+    }
+    match fallback_block {
+        Some(block) if block.trim() != "完成。" => Some(block),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1868,6 +2431,33 @@ mod tests {
     }
 
     #[test]
+    fn extract_bot_binding_route_markers_accepts_short_ids() {
+        let quoted = self::message::NormalizedMessage {
+            text: "继续".to_string(),
+            attachments: Vec::new(),
+            quote: Some("上次进度\n\nID：#A1B2C3D4".to_string()),
+        };
+        let inline = self::message::NormalizedMessage {
+            text: "ccem:A1B2C3D4 继续写测试".to_string(),
+            attachments: Vec::new(),
+            quote: None,
+        };
+
+        assert_eq!(
+            extract_bot_binding_route_markers(&quoted)
+                .correlation_marker
+                .as_deref(),
+            Some("A1B2C3D4")
+        );
+        assert_eq!(
+            extract_bot_binding_route_markers(&inline)
+                .correlation_marker
+                .as_deref(),
+            Some("ccem:A1B2C3D4")
+        );
+    }
+
+    #[test]
     fn bot_binding_stream_block_skips_routing_noise() {
         let user_prompt = bot_binding_frame(
             BotBindingOutboxFrameKind::EventUpdate,
@@ -1949,17 +2539,216 @@ mod tests {
 
     #[test]
     fn bot_binding_tool_events_are_streamed_as_progress() {
-        let tool = bot_binding_frame(
+        let first_tool = bot_binding_frame(
             BotBindingOutboxFrameKind::EventUpdate,
             "Tool started · rg",
             "rg -n bot_binding",
         );
+        let second_tool = bot_binding_frame(
+            BotBindingOutboxFrameKind::EventUpdate,
+            "Tool started · Read",
+            "apps/desktop/src-tauri/src/wecom/mod.rs",
+        );
+        let assistant = bot_binding_frame(
+            BotBindingOutboxFrameKind::EventUpdate,
+            "Assistant update",
+            "已经收敛输出。",
+        );
+        let mut content = String::new();
 
         assert_eq!(
-            format_bot_binding_stream_block(&tool, false).as_deref(),
-            Some("**Tool started · rg**\nrg -n bot_binding")
+            format_bot_binding_stream_block(&first_tool, false).as_deref(),
+            Some("处理中：rg rg -n bot_binding")
         );
-        assert!(!bot_binding_frame_finishes_stream(&tool));
+        append_bot_binding_stream_block(
+            &mut content,
+            &format_bot_binding_stream_block(&first_tool, false).unwrap(),
+            bot_binding_frame_is_inline_text(&first_tool),
+        );
+        append_bot_binding_stream_block(
+            &mut content,
+            &format_bot_binding_stream_block(&second_tool, true).unwrap(),
+            bot_binding_frame_is_inline_text(&second_tool),
+        );
+        assert_eq!(
+            content,
+            "处理中：Read apps/desktop/src-tauri/src/wecom/mod.rs"
+        );
+        append_bot_binding_stream_block(
+            &mut content,
+            &format_bot_binding_stream_block(&assistant, true).unwrap(),
+            bot_binding_frame_is_inline_text(&assistant),
+        );
+        assert_eq!(content, "已经收敛输出。");
+        assert!(!bot_binding_frame_finishes_stream(&first_tool));
+    }
+
+    #[test]
+    fn bot_binding_key_tools_get_special_blocks() {
+        let plan = bot_binding_frame(
+            BotBindingOutboxFrameKind::EventUpdate,
+            "Tool started · Plan review",
+            "1. 调整路由\n2. 验证输出",
+        );
+        let subagent = bot_binding_frame(
+            BotBindingOutboxFrameKind::EventUpdate,
+            "Tool started · Subagent",
+            "检查企微格式",
+        );
+
+        assert_eq!(
+            format_bot_binding_stream_block(&plan, false).as_deref(),
+            Some("计划待确认：\n1. 调整路由\n2. 验证输出")
+        );
+        assert_eq!(
+            format_bot_binding_stream_block(&subagent, false).as_deref(),
+            Some("子 Agent：检查企微格式")
+        );
+    }
+
+    #[test]
+    fn bot_binding_route_footer_keeps_followup_anchor_visible() {
+        assert_eq!(
+            with_bot_binding_route_footer("已经完成。", "A1B2C3D4"),
+            "已经完成。\n\nID：#A1B2C3D4"
+        );
+        assert_eq!(
+            with_bot_binding_route_footer("已经完成。\n\nID：#A1B2C3D4", "A1B2C3D4"),
+            "已经完成。\n\nID：#A1B2C3D4"
+        );
+    }
+
+    #[test]
+    fn active_stream_message_uses_proactive_send_channel() {
+        let frame = build_active_stream_message_frame(
+            "req-1",
+            "chat-1",
+            "stream-1",
+            "处理中：Read 文件",
+            false,
+        );
+
+        assert_eq!(frame["cmd"], json!("aibot_send_msg"));
+        assert_eq!(frame["headers"]["req_id"], json!("req-1"));
+        assert_eq!(frame["body"]["chatid"], json!("chat-1"));
+        assert_eq!(frame["body"]["msgtype"], json!("stream"));
+        assert_eq!(frame["body"]["stream"]["id"], json!("stream-1"));
+        assert_eq!(frame["body"]["stream"]["finish"], json!(false));
+        assert_eq!(
+            frame["body"]["stream"]["content"],
+            json!("处理中：Read 文件")
+        );
+    }
+
+    #[test]
+    fn bot_binding_progress_payload_finishes_without_transcript() {
+        assert_eq!(
+            bot_binding_progress_payload("处理中：Read 文件", false),
+            "处理中：Read 文件"
+        );
+        assert_eq!(
+            bot_binding_progress_payload("处理中：Read 文件", true),
+            "处理中：Read 文件\n\n中间过程已完成。"
+        );
+    }
+
+    #[test]
+    fn bot_binding_markdown_relay_routes_middle_process_to_stream() {
+        let assistant = bot_binding_frame(
+            BotBindingOutboxFrameKind::EventUpdate,
+            "Assistant update",
+            "Let me inspect the code.",
+        );
+        let generic_tool = bot_binding_frame(
+            BotBindingOutboxFrameKind::EventUpdate,
+            "Tool started · Glob",
+            "apps/desktop/src/**/*.tsx",
+        );
+        let checkpoint = bot_binding_frame(
+            BotBindingOutboxFrameKind::EventUpdate,
+            "File checkpoint",
+            "checkpoint_id: abc",
+        );
+        let plan = bot_binding_frame(
+            BotBindingOutboxFrameKind::EventUpdate,
+            "Tool started · Plan review",
+            "1. 保留关键输出",
+        );
+        let subagent_result = bot_binding_frame(
+            BotBindingOutboxFrameKind::EventUpdate,
+            "Tool completed · Subagent",
+            "发现 2 个风险",
+        );
+        let completed = bot_binding_frame(
+            BotBindingOutboxFrameKind::SessionCompleted,
+            "Session completed",
+            "completed",
+        );
+
+        assert_eq!(
+            bot_binding_markdown_relay_frame_kind(&assistant),
+            BotBindingRelayFrameKind::Progress
+        );
+        assert_eq!(
+            bot_binding_markdown_relay_frame_kind(&generic_tool),
+            BotBindingRelayFrameKind::Progress
+        );
+        assert_eq!(
+            bot_binding_markdown_relay_frame_kind(&checkpoint),
+            BotBindingRelayFrameKind::Progress
+        );
+        assert_eq!(
+            bot_binding_markdown_relay_frame_kind(&plan),
+            BotBindingRelayFrameKind::Key
+        );
+        assert_eq!(
+            bot_binding_markdown_relay_frame_kind(&subagent_result),
+            BotBindingRelayFrameKind::Key
+        );
+        assert_eq!(
+            bot_binding_markdown_relay_frame_kind(&completed),
+            BotBindingRelayFrameKind::TurnComplete
+        );
+        assert!(!bot_binding_frame_is_active_progress_message(&assistant));
+        assert!(bot_binding_frame_is_active_progress_message(&generic_tool));
+        assert!(!bot_binding_frame_is_active_progress_message(&checkpoint));
+        assert!(!bot_binding_frame_is_active_progress_message(&plan));
+    }
+
+    #[test]
+    fn bot_binding_turn_text_flushes_as_normal_transcript_output() {
+        let first = bot_binding_frame(
+            BotBindingOutboxFrameKind::EventUpdate,
+            "Assistant update",
+            "Using ",
+        );
+        let second = bot_binding_frame(
+            BotBindingOutboxFrameKind::EventUpdate,
+            "Assistant update",
+            "vercel-react-best-practices",
+        );
+        let cumulative = bot_binding_frame(
+            BotBindingOutboxFrameKind::EventUpdate,
+            "Assistant update",
+            "Using vercel-react-best-practices skill.",
+        );
+        let mut turn_text = String::new();
+
+        append_bot_binding_turn_text(&mut turn_text, &first);
+        append_bot_binding_turn_text(&mut turn_text, &second);
+        append_bot_binding_turn_text(&mut turn_text, &cumulative);
+
+        assert_eq!(
+            take_bot_binding_turn_text(&mut turn_text, Some("完成。".to_string())).as_deref(),
+            Some("Using vercel-react-best-practices skill.")
+        );
+        assert!(turn_text.is_empty());
+        assert_eq!(
+            take_bot_binding_turn_text(&mut turn_text, Some("完成：stopped".to_string()))
+                .as_deref(),
+            Some("完成：stopped")
+        );
+        assert!(take_bot_binding_turn_text(&mut turn_text, Some("完成。".to_string())).is_none());
     }
 
     #[test]

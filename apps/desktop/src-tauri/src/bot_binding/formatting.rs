@@ -1,5 +1,7 @@
-use super::{BotBindingInfo, BotBindingOutboxFrameKind};
-use crate::event_bus::{SessionEventPayload, SessionEventRecord};
+use super::{bot_binding_route_id, BotBindingInfo, BotBindingOutboxFrameKind};
+use crate::event_bus::{
+    InteractiveToolPrompt, SessionEventPayload, SessionEventRecord, ToolCategory,
+};
 
 pub(super) struct EventSummary {
     pub(super) kind: BotBindingOutboxFrameKind,
@@ -43,11 +45,19 @@ pub(super) fn summarize_payload(payload: &SessionEventPayload) -> Option<EventSu
         SessionEventPayload::ToolUseStarted {
             raw_name,
             input_summary,
+            category,
+            prompt,
             ..
         } => Some(EventSummary {
             kind: BotBindingOutboxFrameKind::EventUpdate,
-            title: format!("Tool started · {raw_name}"),
-            text: truncate_text(input_summary, 1200),
+            title: format!(
+                "Tool started · {}",
+                tool_display_name(raw_name, category, prompt.as_ref())
+            ),
+            text: truncate_text(
+                &format_tool_started_text(input_summary, category, prompt.as_ref()),
+                1200,
+            ),
         }),
         SessionEventPayload::ToolUseCompleted {
             raw_name,
@@ -60,7 +70,19 @@ pub(super) fn summarize_payload(payload: &SessionEventPayload) -> Option<EventSu
             } else {
                 BotBindingOutboxFrameKind::Error
             },
-            title: format!("Tool completed · {raw_name}"),
+            title: format!(
+                "Tool completed · {}",
+                if is_subagent_tool(
+                    raw_name,
+                    &ToolCategory::Unknown {
+                        raw_name: raw_name.to_string()
+                    }
+                ) {
+                    "Subagent"
+                } else {
+                    raw_name
+                }
+            ),
             text: truncate_text(result_summary, 1200),
         }),
         SessionEventPayload::PermissionRequired {
@@ -176,7 +198,8 @@ pub(super) fn summarize_payload(payload: &SessionEventPayload) -> Option<EventSu
         SessionEventPayload::ClaudeJson { .. } | SessionEventPayload::GapNotification { .. } => {
             None
         }
-        SessionEventPayload::StdErrLine { .. } | SessionEventPayload::AssistantChunk { .. } => None,
+        SessionEventPayload::StdErrLine { .. }
+        | SessionEventPayload::AssistantChunk { .. } => None,
     }
 }
 
@@ -185,16 +208,18 @@ pub(super) fn format_task_card(info: &BotBindingInfo) -> String {
         .task_summary
         .as_deref()
         .unwrap_or("No summary provided.");
-    let bot_id = info.bot_id.as_deref().unwrap_or("n/a");
+    let route_id = bot_binding_route_id(info);
+    let project = info
+        .project_label
+        .as_deref()
+        .map(|label| format!("\nproject: {label}"))
+        .unwrap_or_default();
     format!(
-        "title: {}\ntask_id: {}\nruntime_id: {}\nplatform: {}\nbot_id: {}\npeer_id: {}\ncorrelation_marker: {}\nsummary: {}",
+        "title: {}\nid: {}{}\nplatform: {}\nsummary: {}",
         info.task_title,
-        info.task_id,
-        info.runtime_id,
+        route_id,
+        project,
         info.platform.display_name(),
-        bot_id,
-        info.peer_id,
-        info.correlation_marker,
         summary
     )
 }
@@ -205,12 +230,14 @@ pub(super) fn format_inbound_prompt(
     quoted_task_id: Option<&str>,
 ) -> String {
     let quoted = quoted_task_id.unwrap_or(&info.task_id);
+    let route_id = bot_binding_route_id(info);
     format!(
-        "[ccem bot-bound command]\nplatform: {}\npeer_id: {}\nruntime_id: {}\ntask_id: {}\nquoted_task_id: {}\ncorrelation_marker: {}\n\n{}",
+        "[ccem bot-bound command]\nplatform: {}\npeer_id: {}\nruntime_id: {}\ntask_id: {}\nroute_id: {}\nquoted_task_id: {}\ncorrelation_marker: {}\n\n{}",
         info.platform.display_name(),
         info.peer_id,
         info.runtime_id,
         info.task_id,
+        route_id,
         quoted,
         info.correlation_marker,
         text
@@ -224,4 +251,54 @@ pub(super) fn truncate_text(text: &str, max_chars: usize) -> String {
     let mut truncated = text.chars().take(max_chars).collect::<String>();
     truncated.push_str("...");
     truncated
+}
+
+fn tool_display_name(
+    raw_name: &str,
+    category: &ToolCategory,
+    prompt: Option<&InteractiveToolPrompt>,
+) -> String {
+    match prompt {
+        Some(InteractiveToolPrompt::PlanEntry) => "Plan".to_string(),
+        Some(InteractiveToolPrompt::PlanExit { .. }) => "Plan review".to_string(),
+        Some(InteractiveToolPrompt::AskUserQuestion { .. }) => "Question".to_string(),
+        None => {
+            if is_subagent_tool(raw_name, category) {
+                "Subagent".to_string()
+            } else {
+                raw_name.to_string()
+            }
+        }
+    }
+}
+
+fn format_tool_started_text(
+    input_summary: &str,
+    category: &ToolCategory,
+    prompt: Option<&InteractiveToolPrompt>,
+) -> String {
+    match prompt {
+        Some(InteractiveToolPrompt::PlanEntry) => "进入计划模式".to_string(),
+        Some(InteractiveToolPrompt::PlanExit { plan_summary, .. }) => plan_summary
+            .as_deref()
+            .filter(|summary| !summary.trim().is_empty())
+            .unwrap_or(input_summary)
+            .to_string(),
+        Some(InteractiveToolPrompt::AskUserQuestion { questions }) => questions
+            .first()
+            .map(|question| question.question.clone())
+            .filter(|question| !question.trim().is_empty())
+            .unwrap_or_else(|| input_summary.to_string()),
+        None if is_subagent_tool("", category) => input_summary.to_string(),
+        None => input_summary.to_string(),
+    }
+}
+
+fn is_subagent_tool(raw_name: &str, category: &ToolCategory) -> bool {
+    raw_name == "Agent"
+        || raw_name == "Task"
+        || matches!(
+            category,
+            ToolCategory::TaskMgmt { raw_name } if raw_name == "Agent" || raw_name == "Task"
+        )
 }

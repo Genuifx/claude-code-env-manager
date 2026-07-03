@@ -1149,9 +1149,16 @@ fn format_wecom_task_binding_card(info: &BotBindingInfo) -> String {
         .as_deref()
         .filter(|summary| !summary.trim().is_empty())
         .unwrap_or("无摘要");
+    let route_id = crate::bot_binding::bot_binding_route_id(info);
+    let project = info
+        .project_label
+        .as_deref()
+        .filter(|label| !label.trim().is_empty())
+        .map(|label| format!("\n目录：{label}"))
+        .unwrap_or_default();
     format!(
-        "**{}**\n\n任务：`{}`\n会话：`{}`\n标记：`{}`\n\n{}\n\n引用这条消息回复，即可继续这个 CCEM 会话。",
-        info.task_title, info.task_id, info.runtime_id, info.correlation_marker, summary
+        "{}\n\nID：#{}{}\n摘要：{}\n\n回复时带 #{}，或直接引用任意带这个 ID 的消息，即可继续这个 CCEM 会话。",
+        info.task_title, route_id, project, summary, route_id
     )
 }
 
