@@ -62,18 +62,34 @@ test('prompt input avoids unconditional URL decoration and trigger scans', async
   );
 });
 
-test('workspace transcript items opt into browser paint skipping', async () => {
+test('live workspace transcript keeps streaming layout eagerly painted', async () => {
   const css = await readSource('src', 'index.css');
+  const sectionStart = css.indexOf('Live workspace transcript items stream and auto-scroll');
+  const sectionEnd = css.indexOf('/* === Reduced Performance Mode === */');
+  const liveTranscriptSection = css.slice(sectionStart, sectionEnd);
+
+  assert.notEqual(sectionStart, -1, 'workspace transcript CSS should explain why paint skipping is disabled');
+  assert.notEqual(sectionEnd, -1, 'workspace transcript CSS should remain before reduced performance mode rules');
 
   assert.match(
     css,
-    /\.workspace-msg-virtualized,[\s\S]*?content-visibility: auto;/,
-    'workspace transcript messages should use content-visibility for long timelines',
+    /\.history-msg-virtualized,[\s\S]*?content-visibility: auto;/,
+    'static history timelines can still use browser paint skipping',
   );
   assert.match(
-    css,
-    /\.workspace-msg-virtualized \{[\s\S]*?contain-intrinsic-size: auto 220px;/,
-    'workspace transcript messages should reserve a stable intrinsic size while skipped',
+    liveTranscriptSection,
+    /\.workspace-msg-virtualized,[\s\S]*?contain: layout paint;/,
+    'live workspace transcript items should keep cheap containment',
+  );
+  assert.doesNotMatch(
+    liveTranscriptSection,
+    /content-visibility:/,
+    'live workspace transcript items should not use paint skipping during streaming turns',
+  );
+  assert.doesNotMatch(
+    liveTranscriptSection,
+    /contain-intrinsic-size:/,
+    'live workspace transcript items should not reserve guessed heights that can shift scroll position',
   );
 });
 
