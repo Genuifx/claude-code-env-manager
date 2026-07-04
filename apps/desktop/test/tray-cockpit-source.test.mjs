@@ -10,7 +10,7 @@ const sourceDir = path.join(desktopDir, 'src');
 const tauriSrcDir = path.join(desktopDir, 'src-tauri', 'src');
 
 test('tray cockpit owns left-click while preserving the native context menu', async () => {
-  const [traySource, mainSource, entrySource, appSource, capabilitySource, cssSource, cockpitSource] =
+  const [traySource, mainSource, entrySource, appSource, capabilitySource, cssSource, cockpitSource, packageSource] =
     await Promise.all([
       fs.readFile(path.join(tauriSrcDir, 'tray.rs'), 'utf8'),
       fs.readFile(path.join(tauriSrcDir, 'main.rs'), 'utf8'),
@@ -19,22 +19,28 @@ test('tray cockpit owns left-click while preserving the native context menu', as
       fs.readFile(path.join(desktopDir, 'src-tauri', 'capabilities', 'default.json'), 'utf8'),
       fs.readFile(path.join(sourceDir, 'index.css'), 'utf8'),
       fs.readFile(path.join(sourceDir, 'pages', 'TrayCockpit.tsx'), 'utf8'),
+      fs.readFile(path.join(desktopDir, 'package.json'), 'utf8'),
     ]);
 
   const capabilities = JSON.parse(capabilitySource);
+  const packageJson = JSON.parse(packageSource);
 
   assert.match(traySource, /pub const TRAY_COCKPIT_LABEL: &str = "tray-cockpit"/);
   assert.match(traySource, /\.show_menu_on_left_click\(false\)/);
   assert.match(
     traySource,
-    /on_tray_icon_event[\s\S]*MouseButton::Left[\s\S]*MouseButtonState::Up[\s\S]*toggle_tray_cockpit/,
+    /on_tray_icon_event[\s\S]*MouseButton::Left[\s\S]*MouseButtonState::Up[\s\S]*rect[\s\S]*TrayCockpitAnchor::icon_rect[\s\S]*toggle_tray_cockpit/,
   );
   assert.match(traySource, /WebviewWindowBuilder::new[\s\S]*TRAY_COCKPIT_LABEL[\s\S]*index\.html\?window=tray-cockpit/);
   assert.match(traySource, /const TRAY_COCKPIT_PANEL_WIDTH: f64 = 390\.0/);
   assert.match(traySource, /const TRAY_COCKPIT_PANEL_HEIGHT: f64 = 700\.0/);
-  assert.match(traySource, /const TRAY_COCKPIT_SHADOW_MARGIN: f64 = 64\.0/);
-  assert.match(traySource, /const TRAY_COCKPIT_WIDTH: f64 = TRAY_COCKPIT_PANEL_WIDTH \+ TRAY_COCKPIT_SHADOW_MARGIN \* 2\.0/);
+  assert.match(traySource, /const TRAY_COCKPIT_SHADOW_MARGIN_X: f64 = 32\.0/);
+  assert.match(traySource, /const TRAY_COCKPIT_SHADOW_MARGIN_TOP: f64 = 8\.0/);
+  assert.match(traySource, /const TRAY_COCKPIT_SHADOW_MARGIN_BOTTOM: f64 = 48\.0/);
+  assert.match(traySource, /const TRAY_COCKPIT_WIDTH: f64 = TRAY_COCKPIT_PANEL_WIDTH \+ TRAY_COCKPIT_SHADOW_MARGIN_X \* 2\.0/);
   assert.match(traySource, /inner_size\(TRAY_COCKPIT_WIDTH, TRAY_COCKPIT_HEIGHT\)/);
+  assert.match(traySource, /panel_x - TRAY_COCKPIT_SHADOW_MARGIN_X/);
+  assert.match(traySource, /panel_y - TRAY_COCKPIT_SHADOW_MARGIN_TOP/);
   assert.match(traySource, /#\[tauri::command\][\s\S]*pub fn open_tray_cockpit/);
 
   assert.match(mainSource, /use tray::\{create_tray, TRAY_COCKPIT_LABEL\}/);
@@ -54,15 +60,44 @@ test('tray cockpit owns left-click while preserving the native context menu', as
   }
 
   assert.match(cssSource, /html\[data-window='tray-cockpit'\]/);
-  assert.match(cssSource, /@keyframes tray-cockpit-enter/);
-  assert.match(cssSource, /@keyframes tray-chart-draw/);
-  assert.match(cssSource, /@keyframes tray-bar-sweep/);
   assert.match(cssSource, /prefers-reduced-motion/);
   assert.match(cssSource, /tray-logo-image/);
+  assert.match(cssSource, /tray-chart-hitbox/);
+  assert.match(cssSource, /tray-chart-tooltip/);
+  assert.match(cssSource, /tray-chart-cursor/);
+  assert.match(cssSource, /stroke-dashoffset: 1/);
+  assert.match(cssSource, /backdrop-filter: blur\(30px\) saturate\(180%\)/);
+  assert.match(cssSource, /--tray-divider: rgba\(255, 255, 255, 0\.06\)/);
+  assert.match(cssSource, /--tray-accent-soft: hsl\(var\(--primary\) \/ 0\.16\)/);
+  assert.match(cssSource, /--tray-accent-softer: hsl\(var\(--primary\) \/ 0\.08\)/);
+  assert.match(cssSource, /--tray-bg-solid: #0b0b0c/);
+  assert.match(cssSource, /\.tray-dock-button:hover/);
+  assert.match(cssSource, /\.tray-icon-button:hover/);
+  assert.match(cockpitSource, /px-\[32px\] pb-\[48px\] pt-2/);
+  assert.match(cockpitSource, /before:bg-\[var\(--tray-divider\)\]/);
+  assert.match(cockpitSource, /bg-\[var\(--tray-accent-softer\)\]/);
+  assert.match(cockpitSource, /bg-\[var\(--tray-bg-solid\)\]/);
+  assert.match(cockpitSource, /rounded-\[10px\]/);
+  assert.match(cockpitSource, /rounded-\[14px\]/);
+  // HealthRow four-cell status grid is intentionally removed; ensure it does not creep back.
+  assert.doesNotMatch(cockpitSource, /function HealthRow/);
+  assert.doesNotMatch(cockpitSource, /<HealthRow/);
+  assert.doesNotMatch(cockpitSource, /healthItems/);
+  assert.equal(packageJson.dependencies.gsap, '^3.15.0');
+  assert.equal(packageJson.dependencies['@gsap/react'], '^2.1.2');
+  assert.match(cockpitSource, /import \{ gsap \} from 'gsap'/);
+  assert.match(cockpitSource, /import \{ useGSAP \} from '@gsap\/react'/);
+  assert.match(cockpitSource, /gsap\.registerPlugin\(useGSAP\)/);
+  assert.match(cockpitSource, /gsap\.timeline/);
+  assert.match(cockpitSource, /gsap\.quickTo/);
+  assert.match(cockpitSource, /chartPoints/);
+  assert.match(cockpitSource, /onPointerMove=\{moveHover\}/);
+  assert.match(cockpitSource, /tray-chart-hitbox/);
+  assert.match(cockpitSource, /tray-chart-tooltip/);
+  assert.match(cockpitSource, /tray-chart-cursor/);
   assert.match(cockpitSource, /function StatStrip/);
   assert.match(cockpitSource, /function ActivityChart/);
   assert.match(cockpitSource, /function ProviderSplit/);
-  assert.match(cockpitSource, /function HealthRow/);
   assert.match(cockpitSource, /function TrayLogo/);
   assert.match(cockpitSource, /previewTheme === 'dark' \|\| previewTheme === 'light'/);
   assert.match(cockpitSource, /src="\/logo_preview\.png"/);
