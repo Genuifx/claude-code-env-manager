@@ -1360,21 +1360,36 @@ fn load_claude_history_from_paths_limited(
     projects_dir: &Path,
     project_scan_limit: Option<usize>,
 ) -> Result<Vec<HistorySession>, String> {
+    let provenance_records = session_provenance::list_records_by_client(SOURCE_CLAUDE).ok();
+    load_claude_history_from_paths_limited_with_provenance_records(
+        history_path,
+        projects_dir,
+        project_scan_limit,
+        provenance_records,
+    )
+}
+
+fn load_claude_history_from_paths_limited_with_provenance_records(
+    history_path: &Path,
+    projects_dir: &Path,
+    project_scan_limit: Option<usize>,
+    provenance_records: Option<HashMap<String, session_provenance::SessionProvenanceRecord>>,
+) -> Result<Vec<HistorySession>, String> {
     let mut session_map: HashMap<String, HistorySession> = HashMap::new();
 
     load_claude_history_index(history_path, &mut session_map, project_scan_limit)?;
 
-    let should_scan_projects = project_scan_limit.is_none() || session_map.is_empty();
-    if should_scan_projects {
-        supplement_claude_history_from_projects(
-            projects_dir,
-            &mut session_map,
-            project_scan_limit,
-        )?;
-    }
+    supplement_claude_history_from_projects(projects_dir, &mut session_map, project_scan_limit)?;
 
     supplement_claude_history_from_runtime_state(&mut session_map);
-    supplement_history_from_provenance(&mut session_map, SOURCE_CLAUDE);
+    if let Some(records) = provenance_records {
+        supplement_history_from_provenance_records(
+            &mut session_map,
+            SOURCE_CLAUDE,
+            records,
+            Some(&projects_dir),
+        );
+    }
     Ok(session_map.into_values().collect())
 }
 
@@ -1506,26 +1521,44 @@ fn supplement_claude_history_from_runtime_state(session_map: &mut HashMap<String
     }
 }
 
-fn supplement_history_from_provenance(
+fn supplement_history_from_provenance_records(
     session_map: &mut HashMap<String, HistorySession>,
     source: &str,
+    records: HashMap<String, session_provenance::SessionProvenanceRecord>,
+    claude_projects_dir: Option<&Path>,
 ) {
-    let records = match session_provenance::list_records_by_client(source) {
-        Ok(records) => records,
-        Err(_) => return,
-    };
-
     for (source_session_id, record) in records {
-        let Some(existing) = session_map.get_mut(&source_session_id) else {
+        if let Some(existing) = session_map.get_mut(&source_session_id) {
+            if existing.source == source {
+                apply_provenance_to_history_session(existing, &record);
+            }
             continue;
         };
 
-        if existing.source != source {
+        if source != SOURCE_CLAUDE {
+            continue;
+        }
+        if !is_cron_provenance_record(&record) {
             continue;
         }
 
-        apply_provenance_to_history_session(existing, &record);
+        let Some(projects_dir) = claude_projects_dir else {
+            continue;
+        };
+        let Some(mut candidate) =
+            load_claude_history_session_from_provenance(projects_dir, &record)
+        else {
+            continue;
+        };
+
+        apply_provenance_to_history_session(&mut candidate, &record);
+        merge_claude_history_session(session_map, candidate);
     }
+}
+
+fn is_cron_provenance_record(record: &session_provenance::SessionProvenanceRecord) -> bool {
+    record.launch_mode.trim().eq_ignore_ascii_case("cron")
+        || record.started_via.trim().eq_ignore_ascii_case("cron")
 }
 
 fn supplement_history_list_from_provenance(sessions: &mut [HistorySession], source: &str) {
@@ -1579,6 +1612,76 @@ fn apply_provenance_to_history_session(
             .unwrap_or("unknown")
             .to_string();
     }
+}
+
+fn load_claude_history_session_from_provenance(
+    projects_dir: &Path,
+    record: &session_provenance::SessionProvenanceRecord,
+) -> Option<HistorySession> {
+    let fallback = history_session_from_provenance_record(SOURCE_CLAUDE, record)?;
+    let source_session_id = record.source_session_id.trim();
+
+    let Some(path) = find_claude_session_file(projects_dir, source_session_id) else {
+        return Some(fallback);
+    };
+    let Some(mut session) = parse_claude_project_session_index(&path) else {
+        return Some(fallback);
+    };
+    if session.source != SOURCE_CLAUDE {
+        return Some(fallback);
+    }
+    if session.id.trim() != source_session_id {
+        session.id = source_session_id.to_string();
+    }
+    if session.timestamp == 0 {
+        session.timestamp = fallback.timestamp;
+    }
+
+    Some(session)
+}
+
+fn history_session_from_provenance_record(
+    source: &str,
+    record: &session_provenance::SessionProvenanceRecord,
+) -> Option<HistorySession> {
+    let id = record.source_session_id.trim();
+    if id.is_empty() {
+        return None;
+    }
+
+    let project = record.working_dir.trim().to_string();
+    let project_name = project
+        .split(['/', '\\'])
+        .next_back()
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown")
+        .to_string();
+    let timestamp = parse_rfc3339_millis(&record.updated_at)
+        .or_else(|| parse_rfc3339_millis(&record.created_at))
+        .unwrap_or(0);
+
+    Some(HistorySession {
+        id: id.to_string(),
+        source: source.to_string(),
+        display: String::new(),
+        timestamp,
+        project,
+        project_name,
+        env_name: Some(record.env_name.clone()).filter(|value| !value.trim().is_empty()),
+        config_source: record
+            .config_source
+            .clone()
+            .filter(|value| !value.trim().is_empty()),
+        task_stage: None,
+        task_sticker: None,
+        task_label: None,
+    })
+}
+
+fn parse_rfc3339_millis(value: &str) -> Option<u64> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|timestamp| timestamp.timestamp_millis().max(0) as u64)
 }
 
 fn dedupe_history_sessions(sessions: Vec<HistorySession>) -> Vec<HistorySession> {
@@ -1988,7 +2091,7 @@ fn extract_first_claude_message_text(message: &serde_json::Value) -> Option<&str
     content.as_str().filter(|text| !text.trim().is_empty())
 }
 
-fn find_claude_session_file(projects_dir: &PathBuf, session_id: &str) -> Option<PathBuf> {
+fn find_claude_session_file(projects_dir: &Path, session_id: &str) -> Option<PathBuf> {
     let projects = fs::read_dir(projects_dir).ok()?;
 
     for project_entry in projects.flatten() {
@@ -4299,14 +4402,14 @@ mod tests {
         dedupe_history_sessions_with_provenance_records, dedupe_near_duplicate_history_sessions,
         discover_subagent_metas, discover_subagent_records, enrich_subagent_metas,
         enrich_subagent_records, find_codex_session_file_with_config, is_noise_display,
-        load_claude_history_from_paths, load_claude_history_from_paths_limited,
+        load_claude_history_from_paths_limited_with_provenance_records,
         load_codex_history_from_config, merge_opencode_history_session,
         merge_tool_results_into_messages, normalize_history_display, normalize_history_limit,
         normalize_history_source, parse_claude_conversation_file, parse_codex_history_timestamp,
         parse_opencode_conversation_export, parse_opencode_history_session,
-        resolve_codex_path_config_from, score_history_search_match, upsert_codex_history_session,
-        CodexHistoryLine, CodexPathConfig, ConversationMessage, HistorySession, HISTORY_LIMIT_MAX,
-        SOURCE_CLAUDE,
+        resolve_codex_path_config_from, score_history_search_match,
+        supplement_history_from_provenance_records, upsert_codex_history_session, CodexHistoryLine,
+        CodexPathConfig, ConversationMessage, HistorySession, HISTORY_LIMIT_MAX, SOURCE_CLAUDE,
     };
     use crate::session_provenance::SessionProvenanceRecord;
     use rusqlite::Connection;
@@ -4765,9 +4868,13 @@ mod tests {
         )
         .expect("write new session file");
 
-        let sessions =
-            load_claude_history_from_paths_limited(&history_path, &projects_dir, Some(1))
-                .expect("load limited history");
+        let sessions = load_claude_history_from_paths_limited_with_provenance_records(
+            &history_path,
+            &projects_dir,
+            Some(1),
+            Some(HashMap::new()),
+        )
+        .expect("load limited history");
         let session_ids = sessions
             .iter()
             .map(|session| session.id.as_str())
@@ -4787,7 +4894,7 @@ mod tests {
     }
 
     #[test]
-    fn test_limited_claude_history_uses_recent_index_without_project_scan() {
+    fn test_limited_claude_history_merges_recent_projects_with_recent_index() {
         let root = temp_history_dir("claude-index-limited");
         let history_path = root.join("history.jsonl");
         let projects_dir = root.join("projects");
@@ -4797,12 +4904,20 @@ mod tests {
         fs::write(
             &history_path,
             concat!(
-                "{\"sessionId\":\"indexed-session\",\"display\":\"Indexed prompt\",",
-                "\"timestamp\":\"2026-03-12T15:44:22.971Z\",\"project\":\"/Users/g/indexed\",",
-                "\"projectName\":\"indexed\"}\n"
+                "{\"sessionId\":\"indexed-session\",\"display\":\"/clear\",",
+                "\"timestamp\":\"2026-03-12T15:44:22.971Z\",\"project\":\"\",",
+                "\"projectName\":\"unknown\"}\n"
             ),
         )
         .expect("write history index");
+        fs::write(
+            project_dir.join("a-indexed-session.jsonl"),
+            concat!(
+                "{\"type\":\"progress\",\"cwd\":\"/Users/g/indexed\",\"sessionId\":\"indexed-session\",\"timestamp\":\"2026-03-12T15:45:00.000Z\"}\n",
+                "{\"type\":\"last-prompt\",\"sessionId\":\"indexed-session\",\"lastPrompt\":\"Indexed real prompt\",\"timestamp\":\"2026-03-12T15:45:01.000Z\"}\n"
+            ),
+        )
+        .expect("write indexed project session file");
         fs::write(
             project_dir.join("z-project-only.jsonl"),
             concat!(
@@ -4812,16 +4927,174 @@ mod tests {
         )
         .expect("write project session file");
 
-        let sessions =
-            load_claude_history_from_paths_limited(&history_path, &projects_dir, Some(2))
-                .expect("load limited history");
+        let sessions = load_claude_history_from_paths_limited_with_provenance_records(
+            &history_path,
+            &projects_dir,
+            Some(2),
+            Some(HashMap::new()),
+        )
+        .expect("load limited history");
         let session_ids = sessions
             .iter()
             .map(|session| session.id.as_str())
             .collect::<Vec<_>>();
 
-        assert_eq!(session_ids, vec!["indexed-session"]);
-        assert_eq!(sessions[0].display, "Indexed prompt");
+        assert!(session_ids.contains(&"indexed-session"));
+        assert!(session_ids.contains(&"project-only"));
+        let indexed = sessions
+            .iter()
+            .find(|session| session.id == "indexed-session")
+            .expect("indexed session should be merged with project metadata");
+        assert_eq!(indexed.display, "Indexed real prompt");
+        assert_eq!(indexed.project, "/Users/g/indexed");
+        let project_only = sessions
+            .iter()
+            .find(|session| session.id == "project-only")
+            .expect("project-only session should be visible");
+        assert_eq!(project_only.display, "Project prompt");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_provenance_recovers_claude_project_session_missing_from_recent_index() {
+        let root = temp_history_dir("claude-provenance-project");
+        let projects_dir = root.join("projects");
+        let project_dir = projects_dir.join("-Users-g-ccem");
+        fs::create_dir_all(&project_dir).expect("create project dir");
+
+        fs::write(
+            project_dir.join("cron-provider-session.jsonl"),
+            concat!(
+                "{\"type\":\"progress\",\"cwd\":\"/Users/g/ccem\",\"sessionId\":\"cron-provider-session\",\"timestamp\":\"2026-07-04T04:00:27.000Z\"}\n",
+                "{\"type\":\"last-prompt\",\"sessionId\":\"cron-provider-session\",\"lastPrompt\":\"Run scheduled release audit\",\"timestamp\":\"2026-07-04T04:00:28.000Z\"}\n"
+            ),
+        )
+        .expect("write cron project session file");
+
+        let record = SessionProvenanceRecord {
+            ccem_session_id: "run-1783137626281-ef83".to_string(),
+            client: SOURCE_CLAUDE.to_string(),
+            source_session_id: "cron-provider-session".to_string(),
+            env_name: "glm-official".to_string(),
+            config_source: Some("ccem".to_string()),
+            working_dir: "/Users/g/ccem".to_string(),
+            perm_mode: Some("dev".to_string()),
+            launch_mode: "cron".to_string(),
+            started_via: "cron".to_string(),
+            created_at: "2026-07-04T04:00:26Z".to_string(),
+            updated_at: "2026-07-04T04:00:29Z".to_string(),
+        };
+        let mut records = HashMap::new();
+        records.insert(record.source_session_id.clone(), record);
+        let mut session_map = HashMap::new();
+
+        supplement_history_from_provenance_records(
+            &mut session_map,
+            SOURCE_CLAUDE,
+            records,
+            Some(&projects_dir),
+        );
+
+        let session = session_map
+            .get("cron-provider-session")
+            .expect("provenance-backed project session should be visible");
+        assert_eq!(session.display, "Run scheduled release audit");
+        assert_eq!(session.project, "/Users/g/ccem");
+        assert_eq!(session.project_name, "ccem");
+        assert_eq!(session.env_name.as_deref(), Some("glm-official"));
+        assert_eq!(session.config_source.as_deref(), Some("ccem"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_provenance_recovers_claude_cron_session_without_provider_history_file() {
+        let root = temp_history_dir("claude-provenance-only");
+        let projects_dir = root.join("projects");
+        fs::create_dir_all(&projects_dir).expect("create projects dir");
+
+        let record = SessionProvenanceRecord {
+            ccem_session_id: "run-1783137626281-ef83".to_string(),
+            client: SOURCE_CLAUDE.to_string(),
+            source_session_id: "cron-provider-session".to_string(),
+            env_name: "KimiCodePlan".to_string(),
+            config_source: Some("ccem".to_string()),
+            working_dir: "/Users/g/baymax".to_string(),
+            perm_mode: Some("dev".to_string()),
+            launch_mode: "cron".to_string(),
+            started_via: "cron".to_string(),
+            created_at: "2026-07-04T04:00:26Z".to_string(),
+            updated_at: "2026-07-04T04:00:29Z".to_string(),
+        };
+        let mut records = HashMap::new();
+        records.insert(record.source_session_id.clone(), record);
+        let mut session_map = HashMap::new();
+
+        supplement_history_from_provenance_records(
+            &mut session_map,
+            SOURCE_CLAUDE,
+            records,
+            Some(&projects_dir),
+        );
+
+        let session = session_map
+            .get("cron-provider-session")
+            .expect("sqlite provenance should make cron session visible");
+        assert_eq!(session.display, "");
+        assert_eq!(session.project, "/Users/g/baymax");
+        assert_eq!(session.project_name, "baymax");
+        assert_eq!(session.env_name.as_deref(), Some("KimiCodePlan"));
+        assert_eq!(session.config_source.as_deref(), Some("ccem"));
+        assert_eq!(session.timestamp, 1_783_137_629_000);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_provenance_project_recovery_is_limited_to_cron_records() {
+        let root = temp_history_dir("claude-provenance-non-cron-project");
+        let projects_dir = root.join("projects");
+        let project_dir = projects_dir.join("-Users-g-ccem");
+        fs::create_dir_all(&project_dir).expect("create project dir");
+
+        fs::write(
+            project_dir.join("manual-provider-session.jsonl"),
+            concat!(
+                "{\"type\":\"progress\",\"cwd\":\"/Users/g/ccem\",\"sessionId\":\"manual-provider-session\",\"timestamp\":\"2026-07-04T04:00:27.000Z\"}\n",
+                "{\"type\":\"last-prompt\",\"sessionId\":\"manual-provider-session\",\"lastPrompt\":\"Manual task\",\"timestamp\":\"2026-07-04T04:00:28.000Z\"}\n"
+            ),
+        )
+        .expect("write manual project session file");
+
+        let record = SessionProvenanceRecord {
+            ccem_session_id: "run-manual".to_string(),
+            client: SOURCE_CLAUDE.to_string(),
+            source_session_id: "manual-provider-session".to_string(),
+            env_name: "glm-official".to_string(),
+            config_source: Some("ccem".to_string()),
+            working_dir: "/Users/g/ccem".to_string(),
+            perm_mode: Some("dev".to_string()),
+            launch_mode: "manual".to_string(),
+            started_via: "desktop".to_string(),
+            created_at: "2026-07-04T04:00:26Z".to_string(),
+            updated_at: "2026-07-04T04:00:29Z".to_string(),
+        };
+        let mut records = HashMap::new();
+        records.insert(record.source_session_id.clone(), record);
+        let mut session_map = HashMap::new();
+
+        supplement_history_from_provenance_records(
+            &mut session_map,
+            SOURCE_CLAUDE,
+            records,
+            Some(&projects_dir),
+        );
+
+        assert!(
+            session_map.is_empty(),
+            "non-cron provenance should not expand recent history from project files"
+        );
 
         let _ = fs::remove_dir_all(root);
     }
@@ -4987,8 +5260,13 @@ mod tests {
         )
         .expect("write session file");
 
-        let sessions =
-            load_claude_history_from_paths(&history_path, &projects_dir).expect("load history");
+        let sessions = load_claude_history_from_paths_limited_with_provenance_records(
+            &history_path,
+            &projects_dir,
+            None,
+            Some(HashMap::new()),
+        )
+        .expect("load history");
         let session = sessions
             .into_iter()
             .find(|session| session.id == "session-1")
@@ -5199,8 +5477,13 @@ mod tests {
         )
         .expect("write session file");
 
-        let sessions =
-            load_claude_history_from_paths(&history_path, &projects_dir).expect("load history");
+        let sessions = load_claude_history_from_paths_limited_with_provenance_records(
+            &history_path,
+            &projects_dir,
+            None,
+            Some(HashMap::new()),
+        )
+        .expect("load history");
         let session = sessions
             .into_iter()
             .find(|session| session.id == "session-2")
@@ -5230,8 +5513,13 @@ mod tests {
         )
         .expect("write session file");
 
-        let sessions =
-            load_claude_history_from_paths(&history_path, &projects_dir).expect("load history");
+        let sessions = load_claude_history_from_paths_limited_with_provenance_records(
+            &history_path,
+            &projects_dir,
+            None,
+            Some(HashMap::new()),
+        )
+        .expect("load history");
         let session = sessions
             .into_iter()
             .find(|session| session.id == "session-1")
