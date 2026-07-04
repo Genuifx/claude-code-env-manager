@@ -185,7 +185,7 @@
     "activeTemporaryProjects": "Active Temporary Tasks",
     "temporaryProjectLabel": "temporary",
     "temporaryProjectParent": "{project}",
-    "dismissActiveTemporaryProject": "Unpin active temporary task",
+    "dismissActiveTemporaryProject": "Hide from active strip",
     "markProjectTemporary": "Mark as temporary workspace",
     "keepProjectInMainList": "Keep in main projects",
     "resetProjectClassification": "Restore automatic grouping",

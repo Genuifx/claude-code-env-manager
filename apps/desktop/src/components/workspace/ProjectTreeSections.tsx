@@ -27,7 +27,7 @@ export const PROJECT_TREE_PAGE_SIZE = 6;
 
 type RenderSessionRow = (
   session: HistorySessionItem,
-  options?: { pinnedSection?: boolean },
+  options?: { pinnedSection?: boolean; activeTemporarySection?: boolean },
 ) => ReactNode;
 
 type ProjectActionCallbacks = {
@@ -117,6 +117,7 @@ export const ProjectTreeContent = memo(function ProjectTreeContent({
     node: ProjectNode,
     section: ProjectNodeSectionKind,
   ) => {
+    const isActiveTemporary = section === 'activeTemporary';
     const isExpanded = effectiveExpanded.has(node.project);
     const visibleCount = getVisibleCount(node.project);
     const visible = node.sessions.slice(0, visibleCount);
@@ -130,15 +131,18 @@ export const ProjectTreeContent = memo(function ProjectTreeContent({
         ? t('workspace.temporaryProjectParent').replace('{project}', parentName)
         : t('workspace.temporaryProjectLabel')
       : null;
-    const showDismiss = section === 'activeTemporary';
+    const showDismiss = isActiveTemporary;
 
+    // Unified row vocabulary across main / temporary / activeTemporary sections.
+    // Active-temporary carries no decorative glow, no border, no shadow — the
+    // section location IS the active signal. Side-stripe borders and ghost-cards
+    // are explicit bans; do not reintroduce them.
     const header = (
       <div
         className={cn(
           'group/project relative mx-1 flex items-center gap-2 rounded-md px-3 py-2 transition-colors duration-150',
           'hover:bg-muted/60',
-          isExpanded && 'bg-muted/40',
-          section === 'activeTemporary' && 'mx-2 bg-primary/[0.06] hover:bg-primary/[0.09]'
+          isExpanded && 'bg-muted/40'
         )}
       >
         <button
@@ -148,20 +152,20 @@ export const ProjectTreeContent = memo(function ProjectTreeContent({
         >
           <ChevronRight
             className={cn(
-              'w-4 h-4 text-muted-foreground transition-transform shrink-0',
+              'h-4 w-4 shrink-0 text-muted-foreground transition-transform',
               isExpanded && 'rotate-90'
             )}
           />
           {isExpanded ? (
-            <FolderOpen className={cn('w-4 h-4 shrink-0', isTemporary ? 'text-amber-500' : 'text-primary')} />
+            <FolderOpen className={cn('h-4 w-4 shrink-0', isTemporary ? 'text-amber-500' : 'text-primary')} />
           ) : (
-            <FolderClosed className={cn('w-4 h-4 shrink-0', isTemporary ? 'text-amber-500' : 'text-muted-foreground')} />
+            <FolderClosed className={cn('h-4 w-4 shrink-0', isTemporary ? 'text-amber-500' : 'text-muted-foreground')} />
           )}
           <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
             {node.projectName}
           </span>
           {metaLabel && (
-            <span className="max-w-[82px] shrink-0 truncate text-[10px] text-muted-foreground/65">
+            <span className="max-w-[82px] shrink-0 truncate text-[10px] text-muted-foreground">
               {metaLabel}
             </span>
           )}
@@ -177,9 +181,11 @@ export const ProjectTreeContent = memo(function ProjectTreeContent({
                 }}
                 aria-label={t('workspace.dismissActiveTemporaryProject')}
                 className={cn(
-                  'flex h-6 w-6 shrink-0 items-center justify-center rounded-md',
-                  'text-muted-foreground hover:bg-muted/70 hover:text-foreground',
-                  'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground/25'
+                  'absolute right-2 top-1/2 z-10 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md',
+                  'pointer-events-none text-muted-foreground opacity-0 transition-opacity duration-150',
+                  'hover:bg-muted/80 hover:text-foreground focus:text-foreground',
+                  'focus:pointer-events-auto focus:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground/25',
+                  'group-hover/project:pointer-events-auto group-hover/project:opacity-100'
                 )}
               >
                 <X className="h-3.5 w-3.5" />
@@ -323,16 +329,20 @@ export const ProjectTreeContent = memo(function ProjectTreeContent({
       </ScrollArea>
 
       {activeTemporaryProjectNodes.length > 0 && (
-        <div className="shrink-0 border-t border-border/50 bg-sidebar/95 px-1 pb-1.5 pt-2">
-          <div className="mb-1 flex h-5 items-center justify-between px-2">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-primary/80">
+        <div className="shrink-0 border-t border-border/60 px-0.5 pb-1 pt-1.5">
+          <div className="mb-0.5 flex h-5 items-center justify-between px-3">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
               {t('workspace.activeTemporaryProjects')}
             </span>
-            <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium tabular-nums text-primary">
+            <span className="rounded-full bg-muted/70 px-1.5 py-0.5 text-[9px] font-medium tabular-nums text-muted-foreground">
               {activeTemporaryProjectNodes.length}
             </span>
           </div>
-          {activeTemporaryProjectNodes.map((node) => renderProjectNode(node, 'activeTemporary'))}
+          {/* Cap the dock height so a flood of active projects scrolls inside its
+              own region instead of eating the project tree. */}
+          <div className="max-h-[40%] overflow-y-auto pr-0.5">
+            {activeTemporaryProjectNodes.map((node) => renderProjectNode(node, 'activeTemporary'))}
+          </div>
         </div>
       )}
     </>

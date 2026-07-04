@@ -185,7 +185,7 @@
     "activeTemporaryProjects": "活跃临时任务",
     "temporaryProjectLabel": "临时",
     "temporaryProjectParent": "{project}",
-    "dismissActiveTemporaryProject": "收起活跃固定",
+    "dismissActiveTemporaryProject": "从活跃区收起",
     "markProjectTemporary": "标记为临时工作区",
     "keepProjectInMainList": "固定到主项目",
     "resetProjectClassification": "恢复自动归类",
