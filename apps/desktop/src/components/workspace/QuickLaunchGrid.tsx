@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Play, Plus, Star, ArrowRight, Code2, Sparkles, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store';
@@ -6,6 +6,7 @@ import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useLongPress } from '@/hooks/useLongPress';
 import { useLocale } from '@/locales';
 import { getProjectName, formatRelativeTime } from '@/lib/utils';
+import { ccemMotion, clearMotionProps, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';
 import { AllProjectsModal } from './AllProjectsModal';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -34,6 +35,7 @@ interface FavoriteCardProps {
 function FavoriteCard({ project, color, onLaunch, onRemove }: FavoriteCardProps) {
   const [progress, setProgress] = useState(0);
   const [removing, setRemoving] = useState(false);
+  const cardRef = useRef<HTMLButtonElement>(null);
 
   const { handlers, firedRef } = useLongPress({
     duration: 600,
@@ -47,13 +49,50 @@ function FavoriteCard({ project, color, onLaunch, onRemove }: FavoriteCardProps)
 
   const handleClick = () => {
     if (firedRef.current) return;
+    const card = cardRef.current;
+    if (card && !shouldReduceMotion()) {
+      gsap.timeline({ defaults: { overwrite: 'auto' } })
+        .to(card, {
+          scale: 0.985,
+          duration: ccemMotion.duration.quick / 2,
+          ease: 'power2.out',
+        })
+        .to(card, {
+          scale: 1,
+          duration: ccemMotion.duration.quick,
+          ease: ccemMotion.ease.standard,
+          onComplete: () => clearMotionProps(card),
+        });
+    }
     onLaunch(project.path);
   };
 
   const pressing = progress > 0 && !removing;
 
+  useGSAP(() => {
+    const card = cardRef.current;
+    if (!card || !removing) {
+      return;
+    }
+    if (shouldReduceMotion()) {
+      clearMotionProps(card);
+      return;
+    }
+
+    gsap.to(card, {
+      autoAlpha: 0,
+      y: -5,
+      scale: 0.96,
+      duration: ccemMotion.duration.base,
+      ease: ccemMotion.ease.soft,
+      overwrite: 'auto',
+    });
+  }, { scope: cardRef, dependencies: [removing] });
+
   return (
     <button
+      ref={cardRef}
+      data-quick-launch-card
       onClick={handleClick}
       {...handlers}
       className={cn(
@@ -143,6 +182,7 @@ function FavoriteCard({ project, color, onLaunch, onRemove }: FavoriteCardProps)
 
 export function QuickLaunchGrid({ onLaunch }: QuickLaunchGridProps) {
   const { t } = useLocale();
+  const gridMotionRef = useRef<HTMLDivElement>(null);
   const { favorites, recent, setSelectedWorkingDir } = useAppStore(
     (state) => ({
       favorites: state.favorites,
@@ -178,10 +218,46 @@ export function QuickLaunchGrid({ onLaunch }: QuickLaunchGridProps) {
 
   // Show max 6 favorites
   const visibleFavorites = favorites.slice(0, 6);
+  const favoriteMotionKey = visibleFavorites.map((project) => project.path).join('\u0000');
+  const recentMotionKey = recentFiltered.map((project) => project.path).join('\u0000');
+
+  useGSAP(() => {
+    const root = gridMotionRef.current;
+    if (!root) {
+      return;
+    }
+
+    const cards = gsap.utils.toArray<HTMLElement>(
+      '[data-quick-launch-card], [data-quick-launch-recent], [data-quick-launch-empty]',
+      root
+    );
+    if (cards.length === 0) {
+      return;
+    }
+    if (shouldReduceMotion()) {
+      clearMotionProps(cards);
+      return;
+    }
+
+    gsap.fromTo(
+      cards,
+      { autoAlpha: 0, y: 8, scale: 0.985 },
+      {
+        autoAlpha: 1,
+        y: 0,
+        scale: 1,
+        duration: ccemMotion.duration.base,
+        ease: ccemMotion.ease.standard,
+        stagger: 0.025,
+        overwrite: 'auto',
+        onComplete: () => clearMotionProps(cards),
+      }
+    );
+  }, { scope: gridMotionRef, dependencies: [favoriteMotionKey, recentMotionKey] });
 
   return (
     <>
-      <div className="flex flex-col glass-card glass-noise rounded-2xl overflow-hidden">
+      <div ref={gridMotionRef} className="flex flex-col glass-card glass-noise rounded-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06]">
           <div className="flex items-center gap-2">
@@ -212,6 +288,7 @@ export function QuickLaunchGrid({ onLaunch }: QuickLaunchGridProps) {
         <div className="flex-1 p-3 overflow-y-auto flex flex-col">
           {visibleFavorites.length === 0 ? (
             <button
+              data-quick-launch-empty
               onClick={handleAddFavorite}
               className="w-full h-full min-h-[140px] rounded-xl glass-ghost-card flex flex-col items-center justify-center gap-2.5 text-muted-foreground hover:text-foreground transition-all"
             >
@@ -254,6 +331,7 @@ export function QuickLaunchGrid({ onLaunch }: QuickLaunchGridProps) {
                 {recentFiltered.map((project) => (
                   <button
                     key={project.path}
+                    data-quick-launch-recent
                     onClick={() => handleLaunch(project.path)}
                     className={cn(
                       'flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs whitespace-nowrap',

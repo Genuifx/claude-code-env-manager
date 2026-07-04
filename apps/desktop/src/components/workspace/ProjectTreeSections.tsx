@@ -228,6 +228,7 @@ export const ProjectTreeContent = memo(function ProjectTreeContent({
     return (
       <div
         key={node.project}
+        data-project-motion-key={`project:${section}:${node.project}`}
         className="mb-0.5 [content-visibility:auto] [contain-intrinsic-size:44px]"
       >
         <ContextMenu>

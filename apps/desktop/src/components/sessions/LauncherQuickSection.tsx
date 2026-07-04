@@ -107,6 +107,7 @@ export function LauncherQuickSection({ onLaunchMulti, onBrowse, isLaunching }: L
               <button
                 key={project.path}
                 type="button"
+                data-launcher-popover-row
                 onClick={() => toggleSelect(project.path)}
                 className={`
                   w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left
@@ -152,7 +153,7 @@ export function LauncherQuickSection({ onLaunchMulti, onBrowse, isLaunching }: L
 
       {/* Action buttons — visible when 1+ selected */}
       {count >= 1 && (
-        <div className="pt-3 glass-divider-top">
+        <div data-launcher-popover-action className="pt-3 glass-divider-top">
           {isLaunching ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground w-full justify-center py-2">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />

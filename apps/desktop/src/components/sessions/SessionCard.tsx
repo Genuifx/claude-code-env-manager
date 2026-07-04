@@ -32,6 +32,7 @@ import {
 import { getRemotePlatformFromChannel, getRemotePlatformMeta } from '@/lib/remote-platforms';
 import { copyBindCommand } from '@/lib/telegram-utils';
 import { cn, getProjectName } from '@/lib/utils';
+import { ccemMotion, clearMotionProps, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';
 import type { TmuxAttachTerminalInfo, TmuxAttachTerminalType } from '@/lib/tauri-ipc';
 import { useLocale } from '../../locales';
 import type { Session, UnifiedSession, ChannelInfo } from '@/store';
@@ -186,6 +187,8 @@ export function SessionCard({
   const [bindCopied, setBindCopied] = useState(false);
   const [bindDialogOpen, setBindDialogOpen] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const hasHydratedStatusMotionRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -226,6 +229,44 @@ export function SessionCard({
   const statusIndicator = unifiedSession
     ? getStatusIndicator(unifiedSession.status)
     : getStatusIndicator(session.status);
+  const statusMotionKey = unifiedSession?.status ?? session.status;
+
+  useGSAP(() => {
+    const card = cardRef.current;
+    if (!card) {
+      return;
+    }
+    if (!hasHydratedStatusMotionRef.current) {
+      hasHydratedStatusMotionRef.current = true;
+      return;
+    }
+
+    const statusDot = card.querySelector<HTMLElement>('[data-session-status-dot]');
+    const confirmActions = card.querySelector<HTMLElement>('[data-session-confirm-actions]');
+    const targets = [statusDot, confirmingClose ? confirmActions : null].filter(
+      (target): target is HTMLElement => !!target
+    );
+    if (targets.length === 0) {
+      return;
+    }
+    if (shouldReduceMotion()) {
+      clearMotionProps(targets);
+      return;
+    }
+
+    gsap.fromTo(
+      targets,
+      { scale: 0.88, autoAlpha: 0.75 },
+      {
+        scale: 1,
+        autoAlpha: 1,
+        duration: ccemMotion.duration.quick,
+        ease: ccemMotion.ease.standard,
+        overwrite: 'auto',
+        onComplete: () => clearMotionProps(targets),
+      }
+    );
+  }, { scope: cardRef, dependencies: [statusMotionKey, confirmingClose] });
 
   const formatDuration = (startedAt: Date) => {
     const now = new Date();
@@ -325,7 +366,7 @@ export function SessionCard({
     // Confirm close state
     if (confirmingClose) {
       return (
-        <div className="flex items-center justify-between w-full">
+        <div data-session-confirm-actions className="flex items-center justify-between w-full">
           <span className="text-[13px] text-destructive font-medium tracking-[-0.02em]">
             {t('sessions.confirmTerminate')}
           </span>
@@ -526,7 +567,9 @@ export function SessionCard({
     <TooltipProvider>
       <>
         <div
+          ref={cardRef}
           data-testid="session-card"
+          data-session-motion-card
           data-session-id={sessionId}
           data-client={session.client}
           className={cn(
@@ -553,7 +596,9 @@ export function SessionCard({
             {/* Header: status + project name + source/channels */}
             <div className="flex items-center justify-between gap-3 mb-3">
               <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                {statusIndicator}
+                <span data-session-status-dot className="inline-flex items-center justify-center">
+                  {statusIndicator}
+                </span>
                 <h3 className="font-semibold text-foreground truncate text-[15px] tracking-[-0.02em] leading-tight">
                   {getProjectName(projectDir)}
                 </h3>

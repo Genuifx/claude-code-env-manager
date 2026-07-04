@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { cn, getProjectName } from '@/lib/utils';
+import { ccemMotion, clearMotionProps, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';
 import { useLocale } from '@/locales';
 import { getHistorySessionDisplay } from '@/components/history/historySession';
 import {
@@ -85,6 +86,7 @@ export const WorkspaceGlobalSearch = memo(function WorkspaceGlobalSearch({
 }: WorkspaceGlobalSearchProps) {
   const { t } = useLocale();
   const inputRef = useRef<HTMLInputElement>(null);
+  const searchMotionRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState('');
   const normalizedQuery = normalizeQuery(query);
 
@@ -172,6 +174,89 @@ export const WorkspaceGlobalSearch = memo(function WorkspaceGlobalSearch({
     return () => window.removeEventListener('keydown', handler);
   }, [isOpen, results, selectedIndex, onSelectProject, onSelectSession, onOpenChange]);
 
+  useGSAP(() => {
+    const root = searchMotionRef.current;
+    if (!isOpen || !root) {
+      return;
+    }
+
+    const sections = gsap.utils.toArray<HTMLElement>(
+      '[data-spotlight-field], [data-spotlight-results], [data-spotlight-footer]',
+      root
+    );
+    if (shouldReduceMotion()) {
+      clearMotionProps(sections);
+      return;
+    }
+
+    gsap.fromTo(
+      sections,
+      { autoAlpha: 0, y: 8 },
+      {
+        autoAlpha: 1,
+        y: 0,
+        duration: ccemMotion.duration.base,
+        ease: ccemMotion.ease.standard,
+        stagger: 0.035,
+        overwrite: 'auto',
+        onComplete: () => clearMotionProps(sections),
+      }
+    );
+  }, { scope: searchMotionRef, dependencies: [isOpen] });
+
+  useGSAP(() => {
+    const root = searchMotionRef.current;
+    if (!isOpen || !root || !normalizedQuery) {
+      return;
+    }
+
+    const items = gsap.utils.toArray<HTMLElement>('[data-spotlight-result-item]', root);
+    if (items.length === 0) {
+      return;
+    }
+    if (shouldReduceMotion()) {
+      clearMotionProps(items);
+      return;
+    }
+
+    gsap.fromTo(
+      items,
+      { autoAlpha: 0, y: 5 },
+      {
+        autoAlpha: 1,
+        y: 0,
+        duration: ccemMotion.duration.quick,
+        ease: ccemMotion.ease.soft,
+        stagger: 0.018,
+        overwrite: 'auto',
+        onComplete: () => clearMotionProps(items),
+      }
+    );
+  }, { scope: searchMotionRef, dependencies: [isOpen, normalizedQuery, results.length] });
+
+  useGSAP(() => {
+    const root = searchMotionRef.current;
+    if (!isOpen || !root || shouldReduceMotion()) {
+      return;
+    }
+
+    const activeItem = root.querySelector<HTMLElement>('[data-spotlight-result-active="true"]');
+    if (!activeItem) {
+      return;
+    }
+    gsap.fromTo(
+      activeItem,
+      { x: -2 },
+      {
+        x: 0,
+        duration: ccemMotion.duration.quick,
+        ease: ccemMotion.ease.soft,
+        overwrite: 'auto',
+        onComplete: () => clearMotionProps(activeItem),
+      }
+    );
+  }, { scope: searchMotionRef, dependencies: [isOpen, selectedIndex] });
+
   const groupedResults = useMemo(() => {
     const projects: Array<{ result: SearchResult; flatIndex: number }> = [];
     const conversations: Array<{ result: SearchResult; flatIndex: number }> = [];
@@ -192,6 +277,8 @@ export const WorkspaceGlobalSearch = memo(function WorkspaceGlobalSearch({
       <button
         key={`project:${result.path}`}
         type="button"
+        data-spotlight-result-item
+        data-spotlight-result-active={isSelected ? 'true' : undefined}
         onClick={() => {
           onSelectProject(result.path);
           onOpenChange(false);
@@ -233,6 +320,8 @@ export const WorkspaceGlobalSearch = memo(function WorkspaceGlobalSearch({
       <button
         key={`session:${session.source}:${session.id}`}
         type="button"
+        data-spotlight-result-item
+        data-spotlight-result-active={isSelected ? 'true' : undefined}
         onClick={() => {
           onSelectSession(session);
           onOpenChange(false);
@@ -279,6 +368,7 @@ export const WorkspaceGlobalSearch = memo(function WorkspaceGlobalSearch({
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent
+        ref={searchMotionRef}
         showCloseButton={false}
         className={cn(
           'max-w-2xl gap-0 overflow-hidden rounded-2xl border border-border bg-popover p-0 shadow-xl',
@@ -292,7 +382,7 @@ export const WorkspaceGlobalSearch = memo(function WorkspaceGlobalSearch({
         </DialogDescription>
 
         {/* Input area */}
-        <div className="flex items-center gap-3.5 px-5 py-4">
+        <div data-spotlight-field className="flex items-center gap-3.5 px-5 py-4">
           <Search className="h-[18px] w-[18px] shrink-0 text-muted-foreground" />
           <input
             ref={inputRef}
@@ -320,7 +410,7 @@ export const WorkspaceGlobalSearch = memo(function WorkspaceGlobalSearch({
         <div className="h-px bg-border" />
 
         {/* Results */}
-        <div className="min-h-[200px] max-h-[460px]">
+        <div data-spotlight-results className="min-h-[200px] max-h-[460px]">
           {results.length > 0 ? (
             <ScrollArea className="h-full">
               <div className="space-y-1 py-2">
@@ -363,7 +453,7 @@ export const WorkspaceGlobalSearch = memo(function WorkspaceGlobalSearch({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between border-t border-border px-5 py-2.5">
+        <div data-spotlight-footer className="flex items-center justify-between border-t border-border px-5 py-2.5">
           <span className="text-[10px] tabular-nums text-muted-foreground">
             {results.length > 0 ? `${results.length} ${t('workspace.globalSearchResultsCount')}` : ''}
           </span>

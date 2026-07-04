@@ -23,6 +23,7 @@ import { toast } from 'sonner';
 import { shallow } from 'zustand/shallow';
 import { getRemotePlatformFromSource } from '@/lib/remote-platforms';
 import { scheduleAfterFirstPaint } from '@/lib/idle';
+import { ccemMotion, clearMotionProps, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';
 import type {
   UnifiedSessionInfo,
   ManagedSessionSource,
@@ -175,6 +176,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
   const launchedTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const tmuxAttachTerminalsRequestedRef = useRef(false);
   const tmuxAttachTerminalsPromiseRef = useRef<Promise<void> | null>(null);
+  const sessionsMotionRef = useRef<HTMLDivElement>(null);
   const [, startTransition] = useTransition();
   const {
     sessions,
@@ -706,7 +708,40 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
 
   // Total count for display (merged)
   const totalDisplayCount = totalCount;
+  const sessionMotionKey = filteredSessions
+    .map((item) => item.session.id)
+    .join('\u0000');
 
+  useGSAP(() => {
+    const root = sessionsMotionRef.current;
+    if (!root) {
+      return;
+    }
+
+    const cards = gsap.utils.toArray<HTMLElement>('[data-session-motion-card]', root);
+    if (cards.length === 0) {
+      return;
+    }
+    if (shouldReduceMotion()) {
+      clearMotionProps(cards);
+      return;
+    }
+
+    gsap.fromTo(
+      cards,
+      { autoAlpha: 0, y: 8, scale: 0.985 },
+      {
+        autoAlpha: 1,
+        y: 0,
+        scale: 1,
+        duration: ccemMotion.duration.base,
+        ease: ccemMotion.ease.standard,
+        stagger: 0.025,
+        overwrite: 'auto',
+        onComplete: () => clearMotionProps(cards),
+      }
+    );
+  }, { scope: sessionsMotionRef, dependencies: [effectiveViewMode, sessionMotionKey] });
 
   // Show skeleton when sessions are loading
   if (isLoadingSessions && !sessions.length && !unifiedSessions.length) {
@@ -737,7 +772,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
       />
 
       {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto px-5 py-5">
+      <div ref={sessionsMotionRef} className="flex-1 overflow-y-auto px-5 py-5">
         {/* Arrange Banner */}
         {externalRunningCount >= 2 && (
           <div className="mb-5">

@@ -1,7 +1,8 @@
-import { memo, useMemo, useState, useCallback, useRef, useEffect } from 'react';
+import { memo, useMemo, useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
 import type { DragEvent } from 'react';
 import { Check, Copy, Link, Pin, RefreshCw, X, Plus, ShieldAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ccemMotion, clearMotionProps, gsap, shouldReduceMotion } from '@/lib/gsapMotion';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
@@ -502,7 +503,78 @@ export const ProjectTree = memo(function ProjectTree({
   );
 
   const processingKeysRef = useRef<Set<string>>(new Set());
+  const treeMotionRef = useRef<HTMLDivElement>(null);
+  const previousTreeRectsRef = useRef<Map<string, DOMRect>>(new Map());
+  const hasHydratedTreeMotionRef = useRef(false);
   const [freshDotKeys, setFreshDotKeys] = useState<Set<string>>(new Set());
+
+  useLayoutEffect(() => {
+    const root = treeMotionRef.current;
+    if (!root) {
+      return;
+    }
+
+    const targets = gsap.utils.toArray<HTMLElement>('[data-project-motion-key]', root);
+    const nextRects = new Map<string, DOMRect>();
+    const previousRects = previousTreeRectsRef.current;
+    const reduceMotion = shouldReduceMotion();
+
+    for (const target of targets) {
+      const key = target.dataset.projectMotionKey;
+      if (!key) {
+        continue;
+      }
+      nextRects.set(key, target.getBoundingClientRect());
+    }
+
+    if (!reduceMotion && hasHydratedTreeMotionRef.current) {
+      for (const target of targets) {
+        const key = target.dataset.projectMotionKey;
+        if (!key) {
+          continue;
+        }
+        const previous = previousRects.get(key);
+        const current = nextRects.get(key);
+        if (!current) {
+          continue;
+        }
+        if (!previous) {
+          gsap.fromTo(
+            target,
+            { autoAlpha: 0, y: 6, scale: 0.985 },
+            {
+              autoAlpha: 1,
+              y: 0,
+              scale: 1,
+              duration: ccemMotion.duration.base,
+              ease: ccemMotion.ease.standard,
+              overwrite: 'auto',
+              onComplete: () => clearMotionProps(target),
+            }
+          );
+          continue;
+        }
+
+        const deltaY = previous.top - current.top;
+        if (Math.abs(deltaY) > 1) {
+          gsap.fromTo(
+            target,
+            { y: deltaY },
+            {
+              y: 0,
+              duration: ccemMotion.duration.base,
+              ease: ccemMotion.ease.standard,
+              overwrite: 'auto',
+              onComplete: () => clearMotionProps(target),
+            }
+          );
+        }
+      }
+    }
+
+    previousTreeRectsRef.current = nextRects;
+    hasHydratedTreeMotionRef.current = true;
+  });
 
   useEffect(() => {
     localStorage.setItem(PINNED_SESSION_KEYS_STORAGE_KEY, JSON.stringify(pinnedSessionKeys));
@@ -975,6 +1047,7 @@ export const ProjectTree = memo(function ProjectTree({
       return (
         <div
           key={key}
+          data-project-motion-key={`session:${key}`}
           className={cn(
             'w-full flex items-center gap-2 py-1.5 rounded-md bg-surface-raised',
             rowChrome,
@@ -1014,6 +1087,7 @@ export const ProjectTree = memo(function ProjectTree({
     const row = (
       <div
         key={key}
+        data-project-motion-key={`session:${key}`}
         role="button"
         tabIndex={0}
         draggable={options.pinnedSection === true}
@@ -1191,7 +1265,10 @@ export const ProjectTree = memo(function ProjectTree({
   ]);
 
   return (
-    <div className="flex w-[clamp(220px,30vw,280px)] shrink-0 flex-col bg-sidebar backdrop-blur-xl">
+    <div
+      ref={treeMotionRef}
+      className="flex w-[clamp(220px,30vw,280px)] shrink-0 flex-col bg-sidebar backdrop-blur-xl"
+    >
       {/* Header: New session + pinned conversations */}
       <div className="shrink-0 p-2 flex flex-col gap-2">
         <div className="flex items-center gap-1.5">
