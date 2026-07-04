@@ -135,3 +135,24 @@ test('user continuation clears persisted plan review prompts', async () => {
 
   assert.equal(attention.prompts.length, 0);
 });
+
+test('permission requests preserve request and tool-use correlation ids', async () => {
+  const { extractAttentionState } = await importWorkspaceNativeAttention();
+
+  const attention = extractAttentionState([
+    event(1, {
+      type: 'permission_required',
+      request_id: 'req-sdk-1',
+      tool_use_id: 'toolu-1',
+      tool_name: 'Bash',
+      input_summary: 'pnpm test',
+    }),
+  ]);
+
+  assert.deepEqual(attention.permissions, [{
+    requestId: 'req-sdk-1',
+    toolUseId: 'toolu-1',
+    toolName: 'Bash',
+    inputSummary: 'pnpm test',
+  }]);
+});

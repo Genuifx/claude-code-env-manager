@@ -179,6 +179,7 @@ impl WeixinChannel {
                     request_id,
                     approved,
                     responder,
+                    ..
                 } => {
                     self.manager.clear_permission_request(request_id);
                     drop(state);

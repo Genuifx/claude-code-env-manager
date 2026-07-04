@@ -20125,8 +20125,9 @@ function normalizeClaudePermissionMode(permMode, options) {
     case "safe":
     case "ci":
     case "default":
+    case "manual":
       settings = {
-        permissionMode: "default",
+        permissionMode: permMode === "manual" ? "manual" : "default",
         allowDangerouslySkipPermissions: false
       };
       break;
@@ -20187,6 +20188,12 @@ async function applyClaudePermissionModeToQuery(query, permMode) {
     await query.setPermissionMode(permission.permissionMode);
   }
   return permission;
+}
+
+// src/claudePermissionRequests.ts
+function resolveClaudePermissionRequestId(options, now = Date.now) {
+  const sdkRequestId = options.requestId?.trim();
+  return sdkRequestId || `${options.toolUseID}:${now()}`;
 }
 
 // src/claudeQuerySnapshotSlot.ts
@@ -21319,7 +21326,7 @@ async function waitForPlanExitApproval(input, toolUseId) {
 }
 async function waitForPermission(toolName, input, options) {
   const toolUseId = options.toolUseID;
-  const requestId = `${toolUseId}:${Date.now()}`;
+  const requestId = resolveClaudePermissionRequestId(options);
   const inputSummary = summarizeClaudeToolInput(toolName, input, options);
   emitClaudeToolUseStarted({
     toolUseId,
@@ -21330,6 +21337,7 @@ async function waitForPermission(toolName, input, options) {
   emitEvent({
     type: "permission_required",
     request_id: requestId,
+    tool_use_id: toolUseId,
     tool_name: options.displayName || toolName,
     input_summary: inputSummary
   });
@@ -21339,6 +21347,7 @@ async function waitForPermission(toolName, input, options) {
   emitEvent({
     type: "permission_responded",
     request_id: requestId,
+    tool_use_id: toolUseId,
     approved,
     responder: "desktop"
   });

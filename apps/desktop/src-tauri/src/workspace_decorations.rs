@@ -81,16 +81,12 @@ pub fn build_workspace_session_decorations(
         let Some(runtime) = matched_runtime_by_session_key.get(&session_key) else {
             continue;
         };
-        let attention_kind = if matches!(runtime, WorkspaceRuntimeDescriptor::Unified { .. }) {
-            resolve_attention_kind(
-                events_by_runtime
-                    .get(runtime.id())
-                    .map(Vec::as_slice)
-                    .unwrap_or(&[]),
-            )
-        } else {
-            None
-        };
+        let attention_kind = resolve_attention_kind(
+            events_by_runtime
+                .get(runtime.id())
+                .map(Vec::as_slice)
+                .unwrap_or(&[]),
+        );
 
         decorations.push(WorkspaceSessionDecoration {
             session_key,
@@ -522,6 +518,44 @@ mod tests {
         assert_eq!(
             decorations[0].attention_kind.as_deref(),
             Some("plan_review")
+        );
+    }
+
+    #[test]
+    fn native_events_promote_permission_attention() {
+        let sessions = vec![session("target", "claude", 1000, "/repo/a")];
+        let runtimes = vec![WorkspaceRuntimeDescriptor::Native {
+            id: "native-1".to_string(),
+            client: "claude".to_string(),
+            status: "processing".to_string(),
+            env_name: "dev".to_string(),
+            project_dir: "/repo/a".to_string(),
+            created_at: 1000,
+            provider_session_id: Some("target".to_string()),
+        }];
+        let event = SessionEventRecord {
+            runtime_id: "native-1".to_string(),
+            seq: 1,
+            occurred_at: Utc::now(),
+            payload: SessionEventPayload::PermissionRequired {
+                request_id: "req-1".to_string(),
+                tool_use_id: Some("tool-1".to_string()),
+                tool_name: "Bash".to_string(),
+                input_summary: None,
+            },
+        };
+        let mut events_by_runtime = HashMap::new();
+        events_by_runtime.insert("native-1".to_string(), vec![event]);
+
+        let decorations =
+            build_workspace_session_decorations(&sessions, &runtimes, &events_by_runtime);
+
+        assert_eq!(decorations.len(), 1);
+        assert_eq!(decorations[0].session_key, "claude:target");
+        assert_eq!(decorations[0].visual_state, "attention");
+        assert_eq!(
+            decorations[0].attention_kind.as_deref(),
+            Some("permission_required")
         );
     }
 }

@@ -29,3 +29,15 @@ test('ProjectTree exposes context menu copy actions for ids and ccem links', asy
   assert.match(source, /workspace\.copySessionLink/);
   assert.match(source, /navigator\.clipboard\.writeText/);
 });
+
+test('ProjectTree replaces the session timestamp slot with approval-required attention', async () => {
+  const source = await fs.readFile(projectTreePath, 'utf8');
+
+  assert.match(source, /approvalRequired = decoration\?\.attentionKind === 'permission_required'/);
+  assert.match(source, /ShieldAlert/);
+  assert.match(source, /workspace\.sessionStateApprovalRequired/);
+  assert.match(
+    source,
+    /approvalRequired \? \([\s\S]*?workspace\.sessionStateApprovalRequired[\s\S]*?\) : freshDotKeys\.has\(key\) \? \([\s\S]*?formatRelativeTime\(session\.timestamp\)/,
+  );
+});
