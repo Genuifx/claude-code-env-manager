@@ -1,5 +1,11 @@
 # ccem
 
+## 2.43.0
+
+### Minor Changes
+
+- Restore project-backed Workspace history sessions and titles after sidebar performance optimization.
+
 ## 2.42.0
 
 ### Minor Changes
