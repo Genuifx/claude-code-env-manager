@@ -1100,10 +1100,17 @@ export type SessionEventPayload =
   | {
       type: 'permission_required';
       request_id: string;
+      tool_use_id?: string | null;
       tool_name: string;
       input_summary?: string | null;
     }
-  | { type: 'permission_responded'; request_id: string; approved: boolean; responder: string }
+  | {
+      type: 'permission_responded';
+      request_id: string;
+      tool_use_id?: string | null;
+      approved: boolean;
+      responder: string;
+    }
   | {
       type: 'checkpoint_created';
       provider: 'claude';

@@ -45,6 +45,10 @@ test('maps ccem permission names to Claude Agent SDK permission modes', async ()
     permissionMode: 'default',
     allowDangerouslySkipPermissions: false,
   });
+  assert.deepEqual(normalizeClaudePermissionMode('manual'), {
+    permissionMode: 'manual',
+    allowDangerouslySkipPermissions: false,
+  });
 });
 
 test('passes persisted Claude plan sessions through as plan mode', async () => {

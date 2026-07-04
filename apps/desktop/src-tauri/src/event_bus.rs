@@ -144,12 +144,16 @@ pub enum SessionEventPayload {
     },
     PermissionRequired {
         request_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_use_id: Option<String>,
         tool_name: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         input_summary: Option<String>,
     },
     PermissionResponded {
         request_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_use_id: Option<String>,
         approved: bool,
         responder: String,
     },
@@ -415,6 +419,44 @@ mod tests {
         let encoded = serde_json::to_string(&payload).expect("serialize");
         let decoded: SessionEventPayload = serde_json::from_str(&encoded).expect("deserialize");
         assert_eq!(decoded, payload);
+    }
+
+    #[test]
+    fn permission_events_preserve_optional_tool_use_correlation() {
+        let required = SessionEventPayload::PermissionRequired {
+            request_id: "req-sdk-1".to_string(),
+            tool_use_id: Some("toolu-1".to_string()),
+            tool_name: "Bash".to_string(),
+            input_summary: Some("pnpm test".to_string()),
+        };
+        let responded = SessionEventPayload::PermissionResponded {
+            request_id: "req-sdk-1".to_string(),
+            tool_use_id: Some("toolu-1".to_string()),
+            approved: true,
+            responder: "desktop".to_string(),
+        };
+
+        for payload in [required, responded] {
+            let encoded = serde_json::to_value(&payload).expect("serialize");
+            assert_eq!(encoded["tool_use_id"], "toolu-1");
+            let decoded: SessionEventPayload =
+                serde_json::from_value(encoded).expect("deserialize permission event");
+            assert_eq!(decoded, payload);
+        }
+
+        let legacy: SessionEventPayload = serde_json::from_str(
+            r#"{"type":"permission_required","request_id":"req-legacy","tool_name":"Bash"}"#,
+        )
+        .expect("deserialize legacy permission request");
+        assert_eq!(
+            legacy,
+            SessionEventPayload::PermissionRequired {
+                request_id: "req-legacy".to_string(),
+                tool_use_id: None,
+                tool_name: "Bash".to_string(),
+                input_summary: None,
+            }
+        );
     }
 
     #[test]

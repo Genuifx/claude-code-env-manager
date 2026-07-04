@@ -536,6 +536,7 @@ impl RuntimeManager {
             &pending.runtime_id,
             SessionEventPayload::PermissionResponded {
                 request_id: request_id.to_string(),
+                tool_use_id: None,
                 approved,
                 responder: responder.to_string(),
             },
@@ -864,6 +865,7 @@ impl RuntimeManager {
                 runtime_id,
                 SessionEventPayload::PermissionRequired {
                     request_id: request.request_id,
+                    tool_use_id: None,
                     tool_name: request.tool_name,
                     input_summary: None,
                 },

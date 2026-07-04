@@ -1,6 +1,6 @@
 import { memo, useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import type { DragEvent } from 'react';
-import { Check, Copy, Link, Pin, RefreshCw, X, Plus } from 'lucide-react';
+import { Check, Copy, Link, Pin, RefreshCw, X, Plus, ShieldAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -961,6 +961,8 @@ export const ProjectTree = memo(function ProjectTree({
     const isEditing = editingKey === key;
     const isPinned = pinnedSessionKeySet.has(key);
     const pinLabel = isPinned ? t('workspace.unpinSession') : t('workspace.pinSession');
+    const decoration = decorationsBySessionKey[key];
+    const approvalRequired = decoration?.attentionKind === 'permission_required';
     // activeTemporarySection is intentionally a no-op visually: session rows
     // share one vocabulary across sections. The option remains in the type so
     // callers can mark intent without reintroducing a side-stripe / nested-card
@@ -986,7 +988,7 @@ export const ProjectTree = memo(function ProjectTree({
             <SessionTreeItemIcon
               session={session}
               environment={resolveEnvironment(session)}
-              decoration={decorationsBySessionKey[key]}
+              decoration={decoration}
               isSelected
             />
           </span>
@@ -1066,7 +1068,7 @@ export const ProjectTree = memo(function ProjectTree({
                 <SessionTreeItemIcon
                   session={session}
                   environment={resolveEnvironment(session)}
-                  decoration={decorationsBySessionKey[key]}
+                  decoration={decoration}
                   isSelected={isSelected}
                 />
                 <SessionAnnotationPopover
@@ -1082,7 +1084,24 @@ export const ProjectTree = memo(function ProjectTree({
             {getHistorySessionDisplay(session, t('history.untitledSession'))}
           </span>
           <span className="inline-flex w-10 shrink-0 items-center justify-end gap-1.5 whitespace-nowrap text-[10px] tabular-nums transition-opacity duration-150 group-hover/session:opacity-0">
-            {freshDotKeys.has(key) ? (
+            {approvalRequired ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    className={cn(
+                      'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md',
+                      'bg-amber-500/12 text-amber-700 ring-1 ring-amber-500/20 dark:text-amber-300'
+                    )}
+                    aria-label={t('workspace.sessionStateApprovalRequired')}
+                  >
+                    <ShieldAlert className="h-3.5 w-3.5" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="right" sideOffset={6} className="whitespace-nowrap">
+                  {t('workspace.sessionStateApprovalRequired')}
+                </TooltipContent>
+              </Tooltip>
+            ) : freshDotKeys.has(key) ? (
               <span className="relative inline-flex h-3.5 w-5 shrink-0 items-center justify-center">
                 <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-amber-500/25 opacity-75" />
                 <span className="relative h-1.5 w-1.5 rounded-full bg-amber-500" />

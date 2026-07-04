@@ -1,5 +1,6 @@
 export type ClaudePermissionMode =
   | 'default'
+  | 'manual'
   | 'acceptEdits'
   | 'bypassPermissions'
   | 'plan'
@@ -57,8 +58,9 @@ export function normalizeClaudePermissionMode(
     case 'safe':
     case 'ci':
     case 'default':
+    case 'manual':
       settings = {
-        permissionMode: 'default',
+        permissionMode: permMode === 'manual' ? 'manual' : 'default',
         allowDangerouslySkipPermissions: false,
       };
       break;

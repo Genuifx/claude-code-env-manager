@@ -955,7 +955,7 @@ fn get_workspace_session_decorations(
             .map(legacy_interactive_runtime_descriptor),
     );
 
-    let events_by_runtime = unified_sessions
+    let mut events_by_runtime = unified_sessions
         .iter()
         .filter(|runtime| !is_workspace_decoration_terminal_status(&runtime.status))
         .filter_map(|runtime| {
@@ -965,6 +965,17 @@ fn get_workspace_session_decorations(
                 .map(|batch| (runtime.id.clone(), batch.events))
         })
         .collect::<HashMap<_, _>>();
+    events_by_runtime.extend(
+        native_sessions
+            .iter()
+            .filter(|runtime| !is_workspace_decoration_terminal_status(&runtime.status))
+            .filter_map(|runtime| {
+                native_state
+                    .replay_events(&runtime.runtime_id, None)
+                    .ok()
+                    .map(|batch| (runtime.runtime_id.clone(), batch.events))
+            }),
+    );
 
     Ok(build_workspace_session_decorations(
         &sessions,

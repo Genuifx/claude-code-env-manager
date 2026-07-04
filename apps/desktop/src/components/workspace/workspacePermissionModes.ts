@@ -15,6 +15,7 @@ const WORKSPACE_PERMISSION_MODE_ALIASES: Record<string, WorkspacePermissionModeN
   bypassPermissions: 'yolo',
   acceptEdits: 'dev',
   default: 'dev',
+  manual: 'dev',
   auto: 'dev',
   dontAsk: 'safe',
   'danger-full-access': 'yolo',

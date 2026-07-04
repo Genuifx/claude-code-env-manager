@@ -7,6 +7,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { buildClaudeQueryEnv } from './claudeEnv';
 import { applyClaudePermissionModeToQuery } from './claudePermissionControl';
+import { resolveClaudePermissionRequestId, type ClaudeToolPermissionOptions } from './claudePermissionRequests';
 import { QuerySnapshotSlot, type QuerySnapshot } from './claudeQuerySnapshotSlot';
 import { buildClaudePlanModeHooks } from './claudePlanGuard';
 import {
@@ -111,6 +112,14 @@ type InputCommand =
   | RewindFilesCommand
   | TitleQueryCommand
   | StopCommand;
+
+type ClaudePermissionRequestOptions = ClaudeToolPermissionOptions & {
+  title?: string;
+  description?: string;
+  displayName?: string;
+  blockedPath?: string;
+  decisionReason?: string;
+};
 
 type HelperOutput =
   | {
@@ -1071,17 +1080,10 @@ async function waitForPlanExitApproval(
 async function waitForPermission(
   toolName: string,
   input: Record<string, unknown>,
-  options: {
-    toolUseID: string;
-    title?: string;
-    description?: string;
-    displayName?: string;
-    blockedPath?: string;
-    decisionReason?: string;
-  },
+  options: ClaudePermissionRequestOptions,
 ) {
   const toolUseId = options.toolUseID;
-  const requestId = `${toolUseId}:${Date.now()}`;
+  const requestId = resolveClaudePermissionRequestId(options);
   const inputSummary = summarizeClaudeToolInput(toolName, input, options);
 
   emitClaudeToolUseStarted({
@@ -1093,6 +1095,7 @@ async function waitForPermission(
   emitEvent({
     type: 'permission_required',
     request_id: requestId,
+    tool_use_id: toolUseId,
     tool_name: options.displayName || toolName,
     input_summary: inputSummary,
   });
@@ -1104,6 +1107,7 @@ async function waitForPermission(
   emitEvent({
     type: 'permission_responded',
     request_id: requestId,
+    tool_use_id: toolUseId,
     approved,
     responder: 'desktop',
   });
@@ -1415,7 +1419,7 @@ function buildClaudeQueryOptions() {
     hooks: buildClaudePlanModeHooks(
       () => initCommand?.provider === 'claude' && initCommand.perm_mode === 'plan',
     ),
-    canUseTool: async (toolName: string, input: unknown, options: { toolUseID: string }) => {
+    canUseTool: async (toolName: string, input: unknown, options: ClaudeToolPermissionOptions) => {
       if (isClaudeAskUserQuestionTool(toolName)) {
         return waitForAskUserQuestionResponse(input, options.toolUseID);
       }

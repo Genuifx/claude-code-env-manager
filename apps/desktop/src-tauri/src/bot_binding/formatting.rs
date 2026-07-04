@@ -89,6 +89,7 @@ pub(super) fn summarize_payload(payload: &SessionEventPayload) -> Option<EventSu
             request_id,
             tool_name,
             input_summary,
+            ..
         } => Some(EventSummary {
             kind: BotBindingOutboxFrameKind::PermissionPrompt,
             title: format!("Permission required · {tool_name}"),
@@ -105,6 +106,7 @@ pub(super) fn summarize_payload(payload: &SessionEventPayload) -> Option<EventSu
             request_id,
             approved,
             responder,
+            ..
         } => Some(EventSummary {
             kind: BotBindingOutboxFrameKind::EventUpdate,
             title: "Permission responded".to_string(),

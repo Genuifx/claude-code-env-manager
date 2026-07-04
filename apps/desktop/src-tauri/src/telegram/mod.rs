@@ -4738,6 +4738,7 @@ fn monitor_session_completion(
                         request_id,
                         approved,
                         responder,
+                        ..
                     } if announced_responses.insert(request_id.clone()) => {
                         let text = format!(
                             "Permission request {request_id} was {} by {responder}.",

@@ -5,6 +5,7 @@ import type {
 
 export interface PendingPermissionRequest {
   requestId: string;
+  toolUseId?: string;
   toolName: string;
   inputSummary?: string;
 }
@@ -113,6 +114,7 @@ export function extractAttentionState(events: SessionEventRecord[]): NativeSessi
       case 'permission_required':
         permissions.set(event.payload.request_id, {
           requestId: event.payload.request_id,
+          toolUseId: event.payload.tool_use_id ?? undefined,
           toolName: event.payload.tool_name,
           inputSummary: event.payload.input_summary ?? undefined,
         });

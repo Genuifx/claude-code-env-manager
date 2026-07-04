@@ -61,3 +61,21 @@ test('restores the active Claude Agent SDK query to the underlying permission mo
     allowDangerouslySkipPermissions: true,
   });
 });
+
+test('passes upstream manual permission mode through to the active Claude query', async () => {
+  const { applyClaudePermissionModeToQuery } = await importClaudePermissionControlModule();
+  const calls = [];
+  const query = {
+    async setPermissionMode(mode) {
+      calls.push(mode);
+    },
+  };
+
+  const permission = await applyClaudePermissionModeToQuery(query, 'manual');
+
+  assert.deepEqual(calls, ['manual']);
+  assert.deepEqual(permission, {
+    permissionMode: 'manual',
+    allowDangerouslySkipPermissions: false,
+  });
+});
