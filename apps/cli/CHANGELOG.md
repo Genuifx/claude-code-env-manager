@@ -1,5 +1,11 @@
 # ccem
 
+## 2.44.0
+
+### Minor Changes
+
+- Add tray cockpit UI with GSAP motion, anchor to status item, surface pending permission approvals, and polish tray cockpit status surface.
+
 ## 2.43.0
 
 ### Minor Changes
