@@ -139,6 +139,7 @@ export function ComposerControls({
               'flex h-8 min-w-0 max-w-full items-center gap-2 rounded-xl px-2.5 text-[12px] text-foreground',
               'cursor-pointer outline-none transition-all duration-150',
               'hover:bg-white/[0.06] focus:ring-2 focus:ring-primary/30',
+              'max-[760px]:px-1.5',
             )}
           >
             <span
@@ -150,7 +151,7 @@ export function ComposerControls({
               <span className={cn('flex shrink-0', isCodexProvider && 'opacity-45 grayscale')}>
                 <EnvironmentLobeIcon hint={currentEnvironmentIconHint} />
               </span>
-              <span className="min-w-0 max-w-[120px] truncate">{envName}</span>
+              <span className="min-w-0 max-w-[120px] truncate max-[760px]:hidden">{envName}</span>
               {isCodexProvider && (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -271,6 +272,7 @@ export function ComposerControls({
           variant="plain"
           className={cn(
             'h-8 w-auto min-w-[112px] shrink-0 rounded-xl px-2.5 text-[12px] text-foreground',
+            'max-[760px]:min-w-0 max-[760px]:px-1.5',
             isRiskyPermissionMode(normalizedPermMode) && 'text-destructive',
           )}
         >
@@ -284,7 +286,7 @@ export function ComposerControls({
                     isRiskyPermissionMode(normalizedPermMode) && 'text-destructive',
                   )}
                 />
-                <span className="truncate">
+                <span className="truncate max-[760px]:hidden">
                   {getWorkspacePermissionModeDisplayName(normalizedPermMode)}
                 </span>
               </span>
