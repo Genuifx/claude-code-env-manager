@@ -69,20 +69,20 @@ test('tray cockpit owns left-click while preserving the native context menu', as
   assert.match(cssSource, /backdrop-filter: blur\(30px\) saturate\(180%\)/);
   assert.match(cssSource, /--tray-divider: rgba\(255, 255, 255, 0\.06\)/);
   assert.match(cssSource, /--tray-accent-soft: hsl\(var\(--primary\) \/ 0\.16\)/);
+  assert.match(cssSource, /--tray-accent-softer: hsl\(var\(--primary\) \/ 0\.08\)/);
   assert.match(cssSource, /--tray-bg-solid: #0b0b0c/);
   assert.match(cssSource, /\.tray-dock-button:hover/);
   assert.match(cssSource, /\.tray-icon-button:hover/);
   assert.match(cockpitSource, /px-\[32px\] pb-\[48px\] pt-2/);
   assert.match(cockpitSource, /before:bg-\[var\(--tray-divider\)\]/);
-  assert.match(cockpitSource, /bg-\[var\(--tray-accent-soft\)\]/);
-  assert.match(cockpitSource, /bg-\[var\(--tray-surface-3\)\]/);
+  assert.match(cockpitSource, /bg-\[var\(--tray-accent-softer\)\]/);
   assert.match(cockpitSource, /bg-\[var\(--tray-bg-solid\)\]/);
-  assert.match(cockpitSource, /grid grid-cols-2 gap-1 rounded-\[12px\] bg-\[var\(--tray-surface-2\)\] p-1/);
-  assert.match(cockpitSource, /function HealthRow[\s\S]*grid grid-cols-2/);
-  assert.match(cockpitSource, /function DockButton[\s\S]*tray-accent-soft/);
-  assert.match(cockpitSource, /function MetricTile[\s\S]*tray-accent-soft/);
-  assert.match(cockpitSource, /function ActivityChart[\s\S]*hover:bg-\[var\(--tray-surface-3\)\]/);
+  assert.match(cockpitSource, /rounded-\[10px\]/);
   assert.match(cockpitSource, /rounded-\[14px\]/);
+  // HealthRow four-cell status grid is intentionally removed; ensure it does not creep back.
+  assert.doesNotMatch(cockpitSource, /function HealthRow/);
+  assert.doesNotMatch(cockpitSource, /<HealthRow/);
+  assert.doesNotMatch(cockpitSource, /healthItems/);
   assert.equal(packageJson.dependencies.gsap, '^3.15.0');
   assert.equal(packageJson.dependencies['@gsap/react'], '^2.1.2');
   assert.match(cockpitSource, /import \{ gsap \} from 'gsap'/);
@@ -98,7 +98,6 @@ test('tray cockpit owns left-click while preserving the native context menu', as
   assert.match(cockpitSource, /function StatStrip/);
   assert.match(cockpitSource, /function ActivityChart/);
   assert.match(cockpitSource, /function ProviderSplit/);
-  assert.match(cockpitSource, /function HealthRow/);
   assert.match(cockpitSource, /function TrayLogo/);
   assert.match(cockpitSource, /previewTheme === 'dark' \|\| previewTheme === 'light'/);
   assert.match(cockpitSource, /src="\/logo_preview\.png"/);

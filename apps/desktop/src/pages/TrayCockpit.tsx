@@ -5,18 +5,11 @@ import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { gsap } from 'gsap';
 import { useGSAP } from '@gsap/react';
 import {
-  Activity,
   Bot,
-  Check,
-  Clock3,
-  Compass,
-  Minus,
   Play,
   RefreshCw,
   Settings2,
-  TerminalSquare,
   Workflow,
-  Zap,
 } from 'lucide-react';
 import { LocaleProvider, useLocale } from '@/locales';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -330,19 +323,6 @@ function statusDotClass(tone: StatusTone): string {
   }
 }
 
-function statusBadgeClass(tone: StatusTone): string {
-  switch (tone) {
-    case 'success':
-      return 'bg-success/15 text-success';
-    case 'warning':
-      return 'bg-warning/15 text-warning';
-    case 'destructive':
-      return 'bg-destructive/15 text-destructive';
-    default:
-      return 'bg-[var(--tray-surface-2)] text-[var(--tray-text-3)]';
-  }
-}
-
 async function readSnapshot(): Promise<TraySnapshot> {
   const [envResult, settingsResult, usageResult, sessionResult, cronResult, platformResult, telegramResult, versionResult] =
     await Promise.allSettled([
@@ -473,37 +453,6 @@ function TrayCockpitContent() {
   const providers = useMemo(() => providerBreakdown(snapshot.sessions), [snapshot.sessions]);
   const todayTokens = usageTokenTotal(snapshot.usage.today);
 
-  const healthItems = useMemo(() => [
-    {
-      key: 'tmux',
-      label: t('trayCockpit.healthTmux'),
-      ok: snapshot.platform?.tmuxInstalled ?? true,
-      detail: snapshot.platform?.tmuxInstalled === false ? t('trayCockpit.healthMissing') : t('trayCockpit.healthOk'),
-    },
-    {
-      key: 'bridge',
-      label: t('trayCockpit.healthBridge'),
-      ok: snapshot.telegram?.running ?? false,
-      detail: snapshot.telegram?.running
-        ? t('trayCockpit.healthOnline')
-        : snapshot.telegram?.configured
-          ? t('trayCockpit.healthOffline')
-          : t('trayCockpit.healthNotSet'),
-    },
-    {
-      key: 'cron',
-      label: t('trayCockpit.healthCron'),
-      ok: visibleCronTasks.length > 0,
-      detail: `${visibleCronTasks.length}`,
-    },
-    {
-      key: 'version',
-      label: t('trayCockpit.healthVersion'),
-      ok: Boolean(snapshot.version),
-      detail: snapshot.version ? `v${snapshot.version}` : t('trayCockpit.healthUnknown'),
-    },
-  ], [snapshot, visibleCronTasks.length, t]);
-
   useGSAP(() => {
     const mm = gsap.matchMedia();
 
@@ -574,12 +523,12 @@ function TrayCockpitContent() {
             <TrayLogo />
             <div className="min-w-0 leading-none">
               <div className="flex items-center gap-1.5">
-                <h1 className="truncate text-[14.5px] font-semibold tracking-[-0.01em] text-[var(--tray-text-1)]">
+                <h1 className="truncate text-[14px] font-semibold tracking-[-0.005em] text-[var(--tray-text-1)]">
                   {t('trayCockpit.title')}
                 </h1>
                 <span
                   className={cn(
-                    'inline-block h-1.5 w-1.5 shrink-0 rounded-full ring-2 ring-[var(--tray-bg-solid)]',
+                    'inline-block h-[5px] w-[5px] shrink-0 rounded-full',
                     snapshot.source === 'live' ? 'bg-[var(--tray-accent)]' : 'bg-[var(--tray-text-3)]',
                   )}
                   aria-hidden="true"
@@ -596,18 +545,18 @@ function TrayCockpitContent() {
             type="button"
             aria-label={t('trayCockpit.refresh')}
             onClick={() => void refresh()}
-            className="tray-icon-button grid h-7 w-7 shrink-0 place-items-center rounded-[10px] text-[var(--tray-text-3)] hover:bg-[var(--tray-surface-3)] hover:text-[var(--tray-text-1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            className="tray-icon-button grid h-7 w-7 shrink-0 place-items-center rounded-[8px] text-[var(--tray-text-3)] hover:bg-[var(--tray-surface-2)] hover:text-[var(--tray-text-1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
-            <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
+            <RefreshCw className={cn('h-[14px] w-[14px]', refreshing && 'animate-spin')} />
           </button>
         </header>
 
-        <div className="tray-cockpit-body relative flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-3 pb-2 pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="tray-cockpit-body relative flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 pb-2 pt-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <StatStrip
             items={[
-              { label: t('trayCockpit.env'), value: snapshot.currentEnv, icon: <Compass className="h-3 w-3" /> },
-              { label: t('trayCockpit.perm'), value: snapshot.permissionMode, icon: <Zap className="h-3 w-3" /> },
-              { label: t('trayCockpit.sessions'), value: `${runningSessions.length}`, icon: <TerminalSquare className="h-3 w-3" /> },
+              { label: t('trayCockpit.env'), value: snapshot.currentEnv },
+              { label: t('trayCockpit.perm'), value: snapshot.permissionMode },
+              { label: t('trayCockpit.sessions'), value: `${runningSessions.length}` },
             ]}
           />
 
@@ -635,20 +584,20 @@ function TrayCockpitContent() {
               count={visibleSessions.length}
               empty={t('trayCockpit.noSessions')}
             >
-              {visibleSessions.slice(0, 2).map((session) => {
-                const tone = statusTone(session.status);
-                return (
-                  <div key={session.id} className="flex min-w-0 items-center gap-2 py-[3px]">
-                    <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', statusDotClass(tone))} aria-hidden="true" />
-                    <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-[var(--tray-text-1)]">
-                      {getProjectName(session.workingDir)}
-                    </span>
-                    <span className={cn('shrink-0 rounded-full px-1.5 py-[1px] text-[9px] font-bold uppercase tracking-[0.04em]', statusBadgeClass(tone))}>
-                      {session.status}
-                    </span>
-                  </div>
-                );
-              })}
+              {visibleSessions.slice(0, 2).map((session) => (
+                <div key={session.id} className="flex min-w-0 items-center gap-1.5 py-[3px]">
+                  <span
+                    className={cn('h-1.5 w-1.5 shrink-0 rounded-full', statusDotClass(statusTone(session.status)))}
+                    aria-hidden="true"
+                  />
+                  <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--tray-text-1)]">
+                    {getProjectName(session.workingDir)}
+                  </span>
+                  <span className="shrink-0 text-[10px] text-[var(--tray-text-3)]">
+                    {session.status}
+                  </span>
+                </div>
+              ))}
             </InfoColumn>
 
             <InfoColumn
@@ -657,9 +606,8 @@ function TrayCockpitContent() {
               empty={t('trayCockpit.noCron')}
             >
               {visibleCronTasks.slice(0, 2).map((task) => (
-                <div key={task.id} className="flex min-w-0 items-center gap-2 py-[3px]">
-                  <Clock3 className="h-3 w-3 shrink-0 text-[var(--tray-text-3)]" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-[var(--tray-text-1)]">{task.name}</span>
+                <div key={task.id} className="flex min-w-0 items-center gap-1.5 py-[3px]">
+                  <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--tray-text-1)]">{task.name}</span>
                   <span className="shrink-0 font-mono text-[10px] tabular-nums text-[var(--tray-text-3)]">
                     {task.cronExpression}
                   </span>
@@ -667,15 +615,13 @@ function TrayCockpitContent() {
               ))}
             </InfoColumn>
           </div>
-
-          <HealthRow items={healthItems} />
         </div>
 
-        <footer className="flex items-center gap-1 border-t border-[var(--tray-hairline)] bg-[var(--tray-surface-1)] px-2 py-1.5">
-          <DockButton icon={<Play className="h-3.5 w-3.5" />} label={t('trayCockpit.launch')} busy={launching} onClick={handleLaunch} primary />
-          <DockButton icon={<Workflow className="h-3.5 w-3.5" />} label={t('trayCockpit.workspace')} onClick={() => void showMainTab('workspace')} />
-          <DockButton icon={<Bot className="h-3.5 w-3.5" />} label={t('trayCockpit.sessionsPage')} onClick={() => void showMainTab('sessions')} />
-          <DockButton icon={<Settings2 className="h-3.5 w-3.5" />} label={t('trayCockpit.diagnostics')} onClick={() => void showMainTab('proxy-debug')} />
+        <footer className="flex items-center gap-0.5 border-t border-[var(--tray-hairline)] bg-transparent px-1.5 py-1.5">
+          <DockButton icon={<Play className="h-[14px] w-[14px]" />} label={t('trayCockpit.launch')} busy={launching} onClick={handleLaunch} primary />
+          <DockButton icon={<Workflow className="h-[14px] w-[14px]" />} label={t('trayCockpit.workspace')} onClick={() => void showMainTab('workspace')} />
+          <DockButton icon={<Bot className="h-[14px] w-[14px]" />} label={t('trayCockpit.sessionsPage')} onClick={() => void showMainTab('sessions')} />
+          <DockButton icon={<Settings2 className="h-[14px] w-[14px]" />} label={t('trayCockpit.diagnostics')} onClick={() => void showMainTab('proxy-debug')} />
         </footer>
       </section>
     </div>
@@ -696,22 +642,21 @@ function TrayLogo() {
   );
 }
 
-function StatStrip({ items }: { items: Array<{ label: string; value: string; icon: ReactNode }> }) {
+function StatStrip({ items }: { items: Array<{ label: string; value: string }> }) {
   return (
-    <div className="flex items-stretch rounded-[12px] bg-[var(--tray-surface-2)] px-1 py-2">
+    <div className="flex items-stretch rounded-[10px] bg-[var(--tray-surface-2)] px-1 py-2">
       {items.map((item, index) => (
         <div
           key={item.label}
           className={cn(
-            'relative flex min-w-0 flex-1 flex-col gap-1 px-3',
+            'relative flex min-w-0 flex-1 flex-col gap-0.5 px-3',
             index > 0 && 'before:absolute before:left-0 before:top-1/2 before:h-3/5 before:w-px before:-translate-y-1/2 before:bg-[var(--tray-divider)]',
           )}
         >
-          <div className="flex items-center gap-1 text-[9.5px] font-semibold uppercase tracking-[0.06em] text-[var(--tray-text-3)]">
-            <span className="[&>svg]:h-[10px] [&>svg]:w-[10px] [&>svg]:stroke-[1.75]">{item.icon}</span>
-            <span className="truncate">{item.label}</span>
+          <div className="truncate text-[10.5px] text-[var(--tray-text-3)]">
+            {item.label}
           </div>
-          <div className="truncate text-[13px] font-semibold leading-none tracking-[-0.01em] text-[var(--tray-text-1)] tabular-nums">
+          <div className="truncate text-[12.5px] font-medium leading-none text-[var(--tray-text-1)] tabular-nums">
             {item.value}
           </div>
         </div>
@@ -733,29 +678,21 @@ function MetricTile({
 }) {
   return (
     <div className={cn(
-      'relative flex flex-col gap-1 overflow-hidden rounded-[12px] px-3.5 py-3',
-      accent
-        ? 'bg-[var(--tray-accent-soft)] before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-[var(--tray-accent)] before:opacity-40'
-        : 'bg-[var(--tray-surface-2)]',
+      'flex flex-col gap-1 rounded-[10px] px-3.5 py-2.5',
+      accent ? 'bg-[var(--tray-accent-softer)]' : 'bg-[var(--tray-surface-2)]',
     )}>
-      <div className={cn(
-        'text-[9.5px] font-semibold uppercase tracking-[0.06em]',
-        accent ? 'text-[var(--tray-accent)] opacity-80' : 'text-[var(--tray-text-3)]',
-      )}>
+      <div className="text-[10.5px] text-[var(--tray-text-3)]">
         {label}
       </div>
       <div
         className={cn(
-          'text-[22px] font-semibold leading-none tracking-[-0.02em] tabular-nums',
+          'text-[20px] font-semibold leading-none tracking-[-0.01em] tabular-nums',
           accent ? 'text-[var(--tray-accent)]' : 'text-[var(--tray-text-1)]',
         )}
       >
         {value}
       </div>
-      <div className={cn(
-        'truncate text-[10px] font-medium',
-        accent ? 'text-[var(--tray-text-2)]' : 'text-[var(--tray-text-3)]',
-      )}>{detail}</div>
+      <div className="truncate text-[10px] text-[var(--tray-text-3)]">{detail}</div>
     </div>
   );
 }
@@ -895,15 +832,12 @@ function ActivityChart({
   const tooltipPoint = hovered ?? lastPoint;
 
   return (
-    <div ref={chartRef} className="tray-chart-card group rounded-[12px] bg-[var(--tray-surface-2)] px-3 pb-2 pt-2.5 transition-[background-color] duration-[var(--tray-duration)] ease-[var(--tray-ease)] hover:bg-[var(--tray-surface-3)]">
+    <div ref={chartRef} className="tray-chart-card rounded-[10px] bg-[var(--tray-surface-2)] px-3 pb-2 pt-2.5">
       <div className="mb-1.5 flex items-center justify-between">
-        <div className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[var(--tray-text-1)]">
-          <span className="grid h-4 w-4 place-items-center rounded-full bg-[var(--tray-accent-soft)] text-[var(--tray-accent)]">
-            <Activity className="h-2.5 w-2.5" />
-          </span>
+        <div className="text-[11.5px] text-[var(--tray-text-2)]">
           {label}
         </div>
-        <span className="text-[9.5px] font-semibold uppercase tracking-[0.06em] text-[var(--tray-text-3)]">
+        <span className="text-[10px] text-[var(--tray-text-3)] tabular-nums">
           12h
         </span>
       </div>
@@ -1000,29 +934,22 @@ function ProviderSplit({
   caption: string;
 }) {
   return (
-    <div className="rounded-[12px] bg-[var(--tray-surface-2)] px-3 py-2.5">
-      <div className="mb-1.5 flex items-center justify-between text-[11.5px] font-semibold text-[var(--tray-text-1)]">
-        <span className="flex items-center gap-1.5">
-          <span className="grid h-4 w-4 place-items-center rounded-full bg-[var(--tray-accent-soft)] text-[var(--tray-accent)]">
-            <Workflow className="h-2.5 w-2.5" />
-          </span>
-          {label}
-        </span>
-        <span className="text-[9.5px] font-semibold uppercase tracking-[0.06em] text-[var(--tray-text-3)]">
-          {caption}
-        </span>
+    <div className="rounded-[10px] bg-[var(--tray-surface-2)] px-3 py-2.5">
+      <div className="mb-1.5 flex items-center justify-between text-[11.5px] text-[var(--tray-text-3)]">
+        <span>{label}</span>
+        <span className="tabular-nums">{caption}</span>
       </div>
       <div className="space-y-1.5">
         {providers.map((item) => (
           <div key={item.key} className="grid grid-cols-[68px_1fr_34px] items-center gap-2 text-[11px]">
-            <span className="truncate font-medium text-[var(--tray-text-2)]">{item.label}</span>
+            <span className="truncate text-[var(--tray-text-2)]">{item.label}</span>
             <div className="h-1 overflow-hidden rounded-full bg-[var(--tray-divider)]">
               <div
                 className="tray-provider-bar h-full rounded-full bg-[var(--tray-accent)] transition-[width] duration-[var(--tray-duration)] ease-[var(--tray-ease)]"
-                style={{ width: `${item.value}%`, opacity: 0.6 + (item.value / 100) * 0.4 }}
+                style={{ width: `${item.value}%`, opacity: 0.55 + (item.value / 100) * 0.45 }}
               />
             </div>
-            <span className="text-right text-[10.5px] font-semibold tabular-nums text-[var(--tray-text-3)]">{item.value}%</span>
+            <span className="text-right text-[10.5px] tabular-nums text-[var(--tray-text-3)]">{item.value}%</span>
           </div>
         ))}
       </div>
@@ -1043,46 +970,16 @@ function InfoColumn({
 }) {
   const hasChildren = Array.isArray(children) ? children.length > 0 : Boolean(children);
   return (
-    <div className="flex min-w-0 flex-col rounded-[12px] bg-[var(--tray-surface-2)] px-3 py-2.5">
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="truncate text-[11.5px] font-semibold text-[var(--tray-text-1)]">{title}</span>
-        <span className="grid h-4 min-w-4 place-items-center rounded-full bg-[var(--tray-divider)] px-1 text-[9.5px] font-bold tabular-nums text-[var(--tray-text-2)]">
-          {count}
-        </span>
+    <div className="flex min-w-0 flex-col rounded-[10px] bg-[var(--tray-surface-2)] px-3 py-2.5">
+      <div className="mb-1 flex items-center justify-between gap-2 text-[11.5px] text-[var(--tray-text-3)]">
+        <span className="truncate">{title}</span>
+        <span className="shrink-0 tabular-nums text-[var(--tray-text-3)]">{count}</span>
       </div>
       <div className="min-h-0 flex-1">
         {hasChildren ? children : (
-          <div className="rounded-[8px] bg-[var(--tray-surface-1)] px-2 py-1 text-[10.5px] text-[var(--tray-text-3)]">{empty}</div>
+          <div className="text-[10.5px] text-[var(--tray-text-3)]">{empty}</div>
         )}
       </div>
-    </div>
-  );
-}
-
-function HealthRow({ items }: { items: Array<{ key: string; label: string; ok: boolean; detail: string }> }) {
-  return (
-    <div className="grid grid-cols-2 gap-1 rounded-[12px] bg-[var(--tray-surface-2)] p-1">
-      {items.map((item) => (
-        <div
-          key={item.key}
-          className="flex min-w-0 items-center gap-1.5 rounded-[9px] bg-[var(--tray-surface-1)] px-2 py-1"
-          title={item.detail}
-        >
-          <span
-            className={cn(
-              'grid h-4 w-4 shrink-0 place-items-center rounded-full',
-              item.ok ? 'bg-success/20 text-success' : 'bg-warning/20 text-warning',
-            )}
-            aria-hidden="true"
-          >
-            {item.ok ? <Check className="h-2.5 w-2.5" strokeWidth={3} /> : <Minus className="h-2.5 w-2.5" strokeWidth={3} />}
-          </span>
-          <div className="flex min-w-0 flex-col leading-none">
-            <span className="truncate text-[10px] font-semibold text-[var(--tray-text-2)]">{item.label}</span>
-            <span className="mt-0.5 truncate text-[9px] font-medium text-[var(--tray-text-3)]">{item.detail}</span>
-          </div>
-        </div>
-      ))}
     </div>
   );
 }
@@ -1108,16 +1005,16 @@ function DockButton({
           aria-label={label}
           onClick={onClick}
           className={cn(
-            'tray-dock-button group relative flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-[10px] px-1 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+            'tray-dock-button flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-[8px] px-1 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
             primary
-              ? 'bg-[var(--tray-accent-soft)] text-[var(--tray-accent)] before:absolute before:inset-x-2 before:top-0 before:h-px before:bg-[var(--tray-accent)] before:opacity-50 hover:bg-[var(--tray-accent-softer)]'
-              : 'text-[var(--tray-text-3)] hover:bg-[var(--tray-surface-3)] hover:text-[var(--tray-text-1)]',
+              ? 'bg-[var(--tray-accent-softer)] text-[var(--tray-accent)] hover:bg-[var(--tray-accent-soft)]'
+              : 'text-[var(--tray-text-3)] hover:bg-[var(--tray-surface-2)] hover:text-[var(--tray-text-1)]',
           )}
         >
-          <span className="flex h-[18px] w-[18px] items-center justify-center [&>svg]:h-[18px] [&>svg]:w-[18px] [&>svg]:stroke-[1.75]">
-            {busy ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : icon}
+          <span className="flex h-[16px] w-[16px] items-center justify-center [&>svg]:h-[16px] [&>svg]:w-[16px] [&>svg]:stroke-[1.75]">
+            {busy ? <RefreshCw className="h-3 w-3 animate-spin" /> : icon}
           </span>
-          <span className="max-w-full truncate text-[9.5px] font-semibold tracking-[0.01em]">{label}</span>
+          <span className="max-w-full truncate text-[9.5px] font-medium">{label}</span>
         </button>
       </TooltipTrigger>
       <TooltipContent side="top">{label}</TooltipContent>
