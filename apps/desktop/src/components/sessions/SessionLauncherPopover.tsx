@@ -1,6 +1,8 @@
+import { useRef } from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import type { ArrangeLayout } from '@/store';
 import { LauncherQuickSection } from './LauncherQuickSection';
+import { ccemMotion, clearMotionProps, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';
 
 interface SessionLauncherPopoverProps {
   open: boolean;
@@ -19,6 +21,8 @@ export function SessionLauncherPopover({
   isLaunching,
   trigger,
 }: SessionLauncherPopoverProps) {
+  const popoverMotionRef = useRef<HTMLDivElement>(null);
+
   const handleLaunchMulti = (dirs: string[], layout: ArrangeLayout) => {
     onLaunchMulti(dirs, layout);
     onOpenChange(false);
@@ -29,11 +33,55 @@ export function SessionLauncherPopover({
     onOpenChange(false);
   };
 
+  useGSAP(() => {
+    const popover = popoverMotionRef.current;
+    if (!open || !popover) {
+      return;
+    }
+
+    const rows = gsap.utils.toArray<HTMLElement>(
+      '[data-launcher-popover-row], [data-launcher-popover-action]',
+      popover
+    );
+    if (shouldReduceMotion()) {
+      clearMotionProps([popover, ...rows]);
+      return;
+    }
+
+    const timeline = gsap.timeline({ defaults: { ease: ccemMotion.ease.standard, overwrite: 'auto' } });
+    timeline.fromTo(
+      popover,
+      { autoAlpha: 0, y: 6, scale: 0.985 },
+      {
+        autoAlpha: 1,
+        y: 0,
+        scale: 1,
+        duration: ccemMotion.duration.base,
+        onComplete: () => clearMotionProps(popover),
+      }
+    );
+    if (rows.length > 0) {
+      timeline.fromTo(
+        rows,
+        { autoAlpha: 0, y: 5 },
+        {
+          autoAlpha: 1,
+          y: 0,
+          duration: ccemMotion.duration.quick,
+          stagger: 0.02,
+          onComplete: () => clearMotionProps(rows),
+        },
+        '-=0.16'
+      );
+    }
+  }, { scope: popoverMotionRef, dependencies: [open] });
+
   return (
     <Popover.Root open={open} onOpenChange={onOpenChange}>
       <Popover.Trigger asChild>{trigger}</Popover.Trigger>
       <Popover.Portal>
         <Popover.Content
+          ref={popoverMotionRef}
           side="bottom"
           align="end"
           sideOffset={6}

@@ -78,6 +78,7 @@ export function SessionList({
           <div
             key={session.id}
             data-testid="session-card"
+            data-session-motion-card
             data-session-id={session.id}
             data-client={session.client}
             className={cn(

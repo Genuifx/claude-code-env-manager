@@ -21,6 +21,7 @@ import {
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { ccemMotion, clearMotionProps, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';
 import type {
   NativeSessionSummary,
   WorkspaceFileDiff,
@@ -138,7 +139,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section>
+    <section data-review-entry>
       <div className="mb-1.5 flex items-center gap-2">
         <Icon className="h-3.5 w-3.5 text-muted-foreground" />
         <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -278,6 +279,7 @@ function TreeLevel({
             <button
               key={child.path}
               type="button"
+              data-review-file-row
               onClick={() => onSelect(child.file!.path)}
               style={{ paddingLeft: depth * 12 + 8 }}
               className={cn(
@@ -308,6 +310,7 @@ function TreeLevel({
           <div key={folder.path}>
             <button
               type="button"
+              data-review-file-row
               onClick={() => onToggle(folder.path)}
               style={{ paddingLeft: depth * 12 + 8 }}
               className="flex w-full items-center gap-1 py-1 pr-2 text-left transition-colors hover:bg-surface-raised/40"
@@ -620,7 +623,7 @@ function SubagentPanel({
   const selectedRunning = selected?.status === 'running';
 
   return (
-    <div className="flex min-h-0 flex-1">
+    <div data-review-motion-panel data-review-page="agents" className="flex min-h-0 flex-1">
       <div className="flex w-[clamp(220px,34%,320px)] shrink-0 flex-col border-r border-border-subtle/50">
         <ScrollArea className="min-h-0 flex-1">
           {agentsError && subagents.length === 0 ? (
@@ -638,6 +641,7 @@ function SubagentPanel({
                   <button
                     type="button"
                     key={agent.agentId}
+                    data-review-entry
                     onClick={() => onSelect(agent.agentId)}
                     className={cn(
                       'flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-surface-raised/50',
@@ -820,6 +824,7 @@ export function WorkspaceReviewDrawer({
   const [agentsError, setAgentsError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const subagentRequestSeqRef = useRef(0);
+  const drawerMotionRef = useRef<HTMLElement>(null);
 
   const tree = useMemo(() => buildFileTree(model.changedFiles), [model.changedFiles]);
   const todoLabel = model.todoTotal > 0 ? `${model.todoCompleted}/${model.todoTotal}` : '0/0';
@@ -987,6 +992,90 @@ export function WorkspaceReviewDrawer({
     }
   }, [page, selectedAgentId, selectAgent, subagents]);
 
+  useGSAP(() => {
+    const root = drawerMotionRef.current;
+    if (!isOpen || !root) {
+      return;
+    }
+
+    const panel = root.querySelector<HTMLElement>(`[data-review-page="${page}"]`);
+    const entries = panel
+      ? gsap.utils.toArray<HTMLElement>('[data-review-entry], [data-review-file-row]', panel)
+      : [];
+    if (!panel) {
+      return;
+    }
+    if (shouldReduceMotion()) {
+      clearMotionProps([panel, ...entries]);
+      return;
+    }
+
+    const timeline = gsap.timeline({ defaults: { ease: ccemMotion.ease.standard, overwrite: 'auto' } });
+    timeline.fromTo(
+      panel,
+      { autoAlpha: 0, y: 8 },
+      {
+        autoAlpha: 1,
+        y: 0,
+        duration: ccemMotion.duration.base,
+        onComplete: () => clearMotionProps(panel),
+      }
+    );
+    if (entries.length > 0) {
+      timeline.fromTo(
+        entries.slice(0, 18),
+        { autoAlpha: 0, y: 5 },
+        {
+          autoAlpha: 1,
+          y: 0,
+          duration: ccemMotion.duration.quick,
+          stagger: 0.018,
+          onComplete: () => clearMotionProps(entries),
+        },
+        '-=0.16'
+      );
+    }
+  }, {
+    scope: drawerMotionRef,
+    dependencies: [
+      isOpen,
+      page,
+      model.changedFiles.length,
+      model.todos.length,
+      subagents.length,
+      agentsLoading,
+    ],
+  });
+
+  useGSAP(() => {
+    const root = drawerMotionRef.current;
+    if (!isOpen || page !== 'files' || !selectedPath || !root) {
+      return;
+    }
+
+    const preview = root.querySelector<HTMLElement>('[data-review-preview]');
+    if (!preview) {
+      return;
+    }
+    if (shouldReduceMotion()) {
+      clearMotionProps(preview);
+      return;
+    }
+
+    gsap.fromTo(
+      preview,
+      { autoAlpha: 0, y: 6 },
+      {
+        autoAlpha: 1,
+        y: 0,
+        duration: ccemMotion.duration.base,
+        ease: ccemMotion.ease.soft,
+        overwrite: 'auto',
+        onComplete: () => clearMotionProps(preview),
+      }
+    );
+  }, { scope: drawerMotionRef, dependencies: [isOpen, page, selectedPath, diffLoading, mediaLoading] });
+
   const openInEditor = async (path: string) => {
     try {
       await invoke<boolean>('open_file_in_workspace', {
@@ -1031,6 +1120,7 @@ export function WorkspaceReviewDrawer({
         onClick={() => onOpenChange(false)}
       />
       <aside
+        ref={drawerMotionRef}
         style={{ width: `min(${width}px, 100%)` }}
         className={cn(
           'absolute inset-y-0 right-0 flex flex-col border-l border-border-subtle/50 bg-surface/95 shadow-2xl backdrop-blur-xl animate-in slide-in-from-right duration-200 ease-out',
@@ -1105,7 +1195,7 @@ export function WorkspaceReviewDrawer({
         )}
 
         {inFiles ? (
-          <div className="flex min-h-0 flex-1">
+          <div data-review-motion-panel data-review-page="files" className="flex min-h-0 flex-1">
             <div className="flex w-[clamp(220px,34%,320px)] shrink-0 flex-col border-r border-border-subtle/50">
               <ScrollArea className="min-h-0 flex-1">
                 {model.changedFiles.length === 0 ? (
@@ -1158,15 +1248,17 @@ export function WorkspaceReviewDrawer({
                     </Button>
                   </div>
                   <ScrollArea className="min-h-0 flex-1">
-                    {selectedPath && mediaKindForPath(selectedPath) ? (
-                      <MediaPreviewView
-                        preview={mediaPreview}
-                        loading={mediaLoading}
-                        error={mediaError}
-                      />
-                    ) : (
-                      <DiffView diff={diff} loading={diffLoading} error={diffError} />
-                    )}
+                    <div data-review-preview>
+                      {selectedPath && mediaKindForPath(selectedPath) ? (
+                        <MediaPreviewView
+                          preview={mediaPreview}
+                          loading={mediaLoading}
+                          error={mediaError}
+                        />
+                      ) : (
+                        <DiffView diff={diff} loading={diffLoading} error={diffError} />
+                      )}
+                    </div>
                   </ScrollArea>
                 </>
               ) : (
@@ -1187,7 +1279,7 @@ export function WorkspaceReviewDrawer({
             onSelect={selectAgent}
           />
         ) : (
-          <ScrollArea className="min-h-0 flex-1">
+          <ScrollArea data-review-motion-panel data-review-page="main" className="min-h-0 flex-1">
             <div className="space-y-5 px-4 py-4">
               <Section icon={CheckCircle2} title="改动概览">
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
@@ -1216,6 +1308,7 @@ export function WorkspaceReviewDrawer({
               {showSubagentEntry ? (
                 <button
                   type="button"
+                  data-review-entry
                   onClick={() => setPage('agents')}
                   className="group w-full rounded-lg border border-border-subtle/50 bg-surface-raised/25 px-3 py-3 text-left transition-colors hover:bg-surface-raised/55"
                 >
@@ -1281,6 +1374,7 @@ export function WorkspaceReviewDrawer({
 
               <button
                 type="button"
+                data-review-entry
                 onClick={() => setPage('files')}
                 disabled={model.changedFiles.length === 0}
                 className="group flex w-full items-center gap-2 rounded-xl border border-border-subtle/50 bg-surface-raised/30 px-3 py-2.5 text-left transition-colors hover:bg-surface-raised/60 disabled:cursor-default disabled:opacity-50"

@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { LayoutGrid, X, ChevronDown, Loader2, Check, Minimize2 } from 'lucide-react';
 // Note: useState imported for future use, dismissed state removed per design
 import { Button } from '@/components/ui/button';
 import { useLocale } from '@/locales';
 import { LayoutPopover } from './LayoutPopover';
 import type { ArrangeLayout } from '@/store';
+import { ccemMotion, clearMotionProps, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';
 
 interface ArrangeBannerProps {
   runningCount: number;
@@ -29,11 +30,56 @@ export function ArrangeBanner({
 }: ArrangeBannerProps) {
   const { t } = useLocale();
   const [popoverOpen, setPopoverOpen] = useState(false);
+  const bannerMotionRef = useRef<HTMLDivElement>(null);
+
+  useGSAP(() => {
+    const banner = bannerMotionRef.current;
+    if (!banner) {
+      return;
+    }
+
+    const action = banner.querySelector<HTMLElement>('[data-arrange-primary-action]');
+    const targets = [banner, action].filter((target): target is HTMLElement => !!target);
+    if (shouldReduceMotion()) {
+      clearMotionProps(targets);
+      return;
+    }
+
+    if (arrangeStatus === 'success') {
+      gsap.fromTo(
+        action,
+        { scale: 0.94 },
+        {
+          scale: 1,
+          duration: ccemMotion.duration.base,
+          ease: ccemMotion.ease.standard,
+          overwrite: 'auto',
+          onComplete: () => action && clearMotionProps(action),
+        }
+      );
+      return;
+    }
+
+    if (arrangeStatus === 'loading') {
+      gsap.fromTo(
+        banner,
+        { autoAlpha: 0.86 },
+        {
+          autoAlpha: 1,
+          duration: ccemMotion.duration.quick,
+          ease: ccemMotion.ease.soft,
+          overwrite: 'auto',
+          onComplete: () => clearMotionProps(banner),
+        }
+      );
+    }
+  }, { scope: bannerMotionRef, dependencies: [arrangeStatus] });
 
   if (runningCount < 2) return null;
 
   return (
     <div
+      ref={bannerMotionRef}
       className="glass-subtle glass-noise rounded-lg px-4 py-3 flex items-center gap-3 animate-in slide-in-from-top-2 fade-in duration-250"
     >
       {/* Split Button: main action + popover chevron - Left side */}
@@ -41,6 +87,7 @@ export function ArrangeBanner({
         <Button
           size="sm"
           variant="ghost"
+          data-arrange-primary-action
           disabled={isArranging}
           onClick={() => onArrange()}
           className={`

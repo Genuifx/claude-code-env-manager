@@ -1,4 +1,6 @@
 import { cn } from '@/lib/utils';
+import { ccemMotion, clearMotionProps, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';
+import { useRef } from 'react';
 import type { ReactNode } from 'react';
 
 interface LaunchButtonProps {
@@ -31,9 +33,47 @@ export function LaunchButton({
   type = 'button',
 }: LaunchButtonProps) {
   const isEnabled = !disabled && !launched;
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  useGSAP(() => {
+    const button = buttonRef.current;
+    if (!button || !launched) {
+      return;
+    }
+    if (shouldReduceMotion()) {
+      clearMotionProps(button);
+      return;
+    }
+
+    const dot = button.querySelector<HTMLElement>('[data-launch-confirmation-dot]');
+    const timeline = gsap.timeline({ defaults: { ease: ccemMotion.ease.standard, overwrite: 'auto' } });
+    timeline.fromTo(
+      button,
+      { scale: 0.985 },
+      {
+        scale: 1,
+        duration: ccemMotion.duration.base,
+        onComplete: () => clearMotionProps(button),
+      }
+    );
+    if (dot) {
+      timeline.fromTo(
+        dot,
+        { autoAlpha: 0, scale: 0.4 },
+        {
+          autoAlpha: 1,
+          scale: 1,
+          duration: ccemMotion.duration.quick,
+          onComplete: () => clearMotionProps(dot),
+        },
+        0
+      );
+    }
+  }, { scope: buttonRef, dependencies: [launched] });
 
   return (
     <button
+      ref={buttonRef}
       type={type}
       onClick={onClick}
       disabled={disabled}
@@ -89,7 +129,10 @@ export function LaunchButton({
 
       {/* Launched pulse */}
       {launched && (
-        <span className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+        <span
+          data-launch-confirmation-dot
+          className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-current animate-pulse"
+        />
       )}
     </button>
   );
