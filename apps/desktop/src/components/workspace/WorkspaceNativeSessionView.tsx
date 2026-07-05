@@ -2824,7 +2824,7 @@ export function WorkspaceNativeSessionView({
                   align="end"
                   side="top"
                   sideOffset={8}
-                  className="w-[300px]"
+                  className="frosted-panel glass-noise w-[300px] border-none p-1.5"
                 >
                   {fileCheckpoints.map((checkpoint) => (
                     <DropdownMenuItem
@@ -2855,7 +2855,7 @@ export function WorkspaceNativeSessionView({
                           {checkpoint.promptSummary || t('workspace.nativeRestorePointUnknown')}
                         </span>
                         {checkpoint.status === 'rewound' ? (
-                          <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-600">
+                          <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
                             {t('workspace.nativeRestorePointRewound')}
                           </span>
                         ) : null}
@@ -2959,7 +2959,7 @@ export function WorkspaceNativeSessionView({
         }
       }}
     >
-      <DialogContent className="max-w-[420px]">
+      <DialogContent className="frosted-panel glass-noise max-w-[420px] border-none p-5">
         <DialogHeader>
           <DialogTitle>{t('workspace.nativeRestoreConfirmTitle')}</DialogTitle>
           <DialogDescription>
@@ -2967,7 +2967,7 @@ export function WorkspaceNativeSessionView({
           </DialogDescription>
         </DialogHeader>
         {selectedFileCheckpoint ? (
-          <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+          <div className="rounded-lg border border-[hsl(var(--glass-border-light)/0.15)] bg-surface-raised/50 px-3 py-2">
             <div className="flex items-center justify-between gap-3 text-xs">
               <span className="font-medium text-foreground">
                 {t('workspace.nativeRestorePointTurn')
@@ -2986,6 +2986,7 @@ export function WorkspaceNativeSessionView({
           <Button
             type="button"
             variant="outline"
+            className="glass-btn-outline"
             disabled={isRewindingFiles}
             onClick={() => {
               setIsRestoreDialogOpen(false);
