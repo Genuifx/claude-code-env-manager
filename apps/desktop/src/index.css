@@ -423,9 +423,20 @@
   touch-action: none;
 }
 
-.tray-provider-bar {
+.tray-model-bar {
   transform-origin: left center;
   will-change: transform;
+}
+
+.tray-chart-range-button {
+  transition:
+    background-color var(--tray-duration) var(--tray-ease),
+    color var(--tray-duration) var(--tray-ease),
+    box-shadow var(--tray-duration) var(--tray-ease);
+}
+
+.tray-chart-range-button:hover {
+  color: var(--tray-text-1);
 }
 
 .tray-dock-button {
@@ -483,7 +494,7 @@
   .tray-chart-dot,
   .tray-chart-cursor,
   .tray-chart-tooltip,
-  .tray-provider-bar,
+  .tray-model-bar,
   .tray-dock-button,
   .tray-icon-button {
     animation: none !important;

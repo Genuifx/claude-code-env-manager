@@ -14,7 +14,7 @@ import {
 import { LocaleProvider, useLocale } from '@/locales';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { CronTask, DesktopSettings, PlatformCapabilities, TelegramBridgeStatus } from '@/lib/tauri-ipc';
-import type { UsageStats } from '@/types/analytics';
+import type { TokenUsageWithCost, UsageStats } from '@/types/analytics';
 import { cn, formatTokens } from '@/lib/utils';
 
 gsap.registerPlugin(useGSAP);
@@ -53,14 +53,44 @@ interface TraySnapshot {
 }
 
 interface ChartPoint {
+  key: string;
   x: number;
   y: number;
   value: number;
   index: number;
+  label: string;
+  shortLabel: string;
+}
+
+type TrayChartRange = 'hour' | 'day';
+
+interface ChartBucket {
+  key: string;
+  value: number;
+  label: string;
+  shortLabel: string;
+}
+
+interface ChartSeries {
+  buckets: ChartBucket[];
+  points: ChartPoint[];
+  path: string;
+  xLabels: [string, string];
 }
 
 type QuickTween = (value: number) => void;
 type ChartHoverTarget = HTMLDivElement | SVGGElement;
+
+const CHART_WIDTH = 320;
+const CHART_HEIGHT = 88;
+
+const EMPTY_USAGE: TokenUsageWithCost = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheCreationTokens: 0,
+  cost: 0,
+};
 
 const REFRESH_INTERVAL_MS = 7000;
 
@@ -225,38 +255,101 @@ function hourlyKey(date: Date): string {
   ].join('-') + `T${String(date.getHours()).padStart(2, '0')}`;
 }
 
-function buildHourlySeries(usage: UsageStats): number[] {
+function dayKey(date: Date): string {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function dateLocale(lang: string): string {
+  return lang === 'zh' ? 'zh-CN' : 'en-US';
+}
+
+function formatDayLabel(key: string, lang: string): string {
+  return new Date(`${key}T00:00:00`).toLocaleDateString(dateLocale(lang), {
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+function buildHourlyBuckets(usage: UsageStats, lang: string): ChartBucket[] {
   const now = new Date();
-  const values: number[] = [];
-  for (let index = 11; index >= 0; index -= 1) {
+  let previousDatePart = '';
+  const buckets: ChartBucket[] = [];
+
+  for (let index = 23; index >= 0; index -= 1) {
     const date = new Date(now);
     date.setHours(now.getHours() - index, 0, 0, 0);
-    values.push(usageTokenTotal(usage.hourlyHistory[hourlyKey(date)] ?? {
-      inputTokens: 0,
-      outputTokens: 0,
-      cacheReadTokens: 0,
-      cacheCreationTokens: 0,
-      cost: 0,
+    const key = hourlyKey(date);
+    const datePart = key.slice(5, 10);
+    const hourPart = key.slice(11);
+    const shortLabel = `${hourPart}:00`;
+    const label = previousDatePart !== datePart
+      ? `${datePart} ${shortLabel}`
+      : shortLabel;
+
+    previousDatePart = datePart;
+    buckets.push({
+      key,
+      value: usageTokenTotal(usage.hourlyHistory[key] ?? EMPTY_USAGE),
+      label: lang === 'zh' ? label.replace('-', '/') : label,
+      shortLabel,
+    });
+  }
+
+  return buckets;
+}
+
+function buildDailyBuckets(usage: UsageStats, lang: string): ChartBucket[] {
+  const entries = Object.entries(usage.dailyHistory)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .slice(-7);
+
+  if (entries.length > 0) {
+    return entries.map(([key, item]) => ({
+      key,
+      value: usageTokenTotal(item),
+      label: formatDayLabel(key, lang),
+      shortLabel: formatDayLabel(key, lang),
     }));
   }
 
-  if (values.some((value) => value > 0)) {
-    return values;
-  }
+  const now = new Date();
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(now);
+    date.setDate(now.getDate() - (6 - index));
+    date.setHours(0, 0, 0, 0);
+    const key = dayKey(date);
+    const label = formatDayLabel(key, lang);
 
-  return [4, 9, 7, 15, 13, 26, 21, 31, 28, 37, 34, 43].map((value) => value * 1000);
+    return {
+      key,
+      value: 0,
+      label,
+      shortLabel: label,
+    };
+  });
 }
 
-function chartPoints(values: number[]): ChartPoint[] {
-  const width = 320;
-  const height = 88;
-  const max = Math.max(...values, 1);
-  const step = width / Math.max(values.length - 1, 1);
-  return values.map((value, index) => ({
+function buildChartBuckets(usage: UsageStats, range: TrayChartRange, lang: string): ChartBucket[] {
+  return range === 'hour'
+    ? buildHourlyBuckets(usage, lang)
+    : buildDailyBuckets(usage, lang);
+}
+
+function chartPoints(buckets: ChartBucket[]): ChartPoint[] {
+  const max = Math.max(...buckets.map((bucket) => bucket.value), 1);
+  const step = CHART_WIDTH / Math.max(buckets.length - 1, 1);
+  return buckets.map((bucket, index) => ({
+    key: bucket.key,
     x: index * step,
-    y: height - (value / max) * (height - 8) - 4,
-    value,
+    y: CHART_HEIGHT - (bucket.value / max) * (CHART_HEIGHT - 8) - 4,
+    value: bucket.value,
     index,
+    label: bucket.label,
+    shortLabel: bucket.shortLabel,
   }));
 }
 
@@ -266,32 +359,75 @@ function chartPath(points: ChartPoint[]): string {
     .join(' ');
 }
 
-function providerBreakdown(sessions: TraySession[]) {
-  const counts = [
-    { key: 'codex', label: 'Codex', value: 0 },
-    { key: 'claude', label: 'Claude', value: 0 },
-    { key: 'opencode', label: 'OpenCode', value: 0 },
-  ];
+function buildChartSeries(usage: UsageStats, range: TrayChartRange, lang: string): ChartSeries {
+  const buckets = buildChartBuckets(usage, range, lang);
+  const points = chartPoints(buckets);
+  const firstLabel = buckets[0]?.shortLabel ?? '';
+  const lastLabel = buckets[buckets.length - 1]?.shortLabel ?? firstLabel;
 
-  sessions.forEach((session) => {
-    const client = (session.client || '').toLowerCase();
-    const target = counts.find((item) => client.includes(item.key)) ?? counts[1];
-    target.value += 1;
-  });
+  return {
+    buckets,
+    points,
+    path: chartPath(points),
+    xLabels: [firstLabel, lastLabel],
+  };
+}
 
-  const total = counts.reduce((sum, item) => sum + item.value, 0);
-  if (total === 0) {
-    return [
-      { ...counts[0], value: 45 },
-      { ...counts[1], value: 35 },
-      { ...counts[2], value: 20 },
-    ];
+function modelTypeLabel(model: string): { key: string; label: string } {
+  const lower = model.toLowerCase();
+
+  if (lower.includes('claude') || lower.includes('sonnet') || lower.includes('opus') || lower.includes('haiku')) {
+    return { key: 'claude', label: 'Claude' };
+  }
+  if (lower.includes('glm') || lower.includes('zhipu')) {
+    return { key: 'glm', label: 'GLM' };
+  }
+  if (lower.includes('deepseek')) {
+    return { key: 'deepseek', label: 'DeepSeek' };
+  }
+  if (lower.includes('qwen') || lower.includes('dashscope') || lower.includes('tongyi')) {
+    return { key: 'qwen', label: 'Qwen' };
+  }
+  if (lower.includes('kimi') || lower.includes('moonshot')) {
+    return { key: 'kimi', label: 'Kimi' };
+  }
+  if (lower.includes('gpt') || lower.includes('openai') || /\bo[134]\b/.test(lower)) {
+    return { key: 'gpt', label: 'GPT' };
+  }
+  if (lower.includes('gemini')) {
+    return { key: 'gemini', label: 'Gemini' };
+  }
+  if (lower.includes('minimax')) {
+    return { key: 'minimax', label: 'MiniMax' };
   }
 
-  return counts.map((item) => ({
-    ...item,
-    value: Math.max(6, Math.round((item.value / total) * 100)),
-  }));
+  return { key: 'other', label: 'Other' };
+}
+
+function modelTypeBreakdown(byModel: UsageStats['byModel']) {
+  const totals = new Map<string, { key: string; label: string; tokens: number }>();
+
+  Object.entries(byModel).forEach(([model, usage]) => {
+    const type = modelTypeLabel(model);
+    const tokens = usageTokenTotal(usage);
+    if (tokens <= 0) {
+      return;
+    }
+
+    const previous = totals.get(type.key) ?? { ...type, tokens: 0 };
+    previous.tokens += tokens;
+    totals.set(type.key, previous);
+  });
+
+  const totalTokens = Array.from(totals.values()).reduce((sum, item) => sum + item.tokens, 0);
+
+  return Array.from(totals.values())
+    .map((item) => ({
+      ...item,
+      value: totalTokens > 0 ? Math.round((item.tokens / totalTokens) * 100) : 0,
+    }))
+    .sort((left, right) => right.tokens - left.tokens)
+    .slice(0, 5);
 }
 
 type StatusTone = 'success' | 'warning' | 'destructive' | 'muted';
@@ -386,11 +522,12 @@ async function showMainTab(tab: string) {
 }
 
 function TrayCockpitContent() {
-  const { t } = useLocale();
+  const { t, lang } = useLocale();
   const cockpitRef = useRef<HTMLDivElement>(null);
   const [snapshot, setSnapshot] = useState<TraySnapshot>(INITIAL_SNAPSHOT);
   const [refreshing, setRefreshing] = useState(false);
   const [launching, setLaunching] = useState(false);
+  const [chartRange, setChartRange] = useState<TrayChartRange>('hour');
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -447,10 +584,11 @@ function TrayCockpitContent() {
   );
   const visibleSessions = snapshot.sessions.length > 0 ? snapshot.sessions.slice(0, 3) : [];
   const visibleCronTasks = snapshot.cronTasks.filter((task) => task.enabled).slice(0, 3);
-  const chartValues = useMemo(() => buildHourlySeries(snapshot.usage), [snapshot.usage]);
-  const points = useMemo(() => chartPoints(chartValues), [chartValues]);
-  const path = useMemo(() => chartPath(points), [points]);
-  const providers = useMemo(() => providerBreakdown(snapshot.sessions), [snapshot.sessions]);
+  const chartSeries = useMemo(
+    () => buildChartSeries(snapshot.usage, chartRange, lang),
+    [chartRange, lang, snapshot.usage],
+  );
+  const modelTypes = useMemo(() => modelTypeBreakdown(snapshot.usage.byModel), [snapshot.usage.byModel]);
   const todayTokens = usageTokenTotal(snapshot.usage.today);
 
   useGSAP(() => {
@@ -458,7 +596,7 @@ function TrayCockpitContent() {
 
     mm.add('(prefers-reduced-motion: reduce)', () => {
       gsap.set(
-        '.tray-cockpit-panel, .tray-cockpit-panel > header, .tray-cockpit-body > *, .tray-cockpit-panel > footer, .tray-provider-bar',
+        '.tray-cockpit-panel, .tray-cockpit-panel > header, .tray-cockpit-body > *, .tray-cockpit-panel > footer, .tray-model-bar',
         { autoAlpha: 1, y: 0, scale: 1, scaleX: 1 },
       );
     });
@@ -484,7 +622,7 @@ function TrayCockpitContent() {
           '<0.05',
         )
         .fromTo(
-          '.tray-provider-bar',
+          '.tray-model-bar',
           { scaleX: 0 },
           { scaleX: 1, duration: 0.34, stagger: 0.04, clearProps: 'transform' },
           '<0.08',
@@ -574,9 +712,23 @@ function TrayCockpitContent() {
             />
           </div>
 
-          <ActivityChart points={points} path={path} label={t('trayCockpit.activity')} />
+          <ActivityChart
+            range={chartRange}
+            series={chartSeries}
+            label={t('trayCockpit.activity')}
+            rangeLabels={{
+              hour: t('trayCockpit.chartHour'),
+              day: t('trayCockpit.chartDay'),
+            }}
+            onRangeChange={setChartRange}
+          />
 
-          <ProviderSplit providers={providers} label={t('trayCockpit.providerSplit')} caption={t('trayCockpit.sessions')} />
+          <ModelTypeSplit
+            models={modelTypes}
+            label={t('trayCockpit.providerSplit')}
+            caption={t('trayCockpit.tokens')}
+            empty={t('trayCockpit.noModelData')}
+          />
 
           <div className="grid grid-cols-2 gap-2">
             <InfoColumn
@@ -698,13 +850,17 @@ function MetricTile({
 }
 
 function ActivityChart({
-  points,
-  path,
+  range,
+  series,
   label,
+  rangeLabels,
+  onRangeChange,
 }: {
-  points: ChartPoint[];
-  path: string;
+  range: TrayChartRange;
+  series: ChartSeries;
   label: string;
+  rangeLabels: Record<TrayChartRange, string>;
+  onRangeChange: (range: TrayChartRange) => void;
 }) {
   const chartRef = useRef<HTMLDivElement>(null);
   const cursorLineRef = useRef<SVGGElement>(null);
@@ -716,7 +872,16 @@ function ActivityChart({
   const tooltipXTo = useRef<QuickTween | null>(null);
   const tooltipYTo = useRef<QuickTween | null>(null);
   const [hovered, setHovered] = useState<ChartPoint | null>(null);
-  const lastPoint = points[points.length - 1] ?? { x: 320, y: 84, value: 0, index: 0 };
+  const { points, path, xLabels } = series;
+  const lastPoint = points[points.length - 1] ?? {
+    key: 'empty',
+    x: CHART_WIDTH,
+    y: CHART_HEIGHT - 4,
+    value: 0,
+    index: 0,
+    label: '',
+    shortLabel: '',
+  };
 
   useGSAP(() => {
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -769,7 +934,7 @@ function ActivityChart({
       tooltipXTo.current = null;
       tooltipYTo.current = null;
     };
-  }, { scope: chartRef, dependencies: [path], revertOnUpdate: true });
+  }, { scope: chartRef, dependencies: [path, range], revertOnUpdate: true });
 
   const updateHoverPoint = useCallback((event: PointerEvent<SVGRectElement>) => {
     if (points.length === 0) {
@@ -777,19 +942,19 @@ function ActivityChart({
     }
 
     const rect = event.currentTarget.getBoundingClientRect();
-    const chartX = Math.min(320, Math.max(0, ((event.clientX - rect.left) / rect.width) * 320));
+    const chartX = Math.min(CHART_WIDTH, Math.max(0, ((event.clientX - rect.left) / rect.width) * CHART_WIDTH));
     const point = points.reduce((best, candidate) => (
       Math.abs(candidate.x - chartX) < Math.abs(best.x - chartX) ? candidate : best
     ), points[0]);
-    const tooltipWidth = 92;
-    const tooltipHeight = 32;
+    const tooltipWidth = 106;
+    const tooltipHeight = 38;
     const tooltipX = Math.min(
       Math.max(0, rect.width - tooltipWidth),
-      Math.max(0, (point.x / 320) * rect.width - tooltipWidth / 2),
+      Math.max(0, (point.x / CHART_WIDTH) * rect.width - tooltipWidth / 2),
     );
     const tooltipY = Math.min(
       Math.max(0, rect.height - tooltipHeight),
-      Math.max(0, (point.y / 88) * rect.height - tooltipHeight - 4),
+      Math.max(0, (point.y / CHART_HEIGHT) * rect.height - tooltipHeight - 4),
     );
 
     setHovered((previous) => (previous?.index === point.index ? previous : point));
@@ -830,6 +995,7 @@ function ActivityChart({
     });
   }, []);
   const tooltipPoint = hovered ?? lastPoint;
+  const rangeOptions: TrayChartRange[] = ['hour', 'day'];
 
   return (
     <div ref={chartRef} className="tray-chart-card rounded-[10px] bg-[var(--tray-surface-2)] px-3 pb-2 pt-2.5">
@@ -837,39 +1003,64 @@ function ActivityChart({
         <div className="text-[11.5px] text-[var(--tray-text-2)]">
           {label}
         </div>
-        <span className="text-[10px] text-[var(--tray-text-3)] tabular-nums">
-          12h
-        </span>
+        <div className="flex items-center gap-0.5 rounded-[7px] bg-[var(--tray-surface-1)] p-0.5" role="radiogroup" aria-label={label}>
+          {rangeOptions.map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="radio"
+              aria-checked={range === option}
+              onClick={() => onRangeChange(option)}
+              className={cn(
+                'tray-chart-range-button h-5 rounded-[6px] px-2 text-[10px] leading-none text-[var(--tray-text-3)]',
+                range === option && 'bg-[var(--tray-bg-solid)] font-medium text-[var(--tray-text-1)] shadow-[0_1px_3px_hsl(220_30%_4%_/_0.10)]',
+              )}
+            >
+              {rangeLabels[option]}
+            </button>
+          ))}
+        </div>
       </div>
-      <div className="relative h-[88px]">
+      <div className="relative h-[104px]">
         <div
           ref={tooltipRef}
-          className="tray-chart-tooltip pointer-events-none absolute left-0 top-0 z-10 flex w-[92px] flex-col rounded-[9px] bg-[var(--tray-bg-solid)] px-2 py-1 opacity-0 shadow-[0_8px_24px_hsl(220_30%_4%_/_0.4)] ring-1 ring-[var(--tray-hairline)]"
+          className="tray-chart-tooltip pointer-events-none absolute left-0 top-0 z-10 flex w-[106px] flex-col rounded-[9px] bg-[var(--tray-bg-solid)] px-2 py-1.5 opacity-0 shadow-[0_8px_24px_hsl(220_30%_4%_/_0.4)] ring-1 ring-[var(--tray-hairline)]"
           aria-hidden="true"
         >
-          <span className="text-[9px] font-semibold uppercase leading-none tracking-[0.06em] text-[var(--tray-text-3)]">
-            {`${tooltipPoint.index + 1}/12`}
+          <span className="truncate text-[9px] font-semibold uppercase leading-none tracking-[0.06em] text-[var(--tray-text-3)]">
+            {tooltipPoint.label}
           </span>
           <span className="mt-0.5 truncate text-[11px] font-semibold leading-none tabular-nums text-[var(--tray-text-1)]">
             {formatTokens(tooltipPoint.value)}
           </span>
         </div>
-        <svg viewBox="0 0 320 88" className="h-[88px] w-full overflow-visible" aria-hidden="true">
+        <svg viewBox={`0 0 ${CHART_WIDTH} 104`} className="h-[104px] w-full overflow-visible" aria-hidden="true">
           <defs>
             <linearGradient id="tray-cockpit-area" x1="0" x2="0" y1="0" y2="1">
               <stop offset="0%" stopColor="var(--tray-accent)" stopOpacity="0.22" />
               <stop offset="100%" stopColor="var(--tray-accent)" stopOpacity="0" />
             </linearGradient>
           </defs>
+          {[16, 44, 72].map((lineY) => (
+            <line
+              key={lineY}
+              x1="0"
+              x2={CHART_WIDTH}
+              y1={lineY}
+              y2={lineY}
+              stroke="var(--tray-divider)"
+              strokeWidth="1"
+            />
+          ))}
           <line
             x1="0"
-            x2="320"
-            y1="88"
-            y2="88"
+            x2={CHART_WIDTH}
+            y1={CHART_HEIGHT}
+            y2={CHART_HEIGHT}
             stroke="var(--tray-divider)"
             strokeWidth="1"
           />
-          <path className="tray-chart-area" d={`${path} L ${lastPoint.x.toFixed(1)} 88 L 0 88 Z`} fill="url(#tray-cockpit-area)" />
+          <path className="tray-chart-area" d={`${path} L ${lastPoint.x.toFixed(1)} ${CHART_HEIGHT} L 0 ${CHART_HEIGHT} Z`} fill="url(#tray-cockpit-area)" />
           <path
             className="tray-chart-line"
             d={path}
@@ -892,7 +1083,7 @@ function ActivityChart({
           <g ref={cursorLineRef} className="tray-chart-cursor" opacity={0}>
             <line
               y1="0"
-              y2="88"
+              y2={CHART_HEIGHT}
               stroke="var(--tray-accent)"
               strokeDasharray="3 4"
               strokeOpacity="0.4"
@@ -911,27 +1102,35 @@ function ActivityChart({
             className="tray-chart-hitbox"
             x="0"
             y="0"
-            width="320"
-            height="88"
+            width={CHART_WIDTH}
+            height={CHART_HEIGHT}
             fill="transparent"
             onPointerEnter={showHover}
             onPointerMove={moveHover}
             onPointerLeave={hideHover}
           />
+          <text x="0" y="101" fill="var(--tray-text-3)" fontSize="9" textAnchor="start">
+            {xLabels[0]}
+          </text>
+          <text x={CHART_WIDTH} y="101" fill="var(--tray-text-3)" fontSize="9" textAnchor="end">
+            {xLabels[1]}
+          </text>
         </svg>
       </div>
     </div>
   );
 }
 
-function ProviderSplit({
-  providers,
+function ModelTypeSplit({
+  models,
   label,
   caption,
+  empty,
 }: {
-  providers: Array<{ key: string; label: string; value: number }>;
+  models: Array<{ key: string; label: string; tokens: number; value: number }>;
   label: string;
   caption: string;
+  empty: string;
 }) {
   return (
     <div className="rounded-[10px] bg-[var(--tray-surface-2)] px-3 py-2.5">
@@ -939,20 +1138,29 @@ function ProviderSplit({
         <span>{label}</span>
         <span className="tabular-nums">{caption}</span>
       </div>
-      <div className="space-y-1.5">
-        {providers.map((item) => (
-          <div key={item.key} className="grid grid-cols-[68px_1fr_34px] items-center gap-2 text-[11px]">
-            <span className="truncate text-[var(--tray-text-2)]">{item.label}</span>
-            <div className="h-1 overflow-hidden rounded-full bg-[var(--tray-divider)]">
-              <div
-                className="tray-provider-bar h-full rounded-full bg-[var(--tray-accent)] transition-[width] duration-[var(--tray-duration)] ease-[var(--tray-ease)]"
-                style={{ width: `${item.value}%`, opacity: 0.55 + (item.value / 100) * 0.45 }}
-              />
+      {models.length === 0 ? (
+        <div className="flex h-[58px] items-center text-[11px] text-[var(--tray-text-3)]">
+          {empty}
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {models.map((item) => (
+            <div key={item.key} className="grid grid-cols-[70px_1fr_76px] items-center gap-1.5 text-[11px]">
+              <span className="truncate text-[var(--tray-text-2)]">{item.label}</span>
+              <div className="h-1.5 overflow-hidden rounded-full bg-[var(--tray-divider)]">
+                <div
+                  className="tray-model-bar h-full rounded-full bg-[var(--tray-accent)] transition-[width] duration-[var(--tray-duration)] ease-[var(--tray-ease)]"
+                  style={{ width: `${Math.max(3, item.value)}%`, opacity: 0.5 + (item.value / 100) * 0.5 }}
+                />
+              </div>
+              <div className="flex min-w-0 justify-end gap-1 text-right tabular-nums">
+                <span className="min-w-0 truncate text-[10.5px] text-[var(--tray-text-2)]">{formatTokens(item.tokens)}</span>
+                <span className="text-[10.5px] text-[var(--tray-text-3)]">{item.value}%</span>
+              </div>
             </div>
-            <span className="text-right text-[10.5px] tabular-nums text-[var(--tray-text-3)]">{item.value}%</span>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
