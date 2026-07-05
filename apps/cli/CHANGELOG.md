@@ -1,5 +1,16 @@
 # ccem
 
+## 2.45.0
+
+### Minor Changes
+
+- Release v2.45.0
+
+  - feat(desktop): add tray analytics controls
+  - fix(desktop): reduce workspace composer typing work
+  - fix(desktop): make tray cockpit panel opaque
+  - docs: rewrite README with landing-page structure and feature documentation
+
 ## 2.44.0
 
 ### Minor Changes
