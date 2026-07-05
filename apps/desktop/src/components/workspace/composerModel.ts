@@ -59,6 +59,7 @@ export interface ComposerSuggestion {
 }
 
 export const SKILL_LINK_REGEX = /\[([/$])([^\]]+)\]\(([^)]+\/SKILL\.md)\)/g;
+const SKILL_REFERENCE_HINT_REGEX = /(^|\s)[$/][A-Za-z0-9._:-]/;
 const SKILL_TOKEN_REGEX = /(^|\s)(\$[A-Za-z0-9._:-]+)/g;
 const COMMAND_TOKEN_REGEX = /(^|\s)(\/[A-Za-z0-9._:-]+)/g;
 const FILE_TOKEN_REGEX = /(^|\s)(@[^\s]+)/g;
@@ -81,6 +82,10 @@ function getSkillDisplayName(skill: InstalledSkill): string {
 
 export function getSkillInvocationLabel(skill: InstalledSkill): string {
   return skill.invocationLabel ?? skill.displayName ?? skill.name;
+}
+
+export function composerTextMayContainSkillReference(text: string): boolean {
+  return text.includes('/SKILL.md') || SKILL_REFERENCE_HINT_REGEX.test(text);
 }
 
 function skillBadges(skill: InstalledSkill): string[] {

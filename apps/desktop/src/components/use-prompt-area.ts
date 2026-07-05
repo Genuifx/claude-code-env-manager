@@ -481,9 +481,10 @@ export function usePromptArea({
     // otherwise the anchor node becomes detached and we lose the position.
     const savedCursorOffset = editor ? getCursorOffset(editor) : null
 
+    let editorDomChanged = false
     if (editor) {
       // Normalize browser-inserted block elements (div, p, font, a, etc.)
-      normalizeEditorDOM(editor)
+      editorDomChanged = normalizeEditorDOM(editor)
     }
 
     const segments = readSegmentsFromDOM()
@@ -523,10 +524,12 @@ export function usePromptArea({
     // Decorate URLs and markdown formatting in text nodes
     if (editor) {
       if (segmentsContainUrlHint(segments)) {
-        decorateURLsInEditor(editor)
+        editorDomChanged = decorateURLsInEditor(editor) || editorDomChanged
       }
-      if (markdownEnabled) decorateMarkdownInEditor(editor)
-      if (savedCursorOffset !== null) {
+      if (markdownEnabled) {
+        editorDomChanged = decorateMarkdownInEditor(editor) || editorDomChanged
+      }
+      if (editorDomChanged && savedCursorOffset !== null) {
         setCursorAtOffset(editor, savedCursorOffset)
       }
     }

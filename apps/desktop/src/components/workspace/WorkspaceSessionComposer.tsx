@@ -88,6 +88,7 @@ import {
   buildComposerDisplayText,
   buildComposerPromptWithSelectedSkills,
   buildComposerSuggestions,
+  composerTextMayContainSkillReference,
   parseComposerTokens,
   selectedSkillFilesFromComposerText,
   type ComposerSuggestion,
@@ -827,8 +828,10 @@ export function WorkspaceSessionComposer({
         .filter((segment): segment is ChipSegment => segment.type === 'chip')
         .map(selectedTokenFromPromptChip)
         .filter((token): token is ComposerToken => Boolean(token));
-      const parsedTokens = parseComposerTokens(composerPlainText, provider, installedSkills)
-        .filter((token) => token.kind === 'skill' && token.path);
+      const parsedTokens = composerTextMayContainSkillReference(composerPlainText)
+        ? parseComposerTokens(composerPlainText, provider, installedSkills)
+          .filter((token) => token.kind === 'skill' && token.path)
+        : [];
       const seen = new Set<string>();
       return [...chipTokens, ...parsedTokens].filter((token) => {
         const key = token.path ?? token.raw;

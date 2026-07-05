@@ -60,6 +60,32 @@ test('prompt input avoids unconditional URL decoration and trigger scans', async
     /if \(shouldRunTriggerDetectionAfterInput\(segments, savedCursorOffset, triggers, activeTrigger\)\) \{\s*runTriggerDetection\(\)/,
     'PromptArea input should not run trigger detection on every ordinary keystroke',
   );
+  assert.match(
+    hook,
+    /let editorDomChanged = false/,
+    'PromptArea input should track whether DOM normalization or decoration actually changed the editor',
+  );
+  assert.match(
+    hook,
+    /if \(editorDomChanged && savedCursorOffset !== null\) \{\s*setCursorAtOffset\(editor, savedCursorOffset\)/,
+    'PromptArea input should not remap the caret on every ordinary keystroke',
+  );
+});
+
+test('workspace composer skips skill parsing for ordinary typing', async () => {
+  const composer = await readSource('src', 'components', 'workspace', 'WorkspaceSessionComposer.tsx');
+  const model = await readSource('src', 'components', 'workspace', 'composerModel.ts');
+
+  assert.match(
+    model,
+    /function composerTextMayContainSkillReference\(text: string\): boolean/,
+    'Composer model should expose a cheap skill-reference hint',
+  );
+  assert.match(
+    composer,
+    /composerTextMayContainSkillReference\(composerPlainText\)\s*\?\s*parseComposerTokens/,
+    'Workspace composer should only parse installed skills when text may contain a skill reference',
+  );
 });
 
 test('live workspace transcript keeps streaming layout eagerly painted', async () => {
