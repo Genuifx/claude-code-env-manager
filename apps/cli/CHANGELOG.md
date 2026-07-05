@@ -1,5 +1,11 @@
 # ccem
 
+## 2.46.0
+
+### Minor Changes
+
+- Stabilize ProjectTree session ordering and decoration polling performance.
+
 ## 2.45.0
 
 ### Minor Changes
