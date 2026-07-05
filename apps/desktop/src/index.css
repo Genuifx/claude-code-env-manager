@@ -313,8 +313,8 @@
   }
 
   html[data-window='tray-cockpit'] {
-    --tray-bg: rgba(20, 20, 22, 0.72);
-    --tray-bg-solid: #0b0b0c;
+    --tray-bg: #141416;
+    --tray-bg-solid: #141416;
     --tray-surface-1: rgba(255, 255, 255, 0.035);
     --tray-surface-2: rgba(255, 255, 255, 0.055);
     --tray-surface-3: rgba(255, 255, 255, 0.085);
@@ -335,8 +335,8 @@
   }
 
   html.light[data-window='tray-cockpit'] {
-    --tray-bg: rgba(245, 245, 247, 0.78);
-    --tray-bg-solid: #f5f5f7;
+    --tray-bg: #f6f8fb;
+    --tray-bg-solid: #f6f8fb;
     --tray-surface-1: #ffffff;
     --tray-surface-2: rgba(0, 0, 0, 0.035);
     --tray-surface-3: rgba(0, 0, 0, 0.06);
@@ -371,8 +371,6 @@
 
 .tray-cockpit-panel {
   background-color: var(--tray-bg);
-  -webkit-backdrop-filter: blur(30px) saturate(180%);
-  backdrop-filter: blur(30px) saturate(180%);
   box-shadow:
     0 0 0 0.5px var(--tray-hairline),
     0 1px 2px hsl(220 30% 4% / 0.28),

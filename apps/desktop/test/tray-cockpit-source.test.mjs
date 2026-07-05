@@ -24,6 +24,8 @@ test('tray cockpit owns left-click while preserving the native context menu', as
 
   const capabilities = JSON.parse(capabilitySource);
   const packageJson = JSON.parse(packageSource);
+  const trayPanelCss = cssSource.match(/\.tray-cockpit-panel \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(trayPanelCss, 'tray cockpit panel CSS block should exist');
 
   assert.match(traySource, /pub const TRAY_COCKPIT_LABEL: &str = "tray-cockpit"/);
   assert.match(traySource, /\.show_menu_on_left_click\(false\)/);
@@ -66,11 +68,15 @@ test('tray cockpit owns left-click while preserving the native context menu', as
   assert.match(cssSource, /tray-chart-tooltip/);
   assert.match(cssSource, /tray-chart-cursor/);
   assert.match(cssSource, /stroke-dashoffset: 1/);
-  assert.match(cssSource, /backdrop-filter: blur\(30px\) saturate\(180%\)/);
+  assert.match(cssSource, /--tray-bg: #141416/);
+  assert.match(cssSource, /html\.light\[data-window='tray-cockpit'\][\s\S]*--tray-bg: #f6f8fb/);
+  assert.match(trayPanelCss, /background-color: var\(--tray-bg\)/);
+  assert.doesNotMatch(trayPanelCss, /backdrop-filter/);
+  assert.doesNotMatch(cssSource, /--tray-bg: rgba/);
   assert.match(cssSource, /--tray-divider: rgba\(255, 255, 255, 0\.06\)/);
   assert.match(cssSource, /--tray-accent-soft: hsl\(var\(--primary\) \/ 0\.16\)/);
   assert.match(cssSource, /--tray-accent-softer: hsl\(var\(--primary\) \/ 0\.08\)/);
-  assert.match(cssSource, /--tray-bg-solid: #0b0b0c/);
+  assert.match(cssSource, /--tray-bg-solid: #141416/);
   assert.match(cssSource, /\.tray-dock-button:hover/);
   assert.match(cssSource, /\.tray-icon-button:hover/);
   assert.match(cockpitSource, /px-\[32px\] pb-\[48px\] pt-2/);
