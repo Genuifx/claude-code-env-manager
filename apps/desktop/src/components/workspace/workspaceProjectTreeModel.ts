@@ -132,6 +132,73 @@ export function buildProjectNodes(sessions: HistorySessionItem[]): ProjectNode[]
   return nodes;
 }
 
+function projectSessionKey(session: Pick<HistorySessionItem, 'id' | 'source'>): string {
+  return `${session.source}:${session.id}`;
+}
+
+export function stabilizeProjectNodeSessions(
+  previousNodes: ProjectNode[],
+  nextNodes: ProjectNode[],
+): ProjectNode[] {
+  if (previousNodes.length === 0 || nextNodes.length === 0) {
+    return nextNodes;
+  }
+
+  const previousByProject = new Map(previousNodes.map((node) => [node.project, node]));
+
+  return nextNodes.map((node) => {
+    const previousNode = previousByProject.get(node.project);
+    if (!previousNode || previousNode.sessions.length === 0 || node.sessions.length <= 1) {
+      return node;
+    }
+
+    const nextSessionByKey = new Map(
+      node.sessions.map((session) => [projectSessionKey(session), session])
+    );
+    const retainedSessions: HistorySessionItem[] = [];
+    const retainedKeys = new Set<string>();
+
+    for (const previousSession of previousNode.sessions) {
+      const key = projectSessionKey(previousSession);
+      const nextSession = nextSessionByKey.get(key);
+      if (!nextSession) {
+        continue;
+      }
+      retainedSessions.push(nextSession);
+      retainedKeys.add(key);
+    }
+
+    if (retainedSessions.length === 0) {
+      return node;
+    }
+
+    const newSessions = node.sessions.filter((session) => !retainedKeys.has(projectSessionKey(session)));
+    if (newSessions.length === 0) {
+      const alreadyStable = retainedSessions.every((session, index) => session === node.sessions[index]);
+      return alreadyStable ? node : { ...node, sessions: retainedSessions };
+    }
+
+    const newestRetainedTimestamp = retainedSessions.reduce(
+      (newest, session) => Math.max(newest, session.timestamp),
+      Number.NEGATIVE_INFINITY
+    );
+    const freshSessions: HistorySessionItem[] = [];
+    const backfilledSessions: HistorySessionItem[] = [];
+    for (const session of newSessions) {
+      if (session.timestamp >= newestRetainedTimestamp) {
+        freshSessions.push(session);
+      } else {
+        backfilledSessions.push(session);
+      }
+    }
+
+    return {
+      ...node,
+      sessions: [...freshSessions, ...retainedSessions, ...backfilledSessions],
+    };
+  });
+}
+
 export function reconcileProjectOrder(
   previousOrder: string[],
   projectsByPreferredAppendOrder: string[],

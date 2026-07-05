@@ -108,6 +108,13 @@ pub fn build_workspace_session_decorations(
     decorations
 }
 
+pub fn should_replay_decoration_events(status: &str) -> bool {
+    matches!(
+        status,
+        "idle" | "initializing" | "processing" | "ready" | "running"
+    )
+}
+
 pub fn unified_runtime_descriptor(runtime: &UnifiedSessionInfo) -> WorkspaceRuntimeDescriptor {
     WorkspaceRuntimeDescriptor::Unified {
         id: runtime.id.clone(),
@@ -399,8 +406,8 @@ fn parse_timestamp_millis(value: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_workspace_session_decorations, WorkspaceDecorationSessionInput,
-        WorkspaceRuntimeDescriptor,
+        build_workspace_session_decorations, should_replay_decoration_events,
+        WorkspaceDecorationSessionInput, WorkspaceRuntimeDescriptor,
     };
     use crate::event_bus::{
         InteractiveToolPrompt, SessionEventPayload, SessionEventRecord, ToolCategory,
@@ -450,6 +457,31 @@ mod tests {
         assert_eq!(decorations.len(), 1);
         assert_eq!(decorations[0].session_key, "codex:target");
         assert_eq!(decorations[0].visual_state, "processing");
+    }
+
+    #[test]
+    fn decoration_events_replay_only_for_live_or_attention_capable_statuses() {
+        for status in ["idle", "initializing", "processing", "ready", "running"] {
+            assert!(
+                should_replay_decoration_events(status),
+                "{status} should be replayed for live decoration state"
+            );
+        }
+
+        for status in [
+            "stopped",
+            "completed",
+            "error",
+            "closed_idle",
+            "interrupted",
+            "handoff",
+            "handoff_pending",
+        ] {
+            assert!(
+                !should_replay_decoration_events(status),
+                "{status} should not replay historical event logs during sidebar polling"
+            );
+        }
     }
 
     #[test]

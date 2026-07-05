@@ -120,8 +120,8 @@ use weixin::{WeixinBridgeManager, WeixinBridgeStatus, WeixinLoginSession, Weixin
 use workspace_search::search_workspace_files;
 use workspace_decorations::{
     build_workspace_session_decorations, legacy_interactive_runtime_descriptor,
-    native_runtime_descriptor, unified_runtime_descriptor, WorkspaceDecorationSessionInput,
-    WorkspaceSessionDecoration,
+    native_runtime_descriptor, should_replay_decoration_events, unified_runtime_descriptor,
+    WorkspaceDecorationSessionInput, WorkspaceSessionDecoration,
 };
 
 /// Global flag: when true, CloseRequested should NOT be intercepted.
@@ -923,69 +923,78 @@ fn get_session_events(
 }
 
 #[tauri::command]
-fn get_workspace_session_decorations(
+async fn get_workspace_session_decorations(
     app: tauri::AppHandle,
     unified_state: State<'_, Arc<UnifiedSessionManager>>,
     native_state: State<'_, Arc<NativeRuntimeManager>>,
     session_state: State<'_, Arc<SessionManager>>,
     sessions: Vec<WorkspaceDecorationSessionInput>,
 ) -> Result<Vec<WorkspaceSessionDecoration>, String> {
-    let unified_sessions = unified_state.list_sessions();
-    let native_sessions = native_state.list_sessions();
-    let unified_runtime_ids = unified_sessions
-        .iter()
-        .map(|runtime| runtime.id.as_str())
-        .collect::<HashSet<_>>();
-    let legacy_interactive_sessions = session_state
-        .list_sessions()
-        .into_iter()
-        .filter(|session| {
-            !unified_runtime_ids.contains(session.id.as_str())
-                && session.terminal_type.as_deref() != Some("embedded")
-                && session.status == "running"
-        })
-        .collect::<Vec<_>>();
+    let unified_state = unified_state.inner().clone();
+    let native_state = native_state.inner().clone();
+    let session_state = session_state.inner().clone();
 
-    let mut runtimes = Vec::new();
-    runtimes.extend(unified_sessions.iter().map(unified_runtime_descriptor));
-    runtimes.extend(native_sessions.iter().map(native_runtime_descriptor));
-    runtimes.extend(
-        legacy_interactive_sessions
+    tauri::async_runtime::spawn_blocking(move || {
+        let unified_sessions = unified_state.list_sessions();
+        let native_sessions = native_state.list_sessions();
+        let unified_runtime_ids = unified_sessions
             .iter()
-            .map(legacy_interactive_runtime_descriptor),
-    );
+            .map(|runtime| runtime.id.as_str())
+            .collect::<HashSet<_>>();
+        let legacy_interactive_sessions = session_state
+            .list_sessions()
+            .into_iter()
+            .filter(|session| {
+                !unified_runtime_ids.contains(session.id.as_str())
+                    && session.terminal_type.as_deref() != Some("embedded")
+                    && session.status == "running"
+            })
+            .collect::<Vec<_>>();
 
-    let mut events_by_runtime = unified_sessions
-        .iter()
-        .filter(|runtime| !is_workspace_decoration_terminal_status(&runtime.status))
-        .filter_map(|runtime| {
-            unified_state
-                .get_session_events(&app, &runtime.id, None)
-                .ok()
-                .map(|batch| (runtime.id.clone(), batch.events))
-        })
-        .collect::<HashMap<_, _>>();
-    events_by_runtime.extend(
-        native_sessions
+        let mut runtimes = Vec::new();
+        runtimes.extend(unified_sessions.iter().map(unified_runtime_descriptor));
+        runtimes.extend(native_sessions.iter().map(native_runtime_descriptor));
+        runtimes.extend(
+            legacy_interactive_sessions
+                .iter()
+                .map(legacy_interactive_runtime_descriptor),
+        );
+
+        let mut events_by_runtime = unified_sessions
             .iter()
-            .filter(|runtime| !is_workspace_decoration_terminal_status(&runtime.status))
+            .filter(|runtime| should_replay_decoration_events(&runtime.status))
             .filter_map(|runtime| {
-                native_state
-                    .replay_events(&runtime.runtime_id, None)
+                unified_state
+                    .get_session_events(&app, &runtime.id, None)
                     .ok()
-                    .map(|batch| (runtime.runtime_id.clone(), batch.events))
-            }),
-    );
+                    .map(|batch| (runtime.id.clone(), batch.events))
+            })
+            .collect::<HashMap<_, _>>();
+        events_by_runtime.extend(
+            native_sessions
+                .iter()
+                .filter(|runtime| should_replay_decoration_events(&runtime.status))
+                .filter_map(|runtime| {
+                    native_state
+                        .replay_events(&runtime.runtime_id, None)
+                        .ok()
+                        .map(|batch| (runtime.runtime_id.clone(), batch.events))
+                }),
+        );
 
-    Ok(build_workspace_session_decorations(
-        &sessions,
-        &runtimes,
-        &events_by_runtime,
-    ))
-}
-
-fn is_workspace_decoration_terminal_status(status: &str) -> bool {
-    matches!(status, "stopped" | "completed" | "error" | "closed_idle")
+        Ok(build_workspace_session_decorations(
+            &sessions,
+            &runtimes,
+            &events_by_runtime,
+        ))
+    })
+    .await
+    .map_err(|error| {
+        format!(
+            "Failed to join workspace session decoration task: {}",
+            error
+        )
+    })?
 }
 
 #[tauri::command]

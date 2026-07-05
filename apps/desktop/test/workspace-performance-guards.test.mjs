@@ -273,6 +273,52 @@ test('workspace runtime decorations use a Rust snapshot command', async () => {
     /get_workspace_session_decorations/,
     'Tauri handler should register the workspace decoration snapshot command',
   );
+  assert.match(
+    backendMain,
+    /async fn get_workspace_session_decorations/,
+    'Workspace decoration snapshots should not execute sync event-log work on the WebView IPC path',
+  );
+  assert.match(
+    backendMain,
+    /spawn_blocking\(move \|\| \{[\s\S]*build_workspace_session_decorations/,
+    'Workspace decoration snapshots should move runtime/event inspection onto a blocking worker',
+  );
+  assert.match(
+    backendDecorations,
+    /pub fn should_replay_decoration_events/,
+    'Rust backend should centrally gate which runtime statuses need event replay',
+  );
+  assert.match(
+    backendDecorations,
+    /"interrupted"[\s\S]*should not replay historical event logs/,
+    'Interrupted recovery rows should stay visible without replaying old event logs during polling',
+  );
+});
+
+test('ProjectTree keeps session order stable and gates FLIP measurement', async () => {
+  const projectTree = await readSource('src', 'components', 'workspace', 'ProjectTree.tsx');
+  const projectTreeModel = await readSource('src', 'components', 'workspace', 'workspaceProjectTreeModel.ts');
+
+  assert.match(
+    projectTreeModel,
+    /export function stabilizeProjectNodeSessions/,
+    'ProjectTree model should expose a stable project-session merge helper',
+  );
+  assert.match(
+    projectTree,
+    /stabilizeProjectNodeSessions\(/,
+    'ProjectTree should stabilize project sessions before rendering sidebar rows',
+  );
+  assert.match(
+    projectTree,
+    /const treeMotionKey = useMemo/,
+    'ProjectTree should derive a structural motion key for reorder animations',
+  );
+  assert.match(
+    projectTree,
+    /useLayoutEffect\(\(\) => \{[\s\S]*getBoundingClientRect\(\)[\s\S]*\}, \[treeMotionKey\]\)/,
+    'ProjectTree should not run layout measurement after every render',
+  );
 });
 
 test('doctor perf smoke is explicit, budgeted, and exportable', async () => {

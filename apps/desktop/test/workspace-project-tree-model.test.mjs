@@ -97,6 +97,101 @@ test('organize order can still use current activity order explicitly', async () 
   assert.deepEqual(activityOrder, ['/repo/new', '/repo/old']);
 });
 
+test('stabilizes project sessions when runtime updates reshuffle timestamps', async () => {
+  const { stabilizeProjectNodeSessions } = await importWorkspaceProjectTreeModel();
+  const previousNodes = [
+    {
+      project: '/repo/app',
+      projectName: 'app',
+      latestTimestamp: 3,
+      sessions: [
+        historySession({ id: 'first', project: '/repo/app', projectName: 'app', timestamp: 3 }),
+        historySession({ id: 'second', project: '/repo/app', projectName: 'app', timestamp: 2 }),
+        historySession({ id: 'third', project: '/repo/app', projectName: 'app', timestamp: 1 }),
+      ],
+    },
+  ];
+  const nextNodes = [
+    {
+      project: '/repo/app',
+      projectName: 'app',
+      latestTimestamp: 10,
+      sessions: [
+        historySession({ id: 'third', project: '/repo/app', projectName: 'app', timestamp: 10 }),
+        historySession({ id: 'first', project: '/repo/app', projectName: 'app', timestamp: 3 }),
+        historySession({ id: 'second', project: '/repo/app', projectName: 'app', timestamp: 2 }),
+      ],
+    },
+  ];
+
+  const stable = stabilizeProjectNodeSessions(previousNodes, nextNodes);
+
+  assert.deepEqual(stable[0].sessions.map((session) => session.id), ['first', 'second', 'third']);
+  assert.equal(stable[0].sessions[2].timestamp, 10);
+});
+
+test('stabilized project sessions place fresh sessions before retained rows', async () => {
+  const { stabilizeProjectNodeSessions } = await importWorkspaceProjectTreeModel();
+  const previousNodes = [
+    {
+      project: '/repo/app',
+      projectName: 'app',
+      latestTimestamp: 3,
+      sessions: [
+        historySession({ id: 'first', project: '/repo/app', projectName: 'app', timestamp: 3 }),
+        historySession({ id: 'second', project: '/repo/app', projectName: 'app', timestamp: 2 }),
+      ],
+    },
+  ];
+  const nextNodes = [
+    {
+      project: '/repo/app',
+      projectName: 'app',
+      latestTimestamp: 4,
+      sessions: [
+        historySession({ id: 'fresh', project: '/repo/app', projectName: 'app', timestamp: 4 }),
+        historySession({ id: 'second', project: '/repo/app', projectName: 'app', timestamp: 2 }),
+        historySession({ id: 'first', project: '/repo/app', projectName: 'app', timestamp: 3 }),
+      ],
+    },
+  ];
+
+  const stable = stabilizeProjectNodeSessions(previousNodes, nextNodes);
+
+  assert.deepEqual(stable[0].sessions.map((session) => session.id), ['fresh', 'first', 'second']);
+});
+
+test('stabilized project sessions append backfilled sessions behind retained rows', async () => {
+  const { stabilizeProjectNodeSessions } = await importWorkspaceProjectTreeModel();
+  const previousNodes = [
+    {
+      project: '/repo/app',
+      projectName: 'app',
+      latestTimestamp: 3,
+      sessions: [
+        historySession({ id: 'first', project: '/repo/app', projectName: 'app', timestamp: 3 }),
+        historySession({ id: 'active', project: '/repo/app', projectName: 'app', timestamp: 2 }),
+      ],
+    },
+  ];
+  const nextNodes = [
+    {
+      project: '/repo/app',
+      projectName: 'app',
+      latestTimestamp: 10,
+      sessions: [
+        historySession({ id: 'active', project: '/repo/app', projectName: 'app', timestamp: 10 }),
+        historySession({ id: 'backfill', project: '/repo/app', projectName: 'app', timestamp: 4 }),
+        historySession({ id: 'first', project: '/repo/app', projectName: 'app', timestamp: 3 }),
+      ],
+    },
+  ];
+
+  const stable = stabilizeProjectNodeSessions(previousNodes, nextNodes);
+
+  assert.deepEqual(stable[0].sessions.map((session) => session.id), ['first', 'active', 'backfill']);
+});
+
 test('detects active sidebar sessions from runtime decorations', async () => {
   const { isSessionActiveInSidebar } = await importWorkspaceProjectTreeModel();
   const session = historySession({ id: 'active-session', source: 'claude' });
