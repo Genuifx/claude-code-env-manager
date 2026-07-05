@@ -37,6 +37,7 @@ import {
   reconcileProjectOrder,
   sortProjectNodesByOrder,
   splitProjectNodesForSidebar,
+  stabilizeProjectNodeSessions,
   type ProjectBucketOverride,
   type ProjectClassification,
   type ProjectNode,
@@ -506,75 +507,8 @@ export const ProjectTree = memo(function ProjectTree({
   const treeMotionRef = useRef<HTMLDivElement>(null);
   const previousTreeRectsRef = useRef<Map<string, DOMRect>>(new Map());
   const hasHydratedTreeMotionRef = useRef(false);
+  const stableProjectNodesRef = useRef<ProjectNode[]>([]);
   const [freshDotKeys, setFreshDotKeys] = useState<Set<string>>(new Set());
-
-  useLayoutEffect(() => {
-    const root = treeMotionRef.current;
-    if (!root) {
-      return;
-    }
-
-    const targets = gsap.utils.toArray<HTMLElement>('[data-project-motion-key]', root);
-    const nextRects = new Map<string, DOMRect>();
-    const previousRects = previousTreeRectsRef.current;
-    const reduceMotion = shouldReduceMotion();
-
-    for (const target of targets) {
-      const key = target.dataset.projectMotionKey;
-      if (!key) {
-        continue;
-      }
-      nextRects.set(key, target.getBoundingClientRect());
-    }
-
-    if (!reduceMotion && hasHydratedTreeMotionRef.current) {
-      for (const target of targets) {
-        const key = target.dataset.projectMotionKey;
-        if (!key) {
-          continue;
-        }
-        const previous = previousRects.get(key);
-        const current = nextRects.get(key);
-        if (!current) {
-          continue;
-        }
-        if (!previous) {
-          gsap.fromTo(
-            target,
-            { autoAlpha: 0, y: 6, scale: 0.985 },
-            {
-              autoAlpha: 1,
-              y: 0,
-              scale: 1,
-              duration: ccemMotion.duration.base,
-              ease: ccemMotion.ease.standard,
-              overwrite: 'auto',
-              onComplete: () => clearMotionProps(target),
-            }
-          );
-          continue;
-        }
-
-        const deltaY = previous.top - current.top;
-        if (Math.abs(deltaY) > 1) {
-          gsap.fromTo(
-            target,
-            { y: deltaY },
-            {
-              y: 0,
-              duration: ccemMotion.duration.base,
-              ease: ccemMotion.ease.standard,
-              overwrite: 'auto',
-              onComplete: () => clearMotionProps(target),
-            }
-          );
-        }
-      }
-    }
-
-    previousTreeRectsRef.current = nextRects;
-    hasHydratedTreeMotionRef.current = true;
-  });
 
   useEffect(() => {
     localStorage.setItem(PINNED_SESSION_KEYS_STORAGE_KEY, JSON.stringify(pinnedSessionKeys));
@@ -820,6 +754,15 @@ export const ProjectTree = memo(function ProjectTree({
     [activitySortedProjectNodes]
   );
 
+  const stableActivityProjectNodes = useMemo(() => {
+    const stableNodes = stabilizeProjectNodeSessions(
+      stableProjectNodesRef.current,
+      activitySortedProjectNodes
+    );
+    stableProjectNodesRef.current = stableNodes;
+    return stableNodes;
+  }, [activitySortedProjectNodes]);
+
   const activityProjectOrderKey = activityProjectOrder.join('\u0000');
 
   useEffect(() => {
@@ -834,7 +777,7 @@ export const ProjectTree = memo(function ProjectTree({
 
   const classificationsByProject = useMemo(() => {
     const result: Record<string, ProjectClassification> = {};
-    for (const node of activitySortedProjectNodes) {
+    for (const node of stableActivityProjectNodes) {
       result[node.project] = classifyProject(
         node.project,
         activityProjectOrder,
@@ -842,11 +785,11 @@ export const ProjectTree = memo(function ProjectTree({
       );
     }
     return result;
-  }, [activityProjectOrder, activitySortedProjectNodes, projectClassificationOverrides]);
+  }, [activityProjectOrder, stableActivityProjectNodes, projectClassificationOverrides]);
 
   const projectNodes = useMemo(
-    () => sortProjectNodesByOrder(activitySortedProjectNodes, projectOrder),
-    [activitySortedProjectNodes, projectOrder]
+    () => sortProjectNodesByOrder(stableActivityProjectNodes, projectOrder),
+    [projectOrder, stableActivityProjectNodes]
   );
 
   const temporaryCandidateProjectNodes = useMemo(
@@ -984,6 +927,105 @@ export const ProjectTree = memo(function ProjectTree({
     },
     [effectiveExpanded]
   );
+
+  const treeMotionKey = useMemo(() => {
+    const serializeProjectNode = (section: string, node: ProjectNode) => {
+      const isExpanded = effectiveExpanded.has(node.project);
+      if (!isExpanded) {
+        return `${section}:${node.project}:collapsed`;
+      }
+      const visibleCount = projectVisibleCount[node.project] ?? PROJECT_TREE_PAGE_SIZE;
+      const visibleSessionKeys = node.sessions
+        .slice(0, visibleCount)
+        .map(toKey)
+        .join(',');
+      return `${section}:${node.project}:expanded:${visibleSessionKeys}`;
+    };
+
+    return [
+      `loading:${isLoading}`,
+      `pinned:${pinnedSessions.map(toKey).join(',')}`,
+      ...mainProjectNodes.map((node) => serializeProjectNode('main', node)),
+      ...temporaryProjectNodes.map((node) => serializeProjectNode('temporary', node)),
+      ...activeTemporaryProjectNodes.map((node) => serializeProjectNode('activeTemporary', node)),
+    ].join('\n');
+  }, [
+    activeTemporaryProjectNodes,
+    effectiveExpanded,
+    isLoading,
+    mainProjectNodes,
+    pinnedSessions,
+    projectVisibleCount,
+    temporaryProjectNodes,
+  ]);
+
+  useLayoutEffect(() => {
+    const root = treeMotionRef.current;
+    if (!root) {
+      return;
+    }
+
+    const targets = gsap.utils.toArray<HTMLElement>('[data-project-motion-key]', root);
+    const nextRects = new Map<string, DOMRect>();
+    const previousRects = previousTreeRectsRef.current;
+    const reduceMotion = shouldReduceMotion();
+
+    for (const target of targets) {
+      const key = target.dataset.projectMotionKey;
+      if (!key) {
+        continue;
+      }
+      nextRects.set(key, target.getBoundingClientRect());
+    }
+
+    if (!reduceMotion && hasHydratedTreeMotionRef.current) {
+      for (const target of targets) {
+        const key = target.dataset.projectMotionKey;
+        if (!key) {
+          continue;
+        }
+        const previous = previousRects.get(key);
+        const current = nextRects.get(key);
+        if (!current) {
+          continue;
+        }
+        if (!previous) {
+          gsap.fromTo(
+            target,
+            { autoAlpha: 0, y: 6, scale: 0.985 },
+            {
+              autoAlpha: 1,
+              y: 0,
+              scale: 1,
+              duration: ccemMotion.duration.base,
+              ease: ccemMotion.ease.standard,
+              overwrite: 'auto',
+              onComplete: () => clearMotionProps(target),
+            }
+          );
+          continue;
+        }
+
+        const deltaY = previous.top - current.top;
+        if (Math.abs(deltaY) > 1) {
+          gsap.fromTo(
+            target,
+            { y: deltaY },
+            {
+              y: 0,
+              duration: ccemMotion.duration.base,
+              ease: ccemMotion.ease.standard,
+              overwrite: 'auto',
+              onComplete: () => clearMotionProps(target),
+            }
+          );
+        }
+      }
+    }
+
+    previousTreeRectsRef.current = nextRects;
+    hasHydratedTreeMotionRef.current = true;
+  }, [treeMotionKey]);
 
   const totalProjects = projectNodes.length;
   const totalSessions = sessions.length;
