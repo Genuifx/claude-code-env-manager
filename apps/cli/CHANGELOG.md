@@ -1,5 +1,16 @@
 # ccem
 
+## 2.47.0
+
+### Minor Changes
+
+- ### Desktop UI fixes
+
+  - Auto-scroll thinking panels during streaming in the workspace transcript view.
+  - Hide env text below 880px width to keep the header readable on small screens.
+  - Optimize status strip layout for narrow viewports.
+  - Align the restore-point dialog with the glass design system.
+
 ## 2.46.0
 
 ### Minor Changes
