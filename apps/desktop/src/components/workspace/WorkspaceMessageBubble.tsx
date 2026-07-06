@@ -508,9 +508,33 @@ function CommandPill({
 }
 
 function ThinkingBlock({ content, label }: { content: string; label: string }) {
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+    const handleScroll = () => {
+      stickToBottomRef.current =
+        viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 32;
+    };
+    viewport.addEventListener('scroll', handleScroll, { passive: true });
+    return () => viewport.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !stickToBottomRef.current) {
+      return;
+    }
+    viewport.scrollTop = viewport.scrollHeight;
+  }, [content]);
+
   return (
     <DisclosureCard icon={Brain} label={label}>
-      <ScrollArea className="max-h-[260px]">
+      <ScrollArea viewportRef={viewportRef} className="max-h-[260px]">
         <pre className="whitespace-pre-wrap font-mono text-[11px] leading-6 text-muted-foreground/80">
           {content.trim()}
         </pre>
@@ -586,6 +610,8 @@ const ThinkingEntryPanel = memo(function ThinkingEntryPanel({
   index: number;
   label: string;
 }) {
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
   const segmentCount = entry.segmentCount ?? 1;
   const headerLabel = segmentCount > 1
     ? `${index === 0 ? label : `${label} ${index + 1}`} · ${segmentCount}`
@@ -593,12 +619,33 @@ const ThinkingEntryPanel = memo(function ThinkingEntryPanel({
       ? label
       : `${label} ${index + 1}`;
 
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+    const handleScroll = () => {
+      stickToBottomRef.current =
+        viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 32;
+    };
+    viewport.addEventListener('scroll', handleScroll, { passive: true });
+    return () => viewport.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !stickToBottomRef.current) {
+      return;
+    }
+    viewport.scrollTop = viewport.scrollHeight;
+  }, [entry.content]);
+
   return (
     <div className="workspace-tool-payload-virtualized rounded-lg bg-[hsl(var(--tool-input-bg))] px-3 py-2.5">
       <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground/50">
         {headerLabel}
       </p>
-      <ScrollArea className="max-h-[160px]">
+      <ScrollArea viewportRef={viewportRef} className="max-h-[160px]">
         <pre className="whitespace-pre-wrap font-mono text-[11px] leading-[1.55] text-muted-foreground/75">
           {entry.content}
         </pre>
