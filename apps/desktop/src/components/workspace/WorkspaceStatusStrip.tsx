@@ -183,7 +183,7 @@ export function WorkspaceStatusStrip({
                 style={{ color: getEnvColorVar(currentEnv) }}
               />
             </span>
-            <span className="hidden sm:inline text-[12px] sm:text-[13px] font-medium text-foreground transition-colors">
+            <span className="hidden min-[880px]:inline text-[12px] sm:text-[13px] font-medium text-foreground transition-colors">
               {currentEnv || '—'}
             </span>
           </button>
