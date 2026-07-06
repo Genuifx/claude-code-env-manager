@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Radio, Circle, Flame, Clock, Check, Settings2, ClipboardCheck, Search, Command } from 'lucide-react';
+import { Radio, Circle, Flame, Clock, Check, Settings2, ClipboardCheck, Search, Command, Globe } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { useLocale } from '@/locales';
 import { getEnvColorVar, cn } from '@/lib/utils';
@@ -169,20 +169,21 @@ export function WorkspaceStatusStrip({
         <DropdownMenuTrigger asChild>
           <button
             type="button"
+            title={currentEnv || '—'}
             className={cn(
-              'group relative inline-flex items-center gap-1.5 sm:gap-2 px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-full',
+              'group relative inline-flex items-center gap-1.5 sm:gap-2 px-2 py-1 sm:px-3.5 sm:py-1.5 rounded-full',
               'status-chip-glass',
               'hover:scale-[1.02] active:scale-[0.98]',
               'cursor-pointer'
             )}
           >
             <span className="relative flex items-center justify-center w-3.5 h-3.5">
-              <Circle
+              <Globe
                 className="w-3.5 h-3.5 transition-transform duration-200 group-hover:scale-110"
                 style={{ color: getEnvColorVar(currentEnv) }}
               />
             </span>
-            <span className="text-[12px] sm:text-[13px] font-medium text-foreground transition-colors">
+            <span className="hidden min-[880px]:inline text-[12px] sm:text-[13px] font-medium text-foreground transition-colors">
               {currentEnv || '—'}
             </span>
           </button>
@@ -296,7 +297,7 @@ export function WorkspaceStatusStrip({
         title={t('workspace.reviewEntry')}
         onClick={() => setReviewPanelOpen(!reviewPanelOpen)}
         className={cn(
-          'group relative inline-flex items-center gap-1.5 sm:gap-2 px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-full cursor-pointer',
+          'group relative inline-flex items-center gap-1.5 sm:gap-2 px-2 py-1 sm:px-3.5 sm:py-1.5 rounded-full cursor-pointer',
           'status-chip-glass',
           'hover:scale-[1.02] active:scale-[0.98]',
           reviewPanelOpen && 'ring-1 ring-inset ring-primary/40'
@@ -317,7 +318,7 @@ export function WorkspaceStatusStrip({
             />
           ) : null}
         </span>
-        <span className="text-[12px] sm:text-[13px] font-medium text-foreground transition-colors">
+        <span className="hidden sm:inline text-[12px] sm:text-[13px] font-medium text-foreground transition-colors">
           {t('workspace.reviewEntry')}
         </span>
         {reviewEntry && reviewEntry.failedTools > 0 ? (
