@@ -11,9 +11,14 @@ pub struct DesktopInstanceLock {
 }
 
 fn lock_path() -> PathBuf {
+    let lock_name = if cfg!(debug_assertions) {
+        "desktop-app-dev.lock"
+    } else {
+        "desktop-app.lock"
+    };
     dirs::home_dir()
-        .map(|home| home.join(".ccem/desktop-app.lock"))
-        .unwrap_or_else(|| PathBuf::from(".ccem/desktop-app.lock"))
+        .map(|home| home.join(format!(".ccem/{}", lock_name)))
+        .unwrap_or_else(|| PathBuf::from(format!(".ccem/{}", lock_name)))
 }
 
 pub fn acquire_desktop_instance_lock() -> Result<DesktopInstanceLock, String> {
