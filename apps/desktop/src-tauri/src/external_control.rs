@@ -1,3 +1,4 @@
+use crate::browser::{BrowserBounds, BrowserManager, BrowserToolRequest};
 use crate::config::{self, resolve_claude_env, resolve_codex_runtime};
 use crate::event_bus::ReplayBatch;
 use crate::native_runtime::{
@@ -25,6 +26,7 @@ const BODY_READ_LIMIT: usize = 4 * 1024 * 1024;
 const SOCKET_IO_TIMEOUT: Duration = Duration::from_secs(10);
 const SOCKET_RETRY_SLEEP: Duration = Duration::from_millis(10);
 const MIN_SOCKET_READ_TIMEOUT: Duration = Duration::from_millis(1);
+const BROWSER_SMOKE_SESSION_ID: &str = "external-control-smoke";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -111,6 +113,20 @@ struct SendInputParams {
 #[derive(Debug, Deserialize)]
 struct OpenSessionParams {
     link: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserSmokeProbeParams {
+    url: String,
+    marker_text: Option<String>,
+    input_label: Option<String>,
+    input_text: Option<String>,
+    click_label: Option<String>,
+    wait_for_text: Option<String>,
+    timeout_ms: Option<u64>,
+    close: Option<bool>,
+    bounds: Option<BrowserBounds>,
 }
 
 impl ExternalControlManager {
@@ -354,7 +370,7 @@ impl ExternalControlManager {
                     }),
                 )
                 .map_err(|error| format!("Failed to emit workspace open request: {}", error))?;
-                if let Some(window) = app.get_webview_window("main") {
+                if let Some(window) = app.get_window("main") {
                     let _ = window.show();
                     let _ = window.unminimize();
                     let _ = window.set_focus();
@@ -365,6 +381,10 @@ impl ExternalControlManager {
                 let params = deserialize_params::<CreateSessionParams>(rpc.params)?;
                 let summary = self.create_session(app.clone(), params)?;
                 Ok(serde_json::to_value(summary).map_err(|error| error.to_string())?)
+            }
+            "ccem.browser.smokeProbe" if cfg!(debug_assertions) => {
+                let params = deserialize_params::<BrowserSmokeProbeParams>(rpc.params)?;
+                self.browser_smoke_probe(app, params)
             }
             method => Err(format!("Unknown method: {}", method)),
         }
@@ -479,6 +499,290 @@ impl ExternalControlManager {
         }
         Ok(result)
     }
+
+    fn browser_smoke_probe(
+        &self,
+        app: &AppHandle,
+        params: BrowserSmokeProbeParams,
+    ) -> Result<Value, String> {
+        let close_after = params.close.unwrap_or(true);
+        let browser = app
+            .try_state::<Arc<BrowserManager>>()
+            .ok_or_else(|| "Browser manager is not available".to_string())?
+            .inner()
+            .clone();
+
+        let result = run_browser_smoke_probe(app, &browser, params);
+        if close_after {
+            let _ = browser.close(app, Some(BROWSER_SMOKE_SESSION_ID));
+        }
+        result
+    }
+}
+
+fn run_browser_smoke_probe(
+    app: &AppHandle,
+    browser: &BrowserManager,
+    params: BrowserSmokeProbeParams,
+) -> Result<Value, String> {
+    let timeout_ms = params.timeout_ms.unwrap_or(8_000).clamp(500, 30_000);
+    let bounds = params.bounds.unwrap_or(BrowserBounds {
+        x: 64.0,
+        y: 72.0,
+        width: 760.0,
+        height: 520.0,
+    });
+    let mut steps = Vec::new();
+
+    let info = browser.open(app, Some(BROWSER_SMOKE_SESSION_ID), Some(&params.url))?;
+    steps.push(json!({
+        "step": "open",
+        "url": info.url,
+        "visible": info.visible,
+    }));
+
+    browser.set_bounds(app, Some(BROWSER_SMOKE_SESSION_ID), bounds)?;
+    steps.push(json!({ "step": "setBounds", "bounds": bounds }));
+
+    let mut snapshot = wait_for_browser_snapshot(
+        app,
+        browser,
+        BROWSER_SMOKE_SESSION_ID,
+        params.marker_text.as_deref(),
+        timeout_ms,
+    )?;
+    steps.push(json!({
+        "step": "snapshot",
+        "snapshot": summarize_browser_snapshot(&snapshot),
+        "matched": params
+            .marker_text
+            .as_deref()
+            .map(|marker| snapshot_text_contains(&snapshot, marker))
+            .unwrap_or(true),
+    }));
+
+    if let Some(label) = params.input_label.as_deref() {
+        let reference = find_snapshot_ref_by_label(&snapshot, label)
+            .ok_or_else(|| format!("Browser smoke input label not found: {label}"))?;
+        let text = params.input_text.clone().unwrap_or_default();
+        let typed = browser.run_tool(
+            app,
+            BROWSER_SMOKE_SESSION_ID,
+            &BrowserToolRequest {
+                request_id: "smoke-type".to_string(),
+                tool: "type".to_string(),
+                args: json!({ "ref": reference, "text": text }),
+            },
+        )?;
+        steps.push(json!({
+            "step": "type",
+            "label": label,
+            "ref": reference,
+            "result": typed,
+        }));
+        snapshot =
+            wait_for_browser_snapshot(app, browser, BROWSER_SMOKE_SESSION_ID, None, timeout_ms)?;
+    }
+
+    if let Some(label) = params.click_label.as_deref() {
+        let reference = find_snapshot_ref_by_label(&snapshot, label)
+            .ok_or_else(|| format!("Browser smoke click label not found: {label}"))?;
+        let clicked = browser.run_tool(
+            app,
+            BROWSER_SMOKE_SESSION_ID,
+            &BrowserToolRequest {
+                request_id: "smoke-click".to_string(),
+                tool: "click".to_string(),
+                args: json!({ "ref": reference }),
+            },
+        )?;
+        steps.push(json!({
+            "step": "click",
+            "label": label,
+            "ref": reference,
+            "result": clicked,
+        }));
+    }
+
+    if let Some(text) = params.wait_for_text.as_deref() {
+        let waited = browser.run_tool(
+            app,
+            BROWSER_SMOKE_SESSION_ID,
+            &BrowserToolRequest {
+                request_id: "smoke-wait-for".to_string(),
+                tool: "wait_for".to_string(),
+                args: json!({ "text": text, "timeoutMs": timeout_ms }),
+            },
+        )?;
+        if !waited
+            .get("found")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            return Err(format!("Browser smoke text was not found: {text}"));
+        }
+        steps.push(json!({
+            "step": "waitFor",
+            "text": text,
+            "result": waited,
+        }));
+        snapshot = wait_for_browser_snapshot(
+            app,
+            browser,
+            BROWSER_SMOKE_SESSION_ID,
+            Some(text),
+            timeout_ms,
+        )?;
+    }
+
+    let screenshot = browser.run_tool(
+        app,
+        BROWSER_SMOKE_SESSION_ID,
+        &BrowserToolRequest {
+            request_id: "smoke-screenshot".to_string(),
+            tool: "screenshot".to_string(),
+            args: json!({}),
+        },
+    )?;
+    let screenshot_chars = screenshot
+        .get("data")
+        .and_then(Value::as_str)
+        .map(str::len)
+        .unwrap_or_default();
+    steps.push(json!({
+        "step": "screenshot",
+        "mimeType": screenshot.get("mime_type").cloned().unwrap_or(Value::Null),
+        "base64Chars": screenshot_chars,
+        "estimatedBytes": (screenshot_chars * 3) / 4,
+    }));
+
+    Ok(json!({
+        "ok": true,
+        "snapshot": summarize_browser_snapshot(&snapshot),
+        "steps": steps,
+    }))
+}
+
+fn wait_for_browser_snapshot(
+    app: &AppHandle,
+    browser: &BrowserManager,
+    browser_session_id: &str,
+    marker_text: Option<&str>,
+    timeout_ms: u64,
+) -> Result<Value, String> {
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let mut last_error = None;
+    let mut last_snapshot = None;
+
+    loop {
+        match browser.run_tool(
+            app,
+            browser_session_id,
+            &BrowserToolRequest {
+                request_id: "smoke-snapshot".to_string(),
+                tool: "snapshot".to_string(),
+                args: json!({}),
+            },
+        ) {
+            Ok(snapshot) => {
+                let matched = marker_text
+                    .map(|marker| snapshot_text_contains(&snapshot, marker))
+                    .unwrap_or(true);
+                if matched {
+                    return Ok(snapshot);
+                }
+                last_snapshot = Some(snapshot);
+            }
+            Err(error) => {
+                last_error = Some(error);
+            }
+        }
+
+        if Instant::now() >= deadline {
+            let context = last_snapshot
+                .as_ref()
+                .map(summarize_browser_snapshot)
+                .unwrap_or(Value::Null);
+            let detail = last_error
+                .as_deref()
+                .map(|error| format!(" Last error: {error}"))
+                .unwrap_or_default();
+            let marker = marker_text.unwrap_or("<any snapshot>");
+            return Err(format!(
+                "Timed out waiting for browser snapshot marker '{marker}'. Snapshot: {context}.{detail}"
+            ));
+        }
+        thread::sleep(Duration::from_millis(150));
+    }
+}
+
+fn summarize_browser_snapshot(snapshot: &Value) -> Value {
+    let text = snapshot
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let elements = snapshot
+        .get("elements")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let preview = elements
+        .iter()
+        .take(12)
+        .map(|element| {
+            json!({
+                "ref": element.get("ref").cloned().unwrap_or(Value::Null),
+                "tag": element.get("tag").cloned().unwrap_or(Value::Null),
+                "label": element.get("label").cloned().unwrap_or(Value::Null),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    json!({
+        "url": snapshot.get("url").cloned().unwrap_or(Value::Null),
+        "title": snapshot.get("title").cloned().unwrap_or(Value::Null),
+        "text": text.chars().take(500).collect::<String>(),
+        "elementsCount": elements.len(),
+        "elements": preview,
+    })
+}
+
+fn snapshot_text_contains(snapshot: &Value, needle: &str) -> bool {
+    let needle = needle.trim().to_ascii_lowercase();
+    if needle.is_empty() {
+        return true;
+    }
+    snapshot
+        .get("text")
+        .and_then(Value::as_str)
+        .map(|text| text.to_ascii_lowercase().contains(&needle))
+        .unwrap_or(false)
+}
+
+fn find_snapshot_ref_by_label(snapshot: &Value, needle: &str) -> Option<u32> {
+    let needle = needle.trim().to_ascii_lowercase();
+    if needle.is_empty() {
+        return None;
+    }
+    snapshot
+        .get("elements")
+        .and_then(Value::as_array)?
+        .iter()
+        .find_map(|element| {
+            let label = element
+                .get("label")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if label.contains(&needle) {
+                element
+                    .get("ref")
+                    .and_then(Value::as_u64)
+                    .and_then(|value| u32::try_from(value).ok())
+            } else {
+                None
+            }
+        })
 }
 
 #[derive(Debug, Serialize)]
@@ -825,7 +1129,9 @@ fn resolve_current_env() -> Option<String> {
 const KNOWN_PERM_MODES: &[&str] = &["yolo", "dev", "readonly", "safe", "ci", "audit"];
 
 fn is_known_perm_mode(mode: &str) -> bool {
-    KNOWN_PERM_MODES.iter().any(|known| known.eq_ignore_ascii_case(mode))
+    KNOWN_PERM_MODES
+        .iter()
+        .any(|known| known.eq_ignore_ascii_case(mode))
 }
 
 /// Validate and resolve the working directory for external control.
@@ -1091,6 +1397,10 @@ pub fn is_json_content_type(content_type: Option<&str>) -> bool {
 /// Allowlist of JSON-RPC method names accepted by the external control server.
 /// Any method not in this list is rejected with -32601 before dispatch.
 pub fn is_allowed_method(method: &str) -> bool {
+    is_allowed_method_for_build(method, cfg!(debug_assertions))
+}
+
+fn is_allowed_method_for_build(method: &str, debug_assertions: bool) -> bool {
     matches!(
         method,
         "ccem.health"
@@ -1100,7 +1410,7 @@ pub fn is_allowed_method(method: &str) -> bool {
             | "ccem.workspace.sendInput"
             | "ccem.workspace.openSession"
             | "ccem.workspace.createSession"
-    )
+    ) || (debug_assertions && method == "ccem.browser.smokeProbe")
 }
 
 fn is_loopback_host_name(host: &str) -> bool {
@@ -1122,10 +1432,7 @@ fn is_loopback_host_name(host: &str) -> bool {
 
 fn is_loopback_ipv6_literal(literal: &str) -> bool {
     let lower = literal.to_lowercase();
-    lower == "::1"
-        || lower == "0:0:0:0:0:0:0:1"
-        || lower == "[::1]"
-        || lower == "[0:0:0:0:0:0:0:1]"
+    lower == "::1" || lower == "0:0:0:0:0:0:0:1" || lower == "[::1]" || lower == "[0:0:0:0:0:0:0:1]"
 }
 
 #[cfg(test)]
@@ -1259,7 +1566,9 @@ mod tests {
     #[test]
     fn test_json_content_type_accept() {
         assert!(is_json_content_type(Some("application/json")));
-        assert!(is_json_content_type(Some("application/json; charset=utf-8")));
+        assert!(is_json_content_type(Some(
+            "application/json; charset=utf-8"
+        )));
         assert!(is_json_content_type(Some("APPLICATION/JSON")));
         assert!(is_json_content_type(Some("  application/json  ")));
     }
@@ -1268,8 +1577,12 @@ mod tests {
     fn test_json_content_type_reject() {
         assert!(!is_json_content_type(None));
         assert!(!is_json_content_type(Some("text/plain")));
-        assert!(!is_json_content_type(Some("application/x-www-form-urlencoded")));
-        assert!(!is_json_content_type(Some("multipart/form-data; boundary=xyz")));
+        assert!(!is_json_content_type(Some(
+            "application/x-www-form-urlencoded"
+        )));
+        assert!(!is_json_content_type(Some(
+            "multipart/form-data; boundary=xyz"
+        )));
         assert!(!is_json_content_type(Some("")));
     }
 
@@ -1285,9 +1598,19 @@ mod tests {
             "ccem.workspace.sendInput",
             "ccem.workspace.openSession",
             "ccem.workspace.createSession",
+            "ccem.browser.smokeProbe",
         ] {
             assert!(is_allowed_method(method), "{} should be allowed", method);
         }
+    }
+
+    #[test]
+    fn test_browser_smoke_probe_is_debug_only() {
+        assert!(is_allowed_method_for_build("ccem.browser.smokeProbe", true));
+        assert!(!is_allowed_method_for_build(
+            "ccem.browser.smokeProbe",
+            false
+        ));
     }
 
     #[test]

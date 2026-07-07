@@ -6,6 +6,7 @@
 mod analytics;
 mod app_updates;
 mod bot_binding;
+mod browser;
 mod channel;
 mod companion;
 mod config;
@@ -59,6 +60,7 @@ use bot_binding::{
     BindSessionToBotRequest, BotBindingInboundRequest, BotBindingInfo, BotBindingManager,
     BotBindingOutboxFrame,
 };
+use browser::BrowserManager;
 use channel::ChannelKind;
 use config::{
     create_env_with_encrypted_key, resolve_claude_env, resolve_codex_runtime,
@@ -117,12 +119,12 @@ use unified_runtime::UnifiedSessionManager;
 use unified_session::{RuntimeInput, UnifiedSessionDebugComparison, UnifiedSessionInfo};
 use wecom::{WecomBridgeManager, WecomBridgeStatus, WecomSettings, WecomTaskBindingTargetType};
 use weixin::{WeixinBridgeManager, WeixinBridgeStatus, WeixinLoginSession, WeixinSettings};
-use workspace_search::search_workspace_files;
 use workspace_decorations::{
     build_workspace_session_decorations, legacy_interactive_runtime_descriptor,
     native_runtime_descriptor, should_replay_decoration_events, unified_runtime_descriptor,
     WorkspaceDecorationSessionInput, WorkspaceSessionDecoration,
 };
+use workspace_search::search_workspace_files;
 
 /// Global flag: when true, CloseRequested should NOT be intercepted.
 static FORCE_QUIT: AtomicBool = AtomicBool::new(false);
@@ -222,7 +224,7 @@ fn get_system_username() -> String {
 #[tauri::command]
 fn window_control(app: tauri::AppHandle, action: WindowControlAction) -> Result<(), String> {
     let main_window = app
-        .get_webview_window("main")
+        .get_window("main")
         .ok_or_else(|| "Main window not available".to_string())?;
 
     match action {
@@ -259,9 +261,7 @@ async fn get_environments() -> Result<HashMap<String, EnvConfig>, String> {
         let decrypted: HashMap<String, EnvConfig> = cfg
             .registries
             .iter()
-            .map(|(k, v)| {
-                config::get_env_with_decrypted_key(v).map(|env| (k.clone(), env))
-            })
+            .map(|(k, v)| config::get_env_with_decrypted_key(v).map(|env| (k.clone(), env)))
             .collect::<Result<_, String>>()?;
 
         #[cfg(debug_assertions)]
@@ -2898,7 +2898,9 @@ fn load_from_remote(url: String, key: String, secret: String) -> Result<LoadResu
                     let stdout = String::from_utf8_lossy(&out.stdout);
 
                     // 查找 JSON 输出（跳过前面的日志行）
-                    if let Some(json_line) = stdout.lines().find(|line| line.trim().starts_with('{')) {
+                    if let Some(json_line) =
+                        stdout.lines().find(|line| line.trim().starts_with('{'))
+                    {
                         if let Ok(result) = serde_json::from_str::<LoadResult>(json_line) {
                             return Ok(result);
                         }
@@ -4219,10 +4221,7 @@ fn resolve_workspace_path(
 /// pass the session's project_dir, which the guard canonicalizes and checks
 /// via `Path::starts_with` (post-symlink-resolution).
 #[tauri::command]
-fn open_file_in_workspace(
-    working_dir: String,
-    file_path: String,
-) -> Result<bool, String> {
+fn open_file_in_workspace(working_dir: String, file_path: String) -> Result<bool, String> {
     let resolved = resolve_workspace_path(&working_dir, &file_path)?;
 
     // We intentionally do not canonicalize again right before spawn: the
@@ -4235,7 +4234,7 @@ fn open_file_in_workspace(
     let spawn_result = Command::new("open").arg(&resolved).spawn();
     #[cfg(target_os = "windows")]
     let spawn_result = Command::new("cmd")
-        .args(["/C", "start", "",])
+        .args(["/C", "start", ""])
         .arg(&resolved)
         .spawn();
     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
@@ -4271,11 +4270,8 @@ mod workspace_guard_tests {
         let file = src.join("foo.ts");
         fs::write(&file, "// hi").unwrap();
 
-        let resolved = resolve_workspace_path(
-            project.to_str().unwrap(),
-            "src/foo.ts",
-        )
-        .expect("relative inside path should resolve");
+        let resolved = resolve_workspace_path(project.to_str().unwrap(), "src/foo.ts")
+            .expect("relative inside path should resolve");
         assert_eq!(resolved, file.canonicalize().unwrap());
     }
 
@@ -4289,11 +4285,8 @@ mod workspace_guard_tests {
         fs::write(&file, "").unwrap();
 
         let abs = file.to_str().unwrap().to_string();
-        let resolved = resolve_workspace_path(
-            project.to_str().unwrap(),
-            &abs,
-        )
-        .expect("absolute inside path should resolve");
+        let resolved = resolve_workspace_path(project.to_str().unwrap(), &abs)
+            .expect("absolute inside path should resolve");
         assert_eq!(resolved, file.canonicalize().unwrap());
     }
 
@@ -4305,11 +4298,8 @@ mod workspace_guard_tests {
         let sibling_secret = tmp.path().join("secret.txt");
         fs::write(&sibling_secret, "shh").unwrap();
 
-        let err = resolve_workspace_path(
-            project.to_str().unwrap(),
-            "../../secret.txt",
-        )
-        .expect_err("../ escape should be rejected");
+        let err = resolve_workspace_path(project.to_str().unwrap(), "../../secret.txt")
+            .expect_err("../ escape should be rejected");
         assert!(
             err.contains("escapes working dir"),
             "unexpected error: {}",
@@ -4328,11 +4318,8 @@ mod workspace_guard_tests {
         let evil_file = evil.join("payload.txt");
         fs::write(&evil_file, "").unwrap();
 
-        let err = resolve_workspace_path(
-            project.to_str().unwrap(),
-            evil_file.to_str().unwrap(),
-        )
-        .expect_err("sibling-prefix absolute path must be rejected");
+        let err = resolve_workspace_path(project.to_str().unwrap(), evil_file.to_str().unwrap())
+            .expect_err("sibling-prefix absolute path must be rejected");
         assert!(
             err.contains("escapes working dir"),
             "unexpected error: {}",
@@ -4351,11 +4338,8 @@ mod workspace_guard_tests {
         symlink("/etc", &link).unwrap();
         let candidate = link.join("passwd");
 
-        let err = resolve_workspace_path(
-            project.to_str().unwrap(),
-            candidate.to_str().unwrap(),
-        )
-        .expect_err("symlink escape must be rejected");
+        let err = resolve_workspace_path(project.to_str().unwrap(), candidate.to_str().unwrap())
+            .expect_err("symlink escape must be rejected");
         assert!(
             err.contains("escapes working dir"),
             "unexpected error: {}",
@@ -4374,11 +4358,8 @@ mod workspace_guard_tests {
         let canonical_src = src.canonicalize().unwrap();
         let missing = canonical_src.join("not-yet.ts");
 
-        let resolved = resolve_workspace_path(
-            project.to_str().unwrap(),
-            "src/not-yet.ts",
-        )
-        .expect("missing leaf under existing dir should resolve");
+        let resolved = resolve_workspace_path(project.to_str().unwrap(), "src/not-yet.ts")
+            .expect("missing leaf under existing dir should resolve");
         assert_eq!(resolved, missing);
     }
 
@@ -4392,11 +4373,8 @@ mod workspace_guard_tests {
         let canonical_project = project.canonicalize().unwrap();
         let missing_file = canonical_project.join("newdir").join("deeper.ts");
 
-        let resolved = resolve_workspace_path(
-            project.to_str().unwrap(),
-            "newdir/deeper.ts",
-        )
-        .expect("missing intermediate dir should resolve via parent walk");
+        let resolved = resolve_workspace_path(project.to_str().unwrap(), "newdir/deeper.ts")
+            .expect("missing intermediate dir should resolve via parent walk");
         assert_eq!(resolved, missing_file);
     }
 
@@ -4404,11 +4382,8 @@ mod workspace_guard_tests {
     fn invalid_working_dir_is_rejected() {
         let tmp = make_temp_dir();
         let bogus = tmp.path().join("never-existed");
-        let err = resolve_workspace_path(
-            bogus.to_str().unwrap(),
-            "anything.ts",
-        )
-        .expect_err("invalid working_dir should be rejected");
+        let err = resolve_workspace_path(bogus.to_str().unwrap(), "anything.ts")
+            .expect_err("invalid working_dir should be rejected");
         assert!(
             err.contains("Invalid working_dir"),
             "unexpected error: {}",
@@ -4429,11 +4404,8 @@ mod workspace_guard_tests {
         let alias = project.join("alias");
         symlink(&real, &alias).unwrap();
 
-        let resolved = resolve_workspace_path(
-            project.to_str().unwrap(),
-            "alias/inner.ts",
-        )
-        .expect("in-workspace symlink should be allowed");
+        let resolved = resolve_workspace_path(project.to_str().unwrap(), "alias/inner.ts")
+            .expect("in-workspace symlink should be allowed");
         assert_eq!(resolved, real_file.canonicalize().unwrap());
     }
 }
@@ -4652,6 +4624,7 @@ fn main() {
     let interactive_runtime_manager = Arc::new(InteractiveRuntimeManager::default());
     let headless_runtime_manager = Arc::new(HeadlessRuntimeManager::default());
     let native_runtime_manager = Arc::new(NativeRuntimeManager::default());
+    let browser_manager = Arc::new(BrowserManager::default());
     let external_control_manager =
         Arc::new(ExternalControlManager::new(native_runtime_manager.clone()));
     let event_dispatcher = Arc::new(EventDispatcher::default());
@@ -4707,6 +4680,7 @@ fn main() {
         .manage(interactive_runtime_manager.clone())
         .manage(headless_runtime_manager.clone())
         .manage(native_runtime_manager.clone())
+        .manage(browser_manager.clone())
         .manage(external_control_manager.clone())
         .manage(event_dispatcher.clone())
         .manage(unified_session_manager.clone())
@@ -4748,6 +4722,18 @@ fn main() {
             pet_notifications::open_pet_notification,
             pet_window::resize_pet_window,
             pet_window::set_pet_window_content_visible,
+            browser::browser_set_active_session,
+            browser::browser_open,
+            browser::browser_set_bounds,
+            browser::browser_set_visible,
+            browser::browser_close,
+            browser::browser_navigate,
+            browser::browser_reload,
+            browser::browser_back,
+            browser::browser_forward,
+            browser::browser_info,
+            browser::browser_snapshot,
+            browser::browser_screenshot,
             tray::open_tray_cockpit,
             app_updates::get_app_version,
             app_updates::check_app_update,
@@ -5027,7 +5013,7 @@ fn main() {
 
             // startMinimized: hide window immediately after setup (platform-independent)
             if startup_settings.start_minimized {
-                if let Some(w) = app.get_webview_window("main") {
+                if let Some(w) = app.get_window("main") {
                     let _ = w.hide();
                 }
             }
@@ -5146,7 +5132,7 @@ fn main() {
             #[cfg(target_os = "macos")]
             if let RunEvent::Reopen { .. } = &event {
                 // macOS Dock icon click should reopen/show the main window.
-                if let Some(window) = app_handle.get_webview_window("main") {
+                if let Some(window) = app_handle.get_window("main") {
                     let _ = window.show();
                     let _ = window.unminimize();
                     let _ = window.set_focus();
@@ -5172,9 +5158,9 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_remote_load_args, build_remote_load_stdin_payload,
-        media_kind_for_extension, merge_git_numstat, normalize_git_changed_path,
-        parse_git_status_line, WorkspaceGitChangedFile,
+        build_remote_load_args, build_remote_load_stdin_payload, media_kind_for_extension,
+        merge_git_numstat, normalize_git_changed_path, parse_git_status_line,
+        WorkspaceGitChangedFile,
     };
     use std::collections::HashMap;
 
@@ -5215,8 +5201,7 @@ mod tests {
 
     #[test]
     fn remote_load_stdin_payload_carries_credentials_separately() {
-        let payload =
-            build_remote_load_stdin_payload("access-key-abc", "encryption-secret-xyz");
+        let payload = build_remote_load_stdin_payload("access-key-abc", "encryption-secret-xyz");
         let parsed: serde_json::Value = serde_json::from_str(&payload).unwrap();
         assert_eq!(parsed["secret"], "encryption-secret-xyz");
         assert_eq!(parsed["key"], "access-key-abc");

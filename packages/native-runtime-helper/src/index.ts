@@ -11,6 +11,14 @@ import { resolveClaudePermissionRequestId, type ClaudeToolPermissionOptions } fr
 import { QuerySnapshotSlot, type QuerySnapshot } from './claudeQuerySnapshotSlot';
 import { buildClaudePlanModeHooks } from './claudePlanGuard';
 import {
+  createBrowserToolBridge,
+  createCcemBrowserMcpServer,
+  ensureBrowserMcpToolsAllowed,
+  isBrowserEvaluateToolName,
+  type BrowserToolRequestOutput,
+  type BrowserToolResponseCommand,
+} from './browserMcp';
+import {
   CLAUDE_SKILL_SETTING_SOURCES,
   ensureClaudeSkillToolAllowed,
 } from './claudeSkills';
@@ -69,6 +77,8 @@ type PermissionResponseCommand = {
   approved: boolean;
 };
 
+type BrowserToolResponseInputCommand = BrowserToolResponseCommand;
+
 type UpdateSettingsCommand = {
   type: 'update_settings';
   env_name?: string;
@@ -108,6 +118,7 @@ type InputCommand =
   | PromptCommand
   | InteractivePromptResponseCommand
   | PermissionResponseCommand
+  | BrowserToolResponseInputCommand
   | UpdateSettingsCommand
   | RewindFilesCommand
   | TitleQueryCommand
@@ -138,7 +149,8 @@ type HelperOutput =
   | {
       type: 'title_result';
       title: string | null;
-    };
+    }
+  | BrowserToolRequestOutput;
 
 type PermissionResolver = {
   resolve: (approved: boolean) => void;
@@ -191,6 +203,8 @@ const pendingPermissions = new Map<string, PermissionResolver>();
 const pendingClaudeInteractivePrompts = new Map<string, ClaudeInteractivePromptResolver>();
 const startedToolNames = new Map<string, string>();
 const completedToolUseIds = new Set<string>();
+const browserToolBridge = createBrowserToolBridge((request) => emit(request));
+let browserEvaluateApprovedForSession = false;
 
 type ClaudeQuerySnapshot = QuerySnapshot<ReturnType<typeof query>, AsyncMessageQueue<SDKUserMessage>>;
 
@@ -1413,8 +1427,17 @@ function buildClaudeQueryOptions() {
     enableFileCheckpointing: true,
     extraArgs: { 'replay-user-messages': null },
     settingSources: [...CLAUDE_SKILL_SETTING_SOURCES],
-    allowedTools: ensureClaudeSkillToolAllowed(initCommand.allowed_tools),
+    allowedTools: ensureBrowserMcpToolsAllowed(
+      ensureClaudeSkillToolAllowed(initCommand.allowed_tools),
+      initCommand.perm_mode,
+    ),
     disallowedTools: initCommand.disallowed_tools ?? undefined,
+    mcpServers: {
+      'ccem-browser': createCcemBrowserMcpServer(
+        initCommand.perm_mode,
+        browserToolBridge.sendBrowserToolRequest,
+      ),
+    },
     ...(model ? { model } : {}),
     hooks: buildClaudePlanModeHooks(
       () => initCommand?.provider === 'claude' && initCommand.perm_mode === 'plan',
@@ -1428,6 +1451,21 @@ function buildClaudeQueryOptions() {
       }
       if (isClaudeInteractiveUserInputTool(toolName)) {
         return buildAllowedClaudeToolResult(input, options.toolUseID);
+      }
+      if (isBrowserEvaluateToolName(toolName)) {
+        if (permission.allowDangerouslySkipPermissions || browserEvaluateApprovedForSession) {
+          return buildAllowedClaudeToolResult(input, options.toolUseID);
+        }
+        const result = await waitForPermission(toolName, input, {
+          ...options,
+          title: options.title ?? 'Claude wants to evaluate JavaScript in the embedded browser.',
+          displayName: options.displayName ?? 'Browser evaluate',
+          description: options.description ?? 'This runs arbitrary JavaScript in the current embedded browser page for this session.',
+        });
+        if (result.behavior === 'allow') {
+          browserEvaluateApprovedForSession = true;
+        }
+        return result;
       }
       return waitForPermission(toolName, input, options);
     },
@@ -1454,6 +1492,8 @@ function denyPendingClaudeInteractivePrompts(message: string) {
 }
 
 function teardownClaudeSession() {
+  browserToolBridge.rejectAll('Claude runtime session was closed before the browser tool completed.');
+  browserEvaluateApprovedForSession = false;
   closeClaudeQueryForRecovery();
   clearAllClaudeQueryState();
   claudeConsumeLoop = null;
@@ -2201,6 +2241,7 @@ async function handleCommand(command: InputCommand) {
   if (command.type === 'init') {
     initCommand = command;
     currentProviderSessionId = command.provider_session_id ?? null;
+    browserEvaluateApprovedForSession = false;
     if (currentProviderSessionId) {
       emitSessionMeta(currentProviderSessionId);
       if (command.provider === 'codex') {
@@ -2230,6 +2271,11 @@ async function handleCommand(command: InputCommand) {
       pendingPermissions.delete(command.request_id);
       pending.resolve(command.approved);
     }
+    return;
+  }
+
+  if (command.type === 'browser_tool_response') {
+    browserToolBridge.handleBrowserToolResponse(command);
     return;
   }
 
@@ -2303,6 +2349,10 @@ async function handleCommand(command: InputCommand) {
   if (command.type === 'update_settings') {
     if (!initCommand) return;
 
+    if (command.perm_mode !== undefined) {
+      browserEvaluateApprovedForSession = false;
+    }
+
     if (await applyClaudePermissionSettingsCommand(command)) {
       emitStatus('ready', 'Settings applied.');
       return;
@@ -2358,6 +2408,7 @@ async function handleCommand(command: InputCommand) {
     pendingClaudePromptReplay = null;
     denyPendingPermissions();
     denyPendingClaudeInteractivePrompts('Native runtime turn was interrupted before user responded.');
+    browserToolBridge.rejectAll('Native runtime turn was interrupted before the browser tool completed.');
 
     if (initCommand?.provider === 'claude') {
       const stopTarget = captureCurrentClaudeQuerySnapshot();

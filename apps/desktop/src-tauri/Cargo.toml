@@ -9,7 +9,7 @@ edition = "2021"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["tray-icon", "unstable"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
@@ -44,8 +44,10 @@ semver = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.5.2", default-features = false }
-objc2-foundation = { version = "0.2.2", default-features = false, features = ["NSArray", "NSData", "NSObject", "NSString"] }
-objc2-app-kit = { version = "0.2.2", default-features = false, features = ["NSImage", "NSPasteboard", "NSResponder", "NSWindow"] }
+block2 = { version = "0.5.1" }
+objc2-foundation = { version = "0.2.2", default-features = false, features = ["NSArray", "NSData", "NSDictionary", "NSError", "NSJSONSerialization", "NSObject", "NSString"] }
+objc2-app-kit = { version = "0.2.2", default-features = false, features = ["NSBitmapImageRep", "NSImage", "NSImageRep", "NSPasteboard", "NSResponder", "NSWindow"] }
+objc2-web-kit = { version = "0.2.2", default-features = false, features = ["block2", "WKNavigation", "WKSnapshotConfiguration", "WKWebView"] }
 
 [features]
 default = ["custom-protocol"]

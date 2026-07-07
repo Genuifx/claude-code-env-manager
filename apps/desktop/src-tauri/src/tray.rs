@@ -304,14 +304,14 @@ pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, tauri::Error> {
                 let _ = app.emit("tray-launch-claude", ());
             }
             "open_window" => {
-                if let Some(window) = app.get_webview_window("main") {
+                if let Some(window) = app.get_window("main") {
                     let _ = window.show();
                     let _ = window.unminimize();
                     let _ = window.set_focus();
                 }
             }
             "settings" => {
-                if let Some(window) = app.get_webview_window("main") {
+                if let Some(window) = app.get_window("main") {
                     let _ = window.show();
                     let _ = window.unminimize();
                     let _ = window.set_focus();

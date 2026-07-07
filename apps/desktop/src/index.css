@@ -1676,6 +1676,18 @@
     0 8px 24px hsl(40 10% 10% / 0.03);
 }
 
+.workspace-browser-panel {
+  background: hsl(var(--background) / 0.96);
+  border-left: 1px solid hsl(var(--border) / 0.72);
+  box-shadow: none;
+}
+
+.light .workspace-browser-panel {
+  background: hsl(40 25% 99% / 0.99);
+  border-left: 1px solid hsl(40 15% 82% / 0.78);
+  box-shadow: none;
+}
+
 /* --- Status chip liquid glass --- */
 .status-chip-glass {
   background:

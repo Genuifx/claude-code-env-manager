@@ -1,5 +1,15 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type PointerEvent as ReactPointerEvent,
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import {
   ChevronDown,
   FolderOpen,
@@ -13,6 +23,7 @@ import { ProjectTree } from '@/components/workspace/ProjectTree';
 import { WorkspaceGlobalSearch } from '@/components/workspace/WorkspaceGlobalSearch';
 import { WorkspaceNativeSessionView } from '@/components/workspace/WorkspaceNativeSessionView';
 import { WorkspaceSessionComposer } from '@/components/workspace/WorkspaceSessionComposer';
+import { BrowserPanel } from '@/components/workspace/BrowserPanel';
 import { ComposerControls } from '@/components/workspace/ComposerControls';
 import type { EffortLevel } from '@/components/workspace/ComposerControls';
 import type { PermissionModeName } from '@ccem/core/browser';
@@ -75,6 +86,14 @@ import {
   type WorkspaceLiveSessionEntry,
   type WorkspaceLiveSessionsByRuntimeId,
 } from '@/components/workspace/workspaceLiveSessions';
+import {
+  BROWSER_PANEL_DEFAULT_WIDTH_PERCENT,
+  BROWSER_PANEL_MAX_WIDTH_PERCENT,
+  BROWSER_PANEL_MIN_WIDTH_PX,
+  BROWSER_PANEL_WIDTH_STORAGE_KEY,
+  calculateBrowserPanelWidthPercent,
+  clampBrowserPanelWidthPercent,
+} from '@/components/workspace/browserPanelLayout';
 import { LazyWorkspaceReviewDrawer } from '@/components/workspace/LazyWorkspaceReviewDrawer';
 import {
   buildWorkspaceReviewModel,
@@ -114,7 +133,19 @@ type WorkspaceViewMode = 'compose' | 'live' | 'history';
 
 const ACTIVE_LIVE_RUNTIME_STORAGE_KEY = 'ccem-workspace-live-runtime';
 const LIVE_RUNTIME_SET_STORAGE_KEY = 'ccem-workspace-live-runtimes';
+const WORKSPACE_BROWSER_COMPOSE_SESSION_ID = 'workspace';
 const WORKSPACE_HISTORY_SESSION_LIMIT = 240;
+
+function readStoredBrowserPanelWidthPercent(): number {
+  try {
+    return clampBrowserPanelWidthPercent(
+      window.localStorage.getItem(BROWSER_PANEL_WIDTH_STORAGE_KEY)
+        ?? BROWSER_PANEL_DEFAULT_WIDTH_PERCENT,
+    );
+  } catch {
+    return BROWSER_PANEL_DEFAULT_WIDTH_PERCENT;
+  }
+}
 
 function readPersistedLiveRuntimeIds(): string[] {
   const raw = localStorage.getItem(LIVE_RUNTIME_SET_STORAGE_KEY);
@@ -353,6 +384,11 @@ export function Workspace({
   const [isLaunchingComposeTerminal, setIsLaunchingComposeTerminal] = useState(false);
   const [isResumingHistorySession, setIsResumingHistorySession] = useState(false);
   const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useState(false);
+  const [browserOpenBySessionId, setBrowserOpenBySessionId] = useState<Record<string, boolean>>({});
+  const [browserPanelWidthPercent, setBrowserPanelWidthPercent] = useState(
+    readStoredBrowserPanelWidthPercent,
+  );
+  const browserLayoutRef = useRef<HTMLDivElement>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshRequestSeqRef = useRef(0);
   const skillsBootstrapAttemptedRef = useRef(false);
@@ -398,6 +434,94 @@ export function Workspace({
   useEffect(() => {
     selectedKeyRef.current = selectedKey;
   }, [selectedKey]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        BROWSER_PANEL_WIDTH_STORAGE_KEY,
+        String(browserPanelWidthPercent),
+      );
+    } catch {
+      // Ignore private-mode storage failures; the current session width still works.
+    }
+  }, [browserPanelWidthPercent]);
+
+  const handleBrowserPanelResizeStart = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) {
+      return;
+    }
+    const layout = browserLayoutRef.current;
+    if (!layout) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const updateWidth = (clientX: number) => {
+      const rect = layout.getBoundingClientRect();
+      setBrowserPanelWidthPercent(
+        calculateBrowserPanelWidthPercent({
+          layoutWidth: rect.width,
+          layoutRight: rect.right,
+          pointerClientX: clientX,
+        }),
+      );
+    };
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      updateWidth(moveEvent.clientX);
+    };
+    const stopResize = () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', stopResize);
+      window.removeEventListener('pointercancel', stopResize);
+    };
+
+    updateWidth(event.clientX);
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', stopResize);
+    window.addEventListener('pointercancel', stopResize);
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+
+    void listen<{ sessionId?: string; session_id?: string }>('browser_panel_requested', (event) => {
+      const requestedSessionId = event.payload?.sessionId
+        ?? event.payload?.session_id
+        ?? WORKSPACE_BROWSER_COMPOSE_SESSION_ID;
+      setBrowserOpenBySessionId((previous) => {
+        if (previous[requestedSessionId]) {
+          return previous;
+        }
+        return {
+          ...previous,
+          [requestedSessionId]: true,
+        };
+      });
+    }).then((nextUnlisten) => {
+      if (disposed) {
+        nextUnlisten();
+        return;
+      }
+      unlisten = nextUnlisten;
+    }).catch((error) => {
+      console.error('Failed to listen for browser panel requests:', error);
+    });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -929,6 +1053,41 @@ export function Workspace({
     if (!selectedKey) return null;
     return sessions.find((session) => toSessionKey(session) === selectedKey) ?? null;
   }, [selectedKey, sessions]);
+
+  const activeBrowserSessionId = useMemo(() => {
+    if (workspaceMode === 'live' && activeLiveEntry) {
+      return activeLiveEntry.session.runtime_id;
+    }
+    if (workspaceMode === 'history' && selectedSession) {
+      return `history:${selectedSession.source}:${selectedSession.id}`;
+    }
+    return WORKSPACE_BROWSER_COMPOSE_SESSION_ID;
+  }, [activeLiveEntry, selectedSession, workspaceMode]);
+
+  const browserPanelOpen = browserOpenBySessionId[activeBrowserSessionId] ?? false;
+
+  const setActiveBrowserPanelOpen = useCallback((next: boolean | ((previous: boolean) => boolean)) => {
+    setBrowserOpenBySessionId((previous) => {
+      const previousOpen = previous[activeBrowserSessionId] ?? false;
+      const nextOpen = typeof next === 'function' ? next(previousOpen) : next;
+      if (previousOpen === nextOpen) {
+        return previous;
+      }
+      return {
+        ...previous,
+        [activeBrowserSessionId]: nextOpen,
+      };
+    });
+  }, [activeBrowserSessionId]);
+
+  useEffect(() => {
+    void invoke('browser_set_active_session', {
+      sessionId: activeBrowserSessionId,
+      visible: browserPanelOpen,
+    }).catch((error) => {
+      console.error('Failed to sync active browser session:', error);
+    });
+  }, [activeBrowserSessionId, browserPanelOpen]);
 
   useEffect(() => {
     setComposeEffort((previous) => normalizeEffortForProvider(previous, composeProvider));
@@ -2233,34 +2392,38 @@ export function Workspace({
               onEffortChange={handleHistoryEffortChange}
             />
           )}
-          secondaryActions={selectedHistorySupportsInline ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="h-9 w-9 rounded-full"
-                    aria-label={t('workspace.nativeOpenTerminal')}
-                    onClick={() => {
-                      void launchClaudeCode(
-                        selectedSession.project || undefined,
-                        selectedSession.id,
-                        historyProvider as LaunchClient,
-                        historyEnv,
-                      )
-                        .then(() => toast.success(t('workspace.nativeHandoffDone')))
-                        .catch(() => toast.error(t('workspace.nativeHandoffFailed')));
-                    }}
-                  >
-                    <Terminal className="h-4 w-4" />
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="top">{t('workspace.nativeOpenTerminal')}</TooltipContent>
-            </Tooltip>
-          ) : null}
+          secondaryActions={(
+            <>
+              {selectedHistorySupportsInline ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex">
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-9 w-9 rounded-full"
+                        aria-label={t('workspace.nativeOpenTerminal')}
+                        onClick={() => {
+                          void launchClaudeCode(
+                            selectedSession.project || undefined,
+                            selectedSession.id,
+                            historyProvider as LaunchClient,
+                            historyEnv,
+                          )
+                            .then(() => toast.success(t('workspace.nativeHandoffDone')))
+                            .catch(() => toast.error(t('workspace.nativeHandoffFailed')));
+                        }}
+                      >
+                        <Terminal className="h-4 w-4" />
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">{t('workspace.nativeOpenTerminal')}</TooltipContent>
+                </Tooltip>
+              ) : null}
+            </>
+          )}
         />
       </div>
     );
@@ -2331,104 +2494,140 @@ export function Workspace({
 
   return (
     <div className="page-transition-enter flex h-full flex-col">
-      <WorkspaceStatusStrip
-        onNavigate={onNavigate}
-        onOpenSearch={() => setIsGlobalSearchOpen(true)}
-      />
+      <div
+        ref={browserLayoutRef}
+        data-ccem-workspace-browser-layout={browserPanelOpen ? 'shell-browser-split' : 'workspace'}
+        className="flex min-h-0 flex-1 overflow-hidden"
+      >
+        <div
+          data-ccem-workspace-column="true"
+          className={cn(
+            'flex min-h-0 min-w-0 flex-col overflow-hidden',
+            browserPanelOpen
+              ? 'ml-3 mb-3 flex-1'
+              : 'mx-3 mb-3 flex-1',
+          )}
+        >
+          <WorkspaceStatusStrip
+            onNavigate={onNavigate}
+            onOpenSearch={() => setIsGlobalSearchOpen(true)}
+            browserOpen={browserPanelOpen}
+            onToggleBrowser={() => setActiveBrowserPanelOpen((open) => !open)}
+          />
 
-      <div className="workspace-main-container mx-3 mb-3 flex min-h-0 flex-1 overflow-hidden">
-        <ProjectTree
-          sessions={sidebarSessions}
-          precomputedProjectNodes={precomputedProjectNodes}
-          environmentByName={environmentByName}
-          decorationsBySessionKey={decorationsBySessionKey}
-          isLoading={isLoadingSessions}
-          isRefreshing={isRefreshing}
-          selectedKey={selectedKey}
-          onSelect={handleSelect}
-          onRefresh={handleProjectTreeRefresh}
-          onSaveTitle={handleProjectTreeSaveTitle}
-          onSaveAnnotation={handleProjectTreeSaveAnnotation}
-          onSessionsChanged={handleProjectTreeSessionsChanged}
-          onCreateForProject={handleCreateForProject}
-          onNewSession={handleProjectTreeNewSession}
-        />
+          <div
+            data-ccem-workspace-shell="true"
+            className="workspace-main-container flex min-h-0 min-w-0 flex-1 overflow-hidden"
+          >
+            <ProjectTree
+              sessions={sidebarSessions}
+              precomputedProjectNodes={precomputedProjectNodes}
+              environmentByName={environmentByName}
+              decorationsBySessionKey={decorationsBySessionKey}
+              isLoading={isLoadingSessions}
+              isRefreshing={isRefreshing}
+              selectedKey={selectedKey}
+              onSelect={handleSelect}
+              onRefresh={handleProjectTreeRefresh}
+              onSaveTitle={handleProjectTreeSaveTitle}
+              onSaveAnnotation={handleProjectTreeSaveAnnotation}
+              onSessionsChanged={handleProjectTreeSessionsChanged}
+              onCreateForProject={handleCreateForProject}
+              onNewSession={handleProjectTreeNewSession}
+            />
 
-        <div className="workspace-reading-surface relative flex min-w-0 flex-1 flex-col overflow-hidden">
-          {shouldRenderWorkspaceReview && workspaceReviewOpen && workspaceReviewModel ? (
-            <Suspense fallback={null}>
-              <LazyWorkspaceReviewDrawer
-                session={workspaceReviewSession}
-                model={workspaceReviewModel}
-                gitSnapshot={workspaceGitSnapshot}
-                isOpen={workspaceReviewOpen}
-                isRefreshingGit={isRefreshingWorkspaceGitSnapshot}
-                onOpenChange={setWorkspaceReviewOpen}
-                onRefreshGit={() => void refreshWorkspaceGitSnapshot()}
-                onLoadDiff={(filePath) => getWorkspaceFileDiff(workspaceReviewWorkingDir || '', filePath)}
-                isLive={workspaceMode !== 'history'}
-                onLoadSubagents={
-                  workspaceReviewSession.provider === 'claude' && workspaceReviewSession.provider_session_id
-                    ? (detailAgentId) =>
-                        getSessionSubagents(
-                          workspaceReviewSession.provider_session_id!,
-                          workspaceReviewSession.provider,
-                          detailAgentId,
-                        )
-                    : undefined
-                }
-              />
-            </Suspense>
-          ) : null}
+            <div className="workspace-reading-surface relative flex min-w-0 flex-1 flex-col overflow-hidden">
+              {shouldRenderWorkspaceReview && workspaceReviewOpen && workspaceReviewModel ? (
+                <Suspense fallback={null}>
+                  <LazyWorkspaceReviewDrawer
+                    session={workspaceReviewSession}
+                    model={workspaceReviewModel}
+                    gitSnapshot={workspaceGitSnapshot}
+                    isOpen={workspaceReviewOpen}
+                    isRefreshingGit={isRefreshingWorkspaceGitSnapshot}
+                    onOpenChange={setWorkspaceReviewOpen}
+                    onRefreshGit={() => void refreshWorkspaceGitSnapshot()}
+                    onLoadDiff={(filePath) => getWorkspaceFileDiff(workspaceReviewWorkingDir || '', filePath)}
+                    isLive={workspaceMode !== 'history'}
+                    onLoadSubagents={
+                      workspaceReviewSession.provider === 'claude' && workspaceReviewSession.provider_session_id
+                        ? (detailAgentId) =>
+                            getSessionSubagents(
+                              workspaceReviewSession.provider_session_id!,
+                              workspaceReviewSession.provider,
+                              detailAgentId,
+                            )
+                        : undefined
+                    }
+                  />
+                </Suspense>
+              ) : null}
 
-          {workspaceMode === 'history' && selectedSession
-            ? renderHistoryView()
-            : workspaceMode === 'compose' || (workspaceMode === 'live' && !activeLiveEntry)
-              ? renderComposeView()
-              : null}
+              {workspaceMode === 'history' && selectedSession
+                ? renderHistoryView()
+                : workspaceMode === 'compose' || (workspaceMode === 'live' && !activeLiveEntry)
+                  ? renderComposeView()
+                  : null}
 
-          {liveSessionEntries.length > 0 ? (
-            <div
-              className={cn(
-                'relative min-h-0 flex-1 overflow-hidden',
-                workspaceMode === 'live' && activeLiveEntry ? 'block' : 'hidden',
-              )}
-            >
-              {liveSessionEntries.map((entry) => {
-                const isActiveLiveEntry = workspaceMode === 'live'
-                  && activeLiveEntry?.session.runtime_id === entry.session.runtime_id;
-                return (
-                  <div
-                    key={entry.session.runtime_id}
-                    className={cn(
-                      'absolute inset-0 min-h-0',
-                      isActiveLiveEntry ? 'block' : 'hidden',
-                    )}
-                  >
-                    <WorkspaceNativeSessionView
-                      session={entry.session}
-                      initialPrompt={entry.initialPrompt}
-                      initialImages={entry.initialImages}
-                      seedMessages={entry.seedMessages}
-                      installedSkills={workspaceInstalledSkills}
-                      onRefreshSkills={refreshWorkspaceInstalledSkills}
-                      workspaceCommands={workspaceCommands}
-                      isVisible={isActiveLiveEntry}
-                      onSessionUpdate={handleLiveSessionUpdate}
-                      codexInstalled={codexInstalled}
-                      opencodeInstalled={opencodeInstalled}
-                      onLaunchNewSession={handleNewSession}
-                      onStartNew={() => {
-                        setWorkspaceMode('compose');
-                        setActiveLiveRuntimeId(null);
-                      }}
-                    />
-                  </div>
-                );
-              })}
+              {liveSessionEntries.length > 0 ? (
+                <div
+                  className={cn(
+                    'relative min-h-0 flex-1 overflow-hidden',
+                    workspaceMode === 'live' && activeLiveEntry ? 'block' : 'hidden',
+                  )}
+                >
+                  {liveSessionEntries.map((entry) => {
+                    const isActiveLiveEntry = workspaceMode === 'live'
+                      && activeLiveEntry?.session.runtime_id === entry.session.runtime_id;
+                    return (
+                      <div
+                        key={entry.session.runtime_id}
+                        className={cn(
+                          'absolute inset-0 min-h-0',
+                          isActiveLiveEntry ? 'block' : 'hidden',
+                        )}
+                      >
+                        <WorkspaceNativeSessionView
+                          session={entry.session}
+                          initialPrompt={entry.initialPrompt}
+                          initialImages={entry.initialImages}
+                          seedMessages={entry.seedMessages}
+                          installedSkills={workspaceInstalledSkills}
+                          onRefreshSkills={refreshWorkspaceInstalledSkills}
+                          workspaceCommands={workspaceCommands}
+                          isVisible={isActiveLiveEntry}
+                          onSessionUpdate={handleLiveSessionUpdate}
+                          codexInstalled={codexInstalled}
+                          opencodeInstalled={opencodeInstalled}
+                          onLaunchNewSession={handleNewSession}
+                          onStartNew={() => {
+                            setWorkspaceMode('compose');
+                            setActiveLiveRuntimeId(null);
+                          }}
+                      />
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
             </div>
-          ) : null}
+          </div>
         </div>
+
+        {browserPanelOpen ? (
+          <BrowserPanel
+            key={activeBrowserSessionId}
+            sessionId={activeBrowserSessionId}
+            className="shrink-0"
+            style={{
+              flex: `0 0 ${browserPanelWidthPercent}%`,
+              maxWidth: `${BROWSER_PANEL_MAX_WIDTH_PERCENT}%`,
+              minWidth: BROWSER_PANEL_MIN_WIDTH_PX,
+            }}
+            onResizeStart={handleBrowserPanelResizeStart}
+            onClose={() => setActiveBrowserPanelOpen(false)}
+          />
+        ) : null}
       </div>
 
       <WorkspaceGlobalSearch

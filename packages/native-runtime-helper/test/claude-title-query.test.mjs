@@ -32,6 +32,20 @@ async function buildHelperWithMockClaudeSdk() {
         pluginBuild.onLoad({ filter: /^claude-agent-sdk$/, namespace: 'mock-sdk' }, () => ({
           loader: 'js',
           contents: `
+            export function tool(name, description, inputSchema, handler) {
+              return { name, description, inputSchema, handler };
+            }
+
+            export function createSdkMcpServer(config) {
+              return {
+                type: 'sdk',
+                name: config.name,
+                instance: {
+                  _registeredTools: Object.fromEntries((config.tools || []).map((definition) => [definition.name, definition])),
+                },
+              };
+            }
+
             export function query({ prompt, options }) {
               if (!prompt.includes('ProjectTree')) {
                 throw new Error('title query prompt missing ProjectTree context');

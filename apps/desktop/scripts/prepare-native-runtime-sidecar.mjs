@@ -47,6 +47,14 @@ function copyFile(source, target) {
   fs.chmodSync(target, 0o755);
 }
 
+function stripTrailingWhitespace(filePath) {
+  const content = fs.readFileSync(filePath, 'utf8');
+  const normalized = content.replace(/[ \t]+$/gm, '');
+  if (normalized !== content) {
+    fs.writeFileSync(filePath, normalized);
+  }
+}
+
 execSync('pnpm --dir ../../ --filter @ccem/native-runtime-helper build', {
   cwd: desktopRoot,
   stdio: 'inherit',
@@ -57,6 +65,7 @@ if (!fs.existsSync(helperDist)) {
 }
 
 copyFile(helperDist, resourceTarget);
+stripTrailingWhitespace(resourceTarget);
 
 const ext = process.platform === 'win32' ? '.exe' : '';
 const targetTriple = getTargetTriple();

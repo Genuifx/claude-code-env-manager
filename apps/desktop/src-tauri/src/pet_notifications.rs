@@ -75,14 +75,13 @@ pub fn open_pet_notification(app: AppHandle, request: PetOpenSessionRequest) -> 
             .map_err(|e| format!("emit pet read state update: {e}"))?;
     }
 
-    if let Some(main_window) = app.get_webview_window("main") {
+    if let Some(main_window) = app.get_window("main") {
         let _ = main_window.show();
         let _ = main_window.unminimize();
         let _ = main_window.set_focus();
-        main_window
-            .emit("pet-open-session", &request)
-            .map_err(|e| format!("emit pet open session: {e}"))?;
     }
+    app.emit("pet-open-session", &request)
+        .map_err(|e| format!("emit pet open session: {e}"))?;
 
     Ok(())
 }

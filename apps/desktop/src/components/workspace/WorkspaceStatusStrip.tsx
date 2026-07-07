@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Radio, Circle, Flame, Clock, Check, Settings2, ClipboardCheck, Search, Command } from 'lucide-react';
+import { Radio, Circle, Flame, Clock, Check, Settings2, ClipboardCheck, Search, Command, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { useLocale } from '@/locales';
 import { getEnvColorVar, cn } from '@/lib/utils';
@@ -38,6 +38,8 @@ function calculateContinuousUsageDays(dailyHistory: UsageStats['dailyHistory']):
 interface WorkspaceStatusStripProps {
   onNavigate: (tab: string) => void;
   onOpenSearch: () => void;
+  browserOpen?: boolean;
+  onToggleBrowser?: () => void;
 }
 
 function StatusChip({
@@ -46,6 +48,7 @@ function StatusChip({
   color,
   pulse,
   onClick,
+  compact = false,
   className,
 }: {
   icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
@@ -53,6 +56,7 @@ function StatusChip({
   color?: string;
   pulse?: boolean;
   onClick?: () => void;
+  compact?: boolean;
   className?: string;
 }) {
   return (
@@ -60,7 +64,8 @@ function StatusChip({
       type="button"
       onClick={onClick}
       className={cn(
-        'group relative inline-flex items-center gap-1.5 sm:gap-2 px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-full',
+        'group relative inline-flex shrink-0 items-center whitespace-nowrap rounded-full',
+        compact ? 'h-8 gap-1 px-2' : 'gap-1.5 px-2.5 py-1 sm:gap-2 sm:px-3.5 sm:py-1.5',
         'status-chip-glass',
         'hover:scale-[1.02] active:scale-[0.98]',
         onClick && 'cursor-pointer',
@@ -85,7 +90,10 @@ function StatusChip({
           </>
         )}
       </span>
-      <span className="text-[12px] sm:text-[13px] font-medium text-foreground group-hover:text-foreground transition-colors">
+      <span className={cn(
+        'whitespace-nowrap text-[12px] font-medium text-foreground transition-colors group-hover:text-foreground',
+        !compact && 'sm:text-[13px]',
+      )}>
         {label}
       </span>
     </button>
@@ -95,6 +103,8 @@ function StatusChip({
 export function WorkspaceStatusStrip({
   onNavigate,
   onOpenSearch,
+  browserOpen = false,
+  onToggleBrowser,
 }: WorkspaceStatusStripProps) {
   const { t } = useLocale();
   const { sessions, currentEnv, environments, continuousUsageDays, cronTasks, usageStats } = useAppStore(
@@ -150,7 +160,11 @@ export function WorkspaceStatusStrip({
   return (
     <div
       data-tauri-drag-region
-      className="workspace-status-strip h-11 sm:h-12 flex items-center gap-1.5 sm:gap-2.5 shrink-0 min-w-0 overflow-x-auto scroll-glass-root [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      data-ccem-workspace-status-compact={browserOpen ? 'browser' : 'default'}
+      className={cn(
+        'workspace-status-strip flex shrink-0 items-center min-w-0 overflow-x-auto scroll-glass-root [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+        browserOpen ? 'h-10 gap-1 pr-1' : 'h-11 gap-1.5 sm:h-12 sm:gap-2.5',
+      )}
     >
       <StatusChip
         icon={Radio}
@@ -162,6 +176,7 @@ export function WorkspaceStatusStrip({
         color={runningSessions.length > 0 ? 'hsl(142 71% 45%)' : undefined}
         pulse={runningSessions.length > 0}
         onClick={() => onNavigate('sessions')}
+        compact={browserOpen}
       />
 
       {/* Environment quick-switch capsule */}
@@ -170,7 +185,8 @@ export function WorkspaceStatusStrip({
           <button
             type="button"
             className={cn(
-              'group relative inline-flex items-center gap-1.5 sm:gap-2 px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-full',
+              'group relative inline-flex shrink-0 items-center whitespace-nowrap rounded-full',
+              browserOpen ? 'h-8 gap-1 px-2' : 'gap-1.5 px-2.5 py-1 sm:gap-2 sm:px-3.5 sm:py-1.5',
               'status-chip-glass',
               'hover:scale-[1.02] active:scale-[0.98]',
               'cursor-pointer'
@@ -182,7 +198,10 @@ export function WorkspaceStatusStrip({
                 style={{ color: getEnvColorVar(currentEnv) }}
               />
             </span>
-            <span className="text-[12px] sm:text-[13px] font-medium text-foreground transition-colors">
+            <span className={cn(
+              'max-w-[8.5rem] truncate whitespace-nowrap text-[12px] font-medium text-foreground transition-colors',
+              !browserOpen && 'sm:max-w-[10rem] sm:text-[13px]',
+            )}>
               {currentEnv || '—'}
             </span>
           </button>
@@ -230,11 +249,12 @@ export function WorkspaceStatusStrip({
           }}
         >
           <PopoverTrigger asChild>
-            <div className="hidden md:inline-flex">
+            <div className={cn(browserOpen ? 'inline-flex' : 'hidden md:inline-flex')}>
               <StatusChip
                 icon={Flame}
                 label={`${continuousUsageDays} ${t('workspace.statusStreak')}`}
                 color="hsl(25 95% 53%)"
+                compact={browserOpen}
                 className={isRefreshingStreak ? 'opacity-70' : undefined}
               />
             </div>
@@ -257,7 +277,7 @@ export function WorkspaceStatusStrip({
         </Popover>
       )}
 
-      {activeCronTasks.length > 0 && (
+      {!browserOpen && activeCronTasks.length > 0 && (
         <StatusChip
           icon={Clock}
           label={`${activeCronTasks.length} ${t('workspace.statusCronActive')}`}
@@ -269,24 +289,31 @@ export function WorkspaceStatusStrip({
       {/* Global search trigger — spotlight-style field, distinct from status chips */}
       <button
         type="button"
+        data-ccem-workspace-search-trigger="true"
         title={t('workspace.globalSearchPlaceholder')}
         onClick={onOpenSearch}
         className={cn(
-          'group ml-auto inline-flex h-7 sm:h-8 items-center gap-1.5 sm:gap-2 rounded-full px-2.5 sm:px-3',
-          'min-w-[120px] sm:min-w-[160px] lg:min-w-[220px]',
+          'group ml-auto inline-flex shrink-0 items-center rounded-full',
+          browserOpen
+            ? 'h-8 w-8 min-h-[2rem] min-w-[2rem] flex-none justify-center px-0'
+            : 'h-7 min-w-[120px] gap-1.5 px-2.5 sm:h-8 sm:min-w-[160px] sm:gap-2 sm:px-3 lg:min-w-[220px]',
           'border border-[hsl(var(--glass-border-light))]/40 bg-muted/25',
           'transition-colors duration-150',
           'hover:border-[hsl(var(--glass-border-light))]/70 hover:bg-muted/40'
         )}
       >
         <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="hidden sm:inline flex-1 truncate text-left text-[12px] text-muted-foreground/70">
-          {t('workspace.globalSearchPlaceholder')}
-        </span>
-        <kbd className="hidden md:inline-flex shrink-0 items-center gap-0.5 rounded border border-border/30 bg-background/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/60">
-          <Command className="h-2.5 w-2.5" />
-          K
-        </kbd>
+        {!browserOpen ? (
+          <>
+            <span className="hidden flex-1 truncate text-left text-[12px] text-muted-foreground/70 sm:inline">
+              {t('workspace.globalSearchPlaceholder')}
+            </span>
+            <kbd className="hidden shrink-0 items-center gap-0.5 rounded border border-border/30 bg-background/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/60 md:inline-flex">
+              <Command className="h-2.5 w-2.5" />
+              K
+            </kbd>
+          </>
+        ) : null}
       </button>
 
       {/* Review audit entry — always visible, far-right, context-aware */}
@@ -296,7 +323,8 @@ export function WorkspaceStatusStrip({
         title={t('workspace.reviewEntry')}
         onClick={() => setReviewPanelOpen(!reviewPanelOpen)}
         className={cn(
-          'group relative inline-flex items-center gap-1.5 sm:gap-2 px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-full cursor-pointer',
+          'group relative inline-flex shrink-0 items-center whitespace-nowrap rounded-full cursor-pointer',
+          browserOpen ? 'h-8 w-8 min-h-[2rem] min-w-[2rem] flex-none justify-center gap-0 px-0' : 'gap-1.5 px-2.5 py-1 sm:gap-2 sm:px-3.5 sm:py-1.5',
           'status-chip-glass',
           'hover:scale-[1.02] active:scale-[0.98]',
           reviewPanelOpen && 'ring-1 ring-inset ring-primary/40'
@@ -317,15 +345,51 @@ export function WorkspaceStatusStrip({
             />
           ) : null}
         </span>
-        <span className="text-[12px] sm:text-[13px] font-medium text-foreground transition-colors">
+        <span className={cn(
+          'whitespace-nowrap text-[12px] font-medium text-foreground transition-colors',
+          browserOpen ? 'sr-only' : 'sm:text-[13px]',
+        )}>
           {t('workspace.reviewEntry')}
         </span>
         {reviewEntry && reviewEntry.failedTools > 0 ? (
-          <span className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-none text-destructive-foreground">
+          <span className={cn(
+            'inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-none text-destructive-foreground',
+            browserOpen ? 'absolute -right-1 -top-1' : 'ml-0.5',
+          )}>
             {reviewEntry.failedTools}
           </span>
         ) : null}
       </button>
+
+      {onToggleBrowser ? (
+        <button
+          type="button"
+          data-ccem-workspace-browser-toggle="true"
+          aria-pressed={browserOpen}
+          aria-label={browserOpen ? t('workspace.browserClose') : t('workspace.browserOpen')}
+          title={browserOpen ? t('workspace.browserClose') : t('workspace.browserOpen')}
+          onClick={onToggleBrowser}
+          className={cn(
+            'group relative inline-flex h-8 w-8 min-h-[2rem] min-w-[2rem] flex-none items-center justify-center rounded-full p-0 cursor-pointer',
+            'status-chip-glass',
+            'hover:scale-[1.02] active:scale-[0.98]',
+            browserOpen && 'ring-1 ring-inset ring-primary/40'
+          )}
+        >
+          {browserOpen ? (
+            <PanelRightClose
+              className="h-3.5 w-3.5 shrink-0 text-primary transition-transform duration-200 group-hover:scale-110"
+            />
+          ) : (
+            <PanelRightOpen
+              className={cn(
+                'h-3.5 w-3.5 shrink-0 transition-transform duration-200 group-hover:scale-110',
+                'text-muted-foreground'
+              )}
+            />
+          )}
+        </button>
+      ) : null}
     </div>
   );
 }

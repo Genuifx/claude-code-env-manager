@@ -1,0 +1,131 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { build } from 'esbuild';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const packageDir = path.resolve(__dirname, '..');
+
+async function importBrowserMcpModule() {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ccem-browser-mcp-test-'));
+  const outfile = path.join(tempDir, 'browserMcp.mjs');
+
+  await build({
+    entryPoints: [path.join(packageDir, 'src', 'browserMcp.ts')],
+    outfile,
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node20',
+    logLevel: 'silent',
+  });
+
+  return import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
+}
+
+function registeredToolNames(server) {
+  return Object.keys(server.instance?._registeredTools ?? {}).sort();
+}
+
+test('browser MCP permission modes only expose read tools in read-only modes', async () => {
+  const {
+    browserToolNamesForPermissionMode,
+    createCcemBrowserMcpServer,
+  } = await importBrowserMcpModule();
+
+  const readTools = ['get_url', 'screenshot', 'snapshot'];
+
+  for (const mode of ['readonly', 'audit', 'plan', 'safe', 'ci']) {
+    assert.deepEqual(browserToolNamesForPermissionMode(mode).sort(), readTools);
+    assert.deepEqual(
+      registeredToolNames(createCcemBrowserMcpServer(mode, async () => ({}))),
+      readTools,
+    );
+  }
+});
+
+test('browser MCP exposes interactive tools for development modes', async () => {
+  const {
+    browserToolNamesForPermissionMode,
+    browserMcpToolNamesForPermissionMode,
+    createCcemBrowserMcpServer,
+    ensureBrowserMcpToolsAllowed,
+    isBrowserEvaluateToolName,
+  } = await importBrowserMcpModule();
+
+  const devTools = browserToolNamesForPermissionMode('dev');
+  assert.ok(devTools.includes('navigate'));
+  assert.ok(devTools.includes('click'));
+  assert.ok(devTools.includes('type'));
+  assert.ok(devTools.includes('evaluate'));
+  assert.equal(isBrowserEvaluateToolName('mcp__ccem-browser__evaluate'), true);
+  assert.equal(isBrowserEvaluateToolName('mcp__ccem-browser__snapshot'), false);
+  assert.ok(browserMcpToolNamesForPermissionMode('dev').includes('mcp__ccem-browser__navigate'));
+  assert.deepEqual(ensureBrowserMcpToolsAllowed(['Read', 'mcp__ccem-browser__snapshot'], 'readonly'), [
+    'Read',
+    'mcp__ccem-browser__snapshot',
+    'mcp__ccem-browser__get_url',
+    'mcp__ccem-browser__screenshot',
+  ]);
+  assert.ok(ensureBrowserMcpToolsAllowed(['Read'], 'dev')?.includes('mcp__ccem-browser__evaluate'));
+  assert.equal(ensureBrowserMcpToolsAllowed(undefined, 'dev'), undefined);
+
+  const server = createCcemBrowserMcpServer('dev', async (toolName, args) => ({ toolName, args }));
+  assert.ok(registeredToolNames(server).includes('evaluate'));
+
+  const navigate = server.instance._registeredTools.navigate.handler;
+  const result = await navigate({ url: 'https://example.com' });
+  assert.deepEqual(JSON.parse(result.content[0].text), {
+    toolName: 'navigate',
+    args: { url: 'https://example.com' },
+  });
+});
+
+test('browser tool bridge resolves successful responses and rejects failures', async () => {
+  const { createBrowserToolBridge } = await importBrowserMcpModule();
+  const requests = [];
+  const bridge = createBrowserToolBridge((request) => requests.push(request), 1_000);
+
+  const success = bridge.sendBrowserToolRequest('navigate', { url: 'https://example.com' });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].type, 'browser_tool_request');
+  assert.equal(requests[0].tool, 'navigate');
+  assert.deepEqual(requests[0].args, { url: 'https://example.com' });
+
+  assert.equal(bridge.handleBrowserToolResponse({
+    type: 'browser_tool_response',
+    request_id: requests[0].request_id,
+    ok: true,
+    result: { ok: true },
+  }), true);
+  assert.deepEqual(await success, { ok: true });
+
+  const failure = bridge.sendBrowserToolRequest('click', { ref: 1 });
+  assert.equal(requests.length, 2);
+  assert.equal(bridge.handleBrowserToolResponse({
+    type: 'browser_tool_response',
+    request_id: requests[1].request_id,
+    ok: false,
+    error: 'missing ref',
+  }), true);
+  await assert.rejects(failure, /missing ref/);
+
+  assert.equal(bridge.handleBrowserToolResponse({
+    type: 'browser_tool_response',
+    request_id: 'missing',
+    ok: true,
+  }), false);
+});
+
+test('browser tool bridge rejects all pending requests when the session closes', async () => {
+  const { createBrowserToolBridge } = await importBrowserMcpModule();
+  const bridge = createBrowserToolBridge(() => {}, 1_000);
+
+  const pending = bridge.sendBrowserToolRequest('snapshot', {});
+  bridge.rejectAll('session closed');
+
+  await assert.rejects(pending, /session closed/);
+});
