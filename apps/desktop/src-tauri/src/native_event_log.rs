@@ -280,7 +280,12 @@ fn query_events_since(
     if let Some(limit) = limit.filter(|value| *value > 0) {
         let mut stmt = conn
             .prepare(
-                "WITH tail AS (
+                "WITH oldest AS (
+                     SELECT MIN(seq) AS seq
+                     FROM native_session_events
+                     WHERE runtime_id = ?1
+                 ),
+                 tail AS (
                      SELECT seq
                      FROM native_session_events
                      WHERE runtime_id = ?1
@@ -291,7 +296,8 @@ fn query_events_since(
                  FROM native_session_events
                  WHERE runtime_id = ?1
                    AND (
-                     seq IN (SELECT seq FROM tail)
+                     seq IN (SELECT seq FROM oldest)
+                     OR seq IN (SELECT seq FROM tail)
                      OR payload_json LIKE '{\"type\":\"user_prompt\"%'
                      OR payload_json LIKE '{\"type\":\"checkpoint_created\"%'
                      OR payload_json LIKE '{\"type\":\"files_rewound\"%'
@@ -515,7 +521,7 @@ mod tests {
                 .iter()
                 .map(|event| event.seq)
                 .collect::<Vec<_>>(),
-            vec![4, 5],
+            vec![1, 4, 5],
         );
 
         let conn = Connection::open(&db_path).expect("open sqlite db");
@@ -547,6 +553,7 @@ mod tests {
                 text: "start here".to_string(),
                 image_count: 0,
                 images: None,
+                canonical_hash: None,
             },
         })
         .expect("append prompt");
@@ -574,6 +581,66 @@ mod tests {
                 .map(|event| event.seq)
                 .collect::<Vec<_>>(),
             vec![1, 4, 5],
+        );
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn native_event_log_keeps_oldest_runtime_anchor_in_limited_replay() {
+        let db_path = std::env::temp_dir().join(format!(
+            "ccem-native-event-log-oldest-anchor-test-{}.sqlite",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default(),
+        ));
+        let log = NativeEventLog::new(db_path.clone());
+
+        log.append(&SessionEventRecord {
+            runtime_id: "runtime-oldest-anchor".to_string(),
+            seq: 1,
+            occurred_at: Utc::now(),
+            payload: SessionEventPayload::Lifecycle {
+                stage: "runtime_boot".to_string(),
+                detail: "Starting claude native runtime.".to_string(),
+            },
+        })
+        .expect("append runtime anchor");
+
+        log.append(&SessionEventRecord {
+            runtime_id: "runtime-oldest-anchor".to_string(),
+            seq: 2,
+            occurred_at: Utc::now(),
+            payload: SessionEventPayload::UserPrompt {
+                text: "start here".to_string(),
+                image_count: 0,
+                images: None,
+                canonical_hash: None,
+            },
+        })
+        .expect("append prompt");
+
+        for seq in 3..=5 {
+            log.append(&SessionEventRecord {
+                runtime_id: "runtime-oldest-anchor".to_string(),
+                seq,
+                occurred_at: Utc::now(),
+                payload: SessionEventPayload::AssistantChunk {
+                    text: format!("chunk-{seq}"),
+                },
+            })
+            .expect("append chunk");
+        }
+
+        let replay = log
+            .replay("runtime-oldest-anchor", None, Some(1))
+            .expect("replay tail");
+
+        assert_eq!(
+            replay
+                .events
+                .iter()
+                .map(|event| event.seq)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 5],
         );
 
         let _ = std::fs::remove_file(db_path);

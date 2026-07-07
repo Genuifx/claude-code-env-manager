@@ -1203,6 +1203,7 @@ async fn create_native_session(
     initial_images: Option<Vec<PromptImage>>,
     provider_session_id: Option<String>,
     effort: Option<String>,
+    seed_boundary_message_count: Option<u64>,
 ) -> Result<NativeSessionSummary, String> {
     let provider = parse_native_provider(&provider)?;
     let effective_working_dir = resolve_headless_working_dir(working_dir);
@@ -1225,6 +1226,7 @@ async fn create_native_session(
                 display_prompt: initial_display_prompt.clone(),
                 initial_images: initial_images.clone(),
                 provider_session_id: provider_session_id.clone(),
+                seed_boundary_message_count,
                 helper_env_vars: resolved.env_vars.clone(),
                 terminal_env_vars: resolved.env_vars,
                 claude_path: terminal::resolve_claude_path(),
@@ -1251,6 +1253,7 @@ async fn create_native_session(
                 display_prompt: initial_display_prompt.clone(),
                 initial_images: initial_images.clone(),
                 provider_session_id: provider_session_id.clone(),
+                seed_boundary_message_count,
                 helper_env_vars: proxy_env_vars.clone(),
                 terminal_env_vars: proxy_env_vars,
                 claude_path: None,

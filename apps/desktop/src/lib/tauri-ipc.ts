@@ -286,6 +286,7 @@ export interface TauriCommands {
       initialImages?: NativePromptImageInput[] | null;
       providerSessionId?: string | null;
       effort?: string | null;
+      seedBoundaryMessageCount?: number | null;
     },
     NativeSessionSummary
   ];
@@ -791,6 +792,7 @@ export interface NativeSessionSummary {
   updated_at: string;
   is_active: boolean;
   last_event_seq?: number | null;
+  seed_boundary_message_count?: number | null;
   can_handoff_to_terminal: boolean;
   last_error?: string | null;
 }
@@ -1074,7 +1076,7 @@ export interface NativePromptImageInput {
 }
 
 export type SessionEventPayload =
-  | { type: 'user_prompt'; text: string; image_count: number; images?: SessionPromptImage[] | null }
+  | { type: 'user_prompt'; text: string; image_count: number; images?: SessionPromptImage[] | null; canonical_hash?: string | null }
   | { type: 'system_message'; message: string }
   | { type: 'lifecycle'; stage: string; detail: string }
   | { type: 'claude_json'; message_type?: string | null; raw_json: string }

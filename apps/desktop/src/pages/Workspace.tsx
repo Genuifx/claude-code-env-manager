@@ -94,7 +94,8 @@ import {
 } from '@/components/workspace/workspaceCronCommand';
 import {
   buildMessagesFromEvents,
-  trimSeedMessagesBeforeFirstUserPrompt,
+  selectSeedMessagesForNativeReplay,
+  shouldSkipProviderSeedHydration,
 } from '@/components/workspace/workspaceEventTranscript';
 import {
   nativeSessionMatchesCcemSessionLink,
@@ -1023,8 +1024,19 @@ export function Workspace({
       const hasPersistedUserPrompt = replayBatch?.events.some((event) =>
         event.payload.type === 'user_prompt',
       ) ?? false;
+      const seedBoundaryMessageCount = session.seed_boundary_message_count ?? null;
 
       if (session.last_event_seq != null && !hasPersistedUserPrompt) {
+        hydratedLiveRuntimeIdsRef.current.add(session.runtime_id);
+        return [];
+      }
+
+      if (
+        shouldSkipProviderSeedHydration(replayBatch, seedBoundaryMessageCount)
+      ) {
+        upsertLiveSessionEntry(session, {
+          seedMessages: [],
+        });
         hydratedLiveRuntimeIdsRef.current.add(session.runtime_id);
         return [];
       }
@@ -1034,7 +1046,7 @@ export function Workspace({
         source: session.provider,
       });
       const seedMessages = replayBatch
-        ? trimSeedMessagesBeforeFirstUserPrompt(historyMessages, replayBatch.events)
+        ? selectSeedMessagesForNativeReplay(historyMessages, replayBatch, seedBoundaryMessageCount)
         : historyMessages;
 
       upsertLiveSessionEntry(session, {
@@ -1200,6 +1212,7 @@ export function Workspace({
       updated_at: '',
       is_active: false,
       last_event_seq: null,
+      seed_boundary_message_count: null,
       can_handoff_to_terminal: false,
       last_error: null,
     };
@@ -1860,6 +1873,7 @@ export function Workspace({
         initialDisplayPrompt: previewPrompt,
         initialImages: images.length > 0 ? images : undefined,
         effort: normalizeEffortForProvider(composeEffort, composeProvider),
+        seedBoundaryMessageCount: 0,
       });
 
       upsertLiveSessionEntry(summary, {
@@ -1975,6 +1989,7 @@ export function Workspace({
         initialImages: images.length > 0 ? images : undefined,
         providerSessionId: selectedSession.id,
         effort: normalizeEffortForProvider(historyEffort, provider),
+        seedBoundaryMessageCount: messages.length,
       });
 
       setLaunchClient(provider);

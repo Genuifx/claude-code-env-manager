@@ -9,6 +9,7 @@ use crate::terminal::{self, resolve_claude_path, resolve_codex_path, TerminalTyp
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
 use std::io;
@@ -59,6 +60,8 @@ pub struct NativeSessionRecord {
     pub transport: NativeTransport,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed_boundary_message_count: Option<u64>,
     pub project_dir: String,
     pub env_name: String,
     pub perm_mode: String,
@@ -84,6 +87,8 @@ pub struct NativeSessionSummary {
     pub transport: NativeTransport,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed_boundary_message_count: Option<u64>,
     pub project_dir: String,
     pub env_name: String,
     pub perm_mode: String,
@@ -137,6 +142,7 @@ pub struct NativeSessionOptions {
     pub display_prompt: Option<String>,
     pub initial_images: Option<Vec<PromptImage>>,
     pub provider_session_id: Option<String>,
+    pub seed_boundary_message_count: Option<u64>,
     pub helper_env_vars: HashMap<String, String>,
     pub terminal_env_vars: HashMap<String, String>,
     pub claude_path: Option<String>,
@@ -189,6 +195,31 @@ fn prompt_images_for_event(
     }
 
     Ok(Some(event_images))
+}
+
+fn canonical_user_prompt_hash(
+    text: &str,
+    images: Option<&Vec<SessionPromptImage>>,
+) -> Option<String> {
+    if text.trim().is_empty() && images.map(|items| items.is_empty()).unwrap_or(true) {
+        return None;
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(b"ccem-user-prompt-v1\0");
+    hasher.update(text.as_bytes());
+    hasher.update(b"\0");
+    if let Some(images) = images {
+        for image in images {
+            hasher.update(b"image\0");
+            if let Some(sha256) = image.sha256.as_deref() {
+                hasher.update(sha256.as_bytes());
+            }
+            hasher.update(b"\0");
+        }
+    }
+
+    Some(hex::encode(hasher.finalize()))
 }
 
 #[derive(Debug, Serialize)]
@@ -349,6 +380,7 @@ impl NativeSessionHandle {
             provider: record.provider,
             transport: record.transport,
             provider_session_id: record.provider_session_id,
+            seed_boundary_message_count: record.seed_boundary_message_count,
             project_dir: record.project_dir,
             env_name: record.env_name,
             perm_mode: record.perm_mode,
@@ -497,6 +529,7 @@ impl NativeRuntimeManager {
             provider: options.provider,
             transport: NativeTransport::NativeSdk,
             provider_session_id: options.provider_session_id.clone(),
+            seed_boundary_message_count: options.seed_boundary_message_count,
             project_dir: options.working_dir.clone(),
             env_name: options.env_name.clone(),
             perm_mode: options.perm_mode.clone(),
@@ -572,6 +605,7 @@ impl NativeRuntimeManager {
                         provider: record.provider,
                         transport: record.transport,
                         provider_session_id: record.provider_session_id,
+                        seed_boundary_message_count: record.seed_boundary_message_count,
                         project_dir: record.project_dir,
                         env_name: record.env_name,
                         perm_mode: record.perm_mode,
@@ -1778,6 +1812,7 @@ impl NativeRuntimeManager {
             return Ok(());
         }
         let event_images = prompt_images_for_event(images, &self.prompt_image_store)?;
+        let canonical_hash = canonical_user_prompt_hash(text, event_images.as_ref());
 
         self.append_event(
             runtime_id,
@@ -1785,6 +1820,7 @@ impl NativeRuntimeManager {
                 text: text.to_string(),
                 image_count: image_count as u64,
                 images: event_images,
+                canonical_hash,
             },
         )
     }
@@ -2030,6 +2066,7 @@ impl NativeRuntimeManager {
                 provider: record.provider,
                 transport: record.transport,
                 provider_session_id: record.provider_session_id,
+                seed_boundary_message_count: record.seed_boundary_message_count,
                 project_dir: record.project_dir,
                 env_name: record.env_name,
                 perm_mode: record.perm_mode,
@@ -2359,6 +2396,7 @@ fn build_runtime_bootstrap_options(
         display_prompt: None,
         initial_images: None,
         provider_session_id: record.provider_session_id.clone(),
+        seed_boundary_message_count: record.seed_boundary_message_count,
         helper_env_vars,
         terminal_env_vars,
         claude_path: resolve_claude_path(),
@@ -2439,6 +2477,7 @@ mod tests {
             provider: NativeProvider::Claude,
             transport: NativeTransport::NativeSdk,
             provider_session_id: None,
+            seed_boundary_message_count: None,
             project_dir: "/tmp/project".to_string(),
             env_name: "DeepSeek".to_string(),
             perm_mode: "dev".to_string(),
@@ -2501,6 +2540,7 @@ mod tests {
             provider: NativeProvider::Claude,
             transport: NativeTransport::NativeSdk,
             provider_session_id: None,
+            seed_boundary_message_count: None,
             project_dir: "/tmp/project".to_string(),
             env_name: "DeepSeek".to_string(),
             perm_mode: "dev".to_string(),
@@ -2530,6 +2570,7 @@ mod tests {
             display_prompt: None,
             initial_images: None,
             provider_session_id: None,
+            seed_boundary_message_count: None,
             helper_env_vars: HashMap::new(),
             terminal_env_vars: HashMap::new(),
             claude_path: None,
@@ -2851,12 +2892,14 @@ mod tests {
             text,
             image_count,
             images,
+            canonical_hash,
         } = &batch.events[0].payload
         else {
             panic!("expected user prompt event");
         };
         assert_eq!(text, "continue");
         assert_eq!(*image_count, 1);
+        assert_eq!(canonical_hash.as_deref().map(str::len), Some(64));
         let image = images
             .as_ref()
             .and_then(|items| items.first())
@@ -2886,6 +2929,23 @@ mod tests {
             persisted_json["images"][0]["storagePath"],
             serde_json::Value::String(storage_path.to_string())
         );
+        assert_eq!(
+            persisted_json["canonical_hash"].as_str().map(str::len),
+            Some(64)
+        );
+    }
+
+    #[test]
+    fn native_session_summary_preserves_seed_boundary_message_count() {
+        let runtime_id = "native-seed-boundary-summary";
+        let mut record = native_record(runtime_id, "processing", true);
+        record.provider_session_id = Some("provider-session-1".to_string());
+        record.seed_boundary_message_count = Some(12);
+        let manager = manager_with_records(runtime_id, vec![record]);
+
+        let summary = manager.summary_for(runtime_id).expect("summary");
+
+        assert_eq!(summary.seed_boundary_message_count, Some(12));
     }
 
     #[test]
@@ -2910,14 +2970,19 @@ mod tests {
             .expect("replay events");
 
         assert_eq!(batch.events.len(), 1);
-        assert_eq!(
-            batch.events[0].payload,
-            SessionEventPayload::UserPrompt {
-                text: "Use the SQLite path".to_string(),
-                image_count: 0,
-                images: None,
-            }
-        );
+        let SessionEventPayload::UserPrompt {
+            text,
+            image_count,
+            images,
+            canonical_hash,
+        } = &batch.events[0].payload
+        else {
+            panic!("expected user prompt event");
+        };
+        assert_eq!(text, "Use the SQLite path");
+        assert_eq!(*image_count, 0);
+        assert_eq!(images, &None);
+        assert_eq!(canonical_hash.as_deref().map(str::len), Some(64));
     }
 
     #[test]

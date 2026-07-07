@@ -41,9 +41,9 @@ test('interleaves prompt images at their text placeholders', async () => {
   ]);
 
   assert.deepEqual(parts, [
-    { type: 'text', text: '先看 [Image #2]' },
+    { type: 'text', text: '先看' },
     { type: 'image', image: image('two', '[Image #2]') },
-    { type: 'text', text: '再看 [Image #1]' },
+    { type: 'text', text: '再看' },
     { type: 'image', image: image('one', '[Image #1]') },
   ]);
 });
@@ -85,6 +85,7 @@ test('keeps selected skill prompts multimodal when the image placeholder is in u
   assert.equal(parts[1].type, 'image');
   assert.deepEqual(parts[1].image, image('one', '[Image #1]'));
   assert.match(parts[0].text, /<selected_skills>/);
-  assert.match(parts[0].text, /\[Image #1\]/);
+  assert.doesNotMatch(parts[0].text, /\[Image #1\]/);
+  assert.doesNotMatch(parts.map((part) => part.type === 'text' ? part.text : '').join('\n'), /\[Image #1\]/);
   assert.match(parts[2].text, /调整这个布局/);
 });

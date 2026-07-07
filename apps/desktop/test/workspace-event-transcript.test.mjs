@@ -3,33 +3,36 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import ts from 'typescript';
+import { build } from 'esbuild';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.resolve(__dirname, '..');
 
 async function importWorkspaceEventTranscript() {
-  const sourcePath = path.join(desktopDir, 'src', 'components', 'workspace', 'workspaceEventTranscript.ts');
-  const source = await fs.readFile(sourcePath, 'utf8');
-  const output = ts.transpileModule(source, {
-    compilerOptions: {
-      module: ts.ModuleKind.ES2022,
-      target: ts.ScriptTarget.ES2022,
-      isolatedModules: true,
-    },
-  });
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ccem-workspace-event-test-'));
   const outputPath = path.join(tempDir, 'workspaceEventTranscript.mjs');
-  await fs.writeFile(outputPath, output.outputText, 'utf8');
+  await build({
+    entryPoints: [path.join(desktopDir, 'src', 'components', 'workspace', 'workspaceEventTranscript.ts')],
+    outfile: outputPath,
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node20',
+    logLevel: 'silent',
+  });
   return import(pathToFileURL(outputPath).href);
 }
 
 function event(seq, payload) {
+  return eventAt(seq, payload, `2026-05-01T00:00:${String(seq).padStart(2, '0')}.000Z`);
+}
+
+function eventAt(seq, payload, occurredAt) {
   return {
     runtime_id: 'runtime-1',
     seq,
-    occurred_at: `2026-05-01T00:00:0${seq}.000Z`,
+    occurred_at: occurredAt,
     payload,
   };
 }
@@ -608,6 +611,63 @@ test('filters optimistic native prompts already confirmed by the event log', asy
   );
 });
 
+test('keeps optimistic prompts when matching persisted events predate their anchor', async () => {
+  const { filterConfirmedLocalUserPrompts } = await importWorkspaceEventTranscript();
+
+  const pending = filterConfirmedLocalUserPrompts(
+    [
+      { id: 'new-repeat', text: '继续', afterEventSeq: 10 },
+    ],
+    [
+      event(2, { type: 'user_prompt', text: '继续', image_count: 0 }),
+    ],
+  );
+
+  assert.deepEqual(
+    pending.map((prompt) => prompt.id),
+    ['new-repeat'],
+  );
+});
+
+test('does not consume anchored optimistic prompts with older persisted user events', async () => {
+  const { buildMessagesFromEvents } = await importWorkspaceEventTranscript();
+
+  const messages = buildMessagesFromEvents(
+    [],
+    [
+      { id: 'new-repeat', text: '继续', afterEventSeq: 10 },
+    ],
+    [
+      event(2, { type: 'user_prompt', text: '继续', image_count: 0 }),
+      event(3, { type: 'assistant_chunk', text: 'old answer' }),
+      event(4, { type: 'lifecycle', stage: 'turn_completed', detail: '' }),
+    ],
+  );
+
+  assert.deepEqual(
+    messages.map((message) => message.uuid),
+    ['user-prompt-2', 'assistant-turn-3', 'new-repeat'],
+  );
+});
+
+test('keeps optimistic prompts when only whitespace-stripped identity matches', async () => {
+  const { filterConfirmedLocalUserPrompts } = await importWorkspaceEventTranscript();
+
+  const pending = filterConfirmedLocalUserPrompts(
+    [
+      { id: 'space-sensitive', text: 'ab' },
+    ],
+    [
+      event(1, { type: 'user_prompt', text: 'a b', image_count: 0 }),
+    ],
+  );
+
+  assert.deepEqual(
+    pending.map((prompt) => prompt.id),
+    ['space-sensitive'],
+  );
+});
+
 test('keeps optimistic continuation prompts after persisted transcript events', async () => {
   const {
     buildBaseMessages,
@@ -780,6 +840,186 @@ test('trims hydrated skill prompt history when the native prompt has image attac
   );
 });
 
+test('trims hydrated multimodal skill prompts across CJK image boundaries without preserving artificial whitespace', async () => {
+  const { trimSeedMessagesBeforeFirstUserPrompt } = await importWorkspaceEventTranscript();
+  const promptTime = Date.parse('2026-05-01T00:00:01.000Z');
+  const seedMessages = [
+    { msgType: 'user', uuid: 'old-user', content: 'old prompt', timestamp: promptTime - 60_000, segmentIndex: 0, isCompactBoundary: false },
+    {
+      msgType: 'user',
+      uuid: 'cjk-image-user',
+      timestamp: promptTime,
+      content: [
+        {
+          type: 'text',
+          text: [
+            '<selected_skills>',
+            '<skill name="lightweight-dev-mode" path="/Users/wzt/.claude/skills/lightweight-dev-mode/SKILL.md">',
+            '<description>快速响应用户的软件开发需求</description>',
+            '</skill>',
+            '</selected_skills>',
+            '',
+            '<user_request>',
+            '/lightweight-dev-mode 我想给我们这个审查的面板',
+          ].join('\n'),
+        },
+        {
+          type: 'image',
+          placeholder: '[Image #1]',
+          source: {
+            type: 'base64',
+            media_type: 'image/png',
+            data: 'iVBORw0KGgo=',
+          },
+        },
+        { type: 'text', text: '新增todo模块</user_request>' },
+      ],
+      segmentIndex: 0,
+      isCompactBoundary: false,
+    },
+  ];
+
+  const trimmed = trimSeedMessagesBeforeFirstUserPrompt(
+    seedMessages,
+    [
+      eventAt(1, {
+        type: 'user_prompt',
+        text: '/lightweight-dev-mode 我想给我们这个审查的面板[Image #1]新增todo模块\n\nImages attached: 1',
+        image_count: 1,
+        images: [{
+          mediaType: 'image/png',
+          storagePath: 'prompt-image.png',
+          placeholder: '[Image #1]',
+        }],
+      }, '2026-05-01T00:00:01.000Z'),
+    ],
+  );
+
+  assert.deepEqual(
+    trimmed.map((message) => message.uuid),
+    ['old-user'],
+  );
+});
+
+test('trims hydrated history at the latest timestamp-compatible prompt match instead of the first substring hit', async () => {
+  const { trimSeedMessagesBeforeFirstUserPrompt } = await importWorkspaceEventTranscript();
+  const seedMessages = [
+    { msgType: 'user', uuid: 'old-user', content: 'old prompt', timestamp: Date.parse('2026-05-01T00:00:00.000Z'), segmentIndex: 0, isCompactBoundary: false },
+    { msgType: 'assistant', uuid: 'old-assistant', content: 'old reply', timestamp: Date.parse('2026-05-01T00:00:01.000Z'), segmentIndex: 0, isCompactBoundary: false },
+    {
+      msgType: 'user',
+      uuid: 'old-substring-user',
+      content: '请继续处理这个审查面板 todo 模块的设计方案',
+      timestamp: Date.parse('2026-05-01T00:01:00.000Z'),
+      segmentIndex: 0,
+      isCompactBoundary: false,
+    },
+    { msgType: 'assistant', uuid: 'old-substring-assistant', content: 'old related reply', timestamp: Date.parse('2026-05-01T00:01:02.000Z'), segmentIndex: 0, isCompactBoundary: false },
+    {
+      msgType: 'user',
+      uuid: 'live-user',
+      content: '继续处理这个审查面板 todo 模块',
+      timestamp: Date.parse('2026-05-01T00:20:00.000Z'),
+      segmentIndex: 0,
+      isCompactBoundary: false,
+    },
+    { msgType: 'assistant', uuid: 'live-assistant', content: 'provider live reply', timestamp: Date.parse('2026-05-01T00:20:02.000Z'), segmentIndex: 0, isCompactBoundary: false },
+  ];
+
+  const trimmed = trimSeedMessagesBeforeFirstUserPrompt(
+    seedMessages,
+    [
+      eventAt(1, {
+        type: 'user_prompt',
+        text: '继续处理这个审查面板 todo 模块',
+        image_count: 0,
+      }, '2026-05-01T00:20:00.000Z'),
+    ],
+  );
+
+  assert.deepEqual(
+    trimmed.map((message) => message.uuid),
+    ['old-user', 'old-assistant', 'old-substring-user', 'old-substring-assistant'],
+  );
+});
+
+test('selects provider seed by persisted boundary count before text matching', async () => {
+  const { selectSeedMessagesForNativeReplay } = await importWorkspaceEventTranscript();
+  const seedMessages = [
+    { msgType: 'user', uuid: 'seed-user-1', content: 'first history prompt', segmentIndex: 0, isCompactBoundary: false },
+    { msgType: 'assistant', uuid: 'seed-assistant-1', content: 'first history reply', segmentIndex: 0, isCompactBoundary: false },
+    { msgType: 'user', uuid: 'repeated-live-user', content: '继续处理这个审查面板 todo 模块', segmentIndex: 0, isCompactBoundary: false },
+    { msgType: 'assistant', uuid: 'provider-live-reply', content: 'provider live reply', segmentIndex: 0, isCompactBoundary: false },
+  ];
+
+  const selected = selectSeedMessagesForNativeReplay(
+    seedMessages,
+    {
+      gap_detected: false,
+      oldest_available_seq: 1,
+      newest_available_seq: 3,
+      events: [
+        event(1, { type: 'lifecycle', stage: 'runtime_boot', detail: 'Starting claude native runtime.' }),
+        event(2, { type: 'user_prompt', text: 'different hook-rewritten prompt', image_count: 0 }),
+        event(3, { type: 'assistant_chunk', text: 'native live reply' }),
+      ],
+    },
+    2,
+  );
+
+  assert.deepEqual(
+    selected.map((message) => message.uuid),
+    ['seed-user-1', 'seed-assistant-1'],
+  );
+});
+
+test('selects no provider seed when native replay covers the runtime start', async () => {
+  const { selectSeedMessagesForNativeReplay } = await importWorkspaceEventTranscript();
+  const seedMessages = [
+    { msgType: 'user', uuid: 'provider-user', content: '<selected_skills>wrapped</selected_skills>', segmentIndex: 0, isCompactBoundary: false },
+    { msgType: 'assistant', uuid: 'provider-assistant', content: 'provider answer', segmentIndex: 0, isCompactBoundary: false },
+  ];
+
+  const selected = selectSeedMessagesForNativeReplay(
+    seedMessages,
+    {
+      gap_detected: false,
+      oldest_available_seq: 1,
+      newest_available_seq: 4,
+      events: [
+        event(1, { type: 'lifecycle', stage: 'runtime_boot', detail: 'Starting claude native runtime.' }),
+        event(2, { type: 'user_prompt', text: '/lightweight-dev-mode 真实 prompt', image_count: 0 }),
+        event(3, { type: 'assistant_chunk', text: 'native replay answer' }),
+        event(4, { type: 'lifecycle', stage: 'turn_completed', detail: '' }),
+      ],
+    },
+    null,
+  );
+
+  assert.deepEqual(selected, []);
+});
+
+test('skips provider seed hydration when the native boundary proves replay ownership', async () => {
+  const { shouldSkipProviderSeedHydration } = await importWorkspaceEventTranscript();
+  const runtimeStartReplay = {
+    gap_detected: false,
+    oldest_available_seq: 1,
+    newest_available_seq: 4,
+    events: [
+      event(1, { type: 'lifecycle', stage: 'runtime_boot', detail: 'Starting claude native runtime.' }),
+      event(2, { type: 'user_prompt', text: '/lightweight-dev-mode 真实 prompt', image_count: 0 }),
+      event(3, { type: 'assistant_chunk', text: 'native replay answer' }),
+      event(4, { type: 'lifecycle', stage: 'turn_completed', detail: '' }),
+    ],
+  };
+
+  assert.equal(shouldSkipProviderSeedHydration(runtimeStartReplay, 0), true);
+  assert.equal(shouldSkipProviderSeedHydration(runtimeStartReplay, null), true);
+  assert.equal(shouldSkipProviderSeedHydration(runtimeStartReplay, 2), false);
+  assert.equal(shouldSkipProviderSeedHydration({ ...runtimeStartReplay, oldest_available_seq: 2 }, null), false);
+  assert.equal(shouldSkipProviderSeedHydration(null, 0), false);
+});
+
 test('live transcript trims duplicated hydrated skill prompt before replaying native events', async () => {
   const { buildMessagesFromEvents } = await importWorkspaceEventTranscript();
   const seedMessages = [
@@ -845,9 +1085,37 @@ test('live transcript trims duplicated hydrated skill prompt before replaying na
     messages.map((message) => message.uuid),
     ['user-prompt-1', 'assistant-turn-2'],
   );
-  assert.equal(messages[0].content[0].text, '/lightweight-dev-mode transcript 展示的图片应该支持点击查看大图[Image #1]');
+  assert.equal(messages[0].content[0].text, '/lightweight-dev-mode transcript 展示的图片应该支持点击查看大图');
   assert.equal(messages[0].content[1].type, 'image');
   assert.match(JSON.stringify(messages[1].content), /native replay answer/);
+});
+
+test('local optimistic prompts are confirmed with the same identity normalization as persisted user prompts', async () => {
+  const { filterConfirmedLocalUserPrompts } = await importWorkspaceEventTranscript();
+
+  const pending = filterConfirmedLocalUserPrompts(
+    [
+      {
+        id: 'local-cjk-image',
+        text: '/lightweight-dev-mode 我想给我们这个审查的面板[Image #1]新增todo模块',
+        images: [{ mediaType: 'image/png', storagePath: 'prompt-image.png', placeholder: '[Image #1]' }],
+      },
+      { id: 'still-pending', text: 'another prompt' },
+    ],
+    [
+      event(1, {
+        type: 'user_prompt',
+        text: '/lightweight-dev-mode 我想给我们这个审查的面板新增todo模块\n\nImages attached: 1',
+        image_count: 1,
+        images: [{ mediaType: 'image/png', storagePath: 'prompt-image.png', placeholder: '[Image #1]' }],
+      }),
+    ],
+  );
+
+  assert.deepEqual(
+    pending.map((prompt) => prompt.id),
+    ['still-pending'],
+  );
 });
 
 test('stabilizes unchanged message references but updates visible tool metadata changes', async () => {

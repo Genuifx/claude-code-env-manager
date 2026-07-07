@@ -106,6 +106,8 @@ pub enum SessionEventPayload {
         image_count: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         images: Option<Vec<SessionPromptImage>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        canonical_hash: Option<String>,
     },
     SystemMessage {
         message: String,

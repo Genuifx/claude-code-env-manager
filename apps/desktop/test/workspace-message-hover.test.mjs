@@ -1,11 +1,153 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { build } from 'esbuild';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.resolve(__dirname, '..');
+
+const SOURCE_EXTENSIONS = ['', '.ts', '.tsx', '.js', '.jsx', '.json'];
+const INDEX_EXTENSIONS = ['index.ts', 'index.tsx', 'index.js', 'index.jsx', 'index.json'];
+
+async function resolveSourcePath(importPath) {
+  const basePath = path.join(desktopDir, 'src', importPath.slice(2));
+  for (const extension of SOURCE_EXTENSIONS) {
+    const candidate = `${basePath}${extension}`;
+    try {
+      const stat = await fs.stat(candidate);
+      if (stat.isFile()) {
+        return candidate;
+      }
+    } catch {
+      // Try the next candidate.
+    }
+  }
+
+  for (const filename of INDEX_EXTENSIONS) {
+    const candidate = path.join(basePath, filename);
+    try {
+      const stat = await fs.stat(candidate);
+      if (stat.isFile()) {
+        return candidate;
+      }
+    } catch {
+      // Try the next candidate.
+    }
+  }
+
+  return null;
+}
+
+const desktopAliasPlugin = {
+  name: 'ccem-desktop-alias',
+  setup(builder) {
+    builder.onResolve({ filter: /^@\// }, async (args) => {
+      const resolved = await resolveSourcePath(args.path);
+      if (!resolved) {
+        return { errors: [{ text: `Could not resolve ${args.path}` }] };
+      }
+      return { path: resolved };
+    });
+  },
+};
+
+async function importWorkspaceMessageRenderer() {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ccem-workspace-message-render-'));
+  const outputPath = path.join(tempDir, 'workspace-message-renderer.cjs');
+  await build({
+    stdin: {
+      contents: `
+        import React from 'react';
+        import { renderToStaticMarkup } from 'react-dom/server';
+        import { LocaleProvider } from '@/locales';
+        import { TooltipProvider } from '@/components/ui/tooltip';
+        import { WorkspaceMessageBubble } from '@/components/workspace/WorkspaceMessageBubble';
+
+        function installNodeGlobals() {
+          const store = new Map();
+          Object.defineProperty(globalThis, 'localStorage', {
+            configurable: true,
+            value: {
+              getItem: (key) => store.get(key) ?? null,
+              setItem: (key, value) => store.set(key, String(value)),
+              removeItem: (key) => store.delete(key),
+              clear: () => store.clear(),
+            },
+          });
+        }
+
+        export function renderUserPromptWithInlineImage() {
+          installNodeGlobals();
+          const message = {
+            msgType: 'user',
+            uuid: 'user-with-image',
+            content: [
+              {
+                type: 'text',
+                text: '/lightweight-dev-mode 我想给我们这个审查的面板[Image #1]新增todo模块\\n\\nImages attached: 1',
+              },
+              {
+                type: 'image',
+                mediaType: 'image/png',
+                base64Data: 'iVBORw0KGgo=',
+                placeholder: '[Image #1]',
+              },
+            ],
+            timestamp: Date.parse('2026-05-01T00:00:01.000Z'),
+            segmentIndex: 0,
+            isCompactBoundary: false,
+          };
+          return renderToStaticMarkup(
+            React.createElement(LocaleProvider, null,
+              React.createElement(TooltipProvider, null,
+                React.createElement(WorkspaceMessageBubble, { message, prevRole: null })
+              )
+            )
+          );
+        }
+      `,
+      resolveDir: desktopDir,
+      sourcefile: 'workspace-message-renderer.tsx',
+      loader: 'tsx',
+    },
+    outfile: outputPath,
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node20',
+    jsx: 'automatic',
+    plugins: [desktopAliasPlugin],
+    logLevel: 'silent',
+  });
+  return import(pathToFileURL(outputPath).href);
+}
+
+function extractBalancedDivByClass(html, classNamePart) {
+  const classIndex = html.indexOf(classNamePart);
+  assert.notEqual(classIndex, -1, `expected rendered HTML to include ${classNamePart}`);
+  const openStart = html.lastIndexOf('<div', classIndex);
+  assert.notEqual(openStart, -1, `expected ${classNamePart} to be on a div`);
+
+  const tagRe = /<\/?div\b[^>]*>/g;
+  tagRe.lastIndex = openStart;
+  let depth = 0;
+  let match;
+  while ((match = tagRe.exec(html)) != null) {
+    if (match[0].startsWith('</')) {
+      depth -= 1;
+    } else {
+      depth += 1;
+    }
+    if (depth === 0) {
+      return html.slice(openStart, tagRe.lastIndex);
+    }
+  }
+
+  assert.fail(`could not find closing div for ${classNamePart}`);
+}
 
 test('workspace message actions are revealed by explicit transcript content hover state', async () => {
   const component = await fs.readFile(
@@ -73,4 +215,34 @@ test('workspace does not render estimated token speed in transcript or session r
   assert.doesNotMatch(messageBubble, /outputTokensPerSecond|output_tokens_per_second|t\/s/);
   assert.doesNotMatch(projectTree, /outputTokensPerSecond|output_tokens_per_second|t\/s/);
   assert.doesNotMatch(sidebarSessions, /outputTokensPerSecond|output_tokens_per_second|t\/s/);
+});
+
+test('user prompt image thumbnails render inside the rounded user message bubble', async () => {
+  const component = await fs.readFile(
+    path.join(desktopDir, 'src', 'components', 'workspace', 'WorkspaceMessageBubble.tsx'),
+    'utf8',
+  );
+
+  assert.match(
+    component,
+    /<div className="rounded-\[24px\][\s\S]*?\{renderedContent\}[\s\S]*?\{hasImages \? <WorkspaceImageStrip blocks=\{imageBlocks\} isUser t=\{t\} \/> : null\}[\s\S]*?<\/div>/,
+  );
+  assert.doesNotMatch(
+    component,
+    /hasImages \? \(\s*<div[\s\S]*?<WorkspaceImageStrip blocks=\{imageBlocks\} isUser=\{isUser\} t=\{t\} \/>[\s\S]*?<\/div>\s*\) : null/,
+  );
+});
+
+test('rendered user prompt keeps inline image thumbnails inside the same user bubble', async () => {
+  const { renderUserPromptWithInlineImage } = await importWorkspaceMessageRenderer();
+  const html = renderUserPromptWithInlineImage();
+  const userBubbleHtml = extractBalancedDivByClass(html, 'rounded-[24px] border border-border/30');
+
+  assert.match(userBubbleHtml, /\/lightweight-dev-mode/);
+  assert.match(userBubbleHtml, /审查的面板/);
+  assert.match(userBubbleHtml, /新增todo模块/);
+  assert.match(userBubbleHtml, /src="data:image\/png;base64,iVBORw0KGgo="/);
+  assert.match(userBubbleHtml, /aria-label="[^"]*图片[^"]*"/);
+  assert.doesNotMatch(userBubbleHtml, /\[Image #1\]/);
+  assert.doesNotMatch(userBubbleHtml, /Images attached/);
 });
