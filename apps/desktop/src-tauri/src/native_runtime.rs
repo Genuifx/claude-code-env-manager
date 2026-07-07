@@ -1,3 +1,4 @@
+use crate::browser::{BrowserManager, BrowserToolRequest};
 use crate::config::{resolve_claude_env, resolve_codex_runtime};
 use crate::event_bus::{ReplayBatch, SessionEventPayload, SessionPromptImage, SessionStore};
 use crate::native_event_log::NativeEventLog;
@@ -19,7 +20,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
     ShellExt,
@@ -278,6 +279,14 @@ enum HelperInputCommand<'a> {
     RewindFiles {
         checkpoint_id: &'a str,
     },
+    BrowserToolResponse {
+        request_id: &'a str,
+        ok: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        result: Option<&'a Value>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<&'a str>,
+    },
     Stop,
 }
 
@@ -313,6 +322,7 @@ fn helper_command_kind(command: &HelperInputCommand<'_>) -> &'static str {
         HelperInputCommand::InteractivePromptResponse { .. } => "interactive_prompt_response",
         HelperInputCommand::UpdateSettings { .. } => "update_settings",
         HelperInputCommand::RewindFiles { .. } => "rewind_files",
+        HelperInputCommand::BrowserToolResponse { .. } => "browser_tool_response",
         HelperInputCommand::Stop => "stop",
     }
 }
@@ -350,6 +360,12 @@ enum HelperOutputEvent {
     },
     Event {
         payload: Value,
+    },
+    BrowserToolRequest {
+        request_id: String,
+        tool: String,
+        #[serde(default)]
+        args: Value,
     },
 }
 
@@ -1380,6 +1396,7 @@ impl NativeRuntimeManager {
         let manager = self.clone();
         let runtime = runtime_id.to_string();
         let event_handle = handle.clone();
+        let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
             let mut stdout_buffer = Vec::new();
             let mut stderr_buffer = Vec::new();
@@ -1394,7 +1411,11 @@ impl NativeRuntimeManager {
                 match event {
                     CommandEvent::Stdout(line) => {
                         for text in drain_helper_output_lines(&mut stdout_buffer, &line) {
-                            if let Err(error) = manager.process_helper_stdout(&runtime, &text) {
+                            if let Err(error) = manager.process_helper_stdout_with_app(
+                                Some(&app_handle),
+                                &runtime,
+                                &text,
+                            ) {
                                 let _ = manager.append_event(
                                     &runtime,
                                     SessionEventPayload::StdErrLine {
@@ -1414,6 +1435,7 @@ impl NativeRuntimeManager {
                     }
                     CommandEvent::Error(error) => {
                         manager.flush_helper_output_buffers(
+                            Some(&app_handle),
                             &runtime,
                             &mut stdout_buffer,
                             &mut stderr_buffer,
@@ -1429,6 +1451,7 @@ impl NativeRuntimeManager {
                     }
                     CommandEvent::Terminated(payload) => {
                         manager.flush_helper_output_buffers(
+                            Some(&app_handle),
                             &runtime,
                             &mut stdout_buffer,
                             &mut stderr_buffer,
@@ -1445,6 +1468,15 @@ impl NativeRuntimeManager {
     }
 
     fn process_helper_stdout(&self, runtime_id: &str, line: &str) -> Result<(), String> {
+        self.process_helper_stdout_with_app(None, runtime_id, line)
+    }
+
+    fn process_helper_stdout_with_app(
+        &self,
+        app: Option<&AppHandle>,
+        runtime_id: &str,
+        line: &str,
+    ) -> Result<(), String> {
         let mut processed = false;
         for entry in line
             .lines()
@@ -1452,7 +1484,7 @@ impl NativeRuntimeManager {
             .filter(|entry| !entry.is_empty())
         {
             processed = true;
-            self.process_helper_stdout_line(runtime_id, entry)?;
+            self.process_helper_stdout_line(app, runtime_id, entry)?;
         }
         if !processed {
             return Ok(());
@@ -1460,7 +1492,12 @@ impl NativeRuntimeManager {
         Ok(())
     }
 
-    fn process_helper_stdout_line(&self, runtime_id: &str, line: &str) -> Result<(), String> {
+    fn process_helper_stdout_line(
+        &self,
+        app: Option<&AppHandle>,
+        runtime_id: &str,
+        line: &str,
+    ) -> Result<(), String> {
         let output: HelperOutputEvent = serde_json::from_str(line)
             .map_err(|error| format!("Failed to parse helper event JSON: {}", error))?;
 
@@ -1573,6 +1610,63 @@ impl NativeRuntimeManager {
                     .map_err(|error| format!("Failed to decode helper payload: {}", error))?;
                 self.append_event(runtime_id, payload)
             }
+            HelperOutputEvent::BrowserToolRequest {
+                request_id,
+                tool,
+                args,
+            } => self.handle_browser_tool_request(
+                app,
+                runtime_id,
+                BrowserToolRequest {
+                    request_id,
+                    tool,
+                    args,
+                },
+            ),
+        }
+    }
+
+    fn handle_browser_tool_request(
+        &self,
+        app: Option<&AppHandle>,
+        runtime_id: &str,
+        request: BrowserToolRequest,
+    ) -> Result<(), String> {
+        let handle = self
+            .handles
+            .lock()
+            .map_err(|_| "Failed to lock native runtime handles".to_string())?
+            .get(runtime_id)
+            .cloned()
+            .ok_or_else(|| format!("Native runtime {} helper is not connected", runtime_id))?;
+
+        let response = match app {
+            Some(app) => match app.try_state::<Arc<BrowserManager>>() {
+                Some(browser) => browser.run_tool(app, runtime_id, &request),
+                None => Err("Browser manager is not registered.".to_string()),
+            },
+            None => Err("Browser tool request requires an app handle.".to_string()),
+        };
+
+        match response {
+            Ok(result) => self.write_to_child(
+                &handle,
+                &HelperInputCommand::BrowserToolResponse {
+                    request_id: &request.request_id,
+                    ok: true,
+                    result: Some(&result),
+                    error: None,
+                },
+            ),
+            Err(error) => self.write_to_child(
+                &handle,
+                &HelperInputCommand::BrowserToolResponse {
+                    request_id: &request.request_id,
+                    ok: false,
+                    result: None,
+                    error: Some(&error),
+                },
+            ),
         }
     }
 
@@ -2085,12 +2179,13 @@ impl NativeRuntimeManager {
 
     fn flush_helper_output_buffers(
         &self,
+        app: Option<&AppHandle>,
         runtime_id: &str,
         stdout_buffer: &mut Vec<u8>,
         stderr_buffer: &mut Vec<u8>,
     ) {
         if let Some(text) = take_remaining_helper_output_line(stdout_buffer) {
-            if let Err(error) = self.process_helper_stdout(runtime_id, &text) {
+            if let Err(error) = self.process_helper_stdout_with_app(app, runtime_id, &text) {
                 let _ = self.append_event(
                     runtime_id,
                     SessionEventPayload::StdErrLine {
@@ -2229,7 +2324,10 @@ fn is_recoverable_native_process_error(message: &str) -> bool {
 }
 
 fn reactivate_record_for_reconnect(record: &mut NativeSessionRecord) -> bool {
-    if !matches!(record.status.as_str(), "error" | "interrupted" | "closed_idle") {
+    if !matches!(
+        record.status.as_str(),
+        "error" | "interrupted" | "closed_idle"
+    ) {
         return false;
     }
 
@@ -3377,7 +3475,10 @@ mod tests {
     #[test]
     fn stop_source_normalization_keeps_lifecycle_details_bounded() {
         assert_eq!(super::normalize_stop_source(None), "unattributed");
-        assert_eq!(super::normalize_stop_source(Some(" workspace_escape ")), "workspace_escape");
+        assert_eq!(
+            super::normalize_stop_source(Some(" workspace_escape ")),
+            "workspace_escape"
+        );
         assert_eq!(
             super::normalize_stop_source(Some("native session stop button!")),
             "nativesessionstopbutton"

@@ -49,6 +49,20 @@ async function buildHelperWithMockClaudeSdk() {
         pluginBuild.onLoad({ filter: /^claude-agent-sdk$/, namespace: 'mock-sdk' }, () => ({
           loader: 'js',
           contents: `
+            export function tool(name, description, inputSchema, handler) {
+              return { name, description, inputSchema, handler };
+            }
+
+            export function createSdkMcpServer(config) {
+              return {
+                type: 'sdk',
+                name: config.name,
+                instance: {
+                  _registeredTools: Object.fromEntries((config.tools || []).map((definition) => [definition.name, definition])),
+                },
+              };
+            }
+
             function assertCheckpointOptions(options) {
               if (options.enableFileCheckpointing !== true) {
                 throw new Error('expected enableFileCheckpointing');

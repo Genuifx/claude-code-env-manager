@@ -12,7 +12,8 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 // installed in the capture phase so it wins against inputs, textareas,
 // terminals, and other contenteditable surfaces — matching native macOS apps.
 
-const STORAGE_KEY = 'ccem-zoom-level';
+export const CCEM_ZOOM_STORAGE_KEY = 'ccem-zoom-level';
+export const CCEM_ZOOM_CHANGE_EVENT = 'ccem-zoom-change';
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 1.3;
 const STEP = 0.1;
@@ -41,7 +42,7 @@ function roundZoom(value: number): number {
 
 function readStoredZoom(): number {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(CCEM_ZOOM_STORAGE_KEY);
     if (!raw) return DEFAULT_ZOOM;
     const parsed = parseFloat(raw);
     if (!Number.isFinite(parsed)) return DEFAULT_ZOOM;
@@ -64,13 +65,17 @@ async function applyZoom(value: number): Promise<void> {
 function persistZoom(value: number): void {
   try {
     if (value === DEFAULT_ZOOM) {
-      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(CCEM_ZOOM_STORAGE_KEY);
     } else {
-      localStorage.setItem(STORAGE_KEY, String(value));
+      localStorage.setItem(CCEM_ZOOM_STORAGE_KEY, String(value));
     }
   } catch {
     // Ignore storage failures (private mode, quota, etc.).
   }
+}
+
+function emitZoomChange(value: number): void {
+  window.dispatchEvent(new CustomEvent(CCEM_ZOOM_CHANGE_EVENT, { detail: { zoom: value } }));
 }
 
 export function useZoom(): void {
@@ -78,6 +83,8 @@ export function useZoom(): void {
     // Restore the persisted zoom on mount.
     const initial = readStoredZoom();
     void applyZoom(initial);
+    persistZoom(initial);
+    emitZoomChange(initial);
 
     let current = initial;
     const isMac = isMacPlatform();
@@ -88,6 +95,7 @@ export function useZoom(): void {
       current = clamped;
       void applyZoom(clamped);
       persistZoom(clamped);
+      emitZoomChange(clamped);
     };
 
     const handler = (e: KeyboardEvent) => {

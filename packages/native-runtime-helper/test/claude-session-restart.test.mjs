@@ -43,6 +43,20 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
         pluginBuild.onLoad({ filter: /^claude-agent-sdk$/, namespace: 'mock-sdk' }, () => ({
           loader: 'js',
           contents: `
+            export function tool(name, description, inputSchema, handler) {
+              return { name, description, inputSchema, handler };
+            }
+
+            export function createSdkMcpServer(config) {
+              return {
+                type: 'sdk',
+                name: config.name,
+                instance: {
+                  _registeredTools: Object.fromEntries((config.tools || []).map((definition) => [definition.name, definition])),
+                },
+              };
+            }
+
             const firstResultSubtype = ${JSON.stringify(firstResultSubtype)};
             const settleDelayMsAfterResult = ${JSON.stringify(settleDelayMsAfterResult)};
             const yieldIdleBeforeResult = ${JSON.stringify(yieldIdleBeforeResult)};

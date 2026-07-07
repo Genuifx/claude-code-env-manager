@@ -102,6 +102,21 @@ export interface TauriCommands {
   clear_proxy_traffic: [void, void];
   generate_workspace_session_title: [{ titleInput: string }, string | null];
   open_text_in_vscode: [{ content: string; suggestedName?: string | null }, string];
+  browser_set_active_session: [{ sessionId?: string | null; visible?: boolean | null }, void];
+  browser_open: [{ sessionId?: string | null; url?: string | null }, BrowserInfo];
+  browser_set_bounds: [
+    { sessionId?: string | null; x: number; y: number; width: number; height: number },
+    void
+  ];
+  browser_set_visible: [{ sessionId?: string | null; visible: boolean }, void];
+  browser_close: [{ sessionId?: string | null } | void, void];
+  browser_navigate: [{ sessionId?: string | null; url: string }, BrowserInfo];
+  browser_reload: [{ sessionId?: string | null } | void, BrowserInfo];
+  browser_back: [{ sessionId?: string | null } | void, BrowserInfo];
+  browser_forward: [{ sessionId?: string | null } | void, BrowserInfo];
+  browser_info: [{ sessionId?: string | null } | void, BrowserInfo];
+  browser_snapshot: [{ sessionId?: string | null } | void, BrowserSnapshot];
+  browser_screenshot: [{ sessionId?: string | null } | void, string];
   search_workspace_files: [
     {
       workingDir: string;
@@ -494,6 +509,39 @@ export interface TauriCommands {
 // ============================================
 // 类型定义
 // ============================================
+
+export interface BrowserInfo {
+  label: string;
+  session_id?: string | null;
+  url?: string | null;
+  title?: string | null;
+  visible: boolean;
+  can_go_back?: boolean;
+  can_go_forward?: boolean;
+}
+
+export interface BrowserSnapshotElement {
+  ref: number;
+  tag: string;
+  role?: string | null;
+  type?: string | null;
+  label?: string | null;
+  href?: string | null;
+  rect?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+}
+
+export interface BrowserSnapshot {
+  ok?: boolean;
+  url?: string;
+  title?: string;
+  text?: string;
+  elements?: BrowserSnapshotElement[];
+}
 
 export interface AppConfig {
   favorites: FavoriteProject[];
