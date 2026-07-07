@@ -10,6 +10,7 @@ import { generateMockMilestones, generateMockUsageStats } from '@/lib/mockAnalyt
 import { useLocale } from '@/locales';
 import { AnalyticsSkeleton } from '@/components/ui/skeleton-states';
 import { useCountUp } from '@/hooks/useCountUp';
+import { ccemMotion, clearMotionProps, getMotionTargets, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';
 import type { DailyActivity, UsageStats } from '@/types/analytics';
 import { shallow } from 'zustand/shallow';
 
@@ -166,6 +167,8 @@ export function Analytics() {
   const [usageSource, setUsageSource] = useState<UsageSourceFilter>('all');
   const [showSharePoster, setShowSharePoster] = useState(false);
   const requestSeqRef = useRef(0);
+  const analyticsMotionRef = useRef<HTMLDivElement>(null);
+  const hasHydratedAnalyticsMotionRef = useRef(false);
   const [, startTransition] = useTransition();
 
   const buildMilestones = useCallback((stats: UsageStats, streakDays: number) => {
@@ -293,6 +296,51 @@ export function Analytics() {
     localStorage.setItem('ccem-ftue-analytics-seen', 'true');
   }, []);
 
+  const analyticsMotionKey = `${usageSource}:${usageStats?.lastUpdated ?? 'empty'}:${isRefreshing ? 'refreshing' : 'settled'}`;
+
+  useGSAP(() => {
+    const root = analyticsMotionRef.current;
+    if (!root) {
+      return;
+    }
+
+    const targets = [
+      ...getMotionTargets(root, '[data-analytics-motion-panel]', 3),
+      ...getMotionTargets(root, '[data-analytics-motion-cell]', 6),
+      ...getMotionTargets(root, '[data-analytics-motion-action]', 2),
+    ];
+
+    if (!hasHydratedAnalyticsMotionRef.current) {
+      hasHydratedAnalyticsMotionRef.current = true;
+      clearMotionProps(targets);
+      return;
+    }
+
+    if (targets.length === 0) {
+      return;
+    }
+
+    if (shouldReduceMotion()) {
+      clearMotionProps(targets);
+      return;
+    }
+
+    gsap.killTweensOf(targets);
+    gsap.fromTo(
+      targets,
+      { autoAlpha: 0, y: 8 },
+      {
+        autoAlpha: 1,
+        y: 0,
+        duration: ccemMotion.duration.quick,
+        ease: ccemMotion.ease.standard,
+        stagger: 0.025,
+        overwrite: 'auto',
+        onComplete: () => clearMotionProps(targets),
+      },
+    );
+  }, { scope: analyticsMotionRef, dependencies: [analyticsMotionKey] });
+
   const totalTokensRaw = usageStats
     ? usageStats.total.inputTokens + usageStats.total.outputTokens + usageStats.total.cacheReadTokens + usageStats.total.cacheCreationTokens
     : 0;
@@ -378,7 +426,7 @@ export function Analytics() {
   }
 
   return (
-    <div className="page-transition-enter mx-auto w-full max-w-[1480px] pb-8">
+    <div ref={analyticsMotionRef} className="page-transition-enter mx-auto w-full max-w-[1480px] pb-8">
       {loadError && !isUsingMockData && (
         <ErrorBanner
           message={t('analytics.failedToLoad')}
@@ -399,7 +447,7 @@ export function Analytics() {
       )}
 
       {/* Summary Section */}
-      <section className="rounded-2xl border border-border-subtle bg-[hsl(var(--surface-sunken))] px-5 py-5 sm:px-8 sm:py-6">
+      <section data-analytics-motion-panel className="rounded-2xl border border-border-subtle bg-[hsl(var(--surface-sunken))] px-5 py-5 sm:px-8 sm:py-6">
         {/* Source filter + actions row */}
         <div className="mb-5 flex items-start justify-between gap-3">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 sm:flex-nowrap sm:overflow-x-auto sm:[scrollbar-width:none] sm:[&::-webkit-scrollbar]:hidden" role="radiogroup" aria-label="Source filter">
@@ -430,6 +478,7 @@ export function Analytics() {
 
           <div className="flex items-center gap-2">
             <button
+              data-analytics-motion-action
               type="button"
               disabled={isRefreshing}
               onClick={() => void handleRefresh()}
@@ -439,6 +488,7 @@ export function Analytics() {
               <RefreshCw className={cn('h-4 w-4', isRefreshing && 'animate-spin')} />
             </button>
             <button
+              data-analytics-motion-action
               type="button"
               onClick={() => setShowSharePoster(true)}
               className="flex h-9 w-9 items-center justify-center rounded-full bg-[hsl(var(--surface))] text-muted-foreground transition-colors hover:text-foreground"
@@ -491,7 +541,7 @@ export function Analytics() {
       </section>
 
       {/* Charts Section — white surface */}
-      <section className="mt-8">
+      <section data-analytics-motion-panel className="mt-8">
         <Suspense fallback={<AnalyticsInsightsFallback />}>
           <LazyAnalyticsInsights
             usageStats={usageStats}
@@ -536,7 +586,7 @@ function MetricCell({
   className?: string;
 }) {
   return (
-    <div className={cn('min-w-0 border-t border-[hsl(var(--border-subtle)/0.42)] pt-2.5 first:border-t-0 first:pt-0', className)}>
+    <div data-analytics-motion-cell className={cn('min-w-0 border-t border-[hsl(var(--border-subtle)/0.42)] pt-2.5 first:border-t-0 first:pt-0', className)}>
       <div className="flex min-w-0 items-center gap-2">
         <span
           className={cn(

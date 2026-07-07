@@ -59,6 +59,7 @@ function DiscoverCard({
 
   return (
     <div
+      data-skill-motion-card
       className={`
         group rounded-2xl border bg-surface-raised transition-all duration-200
         ${isExpanded
@@ -185,6 +186,7 @@ function InstalledCard({
 
   return (
     <div
+      data-skill-motion-card
       className={`
         group rounded-2xl border bg-surface-raised transition-all duration-200
         ${isExpanded

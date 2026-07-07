@@ -30,3 +30,15 @@ export function clearMotionProps(targets: Parameters<typeof gsap.set>[0]) {
     clearProps: 'opacity,visibility,transform,scale,x,y',
   });
 }
+
+export function getMotionTargets(
+  root: ParentNode | null | undefined,
+  selector: string,
+  limit = 12,
+) {
+  if (!root || limit <= 0) {
+    return [] as HTMLElement[];
+  }
+
+  return Array.from(root.querySelectorAll<HTMLElement>(selector)).slice(0, limit);
+}
