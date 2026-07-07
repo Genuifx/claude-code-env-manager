@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
 import { useLocale } from '../locales';
@@ -8,6 +8,7 @@ import { SkillCard, type DiscoverSkillInfo } from '@/components/skills/SkillCard
 import { InstallDialog } from '@/components/skills/InstallDialog';
 import { EmptyState, ErrorBanner } from '@/components/ui/EmptyState';
 import { useTauriEvent } from '@/hooks/useTauriEvents';
+import { ccemMotion, clearMotionProps, getMotionTargets, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';
 import { toast } from 'sonner';
 import {
   Search,
@@ -80,6 +81,8 @@ export function Skills() {
   }>({ open: false, packageId: '', skillName: '', displayName: '', installType: 'skills' });
 
   const streamEndRef = useRef<HTMLDivElement>(null);
+  const skillsMotionRef = useRef<HTMLDivElement>(null);
+  const hasHydratedSkillsMotionRef = useRef(false);
 
   // Load curated skills on mount
   useEffect(() => {
@@ -304,16 +307,87 @@ export function Skills() {
   const pluginSkills = installedSkills.filter((s) => s.scope === 'plugin');
   const globalSkills = installedSkills.filter((s) => s.scope === 'global');
   const projectSkills = installedSkills.filter((s) => s.scope === 'project');
+  const skillsMotionKey = useMemo(() => {
+    if (activeFilter === 'installed') {
+      return `installed:${pluginSkills.length}:${globalSkills.length}:${projectSkills.length}`;
+    }
+
+    if (hasSearchContent) {
+      const resultIds = results
+        .slice(0, 12)
+        .map((skill) => `${skill.package_id}/${skill.skill_name || skill.name}`)
+        .join('|');
+      return `search:${isSearching ? 'busy' : 'done'}:${resultIds}:${error ? 'error' : 'ok'}`;
+    }
+
+    return groupedCurated
+      .map(({ category, skills }) => `${category}:${skills.length}`)
+      .join('|');
+  }, [
+    activeFilter,
+    error,
+    globalSkills.length,
+    groupedCurated,
+    hasSearchContent,
+    isSearching,
+    pluginSkills.length,
+    projectSkills.length,
+    results,
+  ]);
+
+  useGSAP(() => {
+    const root = skillsMotionRef.current;
+    if (!root) {
+      return;
+    }
+
+    const targets = [
+      ...getMotionTargets(root, '[data-skill-motion-warning], [data-skill-motion-stream]', 2),
+      ...getMotionTargets(root, '[data-skill-motion-section]', 4),
+      ...getMotionTargets(root, '[data-skill-motion-card]', 12),
+    ];
+
+    if (!hasHydratedSkillsMotionRef.current) {
+      hasHydratedSkillsMotionRef.current = true;
+      clearMotionProps(targets);
+      return;
+    }
+
+    if (targets.length === 0) {
+      return;
+    }
+
+    if (shouldReduceMotion()) {
+      clearMotionProps(targets);
+      return;
+    }
+
+    gsap.killTweensOf(targets);
+    gsap.fromTo(
+      targets,
+      { autoAlpha: 0, y: 8, scale: 0.985 },
+      {
+        autoAlpha: 1,
+        y: 0,
+        scale: 1,
+        duration: ccemMotion.duration.quick,
+        ease: ccemMotion.ease.standard,
+        stagger: 0.025,
+        overwrite: 'auto',
+        onComplete: () => clearMotionProps(targets),
+      },
+    );
+  }, { scope: skillsMotionRef, dependencies: [skillsMotionKey] });
 
   if (isLoadingSkills) {
     return <SkillsSkeleton />;
   }
 
   return (
-    <div className="page-transition-enter space-y-6">
+    <div ref={skillsMotionRef} className="page-transition-enter space-y-6">
       {/* Working directory warning */}
       {!defaultWorkingDir && (
-        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-500/8 border border-amber-500/15">
+        <div data-skill-motion-warning className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-500/8 border border-amber-500/15">
           <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
           <span className="text-sm text-amber-700 dark:text-amber-400 flex-1">
             {t('skills.needWorkingDir')}
@@ -394,19 +468,21 @@ export function Skills() {
 
       {/* Error banner */}
       {error && (
-        <ErrorBanner
-          message={error}
-          onRetry={() => {
-            setError(null);
-            handleSearch();
-          }}
-          retryLabel={t('common.retry')}
-        />
+        <div data-skill-motion-stream>
+          <ErrorBanner
+            message={error}
+            onRetry={() => {
+              setError(null);
+              handleSearch();
+            }}
+            retryLabel={t('common.retry')}
+          />
+        </div>
       )}
 
       {/* Stream output — compact inline indicator */}
       {streamMessages.length > 0 && (
-        <div className="rounded-xl bg-surface-raised/50 border border-[hsl(var(--glass-border-light)/0.08)] p-4 max-h-36 overflow-y-auto">
+        <div data-skill-motion-stream className="rounded-xl bg-surface-raised/50 border border-[hsl(var(--glass-border-light)/0.08)] p-4 max-h-36 overflow-y-auto">
           <div className="space-y-1.5 text-sm">
             {streamMessages.map((msg, i) => (
               <div key={i} className="flex items-start gap-2">
@@ -479,7 +555,7 @@ export function Skills() {
                 community: t('skills.categoryCommunity'),
               };
               return (
-                <section key={category}>
+                <section key={category} data-skill-motion-section>
                   <h2 className="text-[17px] font-semibold text-foreground tracking-tight mb-4">
                     {categoryLabels[category]}
                   </h2>
@@ -570,7 +646,7 @@ function InstalledView({
   const renderGroup = (label: string, skills: any[]) => {
     if (skills.length === 0) return null;
     return (
-      <section>
+      <section data-skill-motion-section>
         <h2 className="text-[17px] font-semibold text-foreground tracking-tight mb-4">{label}</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {skills.map((skill: any) => (

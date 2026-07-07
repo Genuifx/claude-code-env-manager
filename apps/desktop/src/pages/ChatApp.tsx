@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { useLocale } from '@/locales';
 import { TelegramPanel } from '@/components/chat-app/telegram/TelegramPanel';
@@ -7,6 +7,7 @@ import { WeixinPanel } from '@/components/chat-app/weixin/WeixinPanel';
 import { getRemotePlatformMeta, REMOTE_PLATFORM_ORDER, type RemotePlatformId } from '@/lib/remote-platforms';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import type { PlatformCapabilities } from '@/lib/tauri-ipc';
+import { ccemMotion, clearMotionProps, getMotionTargets, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';
 
 interface TabDef {
   id: RemotePlatformId;
@@ -34,6 +35,8 @@ export function ChatApp() {
   const currentTab = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
   const showTmuxNotice = platformCapabilities?.tmuxSupported === true && !platformCapabilities.tmuxInstalled;
   const tmuxInstallCommand = platformCapabilities?.tmuxInstallCommand ?? null;
+  const chatMotionRef = useRef<HTMLDivElement>(null);
+  const hasHydratedChatMotionRef = useRef(false);
 
   useEffect(() => {
     getPlatformCapabilities()
@@ -41,11 +44,56 @@ export function ChatApp() {
       .catch(() => setPlatformCapabilities(null));
   }, [getPlatformCapabilities]);
 
+  useGSAP(() => {
+    const root = chatMotionRef.current;
+    if (!root) {
+      return;
+    }
+
+    const activeTabButton = root.querySelector<HTMLElement>('[data-chat-platform-active="true"]');
+    const targets = [
+      ...(activeTabButton ? [activeTabButton] : []),
+      ...getMotionTargets(root, '[data-chat-platform-warning]', 1),
+      ...getMotionTargets(root, '[data-chat-platform-panel]', 1),
+    ];
+
+    if (!hasHydratedChatMotionRef.current) {
+      hasHydratedChatMotionRef.current = true;
+      clearMotionProps(targets);
+      return;
+    }
+
+    if (targets.length === 0) {
+      return;
+    }
+
+    if (shouldReduceMotion()) {
+      clearMotionProps(targets);
+      return;
+    }
+
+    gsap.killTweensOf(targets);
+    gsap.fromTo(
+      targets,
+      { autoAlpha: 0, y: 6, scale: 0.99 },
+      {
+        autoAlpha: 1,
+        y: 0,
+        scale: 1,
+        duration: ccemMotion.duration.quick,
+        ease: ccemMotion.ease.standard,
+        stagger: 0.025,
+        overwrite: 'auto',
+        onComplete: () => clearMotionProps(targets),
+      },
+    );
+  }, { scope: chatMotionRef, dependencies: [activeTab, showTmuxNotice] });
+
   return (
-    <div className="page-transition-enter space-y-6">
+    <div ref={chatMotionRef} className="page-transition-enter space-y-6">
       {/* tmux warning */}
       {showTmuxNotice && (
-        <div className="rounded-2xl border border-warning/20 bg-warning/5 px-5 py-4">
+        <div data-chat-platform-warning className="rounded-2xl border border-warning/20 bg-warning/5 px-5 py-4">
           <div className="flex items-start gap-3">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
             <div>
@@ -69,6 +117,8 @@ export function ChatApp() {
           return (
             <button
               key={tab.id}
+              data-chat-platform-tab={tab.id}
+              data-chat-platform-active={isActive ? 'true' : 'false'}
               onClick={() => setActiveTab(tab.id)}
               className={`
                 inline-flex items-center gap-2 rounded-full px-4 py-2
@@ -89,7 +139,7 @@ export function ChatApp() {
       </div>
 
       {/* Active panel */}
-      <div className="animate-in fade-in duration-150">
+      <div data-chat-platform-panel>
         {currentTab.panel()}
       </div>
     </div>

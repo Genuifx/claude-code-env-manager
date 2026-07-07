@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { listen } from '@tauri-apps/api/event';
 import { useLocale } from '@/locales';
@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { ccemMotion, clearMotionProps, getMotionTargets, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';
 import { shallow } from 'zustand/shallow';
 import type { PlatformCapabilities, WecomTaskBindingOption } from '@/lib/tauri-ipc';
 
@@ -165,7 +166,7 @@ function TimelineBar({ tasks, runs }: { tasks: CronTask[]; runs: Record<string, 
   ];
 
   return (
-    <div className="relative h-12 md:h-14 lg:h-16 glass-card glass-noise rounded-xl overflow-hidden">
+    <div data-cron-motion-timeline className="relative h-12 md:h-14 lg:h-16 glass-card glass-noise rounded-xl overflow-hidden">
       {/* Elapsed region */}
       <div
         className="absolute inset-y-0 left-0 bg-[hsl(var(--primary)/0.08)]"
@@ -192,6 +193,7 @@ function TimelineBar({ tasks, runs }: { tasks: CronTask[]; runs: Record<string, 
       {dots.map((dot, i) => (
         <div
           key={i}
+          data-cron-motion-dot
           className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full ring-2 ring-[hsl(var(--surface-raised))]"
           style={{ left: `${dot.percent}%`, backgroundColor: statusColor(dot.status) }}
         />
@@ -290,6 +292,8 @@ function TimelineTaskCard({
 
   return (
     <div
+      data-cron-motion-card
+      data-cron-motion-expanded={expanded ? 'true' : 'false'}
       className={cn(
         'glass-card glass-noise rounded-xl transition-all',
         expanded && 'ring-1 ring-[hsl(var(--primary)/0.4)]',
@@ -337,7 +341,7 @@ function TimelineTaskCard({
 
       {/* Expanded detail */}
       <div className={cn('grid transition-[grid-template-rows] duration-200 ease-out', expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]')}>
-        <div className="overflow-hidden">
+        <div data-cron-motion-detail className="overflow-hidden">
           <div className="px-4 pb-3.5 space-y-2.5 border-t border-[hsl(var(--glass-border-light)/var(--glass-border-opacity))]">
             {/* Actions */}
             <div className="flex items-center gap-2 pt-3.5">
@@ -840,6 +844,8 @@ export function CronTasks({ onAiCreate }: { onAiCreate?: () => void }) {
   const [nextRunTimes, setNextRunTimes] = useState<Record<string, string>>({});
   const [drawerRun, setDrawerRun] = useState<CronTaskRun | null>(null);
   const [drawerLoading, setDrawerLoading] = useState(false);
+  const cronMotionRef = useRef<HTMLDivElement>(null);
+  const hasHydratedCronMotionRef = useRef(false);
   const showTmuxNotice = platformCapabilities?.tmuxSupported === true && !platformCapabilities.tmuxInstalled;
   const tmuxInstallCommand = platformCapabilities?.tmuxInstallCommand ?? null;
 
@@ -951,6 +957,100 @@ export function CronTasks({ onAiCreate }: { onAiCreate?: () => void }) {
     );
   }, [cronTasks, cronRuns]);
 
+  const cronMotionKey = useMemo(() => {
+    const taskKey = [...upcomingTasks, ...disabledTasks]
+      .slice(0, 12)
+      .map((task) => {
+        const runs = cronRuns[task.id] ?? [];
+        const lastRun = runs[runs.length - 1];
+        return `${task.id}:${task.enabled ? 'on' : 'off'}:${nextRunTimes[task.id] ?? '-'}:${lastRun?.status ?? '-'}`;
+      })
+      .join('|');
+    const completedKey = todayCompletedRuns
+      .slice(0, 6)
+      .map(({ run }) => `${run.id}:${run.status}`)
+      .join('|');
+    return `${isLoadingCron ? 'loading' : 'ready'}:${taskKey}:${completedKey}`;
+  }, [cronRuns, disabledTasks, isLoadingCron, nextRunTimes, todayCompletedRuns, upcomingTasks]);
+
+  useGSAP(() => {
+    const root = cronMotionRef.current;
+    if (!root) {
+      return;
+    }
+
+    const targets = [
+      ...getMotionTargets(root, '[data-cron-motion-timeline]', 1),
+      ...getMotionTargets(root, '[data-cron-motion-section]', 4),
+      ...getMotionTargets(root, '[data-cron-motion-card]', 12),
+      ...getMotionTargets(root, '[data-cron-motion-run]', 8),
+    ];
+
+    if (!hasHydratedCronMotionRef.current) {
+      hasHydratedCronMotionRef.current = true;
+      clearMotionProps(targets);
+      return;
+    }
+
+    if (targets.length === 0) {
+      return;
+    }
+
+    if (shouldReduceMotion()) {
+      clearMotionProps(targets);
+      return;
+    }
+
+    gsap.killTweensOf(targets);
+    gsap.fromTo(
+      targets,
+      { autoAlpha: 0, y: 8, scale: 0.99 },
+      {
+        autoAlpha: 1,
+        y: 0,
+        scale: 1,
+        duration: ccemMotion.duration.quick,
+        ease: ccemMotion.ease.standard,
+        stagger: 0.02,
+        overwrite: 'auto',
+        onComplete: () => clearMotionProps(targets),
+      },
+    );
+  }, { scope: cronMotionRef, dependencies: [cronMotionKey] });
+
+  useGSAP(() => {
+    const root = cronMotionRef.current;
+    if (!root || !expandedTaskId) {
+      return;
+    }
+
+    const detail = root.querySelector<HTMLElement>(
+      '[data-cron-motion-card][data-cron-motion-expanded="true"] [data-cron-motion-detail]',
+    );
+    if (!detail) {
+      return;
+    }
+
+    if (shouldReduceMotion()) {
+      clearMotionProps(detail);
+      return;
+    }
+
+    gsap.killTweensOf(detail);
+    gsap.fromTo(
+      detail,
+      { autoAlpha: 0, y: -4 },
+      {
+        autoAlpha: 1,
+        y: 0,
+        duration: ccemMotion.duration.quick,
+        ease: ccemMotion.ease.standard,
+        overwrite: 'auto',
+        onComplete: () => clearMotionProps(detail),
+      },
+    );
+  }, { scope: cronMotionRef, dependencies: [expandedTaskId] });
+
   const handleAdd = () => { setEditingTask(undefined); setDialogOpen(true); };
   const handleEdit = (task: CronTask) => { setEditingTask(task); setDialogOpen(true); };
   const handleAiCreate = () => {
@@ -1010,7 +1110,7 @@ export function CronTasks({ onAiCreate }: { onAiCreate?: () => void }) {
   };
 
   return (
-    <div className="space-y-4">
+    <div ref={cronMotionRef} className="space-y-4">
       {/* Tmux warning */}
       {showTmuxNotice && (
         <div className="rounded-xl border border-warning/25 bg-warning/8 px-4 py-3">
@@ -1047,7 +1147,7 @@ export function CronTasks({ onAiCreate }: { onAiCreate?: () => void }) {
 
       {/* Templates (shown when no tasks) */}
       {templates.length > 0 && cronTasks.length === 0 && (
-        <div className="shrink-0">
+        <div data-cron-motion-section className="shrink-0">
           <p className="text-xs text-muted-foreground mb-2">{t('cron.templates')}</p>
           <div className="flex gap-2 overflow-x-auto pb-1">
             {templates.map((tpl) => {
@@ -1085,7 +1185,7 @@ export function CronTasks({ onAiCreate }: { onAiCreate?: () => void }) {
 
           {/* Upcoming section */}
           {upcomingTasks.length > 0 && (
-            <div className="space-y-2.5">
+            <div data-cron-motion-section className="space-y-2.5">
               <div className="flex items-center gap-2">
                 <Zap className="w-3.5 h-3.5 text-primary" />
                 <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">{t('cron.upcoming')}</h3>
@@ -1113,7 +1213,7 @@ export function CronTasks({ onAiCreate }: { onAiCreate?: () => void }) {
 
           {/* Disabled tasks */}
           {disabledTasks.length > 0 && (
-            <div className="space-y-2.5">
+            <div data-cron-motion-section className="space-y-2.5">
               <div className="flex items-center gap-2">
                 <Timer className="w-3.5 h-3.5 text-muted-foreground" />
                 <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{t('cron.disabled')}</h3>
@@ -1140,7 +1240,7 @@ export function CronTasks({ onAiCreate }: { onAiCreate?: () => void }) {
 
           {/* Completed today section */}
           {todayCompletedRuns.length > 0 && (
-            <div className="space-y-2.5">
+            <div data-cron-motion-section className="space-y-2.5">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-3.5 h-3.5 text-success" />
                 <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">{t('cron.completedToday')}</h3>
@@ -1148,7 +1248,7 @@ export function CronTasks({ onAiCreate }: { onAiCreate?: () => void }) {
               </div>
               <div className="space-y-1.5">
                 {todayCompletedRuns.slice(0, 10).map(({ task, run }) => (
-                  <div key={run.id} className="group/run glass-subtle glass-noise rounded-lg px-4 py-2 flex items-center gap-3">
+                  <div key={run.id} data-cron-motion-run className="group/run glass-subtle glass-noise rounded-lg px-4 py-2 flex items-center gap-3">
                     <StatusBadge status={run.status} />
                     <span className="text-xs font-medium text-foreground flex-1 truncate">{task.name}</span>
                     <span className="text-2xs text-muted-foreground tabular-nums">{formatTimeShort(run.finishedAt)}</span>

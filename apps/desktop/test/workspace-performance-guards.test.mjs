@@ -321,6 +321,50 @@ test('ProjectTree keeps session order stable and gates FLIP measurement', async 
   );
 });
 
+test('GSAP page motion targets stay scoped and capped outside hot paths', async () => {
+  const gsapMotion = await readSource('src', 'lib', 'gsapMotion.ts');
+  const motionFiles = [
+    ['src', 'pages', 'Skills.tsx'],
+    ['src', 'components', 'skills', 'InstallDialog.tsx'],
+    ['src', 'pages', 'Analytics.tsx'],
+    ['src', 'components', 'app-update', 'GlobalUpdateIndicator.tsx'],
+    ['src', 'pages', 'CronTasks.tsx'],
+    ['src', 'pages', 'ChatApp.tsx'],
+  ];
+
+  assert.match(
+    gsapMotion,
+    /export function getMotionTargets\([\s\S]*limit = 12/,
+    'shared motion selector should default to a small target cap',
+  );
+  assert.match(
+    gsapMotion,
+    /querySelectorAll<HTMLElement>\(selector\)\)\.slice\(0, limit\)/,
+    'shared motion selector should slice query results before callers animate them',
+  );
+
+  for (const parts of motionFiles) {
+    const source = await readSource(...parts);
+    const file = parts.join('/');
+
+    assert.match(
+      source,
+      /getMotionTargets\(/,
+      `${file} should use the capped motion selector helper`,
+    );
+    assert.doesNotMatch(
+      source,
+      /gsap\.utils\.toArray/,
+      `${file} should not animate unbounded selector arrays`,
+    );
+    assert.doesNotMatch(
+      source,
+      /document\.querySelectorAll/,
+      `${file} should keep motion selectors scoped to component roots`,
+    );
+  }
+});
+
 test('doctor perf smoke is explicit, budgeted, and exportable', async () => {
   const settings = await readSource('src', 'pages', 'Settings.tsx');
   const perfSmoke = await readSource('src', 'lib', 'doctor-perf-smoke.ts');

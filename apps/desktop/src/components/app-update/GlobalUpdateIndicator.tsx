@@ -5,6 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { useAppUpdate } from './appUpdateContext';
+import { ccemMotion, clearMotionProps, getMotionTargets, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';
 import {
   deriveUpdateIndicatorModel,
   type AppUpdateIndicatorAction,
@@ -23,6 +24,8 @@ export function GlobalUpdateIndicator() {
   const model = deriveUpdateIndicatorModel(state);
   const [statusOpen, setStatusOpen] = useState(false);
   const readyVersionRef = useRef<string | null>(null);
+  const indicatorButtonRef = useRef<HTMLButtonElement>(null);
+  const popoverMotionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -51,6 +54,61 @@ export function GlobalUpdateIndicator() {
       setStatusOpen(false);
     }
   }, [model.visible]);
+
+  useGSAP(() => {
+    const button = indicatorButtonRef.current;
+    if (!model.visible || !button) {
+      return;
+    }
+
+    if (shouldReduceMotion()) {
+      clearMotionProps(button);
+      return;
+    }
+
+    gsap.killTweensOf(button);
+    gsap.fromTo(
+      button,
+      { autoAlpha: 0, y: -4, scale: 0.92 },
+      {
+        autoAlpha: 1,
+        y: 0,
+        scale: 1,
+        duration: ccemMotion.duration.quick,
+        ease: ccemMotion.ease.standard,
+        overwrite: 'auto',
+        onComplete: () => clearMotionProps(button),
+      },
+    );
+  }, { dependencies: [model.visible, model.tone] });
+
+  useGSAP(() => {
+    const popover = popoverMotionRef.current;
+    if (!statusOpen || !popover) {
+      return;
+    }
+
+    const targets = [popover, ...getMotionTargets(popover, '[data-update-popover-motion]', 4)];
+    if (shouldReduceMotion()) {
+      clearMotionProps(targets);
+      return;
+    }
+
+    gsap.killTweensOf(targets);
+    gsap.fromTo(
+      targets,
+      { autoAlpha: 0, y: -4 },
+      {
+        autoAlpha: 1,
+        y: 0,
+        duration: ccemMotion.duration.quick,
+        ease: ccemMotion.ease.standard,
+        stagger: 0.025,
+        overwrite: 'auto',
+        onComplete: () => clearMotionProps(targets),
+      },
+    );
+  }, { scope: popoverMotionRef, dependencies: [statusOpen, model.tone] });
 
   if (!model.visible || !state.updateInfo) {
     return null;
@@ -113,6 +171,7 @@ export function GlobalUpdateIndicator() {
       <Popover open={statusOpen} onOpenChange={setStatusOpen}>
         <PopoverTrigger asChild>
           <button
+            ref={indicatorButtonRef}
             type="button"
             data-update-tone={model.tone}
             className={cn(
@@ -149,22 +208,23 @@ export function GlobalUpdateIndicator() {
           </button>
         </PopoverTrigger>
         <PopoverContent
+          ref={popoverMotionRef}
           side="bottom"
           align="start"
           sideOffset={8}
           className="w-auto max-w-[calc(100vw-24px)] rounded-md border-border/70 bg-popover/95 px-2 py-1.5 shadow-sm backdrop-blur-xl"
         >
           <div className="flex min-w-0 items-center gap-2 whitespace-nowrap">
-            <span className="min-w-0 truncate text-sm font-medium text-foreground">
+            <span data-update-popover-motion className="min-w-0 truncate text-sm font-medium text-foreground">
               {popoverTitle}
             </span>
             {showVersion ? (
-              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+              <span data-update-popover-motion className="shrink-0 text-xs tabular-nums text-muted-foreground">
                 v{state.updateInfo.version}
               </span>
             ) : null}
             {showProgressTrack ? (
-              <span className="relative h-1 w-14 shrink-0 overflow-hidden rounded-full bg-foreground/10" aria-hidden="true">
+              <span data-update-popover-motion className="relative h-1 w-14 shrink-0 overflow-hidden rounded-full bg-foreground/10" aria-hidden="true">
                 <span
                   className={cn(
                     'block h-full rounded-full bg-primary transition-[width] duration-300 ease-out',
@@ -176,6 +236,7 @@ export function GlobalUpdateIndicator() {
             ) : null}
             {actionLabel && model.action !== 'none' ? (
               <Button
+                data-update-popover-motion
                 variant="ghost"
                 size="sm"
                 className={cn(

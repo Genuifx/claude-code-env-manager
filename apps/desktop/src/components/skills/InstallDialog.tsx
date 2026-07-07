@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
 import {
@@ -12,6 +12,7 @@ import {
 import { useLocale } from '@/locales';
 import { toast } from 'sonner';
 import { Download, Loader2 } from 'lucide-react';
+import { ccemMotion, clearMotionProps, getMotionTargets, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';
 
 interface InstallDialogProps {
   open: boolean;
@@ -33,6 +34,7 @@ export function InstallDialog({
   const { t } = useLocale();
   const [agents, setAgents] = useState<string[]>(['Claude Code']);
   const [installing, setInstalling] = useState(false);
+  const installDialogMotionRef = useRef<HTMLDivElement>(null);
 
   const toggleAgent = (agent: string) => {
     setAgents((prev) =>
@@ -61,15 +63,66 @@ export function InstallDialog({
     onOpenChange(false);
   };
 
+  useGSAP(() => {
+    if (!open) {
+      return;
+    }
+
+    const root = installDialogMotionRef.current;
+    if (!root) {
+      return;
+    }
+
+    const targets = getMotionTargets(root, '[data-skill-install-motion]', 6);
+    if (shouldReduceMotion()) {
+      clearMotionProps(targets);
+      return;
+    }
+
+    if (targets.length > 0) {
+      gsap.killTweensOf(targets);
+      gsap.fromTo(
+        targets,
+        { autoAlpha: 0, y: 6 },
+        {
+          autoAlpha: 1,
+          y: 0,
+          duration: ccemMotion.duration.quick,
+          ease: ccemMotion.ease.standard,
+          stagger: 0.03,
+          overwrite: 'auto',
+          onComplete: () => clearMotionProps(targets),
+        },
+      );
+    }
+
+    if (installing) {
+      const action = root.querySelector<HTMLElement>('[data-skill-install-action]');
+      if (action) {
+        gsap.fromTo(
+          action,
+          { scale: 0.96 },
+          {
+            scale: 1,
+            duration: ccemMotion.duration.quick,
+            ease: ccemMotion.ease.standard,
+            overwrite: 'auto',
+            onComplete: () => clearMotionProps(action),
+          },
+        );
+      }
+    }
+  }, { scope: installDialogMotionRef, dependencies: [open, installing] });
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="frosted-panel glass-noise sm:max-w-md">
-        <DialogHeader>
+      <DialogContent ref={installDialogMotionRef} className="frosted-panel glass-noise sm:max-w-md">
+        <DialogHeader data-skill-install-motion>
           <DialogTitle>{t('skills.installDialogTitle')}</DialogTitle>
           <DialogDescription>{displayName}</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
+        <div data-skill-install-motion className="space-y-4 py-2">
           {/* Agent selection */}
           <div>
             <p className="text-sm font-medium text-foreground mb-3">
@@ -97,7 +150,7 @@ export function InstallDialog({
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter data-skill-install-motion>
           <Button
             variant="outline"
             className="glass-btn-outline"
@@ -106,6 +159,7 @@ export function InstallDialog({
             {t('common.cancel')}
           </Button>
           <Button
+            data-skill-install-action
             onClick={handleInstall}
             disabled={installing || agents.length === 0}
           >
