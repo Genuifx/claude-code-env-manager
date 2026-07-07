@@ -819,6 +819,7 @@ export function useTauriCommands() {
     initialImages?: NativePromptImageInput[];
     providerSessionId?: string | null;
     effort?: string | null;
+    seedBoundaryMessageCount?: number | null;
   }): Promise<NativeSessionSummary> => {
     const { currentEnv, permissionMode, selectedWorkingDir } = getSessionDefaults();
     return invoke<NativeSessionSummary>('create_native_session', {
@@ -832,6 +833,7 @@ export function useTauriCommands() {
       initialImages: options.initialImages?.length ? options.initialImages : null,
       providerSessionId: options.providerSessionId ?? null,
       effort: options.effort ?? null,
+      seedBoundaryMessageCount: options.seedBoundaryMessageCount ?? null,
     });
   }, [getSessionDefaults]);
 

@@ -2,7 +2,15 @@ import type {
   ConversationContentBlock,
   ConversationMessageData,
 } from '@/features/conversations/types';
-import type { SessionEventRecord, SessionPromptImage } from '@/lib/tauri-ipc';
+import type { ReplayBatch, SessionEventRecord, SessionPromptImage } from '@/lib/tauri-ipc';
+import {
+  normalizePromptConfirmationText,
+  normalizePromptIdentityText,
+  parsePromptTimestamp,
+  promptIdentityMatches,
+  promptTimestampsAreCompatible,
+  stripRenderedImageMarkers,
+} from './transcriptIdentity';
 
 export const COMPACTING_SUMMARY_TOKEN = '__ccem_context_compacting__';
 export const COMPACT_FAILED_SUMMARY_TOKEN = '__ccem_context_compact_failed__';
@@ -26,8 +34,7 @@ interface PendingAssistantTurn {
 }
 
 function parseOccurredAt(occurredAt: string): number | undefined {
-  const parsed = Date.parse(occurredAt);
-  return Number.isFinite(parsed) ? parsed : undefined;
+  return parsePromptTimestamp(occurredAt);
 }
 
 function cloneContent(content: ConversationMessageData['content']): ConversationMessageData['content'] {
@@ -52,7 +59,7 @@ function cloneMessages(messages: ConversationMessageData[]): ConversationMessage
 function createUserMessage(prompt: LocalUserPrompt): ConversationMessageData {
   const imageBlocks = createPromptImageBlocks(prompt.images);
   if (imageBlocks.length > 0) {
-    const displayText = removeRenderedImageSummary(prompt.text, imageBlocks.length);
+    const displayText = stripRenderedImageMarkers(prompt.text, imageBlocks);
     const content: ConversationContentBlock[] = [];
     if (displayText) {
       content.push({ type: 'text', text: displayText });
@@ -118,41 +125,6 @@ function createPromptImageBlocks(images?: SessionPromptImage[] | null): Conversa
     .filter((block): block is ConversationContentBlock => block != null);
 }
 
-function removeRenderedImageSummary(text: string, imageCount: number): string {
-  if (imageCount <= 0) {
-    return text.trim();
-  }
-
-  return text
-    .split('\n')
-    .filter((line) => !/^Images attached:\s*\d+\s*$/.test(line.trim()))
-    .join('\n')
-    .trim();
-}
-
-function promptTextKey(text: string | null | undefined): string {
-  return (text ?? '').trim();
-}
-
-function extractTaggedUserRequest(text: string): string | null {
-  const tagged = /<user_request>([\s\S]*?)(?:<\/user_request>|$)/.exec(text);
-  return tagged?.[1]?.trim() || null;
-}
-
-function normalizePromptMatchText(text: string | null | undefined): string {
-  const keyed = promptTextKey(text);
-  const requestText = extractTaggedUserRequest(keyed) ?? keyed;
-
-  return requestText
-    .split('\n')
-    .filter((line) => !/^Images attached:\s*\d+\s*$/.test(line.trim()))
-    .join('\n')
-    .replace(/\[Image #\d+\]/gi, '')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
 function messageContentText(content: ConversationMessageData['content']): string {
   if (typeof content === 'string') {
     return content.trim();
@@ -185,17 +157,17 @@ function messageContentText(content: ConversationMessageData['content']): string
   return '';
 }
 
-function promptMatchesMessage(promptText: string, messageText: string): boolean {
-  const prompt = normalizePromptMatchText(promptText);
-  const message = normalizePromptMatchText(messageText);
-  if (!prompt || !message) {
-    return false;
-  }
-  if (prompt === message) {
-    return true;
+function messageImageBlocks(content: ConversationMessageData['content']): ConversationContentBlock[] {
+  if (Array.isArray(content)) {
+    return content.filter((block) => block.type === 'image');
   }
 
-  return prompt.length >= 8 && message.includes(prompt);
+  if (content && typeof content === 'object') {
+    const block = content as ConversationContentBlock;
+    return block.type === 'image' ? [block] : [];
+  }
+
+  return [];
 }
 
 export function filterConfirmedLocalUserPrompts(
@@ -206,33 +178,32 @@ export function filterConfirmedLocalUserPrompts(
     return prompts;
   }
 
-  const confirmedCounts = new Map<string, number>();
+  const confirmedPrompts: Array<{ key: string; seq: number }> = [];
   for (const event of events) {
     if (event.payload.type !== 'user_prompt') {
       continue;
     }
-    const key = promptTextKey(event.payload.text);
+    const key = normalizePromptConfirmationText(event.payload.text, event.payload.images ?? null);
     if (!key) {
       continue;
     }
-    confirmedCounts.set(key, (confirmedCounts.get(key) ?? 0) + 1);
+    confirmedPrompts.push({ key, seq: event.seq });
   }
 
-  if (confirmedCounts.size === 0) {
+  if (confirmedPrompts.length === 0) {
     return prompts;
   }
 
   return prompts.filter((prompt) => {
-    const key = promptTextKey(prompt.text);
-    const count = confirmedCounts.get(key) ?? 0;
-    if (count <= 0) {
+    const key = normalizePromptConfirmationText(prompt.text, prompt.images ?? null);
+    const confirmedIndex = confirmedPrompts.findIndex((confirmed) =>
+      confirmed.key === key
+      && (prompt.afterEventSeq == null || confirmed.seq > prompt.afterEventSeq),
+    );
+    if (confirmedIndex === -1) {
       return true;
     }
-    if (count === 1) {
-      confirmedCounts.delete(key);
-    } else {
-      confirmedCounts.set(key, count - 1);
-    }
+    confirmedPrompts.splice(confirmedIndex, 1);
     return false;
   });
 }
@@ -260,26 +231,113 @@ export function splitLocalUserPromptsForReplay(
 export function trimSeedMessagesBeforeFirstUserPrompt(
   seedMessages: ConversationMessageData[],
   events: SessionEventRecord[],
+  options: { seedBoundaryMessageCount?: number | null } = {},
 ): ConversationMessageData[] {
   if (seedMessages.length === 0 || events.length === 0) {
     return seedMessages;
   }
 
+  if (options.seedBoundaryMessageCount != null && Number.isFinite(options.seedBoundaryMessageCount)) {
+    const boundaryCount = Math.max(0, Math.min(seedMessages.length, Math.floor(options.seedBoundaryMessageCount)));
+    return seedMessages.slice(0, boundaryCount);
+  }
+
   const firstPersistedPrompt = events.find((event) =>
     event.payload.type === 'user_prompt'
-    && promptTextKey(event.payload.text),
+    && normalizePromptIdentityText(event.payload.text, event.payload.images ?? null),
   );
   if (!firstPersistedPrompt || firstPersistedPrompt.payload.type !== 'user_prompt') {
     return seedMessages;
   }
 
   const promptText = firstPersistedPrompt.payload.text;
-  const boundaryIndex = seedMessages.findIndex((message) =>
-    (message.msgType === 'user' || message.msgType === 'human')
-    && promptMatchesMessage(promptText, messageContentText(message.content)),
-  );
+  const promptImages = firstPersistedPrompt.payload.images ?? null;
+  const promptTimestamp = parseOccurredAt(firstPersistedPrompt.occurred_at);
+  let boundaryIndex = -1;
+  let boundaryIsExact = false;
+
+  seedMessages.forEach((message, index) => {
+    if (message.msgType !== 'user' && message.msgType !== 'human') {
+      return;
+    }
+    const messageTimestamp = parsePromptTimestamp(message.timestamp);
+    if (!promptTimestampsAreCompatible(promptTimestamp, messageTimestamp)) {
+      return;
+    }
+    const match = promptIdentityMatches(
+      promptText,
+      messageContentText(message.content),
+      promptImages,
+      messageImageBlocks(message.content),
+    );
+    if (!match.matched) {
+      return;
+    }
+    if (!match.exact && boundaryIsExact) {
+      return;
+    }
+    boundaryIndex = index;
+    boundaryIsExact = match.exact;
+  });
 
   return boundaryIndex >= 0 ? seedMessages.slice(0, boundaryIndex) : seedMessages;
+}
+
+export function nativeReplayCoversRuntimeStart(replayBatch: ReplayBatch): boolean {
+  if (replayBatch.gap_detected || replayBatch.oldest_available_seq !== 1) {
+    return false;
+  }
+
+  const firstEvent = replayBatch.events.find((event) => event.seq === 1);
+  if (!firstEvent) {
+    return false;
+  }
+
+  if (firstEvent.payload.type === 'user_prompt') {
+    return true;
+  }
+
+  return firstEvent.payload.type === 'lifecycle'
+    && (firstEvent.payload.stage === 'runtime_boot' || firstEvent.payload.stage === 'initializing');
+}
+
+export function selectSeedMessagesForNativeReplay(
+  seedMessages: ConversationMessageData[],
+  replayBatch: ReplayBatch | null | undefined,
+  seedBoundaryMessageCount?: number | null,
+): ConversationMessageData[] {
+  if (seedMessages.length === 0) {
+    return seedMessages;
+  }
+
+  if (seedBoundaryMessageCount != null && Number.isFinite(seedBoundaryMessageCount)) {
+    return seedMessages.slice(0, Math.max(0, Math.min(seedMessages.length, Math.floor(seedBoundaryMessageCount))));
+  }
+
+  if (!replayBatch) {
+    return seedMessages;
+  }
+
+  if (nativeReplayCoversRuntimeStart(replayBatch)) {
+    return [];
+  }
+
+  return trimSeedMessagesBeforeFirstUserPrompt(seedMessages, replayBatch.events);
+}
+
+export function shouldSkipProviderSeedHydration(
+  replayBatch: ReplayBatch | null | undefined,
+  seedBoundaryMessageCount?: number | null,
+): boolean {
+  if (!replayBatch) {
+    return false;
+  }
+
+  if (seedBoundaryMessageCount === 0) {
+    return true;
+  }
+
+  return seedBoundaryMessageCount == null && nativeReplayCoversRuntimeStart(replayBatch);
 }
 
 function createAssistantTextMessage(
@@ -965,12 +1023,19 @@ export function buildMessagesFromEvents(
     next.push(createCompactBoundaryMessage(`compact-boundary-${event.seq}`, occurredAt));
   };
 
-  const consumeMatchingPrompt = (text: string) => {
-    const key = promptTextKey(text);
+  const consumeMatchingPrompt = (
+    event: SessionEventRecord,
+    text: string,
+    images: Array<unknown>,
+  ) => {
+    const key = normalizePromptConfirmationText(text, images);
     if (!key || promptQueue.length === 0) {
       return;
     }
-    const index = promptQueue.findIndex((prompt) => promptTextKey(prompt.text) === key);
+    const index = promptQueue.findIndex((prompt) =>
+      normalizePromptConfirmationText(prompt.text, prompt.images ?? null) === key
+      && (prompt.afterEventSeq == null || event.seq > prompt.afterEventSeq),
+    );
     if (index === -1) {
       return;
     }
@@ -1002,7 +1067,7 @@ export function buildMessagesFromEvents(
           timestamp: occurredAt,
         }));
         if (text) {
-          consumeMatchingPrompt(text);
+          consumeMatchingPrompt(event, text, images);
         }
         break;
       }

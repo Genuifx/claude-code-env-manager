@@ -20361,7 +20361,7 @@ function buildPromptContentParts(text, images) {
     if (usedImageIndexes.has(occurrence.imageIndex) || occurrence.start < cursor) {
       continue;
     }
-    pushTextPart(parts, trimmedText.slice(cursor, occurrence.end));
+    pushTextPart(parts, trimmedText.slice(cursor, occurrence.start));
     parts.push({ type: "image", image: promptImages[occurrence.imageIndex] });
     usedImageIndexes.add(occurrence.imageIndex);
     cursor = occurrence.end;

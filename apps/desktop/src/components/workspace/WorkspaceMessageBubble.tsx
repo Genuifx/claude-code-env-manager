@@ -40,6 +40,7 @@ import {
   COMPACT_FAILED_SUMMARY_TOKEN,
   COMPACTING_SUMMARY_TOKEN,
 } from './workspaceEventTranscript';
+import { stripRenderedImageMarkers } from './transcriptIdentity';
 import { ccemMotion, clearMotionProps, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';
 
 interface WorkspaceMessageBubbleProps {
@@ -1635,7 +1636,7 @@ function renderContentBlocks(
   t: (key: string) => string,
 ): { content: React.ReactNode[]; images: ConversationContentBlock[] } {
   const result: React.ReactNode[] = [];
-  const imageBlocks: ConversationContentBlock[] = [];
+  const imageBlocks = blocks.filter((block) => block.type === 'image');
   let index = 0;
 
   while (index < blocks.length) {
@@ -1657,11 +1658,16 @@ function renderContentBlocks(
     }
 
     switch (block.type) {
-      case 'text':
-        result.push(<div key={`text-${index}`}>{renderTextBlock(block.text || '', isUser, t)}</div>);
+      case 'text': {
+        const visibleText = isUser && imageBlocks.length > 0
+          ? stripRenderedImageMarkers(block.text || '', imageBlocks)
+          : block.text || '';
+        if (visibleText.trim()) {
+          result.push(<div key={`text-${index}`}>{renderTextBlock(visibleText, isUser, t)}</div>);
+        }
         break;
+      }
       case 'image':
-        imageBlocks.push(block);
         break;
       case 'thinking':
         result.push(
@@ -1797,8 +1803,7 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
 
   return (
     <div className={cn(spacingClass, 'workspace-msg-virtualized')}>
-      {hasMainContent ? (
-        isUser ? (
+      {isUser && (hasMainContent || hasImages) ? (
           <div
             className="relative ml-auto max-w-[78%] min-w-[220px] pb-6"
             onPointerEnter={() => setIsActionHovering(true)}
@@ -1808,10 +1813,13 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
           >
             <div className="rounded-[24px] border border-border/30 bg-[hsl(var(--chat-assistant-bg)/0.7)] px-5 py-4 text-foreground">
               {renderedContent}
+              {hasImages ? <WorkspaceImageStrip blocks={imageBlocks} isUser t={t} /> : null}
             </div>
             <MessageMetaBar message={message} isUser visible={showMessageActions} t={t} />
           </div>
-        ) : (
+      ) : null}
+
+      {!isUser && hasMainContent ? (
           <div
             className="relative w-fit max-w-full pb-6"
             onPointerEnter={() => setIsActionHovering(true)}
@@ -1822,17 +1830,16 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
             <div className="space-y-3">{renderedContent}</div>
             <MessageMetaBar message={message} isUser={false} visible={showMessageActions} t={t} />
           </div>
-        )
       ) : null}
 
-      {hasImages ? (
+      {!isUser && hasImages ? (
         <div
           className={cn(
             hasMainContent ? 'mt-1' : '',
-            isUser ? 'flex justify-end pl-4' : 'flex justify-start',
+            'flex justify-start',
           )}
         >
-          <WorkspaceImageStrip blocks={imageBlocks} isUser={isUser} t={t} />
+          <WorkspaceImageStrip blocks={imageBlocks} isUser={false} t={t} />
         </div>
       ) : null}
 
