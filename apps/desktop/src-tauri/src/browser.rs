@@ -60,6 +60,8 @@ struct BrowserSessionState {
     bounds: BrowserBounds,
     visible: bool,
     data_store_id: [u8; 16],
+    current_url: Option<String>,
+    title: Option<String>,
 }
 
 impl BrowserSessionState {
@@ -70,6 +72,8 @@ impl BrowserSessionState {
             bounds,
             visible: false,
             data_store_id: browser_data_store_id_for_session_id(session_id),
+            current_url: None,
+            title: None,
         }
     }
 }
@@ -84,6 +88,13 @@ enum BrowserHistoryDirection {
 struct BrowserHistoryState {
     can_go_back: bool,
     can_go_forward: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct BrowserPageMetadata {
+    url: Option<String>,
+    title: Option<String>,
+    history: BrowserHistoryState,
 }
 
 pub struct BrowserManager {
@@ -131,17 +142,25 @@ impl BrowserManager {
     ) -> Result<BrowserInfo, String> {
         let session_id = normalize_browser_session_id(session_id);
         let requested = url.map(str::trim).filter(|value| !value.is_empty());
-        let target = requested.unwrap_or(DEFAULT_BROWSER_URL);
+        let parsed_requested = requested.map(parse_browser_url).transpose()?;
+        let target = parsed_requested
+            .as_ref()
+            .map(|value| value.as_str())
+            .unwrap_or(DEFAULT_BROWSER_URL);
+        let target_url = target.to_string();
         let session = self.session_snapshot(&session_id)?;
         let existed = app.get_webview(&session.label).is_some();
         let webview = ensure_browser_webview(app, &session.label, session.data_store_id, target)?;
         if existed {
-            if let Some(next_url) = requested {
-                let parsed = parse_browser_url(next_url)?;
+            if let Some(parsed) = parsed_requested {
+                let next_url = parsed.as_str().to_string();
                 webview
                     .navigate(parsed)
                     .map_err(|error| format!("navigate browser webview: {error}"))?;
+                self.record_browser_page_metadata(&session_id, Some(next_url), None)?;
             }
+        } else {
+            self.record_browser_page_metadata(&session_id, Some(target_url), None)?;
         }
         apply_browser_bounds(&webview, session.bounds)?;
         self.set_visible_state(&session_id, true)?;
@@ -202,6 +221,7 @@ impl BrowserManager {
     ) -> Result<BrowserInfo, String> {
         let session_id = normalize_browser_session_id(session_id);
         let parsed = parse_browser_url(url)?;
+        let next_url = parsed.as_str().to_string();
         let session = self.session_snapshot(&session_id)?;
         let webview = match app.get_webview(&session.label) {
             Some(webview) => webview,
@@ -212,6 +232,7 @@ impl BrowserManager {
         webview
             .navigate(parsed)
             .map_err(|error| format!("navigate browser webview: {error}"))?;
+        self.record_browser_page_metadata(&session_id, Some(next_url), None)?;
         apply_browser_bounds(&webview, session.bounds)?;
         self.set_visible_state(&session_id, true)?;
         self.sync_webview_visibility(app)?;
@@ -250,7 +271,7 @@ impl BrowserManager {
         let session_id = normalize_browser_session_id(session_id);
         let session = self.session_snapshot(&session_id)?;
         let webview = require_browser_webview(app, &session.label)?;
-        let before_url = webview.url().ok().map(|value| value.to_string());
+        let before_url = session.current_url.clone();
         let did_start = navigate_browser_history(&webview, direction)?;
         if !did_start {
             return self.info(app, Some(&session.session_id));
@@ -288,15 +309,27 @@ impl BrowserManager {
             return Ok(BrowserInfo {
                 label: session.label,
                 session_id,
-                url: None,
-                title: None,
+                url: session.current_url,
+                title: session.title,
                 visible: false,
                 can_go_back: false,
                 can_go_forward: false,
             });
         };
-        let url = webview.url().ok().map(|value| value.to_string());
-        let history = browser_history_state(&webview).unwrap_or_default();
+        let BrowserPageMetadata {
+            url: observed_url,
+            title: observed_title,
+            history,
+        } = browser_page_metadata(&webview).unwrap_or_default();
+        if observed_url.is_some() || observed_title.is_some() {
+            self.record_browser_page_metadata(
+                &session_id,
+                observed_url.clone(),
+                observed_title.clone(),
+            )?;
+        }
+        let url = observed_url.or(session.current_url);
+        let title = observed_title.or(session.title);
         let active_session_id = self
             .active_session_id
             .lock()
@@ -306,7 +339,7 @@ impl BrowserManager {
             label: session.label,
             session_id,
             url,
-            title: None,
+            title,
             visible: session.visible && session.session_id == active_session_id,
             can_go_back: history.can_go_back,
             can_go_forward: history.can_go_forward,
@@ -455,7 +488,10 @@ impl BrowserManager {
     }
 
     fn snapshot(&self, app: &AppHandle, session_id: Option<&str>) -> Result<Value, String> {
-        self.eval_json(app, session_id, SNAPSHOT_SCRIPT)
+        let session_id = normalize_browser_session_id(session_id);
+        let snapshot = self.eval_json(app, Some(&session_id), SNAPSHOT_SCRIPT)?;
+        self.record_browser_page_metadata_from_value(&session_id, &snapshot)?;
+        Ok(snapshot)
     }
 
     fn eval_json(
@@ -495,6 +531,44 @@ impl BrowserManager {
             }
             std::thread::sleep(Duration::from_millis(150));
         }
+    }
+
+    fn record_browser_page_metadata(
+        &self,
+        session_id: &str,
+        url: Option<String>,
+        title: Option<String>,
+    ) -> Result<(), String> {
+        if url.is_none() && title.is_none() {
+            return Ok(());
+        }
+        self.with_session_state(session_id, |state| {
+            if let Some(url) = url {
+                state.current_url = Some(url);
+            }
+            if let Some(title) = title {
+                state.title = Some(title);
+            }
+        })?;
+        Ok(())
+    }
+
+    fn record_browser_page_metadata_from_value(
+        &self,
+        session_id: &str,
+        value: &Value,
+    ) -> Result<(), String> {
+        let url = value
+            .get("url")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .filter(|value| !value.is_empty());
+        let title = value
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .filter(|value| !value.is_empty());
+        self.record_browser_page_metadata(session_id, url, title)
     }
 
     fn wait_for_history_navigation(
@@ -953,7 +1027,7 @@ fn navigate_browser_history(
 }
 
 #[cfg(target_os = "macos")]
-fn browser_history_state(webview: &tauri::Webview) -> Result<BrowserHistoryState, String> {
+fn browser_page_metadata(webview: &tauri::Webview) -> Result<BrowserPageMetadata, String> {
     use objc2_web_kit::WKWebView;
     use std::sync::mpsc;
 
@@ -961,20 +1035,33 @@ fn browser_history_state(webview: &tauri::Webview) -> Result<BrowserHistoryState
     webview
         .with_webview(move |platform| unsafe {
             let view: &WKWebView = &*platform.inner().cast();
-            let _ = tx.send(BrowserHistoryState {
-                can_go_back: view.canGoBack(),
-                can_go_forward: view.canGoForward(),
+            let url = view
+                .URL()
+                .and_then(|url| url.absoluteString())
+                .map(|value| value.to_string())
+                .filter(|value| !value.is_empty());
+            let title = view
+                .title()
+                .map(|value| value.to_string())
+                .filter(|value| !value.is_empty());
+            let _ = tx.send(BrowserPageMetadata {
+                url,
+                title,
+                history: BrowserHistoryState {
+                    can_go_back: view.canGoBack(),
+                    can_go_forward: view.canGoForward(),
+                },
             });
         })
-        .map_err(|error| format!("schedule browser history state: {error}"))?;
+        .map_err(|error| format!("schedule browser metadata read: {error}"))?;
 
     rx.recv_timeout(Duration::from_secs(3))
-        .map_err(|_| "Timed out waiting for browser history state.".to_string())
+        .map_err(|_| "Timed out waiting for browser metadata.".to_string())
 }
 
 #[cfg(not(target_os = "macos"))]
-fn browser_history_state(_webview: &tauri::Webview) -> Result<BrowserHistoryState, String> {
-    Ok(BrowserHistoryState::default())
+fn browser_page_metadata(_webview: &tauri::Webview) -> Result<BrowserPageMetadata, String> {
+    Ok(BrowserPageMetadata::default())
 }
 
 #[cfg(target_os = "macos")]
