@@ -1,5 +1,11 @@
 # ccem
 
+## 2.49.0
+
+### Minor Changes
+
+- Release v2.49.0 — fix desktop browser URL panic
+
 ## 2.47.0
 
 ### Minor Changes
