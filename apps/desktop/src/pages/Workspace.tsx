@@ -334,6 +334,7 @@ export function Workspace({
     generateWorkspaceSessionTitle,
     getWorkspaceGitSnapshot,
     getWorkspaceFileDiff,
+    getWorkspaceMediaPreview,
     getSessionSubagents,
   } = useTauriCommands();
 
@@ -2563,6 +2564,7 @@ export function Workspace({
                     onOpenChange={setWorkspaceReviewOpen}
                     onRefreshGit={() => void refreshWorkspaceGitSnapshot()}
                     onLoadDiff={(filePath) => getWorkspaceFileDiff(workspaceReviewWorkingDir || '', filePath)}
+                    onLoadMediaPreview={(filePath) => getWorkspaceMediaPreview(workspaceReviewWorkingDir || '', filePath)}
                     isLive={workspaceMode !== 'history'}
                     onLoadSubagents={
                       workspaceReviewSession.provider === 'claude' && workspaceReviewSession.provider_session_id
