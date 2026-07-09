@@ -5,6 +5,7 @@ import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { ModelIcon } from '@/components/history/ModelIcon';
+import { resolveEnvironmentIconHint } from '@/components/workspace/sessionTreeIcons';
 import { shallow } from 'zustand/shallow';
 
 function maskAuthToken(token?: string, notSet?: string): string {
@@ -132,7 +133,7 @@ interface EnvCardProps {
  * Smaller padding, tighter spacing, more columns.
  */
 function EnvGridCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardProps) {
-  const defaultOpusModel = env.defaultOpusModel || 'claude-opus-4-1-20250805';
+  const iconHint = resolveEnvironmentIconHint(env) || env.defaultOpusModel || 'claude-opus-4-1-20250805';
   const runtimeModel = env.runtimeModel || 'opus';
 
   return (
@@ -153,7 +154,7 @@ function EnvGridCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCar
             ? 'bg-primary/10'
             : 'bg-background border border-border-subtle'
         )}>
-          <ModelIcon model={defaultOpusModel} size={14} />
+          <ModelIcon model={iconHint} size={14} />
         </div>
         <div className="flex-1 min-w-0">
           <h3 className="text-[13px] font-semibold text-foreground truncate leading-tight">
@@ -204,7 +205,7 @@ function EnvGridCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCar
 function EnvListCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardProps) {
   const { t } = useLocale();
   const runtimeModel = env.runtimeModel || 'opus';
-  const defaultOpusModel = env.defaultOpusModel || 'claude-opus-4-1-20250805';
+  const iconHint = resolveEnvironmentIconHint(env) || env.defaultOpusModel || 'claude-opus-4-1-20250805';
 
   return (
     <div
@@ -223,7 +224,7 @@ function EnvListCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCar
           ? 'bg-primary/10'
           : 'bg-background border border-border-subtle'
       )}>
-        <ModelIcon model={defaultOpusModel} size={16} />
+        <ModelIcon model={iconHint} size={16} />
       </div>
 
       {/* Name + domain */}

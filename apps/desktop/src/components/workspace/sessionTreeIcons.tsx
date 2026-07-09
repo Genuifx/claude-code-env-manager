@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { BadgeAlert, LoaderCircle } from 'lucide-react';
-import { Claude, Codex, DeepSeek, Gemini, Minimax, Moonshot, Ollama, OpenAI, OpenCode, OpenRouter, Qwen, XiaomiMiMo, Zhipu } from '@lobehub/icons';
+import { Claude, Codex, DeepSeek, Gemini, Grok, Minimax, Moonshot, Ollama, OpenAI, OpenCode, OpenRouter, Qwen, XiaomiMiMo, Zhipu } from '@lobehub/icons';
 import { cn } from '@/lib/utils';
 import type { HistorySessionItem } from '@/features/conversations/types';
 import type { Environment, LaunchClient } from '@/store';
@@ -14,6 +14,7 @@ interface SessionTreeItemIconProps {
   className?: string;
 }
 
+const TIER_MODEL_ALIASES = new Set(['opus', 'sonnet', 'haiku']);
 
 function normalizeClient(value: string | undefined): LaunchClient {
   if (value === 'codex') {
@@ -23,6 +24,13 @@ function normalizeClient(value: string | undefined): LaunchClient {
     return 'opencode';
   }
   return 'claude';
+}
+
+function isTierModelAlias(model?: string): boolean {
+  if (!model) {
+    return true;
+  }
+  return TIER_MODEL_ALIASES.has(model.trim().toLowerCase());
 }
 
 function hintFromBaseUrl(baseUrl: string | undefined): string | undefined {
@@ -41,6 +49,13 @@ function hintFromBaseUrl(baseUrl: string | undefined): string | undefined {
   if (normalized.includes('11434') || normalized.includes('ollama')) return 'ollama';
   if (normalized.includes('googleapis.com') || normalized.includes('generativelanguage')) return 'gemini';
   if (normalized.includes('xiaomimimo.com')) return 'mimo';
+  if (
+    normalized.includes('x.ai')
+    || normalized.includes('xai.com')
+    || normalized.includes('api.x.ai')
+  ) {
+    return 'grok';
+  }
   if (normalized.includes('anthropic.com')) return 'claude';
   return undefined;
 }
@@ -50,13 +65,21 @@ export function resolveEnvironmentIconHint(environment?: Environment): string | 
     return undefined;
   }
 
+  const modelCandidates = [
+    environment.defaultOpusModel,
+    environment.runtimeModel,
+    environment.defaultSonnetModel,
+    environment.defaultHaikuModel,
+  ];
+  // Tier aliases like "opus" always look like Claude, so prefer concrete model IDs,
+  // provider base URL, and env name before falling back to those aliases.
+  const concreteModel = modelCandidates.find((model) => model && !isTierModelAlias(model));
+
   return (
-    environment.defaultOpusModel
-    || environment.runtimeModel
-    || environment.defaultSonnetModel
-    || environment.defaultHaikuModel
+    concreteModel
     || hintFromBaseUrl(environment.baseUrl)
     || environment.name
+    || modelCandidates.find(Boolean)
   );
 }
 
@@ -95,6 +118,9 @@ const ProviderIdentityIcon = memo(function ProviderIdentityIcon({
 
   if (normalized.includes('openrouter')) return <OpenRouter className={TREE_ICON_GLYPH_CLASS} color="#6467F2" />;
   if (normalized.includes('gpt') || normalized.includes('openai')) return <OpenAI className={TREE_ICON_GLYPH_CLASS} color="#10A37F" />;
+  if (normalized.includes('grok') || normalized.includes('xai')) {
+    return <Grok className={cn(TREE_ICON_GLYPH_CLASS, 'text-black dark:text-white')} />;
+  }
   if (normalized.includes('deepseek')) return <DeepSeek className={TREE_ICON_GLYPH_CLASS} color="#4D6BFE" />;
   if (normalized.includes('minimax') || normalized.includes('abab')) return <Minimax className={TREE_ICON_GLYPH_CLASS} color="#F23F5D" />;
   if (normalized.includes('moonshot') || normalized.includes('kimi')) return <Moonshot className={TREE_ICON_GLYPH_CLASS} color="#16191E" />;
