@@ -1,5 +1,11 @@
 # ccem
 
+## 2.50.0
+
+### Minor Changes
+
+- Dialog enter animations, cron page motion jitter fix, workspace env capsule alignment, media preview in workspace review, and browser tools CSP fix.
+
 ## 2.49.0
 
 ### Minor Changes
