@@ -293,6 +293,7 @@ function TimelineTaskCard({
   return (
     <div
       data-cron-motion-card
+      data-cron-task-id={task.id}
       data-cron-motion-expanded={expanded ? 'true' : 'false'}
       className={cn(
         'glass-card glass-noise rounded-xl transition-all',
@@ -846,6 +847,7 @@ export function CronTasks({ onAiCreate }: { onAiCreate?: () => void }) {
   const [drawerLoading, setDrawerLoading] = useState(false);
   const cronMotionRef = useRef<HTMLDivElement>(null);
   const hasHydratedCronMotionRef = useRef(false);
+  const seenCronMotionTargetsRef = useRef<Set<string>>(new Set());
   const showTmuxNotice = platformCapabilities?.tmuxSupported === true && !platformCapabilities.tmuxInstalled;
   const tmuxInstallCommand = platformCapabilities?.tmuxInstallCommand ?? null;
 
@@ -957,25 +959,24 @@ export function CronTasks({ onAiCreate }: { onAiCreate?: () => void }) {
     );
   }, [cronTasks, cronRuns]);
 
-  const cronMotionKey = useMemo(() => {
-    const taskKey = [...upcomingTasks, ...disabledTasks]
+  // Only structural list identity should re-trigger entrance motion.
+  // nextRunTimes / run status updates are local data refreshes and must not
+  // replay whole-page fromTo (that caused multi-fade jitter on open).
+  const cronMotionStructureKey = useMemo(() => {
+    const taskIds = [...upcomingTasks, ...disabledTasks]
       .slice(0, 12)
-      .map((task) => {
-        const runs = cronRuns[task.id] ?? [];
-        const lastRun = runs[runs.length - 1];
-        return `${task.id}:${task.enabled ? 'on' : 'off'}:${nextRunTimes[task.id] ?? '-'}:${lastRun?.status ?? '-'}`;
-      })
+      .map((task) => `${task.id}:${task.enabled ? 'on' : 'off'}`)
       .join('|');
-    const completedKey = todayCompletedRuns
+    const completedIds = todayCompletedRuns
       .slice(0, 6)
-      .map(({ run }) => `${run.id}:${run.status}`)
+      .map(({ run }) => run.id)
       .join('|');
-    return `${isLoadingCron ? 'loading' : 'ready'}:${taskKey}:${completedKey}`;
-  }, [cronRuns, disabledTasks, isLoadingCron, nextRunTimes, todayCompletedRuns, upcomingTasks]);
+    return `${isLoadingCron ? 'loading' : 'ready'}:${taskIds}:${completedIds}`;
+  }, [disabledTasks, isLoadingCron, todayCompletedRuns, upcomingTasks]);
 
   useGSAP(() => {
     const root = cronMotionRef.current;
-    if (!root) {
+    if (!root || isLoadingCron) {
       return;
     }
 
@@ -986,24 +987,63 @@ export function CronTasks({ onAiCreate }: { onAiCreate?: () => void }) {
       ...getMotionTargets(root, '[data-cron-motion-run]', 8),
     ];
 
-    if (!hasHydratedCronMotionRef.current) {
-      hasHydratedCronMotionRef.current = true;
-      clearMotionProps(targets);
-      return;
-    }
-
     if (targets.length === 0) {
       return;
     }
 
-    if (shouldReduceMotion()) {
+    const targetIdentity = (el: HTMLElement) => {
+      if (el.hasAttribute('data-cron-motion-timeline')) return 'timeline';
+      if (el.hasAttribute('data-cron-motion-section')) {
+        return `section:${el.querySelector('h3')?.textContent?.trim() || targets.indexOf(el)}`;
+      }
+      if (el.hasAttribute('data-cron-motion-card')) {
+        return `card:${el.getAttribute('data-cron-task-id') || targets.indexOf(el)}`;
+      }
+      if (el.hasAttribute('data-cron-motion-run')) {
+        return `run:${el.getAttribute('data-cron-run-id') || targets.indexOf(el)}`;
+      }
+      return `node:${targets.indexOf(el)}`;
+    };
+
+    const seen = seenCronMotionTargetsRef.current;
+    const freshTargets = targets.filter((el) => !seen.has(targetIdentity(el)));
+
+    // First paint after mount: mark existing nodes as seen without animating.
+    // Subsequent structural inserts animate only the new nodes (local update).
+    if (!hasHydratedCronMotionRef.current) {
+      hasHydratedCronMotionRef.current = true;
+      for (const el of targets) {
+        seen.add(targetIdentity(el));
+      }
       clearMotionProps(targets);
       return;
     }
 
-    gsap.killTweensOf(targets);
+    // Drop identities that left the DOM so re-added tasks can animate once.
+    const liveIds = new Set(targets.map(targetIdentity));
+    for (const id of [...seen]) {
+      if (!liveIds.has(id)) {
+        seen.delete(id);
+      }
+    }
+
+    if (freshTargets.length === 0) {
+      clearMotionProps(targets);
+      return;
+    }
+
+    for (const el of freshTargets) {
+      seen.add(targetIdentity(el));
+    }
+
+    if (shouldReduceMotion()) {
+      clearMotionProps(freshTargets);
+      return;
+    }
+
+    gsap.killTweensOf(freshTargets);
     gsap.fromTo(
-      targets,
+      freshTargets,
       { autoAlpha: 0, y: 8, scale: 0.99 },
       {
         autoAlpha: 1,
@@ -1013,10 +1053,10 @@ export function CronTasks({ onAiCreate }: { onAiCreate?: () => void }) {
         ease: ccemMotion.ease.standard,
         stagger: 0.02,
         overwrite: 'auto',
-        onComplete: () => clearMotionProps(targets),
+        onComplete: () => clearMotionProps(freshTargets),
       },
     );
-  }, { scope: cronMotionRef, dependencies: [cronMotionKey] });
+  }, { scope: cronMotionRef, dependencies: [cronMotionStructureKey, isLoadingCron] });
 
   useGSAP(() => {
     const root = cronMotionRef.current;
@@ -1248,7 +1288,7 @@ export function CronTasks({ onAiCreate }: { onAiCreate?: () => void }) {
               </div>
               <div className="space-y-1.5">
                 {todayCompletedRuns.slice(0, 10).map(({ task, run }) => (
-                  <div key={run.id} data-cron-motion-run className="group/run glass-subtle glass-noise rounded-lg px-4 py-2 flex items-center gap-3">
+                  <div key={run.id} data-cron-motion-run data-cron-run-id={run.id} className="group/run glass-subtle glass-noise rounded-lg px-4 py-2 flex items-center gap-3">
                     <StatusBadge status={run.status} />
                     <span className="text-xs font-medium text-foreground flex-1 truncate">{task.name}</span>
                     <span className="text-2xs text-muted-foreground tabular-nums">{formatTimeShort(run.finishedAt)}</span>
