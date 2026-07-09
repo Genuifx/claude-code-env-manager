@@ -39,6 +39,7 @@ import type {
 import {
   COMPACT_FAILED_SUMMARY_TOKEN,
   COMPACTING_SUMMARY_TOKEN,
+  TRANSCRIPT_GAP_SUMMARY_TOKEN,
 } from './workspaceEventTranscript';
 import { stripRenderedImageMarkers } from './transcriptIdentity';
 import { ccemMotion, clearMotionProps, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';
@@ -1747,7 +1748,9 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
     ? t('history.compactInProgress')
     : message.summary === COMPACT_FAILED_SUMMARY_TOKEN
       ? t('history.compactFailed')
-      : message.summary || t('history.summaryLabel');
+      : message.summary === TRANSCRIPT_GAP_SUMMARY_TOKEN
+        ? t('history.transcriptGap')
+        : message.summary || t('history.summaryLabel');
   const currentRole = isUser ? 'user' : 'assistant';
   const spacingClass = prevRole == null ? 'mt-0' : prevRole === currentRole ? 'mt-4' : 'mt-8';
 

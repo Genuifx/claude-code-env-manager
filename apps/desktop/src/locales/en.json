@@ -1066,6 +1066,7 @@
     "compactInProgress": "Compacting context...",
     "compactBoundary": "Context compacted",
     "compactFailed": "Context compaction failed",
+    "transcriptGap": "Loading missing transcript...",
     "allSegments": "All",
     "segmentInitial": "Initial",
     "segmentLabel": "Segment",

@@ -501,6 +501,35 @@ test('appends monotonic live events without reallocating on duplicate-only batch
   assert.deepEqual(reset.map((item) => item.seq), [10]);
 });
 
+test('live transcript marks retained-anchor sequence gaps as unloaded transcript', async () => {
+  const {
+    buildMessagesFromEvents,
+    TRANSCRIPT_GAP_SUMMARY_TOKEN,
+  } = await importWorkspaceEventTranscript();
+
+  const messages = buildMessagesFromEvents(
+    [],
+    [],
+    [
+      event(1, { type: 'lifecycle', stage: 'runtime_boot', detail: 'Starting claude native runtime.' }),
+      event(2, { type: 'user_prompt', text: 'initial prompt', image_count: 0 }),
+      event(474, { type: 'user_prompt', text: '对，就是启用环境（推荐）', image_count: 0 }),
+      event(1853, { type: 'assistant_chunk', text: 'tail content' }),
+    ],
+  );
+
+  assert.deepEqual(
+    messages.map((message) => [message.msgType, message.summary ?? message.content]),
+    [
+      ['user', 'initial prompt'],
+      ['summary', TRANSCRIPT_GAP_SUMMARY_TOKEN],
+      ['user', '对，就是启用环境（推荐）'],
+      ['summary', TRANSCRIPT_GAP_SUMMARY_TOKEN],
+      ['assistant', 'tail content'],
+    ],
+  );
+});
+
 test('turn_interrupted flushes the active assistant turn before later prompts', async () => {
   const { buildMessagesFromEvents } = await importWorkspaceEventTranscript();
 
@@ -999,6 +1028,35 @@ test('selects no provider seed when native replay covers the runtime start', asy
   assert.deepEqual(selected, []);
 });
 
+test('keeps provider seed when native replay has retained anchors but missing event ranges', async () => {
+  const { selectSeedMessagesForNativeReplay } = await importWorkspaceEventTranscript();
+  const seedMessages = [
+    { msgType: 'user', uuid: 'provider-user', content: 'original prompt', segmentIndex: 0, isCompactBoundary: false },
+    { msgType: 'assistant', uuid: 'provider-assistant', content: 'provider answer', segmentIndex: 0, isCompactBoundary: false },
+  ];
+
+  const selected = selectSeedMessagesForNativeReplay(
+    seedMessages,
+    {
+      gap_detected: false,
+      truncated: true,
+      oldest_available_seq: 1,
+      newest_available_seq: 10,
+      events: [
+        event(1, { type: 'lifecycle', stage: 'runtime_boot', detail: 'Starting claude native runtime.' }),
+        event(2, { type: 'user_prompt', text: 'native prompt', image_count: 0 }),
+        event(10, { type: 'assistant_chunk', text: 'tail answer' }),
+      ],
+    },
+    null,
+  );
+
+  assert.deepEqual(
+    selected.map((message) => message.uuid),
+    ['provider-user', 'provider-assistant'],
+  );
+});
+
 test('skips provider seed hydration when the native boundary proves replay ownership', async () => {
   const { shouldSkipProviderSeedHydration } = await importWorkspaceEventTranscript();
   const runtimeStartReplay = {
@@ -1017,7 +1075,32 @@ test('skips provider seed hydration when the native boundary proves replay owner
   assert.equal(shouldSkipProviderSeedHydration(runtimeStartReplay, null), true);
   assert.equal(shouldSkipProviderSeedHydration(runtimeStartReplay, 2), false);
   assert.equal(shouldSkipProviderSeedHydration({ ...runtimeStartReplay, oldest_available_seq: 2 }, null), false);
+  assert.equal(shouldSkipProviderSeedHydration({ ...runtimeStartReplay, truncated: true }, null), false);
   assert.equal(shouldSkipProviderSeedHydration(null, 0), false);
+});
+
+test('detects whether a replay batch continuously covers its available sequence range', async () => {
+  const { replayBatchCoversAvailableSequenceRange } = await importWorkspaceEventTranscript();
+  const completeReplay = {
+    gap_detected: false,
+    oldest_available_seq: 1,
+    newest_available_seq: 3,
+    events: [
+      event(1, { type: 'lifecycle', stage: 'runtime_boot', detail: '' }),
+      event(2, { type: 'user_prompt', text: 'prompt', image_count: 0 }),
+      event(3, { type: 'assistant_chunk', text: 'answer' }),
+    ],
+  };
+
+  assert.equal(replayBatchCoversAvailableSequenceRange(completeReplay), true);
+  assert.equal(replayBatchCoversAvailableSequenceRange({
+    ...completeReplay,
+    events: [completeReplay.events[0], completeReplay.events[2]],
+  }), false);
+  assert.equal(replayBatchCoversAvailableSequenceRange({
+    ...completeReplay,
+    truncated: true,
+  }), false);
 });
 
 test('live transcript trims duplicated hydrated skill prompt before replaying native events', async () => {

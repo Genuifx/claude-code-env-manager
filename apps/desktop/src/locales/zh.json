@@ -1066,6 +1066,7 @@
     "compactInProgress": "正在压缩上下文...",
     "compactBoundary": "上下文已压缩",
     "compactFailed": "上下文压缩失败",
+    "transcriptGap": "部分转录正在加载...",
     "allSegments": "全部",
     "segmentInitial": "初始对话",
     "segmentLabel": "段落",

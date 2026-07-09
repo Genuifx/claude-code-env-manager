@@ -93,9 +93,17 @@ impl NativeEventLog {
             };
 
             let events = query_events_since(conn, runtime_id, since_seq, limit)?;
+            let truncated = replay_batch_is_truncated(
+                &events,
+                since_seq,
+                oldest_available_seq,
+                newest_available_seq,
+                gap_detected,
+            );
 
             Ok(ReplayBatch {
                 gap_detected,
+                truncated,
                 oldest_available_seq,
                 newest_available_seq,
                 events,
@@ -379,6 +387,58 @@ fn non_negative_i64_to_u64(value: i64) -> Option<u64> {
     }
 }
 
+fn replay_batch_is_truncated(
+    events: &[SessionEventRecord],
+    since_seq: Option<u64>,
+    oldest_available_seq: Option<u64>,
+    newest_available_seq: Option<u64>,
+    gap_detected: bool,
+) -> bool {
+    if events.is_empty() {
+        return false;
+    }
+
+    if gap_detected {
+        return true;
+    }
+
+    let Some(newest_available_seq) = newest_available_seq else {
+        return false;
+    };
+
+    let expected_first_seq = since_seq
+        .map(|seq| seq.saturating_add(1))
+        .or(oldest_available_seq);
+    let Some(expected_first_seq) = expected_first_seq else {
+        return false;
+    };
+
+    let Some(first_event) = events.first() else {
+        return false;
+    };
+    let Some(last_event) = events.last() else {
+        return false;
+    };
+
+    if first_event.seq != expected_first_seq || last_event.seq != newest_available_seq {
+        return true;
+    }
+
+    let expected_len = newest_available_seq
+        .saturating_sub(expected_first_seq)
+        .saturating_add(1);
+    if events.len() as u64 != expected_len {
+        return true;
+    }
+
+    events.windows(2).any(|window| {
+        let [previous, next] = window else {
+            return false;
+        };
+        next.seq != previous.seq.saturating_add(1)
+    })
+}
+
 fn should_flush_after_append(payload: &SessionEventPayload) -> bool {
     match payload {
         SessionEventPayload::Lifecycle { stage, .. } => {
@@ -440,6 +500,7 @@ mod tests {
         let replay = reopened.replay("runtime-1", Some(1), None).expect("replay");
 
         assert!(!replay.gap_detected);
+        assert!(!replay.truncated);
         assert_eq!(replay.oldest_available_seq, Some(1));
         assert_eq!(replay.newest_available_seq, Some(2));
         assert_eq!(replay.events.len(), 1);
@@ -478,6 +539,7 @@ mod tests {
         .expect("append raw jsonl payload");
 
         let replay = log.replay("runtime-jsonl", None, None).expect("replay all");
+        assert!(!replay.truncated);
         assert_eq!(replay.events.len(), 1);
         assert_eq!(
             replay.events[0].payload,
@@ -513,6 +575,7 @@ mod tests {
         let replay = log
             .replay("runtime-tail", None, Some(2))
             .expect("replay tail");
+        assert!(replay.truncated);
         assert_eq!(replay.oldest_available_seq, Some(1));
         assert_eq!(replay.newest_available_seq, Some(5));
         assert_eq!(
@@ -533,6 +596,43 @@ mod tests {
             )
             .unwrap_or(false);
         assert!(!duplicate_index_exists);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn native_event_log_does_not_mark_complete_limited_replay_truncated() {
+        let db_path = std::env::temp_dir().join(format!(
+            "ccem-native-event-log-complete-tail-test-{}.sqlite",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default(),
+        ));
+        let log = NativeEventLog::new(db_path.clone());
+
+        for seq in 1..=3 {
+            log.append(&SessionEventRecord {
+                runtime_id: "runtime-complete-tail".to_string(),
+                seq,
+                occurred_at: Utc::now(),
+                payload: SessionEventPayload::AssistantChunk {
+                    text: format!("chunk-{seq}"),
+                },
+            })
+            .expect("append chunk");
+        }
+
+        let replay = log
+            .replay("runtime-complete-tail", None, Some(10))
+            .expect("replay complete tail");
+
+        assert!(!replay.truncated);
+        assert_eq!(
+            replay
+                .events
+                .iter()
+                .map(|event| event.seq)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3],
+        );
 
         let _ = std::fs::remove_file(db_path);
     }
@@ -574,6 +674,7 @@ mod tests {
             .replay("runtime-tail-anchor", None, Some(2))
             .expect("replay tail");
 
+        assert!(replay.truncated);
         assert_eq!(
             replay
                 .events
@@ -634,6 +735,7 @@ mod tests {
             .replay("runtime-oldest-anchor", None, Some(1))
             .expect("replay tail");
 
+        assert!(replay.truncated);
         assert_eq!(
             replay
                 .events
@@ -705,10 +807,9 @@ mod tests {
             .expect("append chunk");
         }
 
-        let replay = log
-            .replay(runtime_id, None, Some(2))
-            .expect("replay tail");
+        let replay = log.replay(runtime_id, None, Some(2)).expect("replay tail");
 
+        assert!(replay.truncated);
         assert_eq!(
             replay
                 .events

@@ -889,6 +889,7 @@ impl From<NativeSessionSummary> for ControlSessionSummary {
 #[serde(rename_all = "camelCase")]
 struct ControlReplayBatch {
     gap_detected: bool,
+    truncated: bool,
     oldest_available_seq: Option<u64>,
     newest_available_seq: Option<u64>,
     events: Vec<Value>,
@@ -898,6 +899,7 @@ impl From<ReplayBatch> for ControlReplayBatch {
     fn from(batch: ReplayBatch) -> Self {
         Self {
             gap_detected: batch.gap_detected,
+            truncated: batch.truncated,
             oldest_available_seq: batch.oldest_available_seq,
             newest_available_seq: batch.newest_available_seq,
             events: batch

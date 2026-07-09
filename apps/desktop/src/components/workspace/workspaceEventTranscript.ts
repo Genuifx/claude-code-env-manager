@@ -14,6 +14,7 @@ import {
 
 export const COMPACTING_SUMMARY_TOKEN = '__ccem_context_compacting__';
 export const COMPACT_FAILED_SUMMARY_TOKEN = '__ccem_context_compact_failed__';
+export const TRANSCRIPT_GAP_SUMMARY_TOKEN = '__ccem_transcript_gap__';
 
 export interface LocalUserPrompt {
   id: string;
@@ -283,8 +284,46 @@ export function trimSeedMessagesBeforeFirstUserPrompt(
   return boundaryIndex >= 0 ? seedMessages.slice(0, boundaryIndex) : seedMessages;
 }
 
+export function replayBatchCoversAvailableSequenceRange(replayBatch: ReplayBatch): boolean {
+  if (replayBatch.truncated || replayBatch.gap_detected) {
+    return false;
+  }
+
+  const oldestSeq = replayBatch.oldest_available_seq;
+  const newestSeq = replayBatch.newest_available_seq;
+  if (oldestSeq == null || newestSeq == null) {
+    return replayBatch.events.length === 0;
+  }
+
+  if (!Number.isFinite(oldestSeq) || !Number.isFinite(newestSeq) || newestSeq < oldestSeq) {
+    return false;
+  }
+
+  const firstEvent = replayBatch.events[0];
+  const lastEvent = replayBatch.events[replayBatch.events.length - 1];
+  if (!firstEvent || !lastEvent) {
+    return false;
+  }
+
+  if (firstEvent.seq !== oldestSeq || lastEvent.seq !== newestSeq) {
+    return false;
+  }
+
+  const expectedEventCount = newestSeq - oldestSeq + 1;
+  if (replayBatch.events.length !== expectedEventCount) {
+    return false;
+  }
+
+  return replayBatch.events.every((event, index, events) => {
+    if (index === 0) {
+      return true;
+    }
+    return event.seq === events[index - 1]!.seq + 1;
+  });
+}
+
 export function nativeReplayCoversRuntimeStart(replayBatch: ReplayBatch): boolean {
-  if (replayBatch.gap_detected || replayBatch.oldest_available_seq !== 1) {
+  if (replayBatch.oldest_available_seq !== 1 || !replayBatchCoversAvailableSequenceRange(replayBatch)) {
     return false;
   }
 
@@ -1023,6 +1062,23 @@ export function buildMessagesFromEvents(
     next.push(createCompactBoundaryMessage(`compact-boundary-${event.seq}`, occurredAt));
   };
 
+  const appendTranscriptGapSummary = (
+    previousSeq: number,
+    event: SessionEventRecord,
+    occurredAt?: number,
+  ) => {
+    flushPendingTurn();
+    const last = next[next.length - 1];
+    if (last?.msgType === 'summary' && last.summary === TRANSCRIPT_GAP_SUMMARY_TOKEN) {
+      return;
+    }
+    next.push(createSummaryMessage(
+      `transcript-gap-${previousSeq}-${event.seq}`,
+      TRANSCRIPT_GAP_SUMMARY_TOKEN,
+      occurredAt,
+    ));
+  };
+
   const consumeMatchingPrompt = (
     event: SessionEventRecord,
     text: string,
@@ -1045,9 +1101,15 @@ export function buildMessagesFromEvents(
     ];
   };
 
+  let previousEventSeq: number | null = null;
   for (const event of events) {
-    flushAnchoredPromptsBeforeEvent(event);
     const occurredAt = parseOccurredAt(event.occurred_at);
+    if (previousEventSeq != null && event.seq > previousEventSeq + 1) {
+      appendTranscriptGapSummary(previousEventSeq, event, occurredAt);
+    }
+    previousEventSeq = event.seq;
+
+    flushAnchoredPromptsBeforeEvent(event);
 
     switch (event.payload.type) {
       case 'user_prompt': {

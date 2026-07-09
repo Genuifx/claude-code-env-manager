@@ -674,6 +674,7 @@ impl NativeRuntimeManager {
             if self.has_record(runtime_id)? {
                 return Ok(ReplayBatch {
                     gap_detected: false,
+                    truncated: false,
                     oldest_available_seq: None,
                     newest_available_seq: None,
                     events: Vec::new(),
@@ -691,6 +692,7 @@ impl NativeRuntimeManager {
                     if let Some(limit) = limit.and_then(|value| usize::try_from(value).ok()) {
                         if limit > 0 && batch.events.len() > limit {
                             batch.events = batch.events[batch.events.len() - limit..].to_vec();
+                            batch.truncated = true;
                         }
                     }
                 }

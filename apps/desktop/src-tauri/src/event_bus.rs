@@ -230,6 +230,7 @@ pub struct SessionEventRecord {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ReplayBatch {
     pub gap_detected: bool,
+    pub truncated: bool,
     pub oldest_available_seq: Option<u64>,
     pub newest_available_seq: Option<u64>,
     pub events: Vec<SessionEventRecord>,
@@ -254,6 +255,7 @@ pub fn replay_records(records: &[SessionEventRecord], last_seen_seq: Option<u64>
 
     ReplayBatch {
         gap_detected,
+        truncated: false,
         oldest_available_seq,
         newest_available_seq,
         events,

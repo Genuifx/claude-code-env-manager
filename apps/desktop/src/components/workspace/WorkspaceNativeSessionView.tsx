@@ -100,6 +100,7 @@ import {
   buildBaseMessages,
   buildMessagesFromEvents,
   filterConfirmedLocalUserPrompts,
+  replayBatchCoversAvailableSequenceRange,
   sessionEventsNeedSummaryRefresh,
   shouldTreatNativeSessionAsProcessing,
   splitLocalUserPromptsForReplay,
@@ -1396,6 +1397,7 @@ export function WorkspaceNativeSessionView({
   const pendingRewindStartSeqRef = useRef(0);
   const prevEventCountRef = useRef(0);
   const tickInFlightRef = useRef(false);
+  const initialReplayBackfillRuntimeRef = useRef<string | null>(null);
   const gitSnapshotRequestSeqRef = useRef(0);
 
   const handleComposerTextChange = useCallback((value: string) => {
@@ -1525,6 +1527,7 @@ export function WorkspaceNativeSessionView({
     lastSeenSeqRef.current = latestEventSeq(cachedEvents);
     latestEventsRef.current = cachedEvents;
     previousMessagesRef.current = [];
+    initialReplayBackfillRuntimeRef.current = null;
     autoScrollDetachedRef.current = false;
     prevEventCountRef.current = 0;
     setEvents(cachedEvents);
@@ -1737,6 +1740,34 @@ export function WorkspaceNativeSessionView({
     }
   }, [listNativeSessions, onSessionUpdate, session.runtime_id]);
 
+  const backfillInitialReplay = useCallback(async () => {
+    if (initialReplayBackfillRuntimeRef.current === session.runtime_id) {
+      return;
+    }
+    initialReplayBackfillRuntimeRef.current = session.runtime_id;
+
+    try {
+      const fullBatch = await getNativeSessionEvents(session.runtime_id, null, null);
+      if (!fullBatch.events.length) {
+        return;
+      }
+
+      startTransition(() => {
+        setEvents((previous) => {
+          const merged = appendSessionEvents(fullBatch.events, previous);
+          lastSeenSeqRef.current = latestEventSeq(merged);
+          return merged;
+        });
+      });
+
+      if (sessionEventsNeedSummaryRefresh(fullBatch.events)) {
+        await refreshSummary({ force: true });
+      }
+    } catch (error) {
+      console.error('Failed to backfill native session transcript:', error);
+    }
+  }, [getNativeSessionEvents, refreshSummary, session.runtime_id]);
+
   const pollEvents = useCallback(async () => {
     const sinceSeq = lastSeenSeqRef.current;
     const batch = await getNativeSessionEvents(
@@ -1759,8 +1790,12 @@ export function WorkspaceNativeSessionView({
       startTransition(updateEvents);
     }
 
+    if (sinceSeq == null && !replayBatchCoversAvailableSequenceRange(batch)) {
+      void backfillInitialReplay();
+    }
+
     return sessionEventsNeedSummaryRefresh(batch.events);
-  }, [getNativeSessionEvents, session.runtime_id]);
+  }, [backfillInitialReplay, getNativeSessionEvents, session.runtime_id]);
 
   const rawAttentionState = useMemo(
     () => extractAttentionState(events),
