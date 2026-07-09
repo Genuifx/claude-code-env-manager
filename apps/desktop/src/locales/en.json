@@ -331,6 +331,8 @@
     "nativePromptProgress": "{current} / {total}",
     "nativePromptContinue": "Continue",
     "nativePromptBack": "Back",
+    "nativePromptCollapse": "Collapse question",
+    "nativePromptExpand": "Expand question",
     "nativePromptMultiSelectHint": "You can choose more than one option before continuing or submitting.",
     "nativePromptSelectedCount": "{count} selected",
     "nativePromptAdjust": "No, tell {provider} how to adjust",
