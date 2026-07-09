@@ -10,6 +10,7 @@ import type {
   BotBindingInboundRequest,
   BotBindingInfo,
   BotBindingOutboxFrame,
+  DesktopSettings,
   HeadlessSessionSummary,
   InteractivePromptAnnotation,
   InteractiveReplayBatch,
@@ -206,6 +207,7 @@ export function useTauriCommands() {
   const {
     setEnvironments,
     setCurrentEnv,
+    setEnabledEnvironments,
     setLoading,
     setLoadingEnvs,
     setError,
@@ -226,6 +228,7 @@ export function useTauriCommands() {
     (state) => ({
       setEnvironments: state.setEnvironments,
       setCurrentEnv: state.setCurrentEnv,
+      setEnabledEnvironments: state.setEnabledEnvironments,
       setLoading: state.setLoading,
       setLoadingEnvs: state.setLoadingEnvs,
       setError: state.setError,
@@ -318,19 +321,32 @@ export function useTauriCommands() {
         subagentModel: env.subagentModel,
       });
       await loadEnvironments();
+      // In managed enable mode, newly created/copied envs start enabled.
+      const currentEnabled = useAppStore.getState().enabledEnvironments;
+      if (currentEnabled != null && !currentEnabled.includes(env.name)) {
+        const next = [...currentEnabled, env.name];
+        await invoke('save_settings', {
+          settings: {
+            ...(await invoke<DesktopSettings>('get_settings')),
+            enabledEnvironments: next,
+          },
+        });
+        setEnabledEnvironments(next);
+      }
       setError(null);
     } catch (err) {
       setError(`Failed to add environment: ${err}`);
     } finally {
       setLoading(false);
     }
-  }, [loadEnvironments, setLoading, setError]);
+  }, [loadEnvironments, setEnabledEnvironments, setLoading, setError]);
 
   const updateEnvironment = useCallback(async (env: Environment, oldName?: string) => {
     setLoading(true);
     try {
+      const previousName = oldName ?? env.name;
       await invoke('update_environment', {
-        oldName: oldName ?? env.name,
+        oldName: previousName,
         name: env.name,
         baseUrl: env.baseUrl,
         authToken: env.authToken,
@@ -342,26 +358,80 @@ export function useTauriCommands() {
       });
       await loadEnvironments();
       await loadCurrentEnv();
+      // Keep managed enable list aligned when an environment is renamed.
+      const currentEnabled = useAppStore.getState().enabledEnvironments;
+      if (
+        currentEnabled != null &&
+        previousName !== env.name &&
+        currentEnabled.includes(previousName)
+      ) {
+        const next = currentEnabled.map((envName) =>
+          envName === previousName ? env.name : envName,
+        );
+        await invoke('save_settings', {
+          settings: {
+            ...(await invoke<DesktopSettings>('get_settings')),
+            enabledEnvironments: next,
+          },
+        });
+        setEnabledEnvironments(next);
+      }
       setError(null);
     } catch (err) {
       setError(`Failed to update environment: ${err}`);
     } finally {
       setLoading(false);
     }
-  }, [loadEnvironments, loadCurrentEnv, setLoading, setError]);
+  }, [loadEnvironments, loadCurrentEnv, setEnabledEnvironments, setLoading, setError]);
 
   const deleteEnvironment = useCallback(async (name: string) => {
     setLoading(true);
     try {
       await invoke('delete_environment', { name });
       await loadEnvironments();
+      // Keep enable list tidy when an environment is removed.
+      const currentEnabled = useAppStore.getState().enabledEnvironments;
+      if (currentEnabled != null && currentEnabled.includes(name)) {
+        const next = currentEnabled.filter((envName) => envName !== name);
+        await invoke('save_settings', {
+          settings: {
+            ...(await invoke<DesktopSettings>('get_settings')),
+            enabledEnvironments: next,
+          },
+        });
+        setEnabledEnvironments(next);
+      }
       setError(null);
     } catch (err) {
       setError(`Failed to delete environment: ${err}`);
     } finally {
       setLoading(false);
     }
-  }, [loadEnvironments, setLoading, setError]);
+  }, [loadEnvironments, setEnabledEnvironments, setLoading, setError]);
+
+  const loadEnabledEnvironments = useCallback(async () => {
+    try {
+      const settings = await invoke<DesktopSettings>('get_settings');
+      const enabled = settings.enabledEnvironments ?? null;
+      setEnabledEnvironments(enabled);
+      return enabled;
+    } catch (err) {
+      console.error('Failed to load enabled environments:', err);
+      return null;
+    }
+  }, [setEnabledEnvironments]);
+
+  const saveEnabledEnvironments = useCallback(async (names: string[] | null) => {
+    // Read-modify-write full settings so unrelated fields are not reset.
+    const current = await invoke<DesktopSettings>('get_settings');
+    await invoke('save_settings', {
+      settings: {
+        ...current,
+        enabledEnvironments: names,
+      },
+    });
+    setEnabledEnvironments(names);
+  }, [setEnabledEnvironments]);
 
   const syncInteractiveSessions = useCallback(async (): Promise<Session[]> => {
     const tauriSessions = await invoke<TauriSession[]>('list_interactive_sessions');
@@ -1445,6 +1515,8 @@ export function useTauriCommands() {
     addEnvironment,
     updateEnvironment,
     deleteEnvironment,
+    loadEnabledEnvironments,
+    saveEnabledEnvironments,
     launchClaudeCode,
     createInteractiveSession,
     loadSessions,

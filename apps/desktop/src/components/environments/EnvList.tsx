@@ -1,10 +1,16 @@
 import { useState } from 'react';
-import { Globe, Edit2, Trash2, Search } from 'lucide-react';
+import { Copy, Edit2, Globe, Search, Trash2 } from 'lucide-react';
 import { useAppStore, type Environment } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { ModelIcon } from '@/components/history/ModelIcon';
+import { Switch } from '@/components/ui/switch';
+import {
+  isEnvironmentEnabled,
+  toggleEnabledEnvironment,
+} from '@/lib/enabledEnvironments';
+import { toast } from 'sonner';
 import { shallow } from 'zustand/shallow';
 
 function maskAuthToken(token?: string, notSet?: string): string {
@@ -25,21 +31,32 @@ function extractDomain(url: string): string {
 
 interface EnvListProps {
   onEdit?: (name: string) => void;
+  onCopy?: (name: string) => void;
   onDelete?: (name: string) => void;
   viewMode?: 'grid' | 'list';
+  /** When true, only show environments currently treated as enabled. */
+  showEnabledOnly?: boolean;
 }
 
-export function EnvList({ onEdit, onDelete, viewMode = 'grid' }: EnvListProps) {
-  const { environments, currentEnv } = useAppStore(
+export function EnvList({
+  onEdit,
+  onCopy,
+  onDelete,
+  viewMode = 'grid',
+  showEnabledOnly = false,
+}: EnvListProps) {
+  const { environments, currentEnv, enabledEnvironments } = useAppStore(
     (state) => ({
       environments: state.environments,
       currentEnv: state.currentEnv,
+      enabledEnvironments: state.enabledEnvironments,
     }),
     shallow
   );
-  const { switchEnvironment } = useTauriCommands();
+  const { switchEnvironment, saveEnabledEnvironments } = useTauriCommands();
   const { t } = useLocale();
   const [filter, setFilter] = useState('');
+  const [pendingToggle, setPendingToggle] = useState<string | null>(null);
 
   if (environments.length === 0) {
     return (
@@ -55,13 +72,35 @@ export function EnvList({ onEdit, onDelete, viewMode = 'grid' }: EnvListProps) {
     );
   }
 
-  // Filter environments by name or domain
-  const filtered = filter
-    ? environments.filter((env) =>
-        env.name.toLowerCase().includes(filter.toLowerCase()) ||
-        extractDomain(env.baseUrl).toLowerCase().includes(filter.toLowerCase())
-      )
-    : environments;
+  const handleToggleEnabled = async (name: string) => {
+    if (pendingToggle) return;
+    setPendingToggle(name);
+    try {
+      const next = toggleEnabledEnvironment(
+        name,
+        enabledEnvironments,
+        environments.map((env) => env.name),
+      );
+      await saveEnabledEnvironments(next);
+    } catch (err) {
+      toast.error(String(err));
+    } finally {
+      setPendingToggle(null);
+    }
+  };
+
+  // Filter environments by name or domain, optionally by enablement.
+  const filtered = environments.filter((env) => {
+    if (showEnabledOnly && !isEnvironmentEnabled(env.name, enabledEnvironments)) {
+      return false;
+    }
+    if (!filter) return true;
+    const q = filter.toLowerCase();
+    return (
+      env.name.toLowerCase().includes(q) ||
+      extractDomain(env.baseUrl).toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div>
@@ -87,9 +126,13 @@ export function EnvList({ onEdit, onDelete, viewMode = 'grid' }: EnvListProps) {
               name={env.name}
               env={env}
               isActive={env.name === currentEnv}
+              isEnabled={isEnvironmentEnabled(env.name, enabledEnvironments)}
+              isToggling={pendingToggle === env.name}
               onSelect={() => switchEnvironment(env.name)}
               onEdit={() => onEdit?.(env.name)}
+              onCopy={() => onCopy?.(env.name)}
               onDelete={() => onDelete?.(env.name)}
+              onToggleEnabled={() => void handleToggleEnabled(env.name)}
             />
           ))}
         </div>
@@ -101,9 +144,13 @@ export function EnvList({ onEdit, onDelete, viewMode = 'grid' }: EnvListProps) {
               name={env.name}
               env={env}
               isActive={env.name === currentEnv}
+              isEnabled={isEnvironmentEnabled(env.name, enabledEnvironments)}
+              isToggling={pendingToggle === env.name}
               onSelect={() => switchEnvironment(env.name)}
               onEdit={() => onEdit?.(env.name)}
+              onCopy={() => onCopy?.(env.name)}
               onDelete={() => onDelete?.(env.name)}
+              onToggleEnabled={() => void handleToggleEnabled(env.name)}
             />
           ))}
         </div>
@@ -122,16 +169,32 @@ interface EnvCardProps {
   name: string;
   env: Environment;
   isActive: boolean;
+  isEnabled: boolean;
+  isToggling: boolean;
   onSelect: () => void;
   onEdit: () => void;
+  onCopy: () => void;
   onDelete: () => void;
+  onToggleEnabled: () => void;
 }
 
 /**
  * Compact grid card — dense, scannable.
  * Smaller padding, tighter spacing, more columns.
  */
-function EnvGridCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardProps) {
+function EnvGridCard({
+  name,
+  env,
+  isActive,
+  isEnabled,
+  isToggling,
+  onSelect,
+  onEdit,
+  onCopy,
+  onDelete,
+  onToggleEnabled,
+}: EnvCardProps) {
+  const { t } = useLocale();
   const defaultOpusModel = env.defaultOpusModel || 'claude-opus-4-1-20250805';
   const runtimeModel = env.runtimeModel || 'opus';
 
@@ -141,7 +204,8 @@ function EnvGridCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCar
         'group relative p-3 rounded-xl cursor-pointer border transition-all duration-150 active:scale-[0.97]',
         isActive
           ? 'border-primary/50 bg-primary/[0.03]'
-          : 'border-border-subtle bg-surface-raised/60 hover:border-border hover:bg-surface-raised'
+          : 'border-border-subtle bg-surface-raised/60 hover:border-border hover:bg-surface-raised',
+        !isEnabled && 'opacity-70',
       )}
       onClick={onSelect}
     >
@@ -175,8 +239,35 @@ function EnvGridCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCar
         </p>
       </div>
 
+      {/* Enable switch + status */}
+      <div
+        className="mt-2.5 flex items-center justify-between gap-2"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-1.5 min-w-0">
+          <Switch
+            checked={isEnabled}
+            disabled={isToggling}
+            onCheckedChange={() => onToggleEnabled()}
+            aria-label={isEnabled ? t('environments.disableEnv') : t('environments.enableEnv')}
+            className="scale-90 origin-left"
+          />
+          <span className="text-[10px] text-muted-foreground truncate">
+            {isEnabled ? t('environments.enableEnv') : t('environments.disabledBadge')}
+          </span>
+        </div>
+      </div>
+
       {/* Hover actions */}
       <div className="absolute top-2 right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          type="button"
+          className="w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-background transition-colors"
+          title={t('environments.copyEnv')}
+          onClick={(e) => { e.stopPropagation(); onCopy(); }}
+        >
+          <Copy className="w-3 h-3" />
+        </button>
         <button
           type="button"
           className="w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-background transition-colors"
@@ -201,7 +292,18 @@ function EnvGridCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCar
 /**
  * Compact list row — single line with key info.
  */
-function EnvListCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCardProps) {
+function EnvListCard({
+  name,
+  env,
+  isActive,
+  isEnabled,
+  isToggling,
+  onSelect,
+  onEdit,
+  onCopy,
+  onDelete,
+  onToggleEnabled,
+}: EnvCardProps) {
   const { t } = useLocale();
   const runtimeModel = env.runtimeModel || 'opus';
   const defaultOpusModel = env.defaultOpusModel || 'claude-opus-4-1-20250805';
@@ -212,7 +314,8 @@ function EnvListCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCar
         'group relative flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer border transition-all duration-150 active:scale-[0.99]',
         isActive
           ? 'border-primary/50 bg-primary/[0.03]'
-          : 'border-border-subtle bg-surface-raised/60 hover:border-border hover:bg-surface-raised'
+          : 'border-border-subtle bg-surface-raised/60 hover:border-border hover:bg-surface-raised',
+        !isEnabled && 'opacity-70',
       )}
       onClick={onSelect}
     >
@@ -242,6 +345,25 @@ function EnvListCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCar
         </span>
       </div>
 
+      {/* Enable switch */}
+      <div
+        className="flex items-center gap-1.5 shrink-0"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <Switch
+          checked={isEnabled}
+          disabled={isToggling}
+          onCheckedChange={() => onToggleEnabled()}
+          aria-label={isEnabled ? t('environments.disableEnv') : t('environments.enableEnv')}
+          className="scale-90"
+        />
+        {!isEnabled && (
+          <span className="text-[10px] text-muted-foreground hidden sm:inline">
+            {t('environments.disabledBadge')}
+          </span>
+        )}
+      </div>
+
       {/* Status */}
       {isActive && (
         <span className="flex items-center gap-1.5 shrink-0">
@@ -261,6 +383,14 @@ function EnvListCard({ name, env, isActive, onSelect, onEdit, onDelete }: EnvCar
             {t('environments.switchTo')}
           </button>
         )}
+        <button
+          type="button"
+          className="w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-background transition-colors"
+          title={t('environments.copyEnv')}
+          onClick={(e) => { e.stopPropagation(); onCopy(); }}
+        >
+          <Copy className="w-3 h-3" />
+        </button>
         <button
           type="button"
           className="w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-background transition-colors"

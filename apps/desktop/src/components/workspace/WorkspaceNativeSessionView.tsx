@@ -1290,6 +1290,7 @@ export function WorkspaceNativeSessionView({
 }: WorkspaceNativeSessionViewProps) {
   const { t } = useLocale();
   const environments = useAppStore((state) => state.environments);
+  const enabledEnvironments = useAppStore((state) => state.enabledEnvironments);
   const defaultPermissionMode = useAppStore((state) => state.permissionMode);
   const {
     getNativeSessionEvents,
@@ -2841,6 +2842,7 @@ export function WorkspaceNativeSessionView({
             permMode={sessionPermMode}
             effort={sessionEffort}
             environments={environments}
+            enabledEnvironments={enabledEnvironments}
             onEnvChange={handleEnvChange}
             onPermModeChange={handlePermModeChange}
             onEffortChange={handleEffortChange}

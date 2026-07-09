@@ -284,6 +284,7 @@ export function Workspace({
     isLoadingStats,
     environments,
     currentEnv,
+    enabledEnvironments,
     permissionMode,
     selectedWorkingDir,
     defaultWorkingDir,
@@ -298,6 +299,7 @@ export function Workspace({
       isLoadingStats: state.isLoadingStats,
       environments: state.environments,
       currentEnv: state.currentEnv,
+      enabledEnvironments: state.enabledEnvironments,
       permissionMode: state.permissionMode,
       selectedWorkingDir: state.selectedWorkingDir,
       defaultWorkingDir: state.defaultWorkingDir,
@@ -2337,6 +2339,7 @@ export function Workspace({
               permMode={permissionMode}
               effort={composeEffort}
               environments={environments}
+              enabledEnvironments={enabledEnvironments}
               onEnvChange={(value) => void switchEnvironment(value)}
               onPermModeChange={setPermissionMode}
               onEffortChange={setComposeEffort}
@@ -2403,6 +2406,7 @@ export function Workspace({
               permMode={historyPermMode}
               effort={historyEffort}
               environments={environments}
+              enabledEnvironments={enabledEnvironments}
               onEnvChange={handleHistoryEnvChange}
               onPermModeChange={handleHistoryPermModeChange}
               onEffortChange={handleHistoryEffortChange}

@@ -17,6 +17,7 @@ import { useAppStore, type ArrangeLayout, type LaunchClient, type Session, type 
 import type { PermissionModeName } from '@ccem/core/browser';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useLocale } from '../locales';
+import { filterRuntimeEnvironments } from '@/lib/enabledEnvironments';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { SessionsSkeleton } from '@/components/ui/skeleton-states';
 import { toast } from 'sonner';
@@ -189,6 +190,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
     setUnifiedSessions,
     currentEnv,
     environments,
+    enabledEnvironments,
     permissionMode,
     setPermissionMode,
   } = useAppStore(
@@ -203,6 +205,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
       setUnifiedSessions: state.setUnifiedSessions,
       currentEnv: state.currentEnv,
       environments: state.environments,
+      enabledEnvironments: state.enabledEnvironments,
       permissionMode: state.permissionMode,
       setPermissionMode: state.setPermissionMode,
     }),
@@ -743,6 +746,11 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
     );
   }, { scope: sessionsMotionRef, dependencies: [effectiveViewMode, sessionMotionKey] });
 
+  const runtimeEnvironments = useMemo(
+    () => filterRuntimeEnvironments(environments, enabledEnvironments, { currentEnv }),
+    [currentEnv, enabledEnvironments, environments],
+  );
+
   // Show skeleton when sessions are loading
   if (isLoadingSessions && !sessions.length && !unifiedSessions.length) {
     return <SessionsSkeleton />;
@@ -754,7 +762,7 @@ export function Sessions({ onLaunch, onLaunchWithDir }: SessionsProps) {
         effectiveViewMode={effectiveViewMode}
         hasUnifiedOnlyInView={hasUnifiedOnlyInView}
         currentEnv={currentEnv}
-        environments={environments}
+        environments={runtimeEnvironments}
         permissionMode={permissionMode as PermissionModeName}
         launchDirDisplay={launchDirDisplay}
         isLaunching={isLaunching}
