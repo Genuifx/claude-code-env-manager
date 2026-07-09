@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Radio, Circle, Flame, Clock, Check, Settings2, ClipboardCheck, Search, Command, Globe, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { Radio, Flame, Clock, Check, Settings2, ClipboardCheck, Search, Command, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { useLocale } from '@/locales';
 import { getEnvColorVar, cn } from '@/lib/utils';
@@ -18,8 +18,28 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
+import { ModelIcon } from '@/components/history/ModelIcon';
+import { resolveEnvironmentIconHint } from '@/components/workspace/sessionTreeIcons';
 import { StreakUsagePopoverContent } from './StreakUsagePopover';
 import type { UsageStats } from '@/types/analytics';
+import type { Environment } from '@/store';
+
+function EnvironmentLobeIcon({
+  environment,
+  size = 14,
+}: {
+  environment?: Environment;
+  size?: number;
+}) {
+  return (
+    <ModelIcon
+      model={resolveEnvironmentIconHint(environment)}
+      size={size}
+      className="shrink-0"
+      disableContrastBg
+    />
+  );
+}
 
 // Walks dailyHistory backwards from today counting consecutive days.
 // Matches the boot-time calculation in App.tsx.
@@ -156,6 +176,7 @@ export function WorkspaceStatusStrip({
 
   const runningSessions = sessions.filter((s) => s.status === 'running');
   const activeCronTasks = cronTasks.filter((t) => t.enabled !== false);
+  const currentEnvironment = environments.find((env) => env.name === currentEnv);
 
   return (
     <div
@@ -179,7 +200,7 @@ export function WorkspaceStatusStrip({
         compact={browserOpen}
       />
 
-      {/* Environment quick-switch capsule */}
+      {/* Environment quick-switch capsule — icon language matches composer env picker */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
@@ -193,11 +214,8 @@ export function WorkspaceStatusStrip({
               'cursor-pointer'
             )}
           >
-            <span className="relative flex items-center justify-center w-3.5 h-3.5">
-              <Globe
-                className="w-3.5 h-3.5 transition-transform duration-200 group-hover:scale-110"
-                style={{ color: getEnvColorVar(currentEnv) }}
-              />
+            <span className="relative flex items-center justify-center">
+              <EnvironmentLobeIcon environment={currentEnvironment} size={14} />
             </span>
             <span className={cn(
               'max-w-[8.5rem] truncate whitespace-nowrap text-[12px] font-medium text-foreground transition-colors',
@@ -207,36 +225,38 @@ export function WorkspaceStatusStrip({
             </span>
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="min-w-[180px] p-0">
-          <div className={cn('p-1', environments.length > 6 && 'max-h-[264px] overflow-y-auto')}>
+        <DropdownMenuContent align="start" className="min-w-[220px] p-0">
+          <div className="px-3 pt-2.5 pb-1 text-2xs uppercase tracking-wider font-medium text-muted-foreground/70">
+            {t('workspace.environmentLabel')}
+          </div>
+          <div className={cn('p-1.5 pt-0', environments.length > 6 && 'max-h-[200px] overflow-y-auto')}>
             {environments.map((env) => {
               const isActive = env.name === currentEnv;
-              const envColor = getEnvColorVar(env.name);
               return (
                 <DropdownMenuItem
                   key={env.name}
-                  className={cn('gap-2.5', isActive && 'bg-primary/5')}
+                  className={cn(
+                    'gap-2 rounded-lg px-3 py-2 glass-dropdown-item',
+                    isActive && 'text-primary',
+                  )}
                   onSelect={() => {
                     if (!isActive) void switchEnvironment(env.name);
                   }}
                 >
-                  <Circle
-                    className="w-2.5 h-2.5 shrink-0"
-                    style={{ color: envColor, fill: `hsl(${envColor})` }}
-                  />
-                  <span className="flex-1 text-[13px]">{env.name}</span>
-                  {isActive && <Check className="w-3.5 h-3.5 text-primary shrink-0" />}
+                  <EnvironmentLobeIcon environment={env} size={13} />
+                  <span className="flex-1 text-left text-sm">{env.name}</span>
+                  {isActive && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
                 </DropdownMenuItem>
               );
             })}
           </div>
-          {environments.length > 0 && <DropdownMenuSeparator className="mx-1" />}
+          {environments.length > 0 && <DropdownMenuSeparator className="mx-1.5" />}
           <DropdownMenuItem
-            className="text-muted-foreground gap-2.5 mx-1 mb-1"
+            className="mx-1.5 mb-1.5 gap-2 rounded-lg px-3 py-2 text-muted-foreground glass-dropdown-item"
             onSelect={() => onNavigate('environments')}
           >
-            <Settings2 className="w-3.5 h-3.5 shrink-0" />
-            <span className="text-[13px]">{t('workspace.manageEnvs')}</span>
+            <Settings2 className="h-3.5 w-3.5 shrink-0" />
+            <span className="text-sm">{t('workspace.manageEnvs')}</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
