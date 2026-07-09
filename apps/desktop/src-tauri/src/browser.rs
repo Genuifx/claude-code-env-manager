@@ -442,10 +442,15 @@ impl BrowserManager {
                     app,
                     Some(&session_id),
                     &format!(
-                        "window.scrollBy(0, {delta_y}); ({{
-                    ok: true,
-                    scrollY: window.scrollY
-                }})"
+                        r#"
+                    (() => {{
+                      window.scrollBy(0, {delta_y});
+                      return {{
+                        ok: true,
+                        scrollY: window.scrollY
+                      }};
+                    }})()
+                    "#
                     ),
                 )
             }
@@ -912,9 +917,19 @@ fn decode_eval_json_string(raw: &str) -> Result<String, String> {
 }
 
 fn build_eval_json_script(expression: &str) -> Result<String, String> {
-    let encoded = serde_json::to_string(expression).map_err(|error| error.to_string())?;
     Ok(format!(
-        "JSON.stringify((() => {{ try {{ return eval({encoded}); }} catch (error) {{ return {{ ok: false, error: String(error && error.message || error) }}; }} }})())"
+        r#"
+(() => {{
+  try {{
+    const value = (
+{expression}
+    );
+    return JSON.stringify(value === undefined ? null : value);
+  }} catch (error) {{
+    return JSON.stringify({{ ok: false, error: String(error && error.message || error) }});
+  }}
+}})()
+"#
     ))
 }
 
@@ -1243,11 +1258,19 @@ mod tests {
     }
 
     #[test]
-    fn build_eval_json_script_accepts_statement_sequences() {
-        let script =
-            build_eval_json_script("window.scrollBy(0, 100); ({ ok: true })").expect("script");
-        assert!(script.contains("eval("));
+    fn build_eval_json_script_runs_without_page_eval() {
+        let script = build_eval_json_script(
+            r#"
+            (() => {
+              window.scrollBy(0, 100);
+              return { ok: true };
+            })()
+            "#,
+        )
+        .expect("script");
+        assert!(!script.contains("eval("));
         assert!(script.contains("window.scrollBy"));
+        assert!(script.contains("JSON.stringify"));
     }
 
     #[test]

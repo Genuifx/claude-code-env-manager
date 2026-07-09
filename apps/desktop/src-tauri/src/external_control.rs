@@ -120,6 +120,8 @@ struct OpenSessionParams {
 struct BrowserSmokeProbeParams {
     url: String,
     marker_text: Option<String>,
+    navigate_url: Option<String>,
+    navigate_marker_text: Option<String>,
     input_label: Option<String>,
     input_text: Option<String>,
     click_label: Option<String>,
@@ -562,6 +564,34 @@ fn run_browser_smoke_probe(
             .map(|marker| snapshot_text_contains(&snapshot, marker))
             .unwrap_or(true),
     }));
+
+    if let Some(navigate_url) = params.navigate_url.as_deref() {
+        let info = browser.navigate(app, Some(BROWSER_SMOKE_SESSION_ID), navigate_url)?;
+        steps.push(json!({
+            "step": "navigate",
+            "url": info.url,
+            "visible": info.visible,
+        }));
+        snapshot = wait_for_browser_snapshot(
+            app,
+            browser,
+            BROWSER_SMOKE_SESSION_ID,
+            params
+                .navigate_marker_text
+                .as_deref()
+                .or(params.marker_text.as_deref()),
+            timeout_ms,
+        )?;
+        steps.push(json!({
+            "step": "navigateSnapshot",
+            "snapshot": summarize_browser_snapshot(&snapshot),
+            "matched": params
+                .navigate_marker_text
+                .as_deref()
+                .map(|marker| snapshot_text_contains(&snapshot, marker))
+                .unwrap_or(true),
+        }));
+    }
 
     if let Some(label) = params.input_label.as_deref() {
         let reference = find_snapshot_ref_by_label(&snapshot, label)
