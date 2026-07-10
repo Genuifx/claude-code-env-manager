@@ -34,7 +34,23 @@ cargoToml = cargoToml.replace(
 );
 writeFileSync(cargoTomlPath, cargoToml);
 
+// 更新 Cargo.lock 中当前应用包的版本
+const cargoLockPath = join(rootDir, 'apps/desktop/src-tauri/Cargo.lock');
+let cargoLock = readFileSync(cargoLockPath, 'utf-8');
+const cargoPackagePattern = /(\[\[package\]\]\nname = "ccem-desktop"\nversion = ")[^"]+("\n)/;
+
+if (!cargoPackagePattern.test(cargoLock)) {
+  throw new Error('Could not find ccem-desktop package version in Cargo.lock');
+}
+
+cargoLock = cargoLock.replace(
+  cargoPackagePattern,
+  (_match, prefix, suffix) => `${prefix}${version}${suffix}`,
+);
+writeFileSync(cargoLockPath, cargoLock);
+
 console.log(`✅ Synced version to ${version}`);
 console.log(`   - apps/desktop/package.json`);
 console.log(`   - apps/desktop/src-tauri/tauri.conf.json`);
 console.log(`   - apps/desktop/src-tauri/Cargo.toml`);
+console.log(`   - apps/desktop/src-tauri/Cargo.lock`);
