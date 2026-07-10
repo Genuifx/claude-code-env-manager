@@ -4,6 +4,8 @@ use super::{
     emit_browser_state, normalize_browser_session_id, required_string_arg, required_u32_arg,
     BrowserManager, BrowserToolRequest,
 };
+use rand::rngs::OsRng;
+use rand::RngCore;
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
@@ -13,6 +15,7 @@ impl BrowserManager {
         &self,
         app: &AppHandle,
         session_id: &str,
+        workspace_dir: &str,
         request: &BrowserToolRequest,
     ) -> Result<Value, String> {
         let session_id = normalize_browser_session_id(Some(session_id));
@@ -32,7 +35,7 @@ impl BrowserManager {
         emit_browser_state(app, &active, "agent_action_started");
 
         let outcome = self
-            .run_tool_inner(app, &session_id, request, &token)
+            .run_tool_inner(app, &session_id, workspace_dir, request, &token)
             .and_then(|value| {
                 self.registry.validate_operation(&token)?;
                 Ok(value)
@@ -56,6 +59,7 @@ impl BrowserManager {
         &self,
         app: &AppHandle,
         session_id: &str,
+        workspace_dir: &str,
         request: &BrowserToolRequest,
         token: &BrowserOperationToken,
     ) -> Result<Value, String> {
@@ -69,16 +73,29 @@ impl BrowserManager {
                 let info = self.info(app, Some(session_id))?;
                 Ok(json!({ "url": info.url, "title": info.title }))
             }
-            "snapshot" => self.snapshot(app, Some(session_id)),
+            "snapshot" => {
+                let snapshot = self.snapshot(app, Some(session_id))?;
+                self.store_interaction_snapshot_artifact(session_id, workspace_dir, &snapshot)
+            }
             "click" => {
+                let snapshot_id = required_string_arg(&request.args, "snapshotId")?;
+                self.registry
+                    .validate_interaction_snapshot(session_id, &snapshot_id)?;
                 let reference = required_u32_arg(&request.args, "ref")?;
-                self.eval_json(
+                let snapshot_id_json =
+                    serde_json::to_string(&snapshot_id).map_err(|error| error.to_string())?;
+                ensure_page_action_ok(self.eval_json(
                     app,
                     Some(session_id),
                     &format!(
                         r#"
                     (() => {{
-                      const node = window.__ccemRefs && window.__ccemRefs[{reference}];
+                      const snapshotId = {snapshot_id_json};
+                      const refs = window[`__ccemSnapshot_${{snapshotId}}`];
+                      if (window.__ccemCurrentSnapshotId !== snapshotId || !refs) {{
+                        return {{ ok: false, error: 'Browser interaction snapshot is stale' }};
+                      }}
+                      const node = refs[{reference}];
                       if (!node) return {{ ok: false, error: 'Unknown browser ref {reference}' }};
                       node.scrollIntoView({{ block: 'center', inline: 'center' }});
                       node.click();
@@ -86,19 +103,29 @@ impl BrowserManager {
                     }})()
                     "#
                     ),
-                )
+                )?)
             }
             "type" => {
+                let snapshot_id = required_string_arg(&request.args, "snapshotId")?;
+                self.registry
+                    .validate_interaction_snapshot(session_id, &snapshot_id)?;
                 let reference = required_u32_arg(&request.args, "ref")?;
                 let text = required_string_arg(&request.args, "text")?;
                 let text_json = serde_json::to_string(&text).map_err(|error| error.to_string())?;
-                self.eval_json(
+                let snapshot_id_json =
+                    serde_json::to_string(&snapshot_id).map_err(|error| error.to_string())?;
+                ensure_page_action_ok(self.eval_json(
                     app,
                     Some(session_id),
                     &format!(
                         r#"
                     (() => {{
-                      const node = window.__ccemRefs && window.__ccemRefs[{reference}];
+                      const snapshotId = {snapshot_id_json};
+                      const refs = window[`__ccemSnapshot_${{snapshotId}}`];
+                      if (window.__ccemCurrentSnapshotId !== snapshotId || !refs) {{
+                        return {{ ok: false, error: 'Browser interaction snapshot is stale' }};
+                      }}
+                      const node = refs[{reference}];
                       if (!node) return {{ ok: false, error: 'Unknown browser ref {reference}' }};
                       node.focus();
                       if ('value' in node) {{
@@ -112,7 +139,7 @@ impl BrowserManager {
                     }})()
                     "#
                     ),
-                )
+                )?)
             }
             "press_key" => {
                 let key = required_string_arg(&request.args, "key")?;
@@ -152,10 +179,7 @@ impl BrowserManager {
                     ),
                 )
             }
-            "screenshot" => {
-                let data = self.screenshot_base64(app, Some(session_id))?;
-                Ok(json!({ "mime_type": "image/png", "data": data }))
-            }
+            "screenshot" => self.capture_screenshot_artifact(app, session_id, workspace_dir),
             "evaluate" => {
                 let script = required_string_arg(&request.args, "script")?;
                 let result = self.eval_js(app, Some(session_id), &script)?;
@@ -221,14 +245,26 @@ impl BrowserManager {
         }
     }
 
-    pub(super) fn snapshot(
+    pub(crate) fn snapshot(
         &self,
         app: &AppHandle,
         session_id: Option<&str>,
     ) -> Result<Value, String> {
         let session_id = normalize_browser_session_id(session_id);
-        let snapshot = self.eval_json(app, Some(&session_id), SNAPSHOT_SCRIPT)?;
+        let snapshot_id = random_snapshot_id();
+        let script = build_snapshot_script(&snapshot_id)?;
+        let mut snapshot = self.eval_json(app, Some(&session_id), &script)?;
         self.record_browser_page_metadata_from_value(&session_id, &snapshot)?;
+        let token = self
+            .registry
+            .record_interaction_snapshot(&session_id, &snapshot_id)?;
+        let object = snapshot
+            .as_object_mut()
+            .ok_or_else(|| "Browser interaction snapshot is not an object.".to_string())?;
+        object.insert("snapshot_id".to_string(), Value::String(snapshot_id));
+        object.insert("generation".to_string(), json!(token.generation));
+        object.insert("navigation_seq".to_string(), json!(token.navigation_seq));
+        object.insert("frame_id".to_string(), Value::String("main".to_string()));
         Ok(snapshot)
     }
 
@@ -307,32 +343,176 @@ impl BrowserManager {
     }
 }
 
-const SNAPSHOT_SCRIPT: &str = r#"
+fn random_snapshot_id() -> String {
+    let mut bytes = [0_u8; 16];
+    OsRng.fill_bytes(&mut bytes);
+    hex::encode(bytes)
+}
+
+fn build_snapshot_script(snapshot_id: &str) -> Result<String, String> {
+    if snapshot_id.len() != 32 || !snapshot_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("Browser snapshot id is invalid.".to_string());
+    }
+    Ok(SNAPSHOT_SCRIPT_TEMPLATE.replace("__CCEM_SNAPSHOT_ID__", snapshot_id))
+}
+
+fn ensure_page_action_ok(result: Value) -> Result<Value, String> {
+    if result.get("ok").and_then(Value::as_bool) == Some(false) {
+        return Err(result
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("Browser page rejected the interaction.")
+            .to_string());
+    }
+    Ok(result)
+}
+
+const SNAPSHOT_SCRIPT_TEMPLATE: &str = r#"
 (() => {
-  const interesting = Array.from(document.querySelectorAll('a,button,input,textarea,select,[role="button"],[contenteditable="true"]'))
-    .filter((node) => {
-      const rect = node.getBoundingClientRect();
-      const style = window.getComputedStyle(node);
-      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
-    })
+  const snapshotId = '__CCEM_SNAPSHOT_ID__';
+  const normalize = (value, limit = 160) => String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, limit);
+  const isRendered = (node) => {
+    if (!node || node.nodeType !== Node.ELEMENT_NODE || node.hidden || node.getAttribute('aria-hidden') === 'true') return false;
+    const rect = node.getBoundingClientRect();
+    const style = window.getComputedStyle(node);
+    return rect.width > 0
+      && rect.height > 0
+      && style.visibility !== 'hidden'
+      && style.display !== 'none'
+      && style.opacity !== '0';
+  };
+  const safeUrl = (value) => {
+    if (!value) return null;
+    try {
+      const url = new URL(String(value), location.href);
+      url.username = '';
+      url.password = '';
+      for (const key of Array.from(url.searchParams.keys())) {
+        if (/(token|secret|pass(word)?|api.?key|auth|session|otp|one.?time|code)/i.test(key)) {
+          url.searchParams.set(key, '[REDACTED]');
+        }
+      }
+      return url.href.slice(0, 2048);
+    } catch (_) {
+      return null;
+    }
+  };
+  const inferredRole = (node) => {
+    const explicit = node.getAttribute('role');
+    if (explicit) return explicit;
+    const tag = node.tagName.toLowerCase();
+    if (tag === 'a' && node.href) return 'link';
+    if (tag === 'button') return 'button';
+    if (tag === 'textarea') return 'textbox';
+    if (tag === 'select') return 'combobox';
+    if (tag === 'input') {
+      const type = (node.type || 'text').toLowerCase();
+      if (type === 'checkbox') return 'checkbox';
+      if (type === 'radio') return 'radio';
+      if (type === 'button' || type === 'submit' || type === 'reset') return 'button';
+      return 'textbox';
+    }
+    return null;
+  };
+  const accessibleName = (node) => {
+    const labelledBy = (node.getAttribute('aria-labelledby') || '')
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((id) => document.getElementById(id))
+      .filter(Boolean)
+      .map((label) => label.innerText || label.textContent || '')
+      .join(' ');
+    const associatedLabel = node.labels && node.labels.length
+      ? Array.from(node.labels).map((label) => label.innerText || '').join(' ')
+      : '';
+    return normalize(
+      node.getAttribute('aria-label')
+        || labelledBy
+        || associatedLabel
+        || node.innerText
+        || node.placeholder
+        || node.getAttribute('title')
+        || node.name
+        || node.id
+        || node.tagName,
+    );
+  };
+  const isSensitiveInput = (node) => {
+    const attributes = [
+      node.type,
+      node.name,
+      node.id,
+      node.autocomplete,
+      node.getAttribute('aria-label'),
+      node.placeholder,
+    ].join(' ');
+    return /(password|token|secret|api.?key|auth|session|otp|one.?time)/i.test(attributes);
+  };
+  const interesting = Array.from(document.querySelectorAll([
+    'a[href]',
+    'button',
+    'input',
+    'textarea',
+    'select',
+    '[role="button"]',
+    '[role="link"]',
+    '[role="checkbox"]',
+    '[role="radio"]',
+    '[role="textbox"]',
+    '[role="combobox"]',
+    '[contenteditable="true"]',
+    '[tabindex]',
+  ].join(',')))
+    .filter(isRendered)
     .slice(0, 80);
-  window.__ccemRefs = Object.create(null);
+  const refs = Object.create(null);
+  const priorSlot = window.__ccemCurrentSnapshotSlot;
+  if (typeof priorSlot === 'string' && priorSlot.startsWith('__ccemSnapshot_')) {
+    try { delete window[priorSlot]; } catch (_) {}
+  }
+  const snapshotSlot = `__ccemSnapshot_${snapshotId}`;
+  window[snapshotSlot] = refs;
+  window.__ccemCurrentSnapshotSlot = snapshotSlot;
+  window.__ccemCurrentSnapshotId = snapshotId;
   const items = interesting.map((node, index) => {
     const ref = index + 1;
-    window.__ccemRefs[ref] = node;
+    refs[ref] = node;
     const rect = node.getBoundingClientRect();
-    const label = (node.getAttribute('aria-label') || node.innerText || node.value || node.placeholder || node.href || node.name || node.id || node.tagName)
-      .toString()
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 160);
+    const disabled = Boolean(node.disabled) || node.getAttribute('aria-disabled') === 'true';
+    const editable = !disabled && !node.readOnly && (
+      node.isContentEditable
+      || node.tagName === 'TEXTAREA'
+      || node.tagName === 'SELECT'
+      || (node.tagName === 'INPUT' && !['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'hidden'].includes((node.type || '').toLowerCase()))
+    );
+    const focusable = !disabled && (
+      node.tabIndex >= 0
+      || node.isContentEditable
+      || ['A', 'BUTTON', 'INPUT', 'TEXTAREA', 'SELECT'].includes(node.tagName)
+    );
+    const rawValue = 'value' in node ? String(node.value || '') : '';
+    const valueRedacted = Boolean(rawValue) && isSensitiveInput(node);
+    const name = accessibleName(node);
     return {
       ref,
+      element_id: `${snapshotId}:${ref}`,
       tag: node.tagName.toLowerCase(),
-      role: node.getAttribute('role') || null,
+      role: inferredRole(node),
       type: node.getAttribute('type') || null,
-      label,
-      href: node.href || null,
+      name,
+      label: name,
+      href: safeUrl(node.href),
+      disabled,
+      hidden: false,
+      focusable,
+      editable,
+      readonly: Boolean(node.readOnly),
+      checked: typeof node.checked === 'boolean' ? node.checked : null,
+      value: valueRedacted ? '[REDACTED]' : normalize(rawValue),
+      value_redacted: valueRedacted,
       rect: {
         x: Math.round(rect.x),
         y: Math.round(rect.y),
@@ -341,6 +521,22 @@ const SNAPSHOT_SCRIPT: &str = r#"
       },
     };
   });
+  const blockSelector = 'h1,h2,h3,h4,h5,h6,p,li,pre,code,label,legend,td,th,dt,dd,blockquote';
+  const textBlocks = Array.from(document.querySelectorAll(blockSelector))
+    .filter(isRendered)
+    .map((node) => ({ tag: node.tagName.toLowerCase(), text: normalize(node.innerText, 500) }))
+    .filter((block) => block.text)
+    .slice(0, 200);
+  const hiddenCandidatesAll = document.body ? Array.from(document.body.querySelectorAll('*')) : [];
+  const hiddenCandidates = hiddenCandidatesAll.slice(0, 2000);
+  const hiddenTextCount = hiddenCandidates.reduce((count, node) => {
+    const ownText = Array.from(node.childNodes)
+      .filter((child) => child.nodeType === Node.TEXT_NODE)
+      .map((child) => child.textContent || '')
+      .join(' ')
+      .trim();
+    return count + (ownText && !isRendered(node) ? 1 : 0);
+  }, 0);
   const text = (document.body && document.body.innerText || '')
     .replace(/\s+/g, ' ')
     .trim()
@@ -350,6 +546,9 @@ const SNAPSHOT_SCRIPT: &str = r#"
     url: location.href,
     title: document.title,
     text,
+    text_blocks: textBlocks,
+    hidden_text_count: hiddenTextCount,
+    hidden_text_scan_truncated: hiddenCandidatesAll.length > hiddenCandidates.length,
     elements: items,
   };
 })()

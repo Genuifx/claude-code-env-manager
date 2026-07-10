@@ -119,6 +119,7 @@ struct OpenSessionParams {
 #[serde(rename_all = "camelCase")]
 struct BrowserSmokeProbeParams {
     url: String,
+    workspace_dir: Option<String>,
     marker_text: Option<String>,
     navigate_url: Option<String>,
     navigate_marker_text: Option<String>,
@@ -127,6 +128,7 @@ struct BrowserSmokeProbeParams {
     click_label: Option<String>,
     wait_for_text: Option<String>,
     verify_pause: Option<bool>,
+    verify_stale_snapshot: Option<bool>,
     timeout_ms: Option<u64>,
     close: Option<bool>,
     bounds: Option<BrowserBounds>,
@@ -531,6 +533,12 @@ fn run_browser_smoke_probe(
     params: BrowserSmokeProbeParams,
 ) -> Result<Value, String> {
     let timeout_ms = params.timeout_ms.unwrap_or(8_000).clamp(500, 30_000);
+    let workspace_dir = params.workspace_dir.clone().unwrap_or_else(|| {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .to_string_lossy()
+            .into_owned()
+    });
     let bounds = params.bounds.unwrap_or(BrowserBounds {
         x: 64.0,
         y: 72.0,
@@ -573,6 +581,7 @@ fn run_browser_smoke_probe(
         let paused_error = match browser.run_tool(
             app,
             BROWSER_SMOKE_SESSION_ID,
+            &workspace_dir,
             &BrowserToolRequest {
                 request_id: "smoke-paused-get-url".to_string(),
                 tool: "get_url".to_string(),
@@ -631,17 +640,57 @@ fn run_browser_smoke_probe(
         }));
     }
 
+    if params.verify_stale_snapshot.unwrap_or(false) {
+        let stale_snapshot_id = required_snapshot_id(&snapshot)?;
+        let stale_ref = snapshot
+            .get("elements")
+            .and_then(Value::as_array)
+            .and_then(|elements| elements.first())
+            .and_then(|element| element.get("ref"))
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                "Browser stale-snapshot smoke requires at least one interactable element."
+                    .to_string()
+            })?;
+        let fresh_snapshot = browser.snapshot(app, Some(BROWSER_SMOKE_SESSION_ID))?;
+        let stale_error = match browser.run_tool(
+            app,
+            BROWSER_SMOKE_SESSION_ID,
+            &workspace_dir,
+            &BrowserToolRequest {
+                request_id: "smoke-stale-snapshot".to_string(),
+                tool: "click".to_string(),
+                args: json!({ "snapshotId": stale_snapshot_id, "ref": stale_ref }),
+            },
+        ) {
+            Ok(_) => return Err("Stale browser snapshot unexpectedly succeeded.".to_string()),
+            Err(error) => error,
+        };
+        if !stale_error.to_ascii_lowercase().contains("stale") {
+            return Err(format!(
+                "Stale browser snapshot returned an unexpected error: {stale_error}"
+            ));
+        }
+        steps.push(json!({
+            "step": "staleSnapshotRejected",
+            "blockedError": stale_error,
+        }));
+        snapshot = fresh_snapshot;
+    }
+
     if let Some(label) = params.input_label.as_deref() {
         let reference = find_snapshot_ref_by_label(&snapshot, label)
             .ok_or_else(|| format!("Browser smoke input label not found: {label}"))?;
+        let snapshot_id = required_snapshot_id(&snapshot)?;
         let text = params.input_text.clone().unwrap_or_default();
         let typed = browser.run_tool(
             app,
             BROWSER_SMOKE_SESSION_ID,
+            &workspace_dir,
             &BrowserToolRequest {
                 request_id: "smoke-type".to_string(),
                 tool: "type".to_string(),
-                args: json!({ "ref": reference, "text": text }),
+                args: json!({ "snapshotId": snapshot_id, "ref": reference, "text": text }),
             },
         )?;
         steps.push(json!({
@@ -657,13 +706,15 @@ fn run_browser_smoke_probe(
     if let Some(label) = params.click_label.as_deref() {
         let reference = find_snapshot_ref_by_label(&snapshot, label)
             .ok_or_else(|| format!("Browser smoke click label not found: {label}"))?;
+        let snapshot_id = required_snapshot_id(&snapshot)?;
         let clicked = browser.run_tool(
             app,
             BROWSER_SMOKE_SESSION_ID,
+            &workspace_dir,
             &BrowserToolRequest {
                 request_id: "smoke-click".to_string(),
                 tool: "click".to_string(),
-                args: json!({ "ref": reference }),
+                args: json!({ "snapshotId": snapshot_id, "ref": reference }),
             },
         )?;
         steps.push(json!({
@@ -678,6 +729,7 @@ fn run_browser_smoke_probe(
         let waited = browser.run_tool(
             app,
             BROWSER_SMOKE_SESSION_ID,
+            &workspace_dir,
             &BrowserToolRequest {
                 request_id: "smoke-wait-for".to_string(),
                 tool: "wait_for".to_string(),
@@ -705,25 +757,36 @@ fn run_browser_smoke_probe(
         )?;
     }
 
+    let snapshot_artifact = browser.run_tool(
+        app,
+        BROWSER_SMOKE_SESSION_ID,
+        &workspace_dir,
+        &BrowserToolRequest {
+            request_id: "smoke-snapshot-artifact".to_string(),
+            tool: "snapshot".to_string(),
+            args: json!({}),
+        },
+    )?;
+    verify_browser_artifact(&snapshot_artifact, "interaction_snapshot")?;
+    steps.push(json!({
+        "step": "snapshotArtifact",
+        "artifact": snapshot_artifact,
+    }));
+
     let screenshot = browser.run_tool(
         app,
         BROWSER_SMOKE_SESSION_ID,
+        &workspace_dir,
         &BrowserToolRequest {
             request_id: "smoke-screenshot".to_string(),
             tool: "screenshot".to_string(),
             args: json!({}),
         },
     )?;
-    let screenshot_chars = screenshot
-        .get("data")
-        .and_then(Value::as_str)
-        .map(str::len)
-        .unwrap_or_default();
+    verify_browser_artifact(&screenshot, "screenshot")?;
     steps.push(json!({
         "step": "screenshot",
-        "mimeType": screenshot.get("mime_type").cloned().unwrap_or(Value::Null),
-        "base64Chars": screenshot_chars,
-        "estimatedBytes": (screenshot_chars * 3) / 4,
+        "artifact": screenshot,
     }));
 
     let health = browser.health_check(app, Some(BROWSER_SMOKE_SESSION_ID))?;
@@ -744,6 +807,61 @@ fn run_browser_smoke_probe(
     }))
 }
 
+fn required_snapshot_id(snapshot: &Value) -> Result<String, String> {
+    snapshot
+        .get("snapshot_id")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| "Browser smoke snapshot did not include a snapshot id.".to_string())
+}
+
+fn verify_browser_artifact(artifact: &Value, expected_kind: &str) -> Result<(), String> {
+    let kind = artifact
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Browser smoke artifact did not include a kind.".to_string())?;
+    if kind != expected_kind {
+        return Err(format!(
+            "Browser smoke artifact kind mismatch: expected {expected_kind}, got {kind}."
+        ));
+    }
+    let path = artifact
+        .get("path")
+        .and_then(Value::as_str)
+        .map(Path::new)
+        .ok_or_else(|| "Browser smoke artifact did not include a path.".to_string())?;
+    if !path.is_absolute() || !path.is_file() {
+        return Err(format!(
+            "Browser smoke artifact path is not a readable absolute file: {}",
+            path.display()
+        ));
+    }
+    let sha256 = artifact
+        .get("sha256")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if sha256.len() != 64 || !sha256.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("Browser smoke artifact did not include a valid SHA-256.".to_string());
+    }
+    if expected_kind == "interaction_snapshot" {
+        let payload: Value = serde_json::from_slice(
+            &fs::read(path)
+                .map_err(|error| format!("Failed to read browser smoke artifact: {error}"))?,
+        )
+        .map_err(|error| format!("Failed to parse browser smoke snapshot artifact: {error}"))?;
+        if payload
+            .pointer("/provenance/untrusted")
+            .and_then(Value::as_bool)
+            != Some(true)
+        {
+            return Err(
+                "Browser smoke snapshot artifact is missing untrusted provenance.".to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
 fn wait_for_browser_snapshot(
     app: &AppHandle,
     browser: &BrowserManager,
@@ -756,21 +874,23 @@ fn wait_for_browser_snapshot(
     let mut last_snapshot = None;
 
     loop {
-        match browser.run_tool(
-            app,
-            browser_session_id,
-            &BrowserToolRequest {
-                request_id: "smoke-snapshot".to_string(),
-                tool: "snapshot".to_string(),
-                args: json!({}),
-            },
-        ) {
+        match browser.snapshot(app, Some(browser_session_id)) {
             Ok(snapshot) => {
                 let matched = marker_text
                     .map(|marker| snapshot_text_contains(&snapshot, marker))
                     .unwrap_or(true);
                 if matched {
-                    return Ok(snapshot);
+                    match browser.info(app, Some(browser_session_id)) {
+                        Ok(info)
+                            if info.lifecycle
+                                == crate::browser::BrowserLifecycleState::Interactive
+                                && !info.loading =>
+                        {
+                            return Ok(snapshot);
+                        }
+                        Ok(_) => {}
+                        Err(error) => last_error = Some(error),
+                    }
                 }
                 last_snapshot = Some(snapshot);
             }

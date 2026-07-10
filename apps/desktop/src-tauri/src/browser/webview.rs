@@ -3,7 +3,6 @@ use super::{
     emit_browser_state, is_allowed_browser_navigation, parse_browser_url, BrowserBounds,
     BrowserHistoryDirection, BrowserHistoryState, BrowserPageMetadata, SAFARI_DESKTOP_UA,
 };
-use base64::Engine;
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
@@ -302,7 +301,7 @@ pub(super) fn probe_webview_health(_webview: &tauri::Webview) -> Result<(), Stri
 }
 
 #[cfg(target_os = "macos")]
-pub(super) fn snapshot_webview_png(webview: &tauri::Webview) -> Result<String, String> {
+pub(super) fn snapshot_webview_png(webview: &tauri::Webview) -> Result<Vec<u8>, String> {
     use block2::RcBlock;
     use objc2::runtime::AnyObject;
     use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep, NSImage};
@@ -333,7 +332,7 @@ pub(super) fn snapshot_webview_png(webview: &tauri::Webview) -> Result<String, S
                                 &properties,
                             )
                         })
-                        .map(|png| base64::engine::general_purpose::STANDARD.encode(png.bytes()))
+                        .map(|png| png.bytes().to_vec())
                         .ok_or_else(|| "Failed to convert browser screenshot to PNG.".to_string())
                 };
                 let _ = tx.send(result);
@@ -347,6 +346,6 @@ pub(super) fn snapshot_webview_png(webview: &tauri::Webview) -> Result<String, S
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(super) fn snapshot_webview_png(_webview: &tauri::Webview) -> Result<String, String> {
+pub(super) fn snapshot_webview_png(_webview: &tauri::Webview) -> Result<Vec<u8>, String> {
     Err("Embedded browser screenshot is only supported on macOS in this version.".to_string())
 }

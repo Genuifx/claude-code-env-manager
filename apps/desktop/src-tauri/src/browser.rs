@@ -1,9 +1,12 @@
+mod artifacts;
 mod policy;
 mod registry;
 mod tools;
 mod url;
 mod webview;
 
+use artifacts::BrowserArtifactStore;
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 pub(crate) use policy::authorize_browser_tool;
 use registry::{BrowserSessionRegistry, BrowserSessionState};
 use serde::{Deserialize, Serialize};
@@ -123,12 +126,14 @@ struct BrowserPageMetadata {
 
 pub struct BrowserManager {
     registry: Arc<BrowserSessionRegistry>,
+    artifacts: Arc<BrowserArtifactStore>,
 }
 
 impl Default for BrowserManager {
     fn default() -> Self {
         Self {
             registry: Arc::new(BrowserSessionRegistry::new(DEFAULT_BROWSER_SESSION_ID)),
+            artifacts: Arc::new(BrowserArtifactStore::default()),
         }
     }
 }
@@ -378,6 +383,15 @@ impl BrowserManager {
         app: &AppHandle,
         session_id: Option<&str>,
     ) -> Result<String, String> {
+        self.screenshot_png(app, session_id)
+            .map(|bytes| STANDARD.encode(bytes))
+    }
+
+    pub(super) fn screenshot_png(
+        &self,
+        app: &AppHandle,
+        session_id: Option<&str>,
+    ) -> Result<Vec<u8>, String> {
         let session_id = normalize_browser_session_id(session_id);
         let session = self.session_snapshot(&session_id)?;
         let webview = require_browser_webview(app, &session.label)?;

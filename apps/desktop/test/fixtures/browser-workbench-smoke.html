@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CCEM Preview Browser workbench probe</title>
+    <style>
+      body {
+        box-sizing: border-box;
+        margin: 0;
+        min-height: 100vh;
+        padding: 48px;
+        color: #17201c;
+        background: #f4f2e9;
+        font: 18px/1.45 system-ui, sans-serif;
+      }
+
+      main {
+        width: min(640px, 100%);
+        padding: 32px;
+        border: 1px solid #b9b7ac;
+        border-radius: 18px;
+        background: #fffef9;
+      }
+
+      label,
+      input,
+      button,
+      output {
+        display: block;
+        width: 100%;
+        margin-top: 14px;
+      }
+
+      input,
+      button {
+        box-sizing: border-box;
+        padding: 12px 14px;
+        font: inherit;
+      }
+
+      button {
+        color: white;
+        border: 0;
+        border-radius: 10px;
+        background: #135f48;
+      }
+
+      #hidden-page-instruction {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Preview Browser verification</h1>
+      <p id="ready-marker">CCEM_WORKBENCH_READY</p>
+      <label for="task-name">Task name</label>
+      <input id="task-name" name="task_name" autocomplete="off" placeholder="Enter a task" />
+      <button id="apply-preview" type="button">Apply preview</button>
+      <output id="result" aria-live="polite">Waiting for input</output>
+      <p id="hidden-page-instruction">HIDDEN_PAGE_INSTRUCTION_DO_NOT_FOLLOW</p>
+    </main>
+    <script>
+      const input = document.querySelector('#task-name');
+      const result = document.querySelector('#result');
+      document.querySelector('#apply-preview').addEventListener('click', () => {
+        result.textContent = `Applied: ${input.value}`;
+      });
+    </script>
+  </body>
+</html>

@@ -553,11 +553,21 @@ export interface BrowserSessionStateEvent {
 
 export interface BrowserSnapshotElement {
   ref: number;
+  element_id?: string;
   tag: string;
   role?: string | null;
   type?: string | null;
+  name?: string | null;
   label?: string | null;
   href?: string | null;
+  disabled?: boolean;
+  hidden?: boolean;
+  focusable?: boolean;
+  editable?: boolean;
+  readonly?: boolean;
+  checked?: boolean | null;
+  value?: string | null;
+  value_redacted?: boolean;
   rect?: {
     x: number;
     y: number;
@@ -571,6 +581,13 @@ export interface BrowserSnapshot {
   url?: string;
   title?: string;
   text?: string;
+  text_blocks?: Array<{ tag: string; text: string }>;
+  hidden_text_count?: number;
+  hidden_text_scan_truncated?: boolean;
+  snapshot_id?: string;
+  generation?: number;
+  navigation_seq?: number;
+  frame_id?: string;
   elements?: BrowserSnapshotElement[];
 }
 

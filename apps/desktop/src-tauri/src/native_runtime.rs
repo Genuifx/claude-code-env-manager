@@ -1692,17 +1692,18 @@ impl NativeRuntimeManager {
             .cloned()
             .ok_or_else(|| format!("Native runtime {} helper is not connected", runtime_id))?;
 
-        let authorization = {
+        let authorized_workspace = {
             let record = handle
                 .record
                 .lock()
                 .map_err(|_| "Failed to lock native session record".to_string())?;
             authorize_browser_tool_for_record(&record, &request.tool)
+                .map(|_| record.project_dir.clone())
         };
 
-        let response = authorization.and_then(|_| match app {
+        let response = authorized_workspace.and_then(|workspace_dir| match app {
             Some(app) => match app.try_state::<Arc<BrowserManager>>() {
-                Some(browser) => browser.run_tool(app, runtime_id, &request),
+                Some(browser) => browser.run_tool(app, runtime_id, &workspace_dir, &request),
                 None => Err("Browser manager is not registered.".to_string()),
             },
             None => Err("Browser tool request requires an app handle.".to_string()),

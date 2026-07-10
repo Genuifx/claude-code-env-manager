@@ -21,6 +21,7 @@ pub(super) struct BrowserSessionState {
     pub paused: bool,
     pub generation: u64,
     pub navigation_seq: u64,
+    pub latest_snapshot: Option<BrowserSnapshotToken>,
     pub cancel_epoch: u64,
     pub policy_epoch: u64,
     pub operation_seq: u64,
@@ -48,6 +49,7 @@ impl BrowserSessionState {
             paused: false,
             generation,
             navigation_seq: 0,
+            latest_snapshot: None,
             cancel_epoch: 0,
             policy_epoch: 0,
             operation_seq: 0,
@@ -65,6 +67,14 @@ impl BrowserSessionState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct BrowserNavigationToken {
     pub session_id: String,
+    pub generation: u64,
+    pub navigation_seq: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct BrowserSnapshotToken {
+    pub session_id: String,
+    pub snapshot_id: String,
     pub generation: u64,
     pub navigation_seq: u64,
 }
@@ -194,6 +204,7 @@ impl BrowserSessionRegistry {
             .get_mut(session_id)
             .ok_or_else(|| format!("Browser session {session_id} is not registered"))?;
         session.navigation_seq = session.navigation_seq.saturating_add(1);
+        session.latest_snapshot = None;
         session.current_url = Some(url);
         session.title = None;
         session.lifecycle = BrowserLifecycleState::Navigating;
@@ -267,12 +278,64 @@ impl BrowserSessionRegistry {
     ) -> Result<BrowserSessionState, String> {
         self.update(session_id, |session| {
             if let Some(url) = url.filter(|value| !value.is_empty()) {
+                if session.current_url.as_deref() != Some(url.as_str()) {
+                    session.navigation_seq = session.navigation_seq.saturating_add(1);
+                    session.latest_snapshot = None;
+                }
                 session.current_url = Some(url);
             }
             if let Some(title) = title.filter(|value| !value.is_empty()) {
                 session.title = Some(title);
             }
         })
+    }
+
+    pub fn record_interaction_snapshot(
+        &self,
+        session_id: &str,
+        snapshot_id: &str,
+    ) -> Result<BrowserSnapshotToken, String> {
+        let mut sessions = self.lock_sessions()?;
+        let session = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| format!("Browser session {session_id} is not registered"))?;
+        let token = BrowserSnapshotToken {
+            session_id: session_id.to_string(),
+            snapshot_id: snapshot_id.to_string(),
+            generation: session.generation,
+            navigation_seq: session.navigation_seq,
+        };
+        session.latest_snapshot = Some(token.clone());
+        if session.lifecycle == BrowserLifecycleState::Navigating {
+            session.lifecycle = BrowserLifecycleState::Interactive;
+            session.loading = false;
+            session.last_error = None;
+        }
+        session.touch();
+        Ok(token)
+    }
+
+    pub fn validate_interaction_snapshot(
+        &self,
+        session_id: &str,
+        snapshot_id: &str,
+    ) -> Result<BrowserSnapshotToken, String> {
+        let sessions = self.lock_sessions()?;
+        let session = sessions
+            .get(session_id)
+            .ok_or_else(|| format!("Browser session {session_id} is not registered"))?;
+        let token = session.latest_snapshot.as_ref().ok_or_else(|| {
+            "Browser interaction requires a fresh snapshot for the current page.".to_string()
+        })?;
+        if token.snapshot_id != snapshot_id
+            || token.generation != session.generation
+            || token.navigation_seq != session.navigation_seq
+        {
+            return Err(
+                "Browser interaction snapshot is stale; capture a new snapshot first.".to_string(),
+            );
+        }
+        Ok(token.clone())
     }
 
     pub fn mark_crashed(
@@ -288,6 +351,7 @@ impl BrowserSessionRegistry {
         session.loading = false;
         session.visible = false;
         session.last_error = Some(error.into());
+        session.latest_snapshot = None;
         session.cancel_epoch = session.cancel_epoch.saturating_add(1);
         session.control = BrowserControlState::User;
         session.touch();
@@ -585,6 +649,45 @@ mod tests {
             .expect("change policy epoch");
         assert_eq!(changed.policy_epoch, token.policy_epoch + 1);
         assert!(registry.validate_operation(&token).is_err());
+    }
+
+    #[test]
+    fn interaction_snapshot_is_bound_to_generation_and_navigation() {
+        let registry = registry();
+        registry
+            .snapshot_or_create("session-a", |_| "browser-a".to_string())
+            .expect("create session");
+        registry.mark_ready("session-a").expect("ready");
+        registry
+            .mark_navigation("session-a", "https://current.test/".to_string())
+            .expect("start navigation");
+        let token = registry
+            .record_interaction_snapshot("session-a", "snapshot-1")
+            .expect("record snapshot");
+
+        let settled = registry
+            .snapshot("session-a")
+            .expect("snapshot state")
+            .expect("registered state");
+        assert_eq!(settled.lifecycle, BrowserLifecycleState::Interactive);
+        assert!(!settled.loading);
+
+        assert_eq!(
+            registry
+                .validate_interaction_snapshot("session-a", "snapshot-1")
+                .expect("current snapshot"),
+            token
+        );
+        assert!(registry
+            .validate_interaction_snapshot("session-a", "snapshot-other")
+            .is_err());
+
+        registry
+            .mark_navigation("session-a", "https://next.test/".to_string())
+            .expect("navigate");
+        assert!(registry
+            .validate_interaction_snapshot("session-a", "snapshot-1")
+            .is_err());
     }
 
     #[test]

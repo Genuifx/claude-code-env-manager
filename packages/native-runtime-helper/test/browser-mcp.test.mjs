@@ -101,6 +101,13 @@ test('browser MCP exposes interactive tools for development modes', async () => 
     toolName: 'navigate',
     args: { url: 'https://example.com' },
   });
+
+  const click = server.instance._registeredTools.click.handler;
+  const clickResult = await click({ snapshotId: 'snapshot-1', ref: 7 });
+  assert.deepEqual(JSON.parse(clickResult.content[0].text), {
+    toolName: 'click',
+    args: { snapshotId: 'snapshot-1', ref: 7 },
+  });
 });
 
 test('browser tool bridge resolves successful responses and rejects failures', async () => {
