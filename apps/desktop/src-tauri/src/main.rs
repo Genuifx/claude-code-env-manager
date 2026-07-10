@@ -20,6 +20,8 @@ mod event_dispatcher;
 mod external_control;
 mod history;
 mod interactive_runtime;
+#[cfg(test)]
+mod ipc_isolation_tests;
 mod jsonl_watcher;
 mod native_event_log;
 mod native_helper_resource;

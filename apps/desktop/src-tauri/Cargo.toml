@@ -54,4 +54,5 @@ default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 
 [dev-dependencies]
+tauri = { version = "2", features = ["test"] }
 tempfile = "3"

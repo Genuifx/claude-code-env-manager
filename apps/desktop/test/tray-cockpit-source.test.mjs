@@ -51,7 +51,7 @@ test('tray cockpit owns left-click while preserving the native context menu', as
   assert.match(entrySource, /label === 'tray-cockpit'[\s\S]*return TrayCockpit/);
   assert.match(entrySource, /requestedWindow === 'tray-cockpit'[\s\S]*return TrayCockpit/);
   assert.match(appSource, /listen<TrayOpenTabRequest>\('tray-open-tab'[\s\S]*navigateToTab\(event\.payload\.tab\)/);
-  assert.deepEqual(capabilities.windows, ['main', 'desktop-pet', 'tray-cockpit']);
+  assert.deepEqual(capabilities.webviews, ['main', 'desktop-pet', 'tray-cockpit']);
   for (const permission of [
     'core:window:allow-hide',
     'core:window:allow-set-focus',

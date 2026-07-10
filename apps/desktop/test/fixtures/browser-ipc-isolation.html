@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>CCEM browser IPC isolation probe</title>
+  </head>
+  <body>
+    <main id="result">CCEM_IPC_ISOLATION_PENDING</main>
+    <script>
+      const result = document.querySelector('#result');
+
+      async function probe(command, args) {
+        const invoke = window.__TAURI_INTERNALS__?.invoke;
+        if (typeof invoke !== 'function') {
+          return 'NO_BRIDGE';
+        }
+        try {
+          await invoke(command, args);
+          return 'ALLOWED';
+        } catch {
+          return 'DENIED';
+        }
+      }
+
+      Promise.all([
+        probe('greet', { name: 'untrusted browser page' }),
+        probe('plugin:app|version', {}),
+      ]).then(([appCommand, pluginCommand]) => {
+        const blocked = (value) => value === 'DENIED' || value === 'NO_BRIDGE';
+        const status = blocked(appCommand) && blocked(pluginCommand) ? 'PASS' : 'FAIL';
+        result.textContent =
+          `CCEM_IPC_ISOLATION_${status} app=${appCommand} plugin=${pluginCommand}`;
+      });
+    </script>
+  </body>
+</html>
