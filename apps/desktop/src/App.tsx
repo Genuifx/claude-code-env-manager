@@ -124,15 +124,16 @@ function App() {
 
   const {
     loadEnvironments,
-      loadCurrentEnv,
-      loadSessions,
-      loadAppConfig,
-      launchClaudeCode,
+    loadCurrentEnv,
+    loadSessions,
+    loadAppConfig,
+    launchClaudeCode,
     addEnvironment,
     updateEnvironment,
-      deleteEnvironment,
-      loadFromRemote,
-    } = useTauriCommands();
+    deleteEnvironment,
+    loadEnabledEnvironments,
+    loadFromRemote,
+  } = useTauriCommands();
 
   const preloadAnalyticsPage = useCallback(() => {
     void import('@/pages/Analytics').then((module) => {
@@ -366,13 +367,18 @@ function App() {
   }, [navigateToTab, setCurrentEnv, setPermissionMode]);
 
   const refreshCriticalData = useCallback(async () => {
-    const settingsPromise = invoke<{ defaultMode: string | null }>('get_settings')
+    const settingsPromise = invoke<{
+      defaultMode: string | null;
+      enabledEnvironments?: string[] | null;
+    }>('get_settings')
       .then((settings) => {
         const defaultMode = normalizeAppPermissionMode(settings.defaultMode);
         if (defaultMode) {
           setDefaultMode(defaultMode);
           setPermissionMode(defaultMode);
         }
+        // Prefer full settings payload; keep explicit null as legacy all-enabled.
+        useAppStore.getState().setEnabledEnvironments(settings.enabledEnvironments ?? null);
       })
       .catch(() => {
         const saved = localStorage.getItem('ccem-settings');
@@ -380,16 +386,24 @@ function App() {
           return;
         }
         try {
-          const settings = JSON.parse(saved) as { defaultMode?: unknown };
+          const settings = JSON.parse(saved) as {
+            defaultMode?: unknown;
+            enabledEnvironments?: string[] | null;
+          };
           const defaultMode = normalizeAppPermissionMode(settings.defaultMode);
           if (defaultMode) {
             setDefaultMode(defaultMode);
             setPermissionMode(defaultMode);
           }
+          if ('enabledEnvironments' in settings) {
+            useAppStore.getState().setEnabledEnvironments(settings.enabledEnvironments ?? null);
+          }
         } catch {
           // Ignore corrupt local fallback settings.
         }
       });
+    // Best-effort dedicated load so enablement still hydrates if settings payload is partial.
+    void loadEnabledEnvironments();
     const envPromise = loadEnvironments().catch(() => {
       // Fallback to presets if Tauri is not available (dev mode)
       const envList: Environment[] = Object.entries(ENV_PRESETS).map(([name, config]) => ({
@@ -421,6 +435,7 @@ function App() {
     ]);
   }, [
     loadEnvironments,
+    loadEnabledEnvironments,
     loadCurrentEnv,
     setEnvironments,
     setCurrentEnv,
@@ -660,6 +675,12 @@ function App() {
     setDialogOpen(true);
   };
 
+  const handleCopyEnv = (name: string) => {
+    setDialogMode('add');
+    setEditingEnvName(name);
+    setDialogOpen(true);
+  };
+
   const handleDeleteEnv = (name: string) => {
     setPendingDeleteEnv(name);
   };
@@ -688,12 +709,14 @@ function App() {
     }
   };
 
-  // Get editing environment for dialog
+  // Get seed environment for edit / copy dialogs
   const getEditingEnv = (): Environment | undefined => {
     if (!editingEnvName) return undefined;
     const env = environments.find(e => e.name === editingEnvName);
     return env;
   };
+
+  const existingEnvNames = environments.map((env) => env.name);
 
   // Render current non-workspace page. Workspace stays mounted so its local UI state
   // survives tab switches instead of remounting on every return.
@@ -708,6 +731,7 @@ function App() {
           <EnvironmentsPage
             onAddEnv={handleAddEnv}
             onEditEnv={handleEditEnv}
+            onCopyEnv={handleCopyEnv}
             onDeleteEnv={handleDeleteEnv}
           />
         );
@@ -789,6 +813,7 @@ function App() {
                 onOpenChange={setDialogOpen}
                 mode={dialogMode}
                 environment={getEditingEnv()}
+                existingNames={existingEnvNames}
                 onSave={handleSaveEnv}
                 onServerSync={loadFromRemote}
               />

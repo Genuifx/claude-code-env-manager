@@ -31,6 +31,7 @@ import { PERMISSION_PRESETS } from '@ccem/core/browser';
 import type { PermissionModeName } from '@ccem/core/browser';
 import type { Environment } from '@/store';
 import { resolveEnvironmentIconHint } from '@/components/workspace/sessionTreeIcons';
+import { filterRuntimeEnvironments } from '@/lib/enabledEnvironments';
 import {
   getWorkspacePermissionModeDisplayName,
   normalizeWorkspacePermissionModeName,
@@ -85,6 +86,8 @@ export interface ComposerControlsProps {
   permMode: WorkspacePermissionModeName;
   effort: EffortLevel;
   environments: Environment[];
+  /** null = legacy all-enabled; string[] = explicit enable list */
+  enabledEnvironments?: string[] | null;
   onEnvChange: (envName: string) => void;
   onPermModeChange: (mode: PermissionModeName) => void;
   onEffortChange: (effort: EffortLevel) => void;
@@ -96,6 +99,7 @@ export function ComposerControls({
   permMode,
   effort,
   environments,
+  enabledEnvironments = null,
   onEnvChange,
   onPermModeChange,
   onEffortChange,
@@ -117,6 +121,11 @@ export function ComposerControls({
   const permissionModes = useMemo(
     () => Object.keys(PERMISSION_PRESETS) as PermissionModeName[],
     [],
+  );
+
+  const selectableEnvironments = useMemo(
+    () => filterRuntimeEnvironments(environments, enabledEnvironments, { currentEnv: envName }),
+    [enabledEnvironments, envName, environments],
   );
 
   const currentEnvironment = environments.find((e) => e.name === envName);
@@ -218,7 +227,7 @@ export function ComposerControls({
           </div>
           <ScrollArea className="min-h-0 max-h-[200px]">
             <div className="p-1.5 pt-0">
-              {environments.map((environment) => (
+              {selectableEnvironments.map((environment) => (
                 <button
                   key={environment.name}
                   type="button"
