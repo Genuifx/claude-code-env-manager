@@ -2217,6 +2217,9 @@ fn parse_claude_conversation_file(
         }
 
         if parsed.is_meta == Some(true) {
+            if msg_type == "user" {
+                append_claude_meta_images_to_parent(&mut messages, &parsed);
+            }
             continue;
         }
 
@@ -2228,32 +2231,45 @@ fn parse_claude_conversation_file(
             continue;
         }
 
-        let (content, model, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens) =
-            if let Some(msg) = &parsed.message {
-                let content = msg
-                    .get("content")
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null);
-                let model = msg
-                    .get("model")
-                    .and_then(|m| m.as_str())
-                    .map(|s| s.to_string());
-                let (input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens) =
-                    extract_usage_fields(msg);
-                (
-                    content,
-                    model,
-                    input_tokens,
-                    output_tokens,
-                    cache_creation_tokens,
-                    cache_read_tokens,
-                )
-            } else {
-                (serde_json::Value::Null, None, None, None, None, None)
-            };
+        let (
+            mut content,
+            model,
+            input_tokens,
+            output_tokens,
+            cache_creation_tokens,
+            cache_read_tokens,
+        ) = if let Some(msg) = &parsed.message {
+            let content = msg
+                .get("content")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            let model = msg
+                .get("model")
+                .and_then(|m| m.as_str())
+                .map(|s| s.to_string());
+            let (input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens) =
+                extract_usage_fields(msg);
+            (
+                content,
+                model,
+                input_tokens,
+                output_tokens,
+                cache_creation_tokens,
+                cache_read_tokens,
+            )
+        } else {
+            (serde_json::Value::Null, None, None, None, None, None)
+        };
 
         if content.is_null() && msg_type != "summary" && parsed.summary.is_none() {
             continue;
+        }
+
+        if msg_type == "user" {
+            let Some(normalized_content) = normalize_claude_user_content(&content) else {
+                continue;
+            };
+            content = normalized_content;
         }
 
         if should_skip_claude_conversation_message(&msg_type, &content, model.as_deref()) {
@@ -2286,6 +2302,133 @@ fn parse_claude_conversation_file(
     Ok((messages, segments))
 }
 
+fn append_claude_meta_images_to_parent(messages: &mut [ConversationMessage], parsed: &MessageLine) {
+    let Some(parent_uuid) = parsed
+        .parent_uuid
+        .as_ref()
+        .and_then(serde_json::Value::as_str)
+    else {
+        return;
+    };
+    let Some(blocks) = parsed
+        .message
+        .as_ref()
+        .and_then(|message| message.get("content"))
+        .and_then(serde_json::Value::as_array)
+    else {
+        return;
+    };
+    let images: Vec<serde_json::Value> = blocks
+        .iter()
+        .filter(|block| block.get("type").and_then(serde_json::Value::as_str) == Some("image"))
+        .cloned()
+        .collect();
+    if images.is_empty() {
+        return;
+    }
+
+    let Some(parent) = messages
+        .iter_mut()
+        .rev()
+        .find(|message| message.uuid.as_deref() == Some(parent_uuid))
+    else {
+        return;
+    };
+
+    let existing = std::mem::replace(&mut parent.content, serde_json::Value::Null);
+    let mut combined = match existing {
+        serde_json::Value::Array(blocks) => blocks,
+        serde_json::Value::String(text) if !text.trim().is_empty() => {
+            vec![serde_json::json!({ "type": "text", "text": text })]
+        }
+        serde_json::Value::Null => Vec::new(),
+        other => vec![other],
+    };
+    combined.extend(images);
+    parent.content = serde_json::Value::Array(combined);
+}
+
+fn normalize_claude_user_content(content: &serde_json::Value) -> Option<serde_json::Value> {
+    match content {
+        serde_json::Value::String(text) => {
+            if is_claude_user_wrapper_text(text) {
+                extract_claude_wrapped_user_request(text).map(serde_json::Value::String)
+            } else {
+                Some(content.clone())
+            }
+        }
+        serde_json::Value::Array(blocks) => {
+            let wrapped_texts: Vec<&str> = blocks
+                .iter()
+                .filter_map(|block| block.get("text").and_then(serde_json::Value::as_str))
+                .filter(|text| is_claude_user_wrapper_text(text))
+                .collect();
+            if wrapped_texts.is_empty() {
+                return Some(content.clone());
+            }
+
+            let mut normalized = Vec::new();
+            if let Some(request) = wrapped_texts
+                .iter()
+                .find_map(|text| extract_claude_wrapped_user_request(text))
+            {
+                normalized.push(serde_json::json!({ "type": "text", "text": request }));
+            }
+            normalized.extend(
+                blocks
+                    .iter()
+                    .filter(|block| {
+                        block.get("type").and_then(serde_json::Value::as_str) == Some("image")
+                    })
+                    .cloned(),
+            );
+
+            (!normalized.is_empty()).then(|| serde_json::Value::Array(normalized))
+        }
+        _ => Some(content.clone()),
+    }
+}
+
+fn is_claude_user_wrapper_text(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    trimmed.starts_with("<command-name>")
+        || trimmed.starts_with("<command-message>")
+        || trimmed.starts_with("<selected_skills>")
+        || trimmed.starts_with("<user_request>")
+}
+
+fn extract_claude_wrapped_user_request(text: &str) -> Option<String> {
+    if !is_claude_user_wrapper_text(text) {
+        return None;
+    }
+
+    if let Some(request) = extract_claude_tag_body(text, "<user_request>", "</user_request>") {
+        return clean_claude_user_request(request);
+    }
+
+    if text.contains("</user_request>") {
+        if let Some(args) = extract_claude_tag_body(text, "<command-args>", "</command-args>") {
+            return clean_claude_user_request(args);
+        }
+    }
+
+    None
+}
+
+fn extract_claude_tag_body<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
+    let start = text.find(open)? + open.len();
+    let end = text[start..].find(close)? + start;
+    Some(&text[start..end])
+}
+
+fn clean_claude_user_request(text: &str) -> Option<String> {
+    let cleaned = text
+        .replace("<user_request>", "")
+        .replace("</user_request>", "");
+    let trimmed = cleaned.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
 fn should_skip_claude_conversation_message(
     msg_type: &str,
     content: &serde_json::Value,
@@ -2316,6 +2459,7 @@ fn is_claude_control_artifact_text(text: &str) -> bool {
         || lowered.starts_with("<local-command-stdout>")
         || lowered.starts_with("<command-name>")
         || lowered.starts_with("<command-message>")
+        || lowered.starts_with("<selected_skills>")
         || lowered.starts_with("<synthetic>")
     {
         return true;
@@ -5450,6 +5594,102 @@ mod tests {
         );
         assert_eq!(messages[1].msg_type, "assistant");
         assert_eq!(messages[1].model.as_deref(), Some("claude-test"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_claude_conversation_file_preserves_wrapped_requests_and_meta_images() {
+        let root = temp_history_dir("wrapped-user-request");
+        let session_path = root.join("session-wrapped-user-request.jsonl");
+        let wrapped_prompt = concat!(
+            "<command-message>lightweight-dev-mode</command-message>\n",
+            "<command-name>/lightweight-dev-mode</command-name>\n",
+            "<command-args> workspace 审查 - 改动的文件 现在没法支持多媒体\n",
+            "</user_request></command-args>"
+        );
+        let selected_skill_prompt = concat!(
+            "<selected_skills><skill name=\"finishing-a-development-branch\" /></selected_skills>\n",
+            "<user_request>/superpowers:finishing-a-development-branch merge back main</user_request>"
+        );
+        let lines = [
+            serde_json::json!({
+                "type": "user",
+                "uuid": "prompt-1",
+                "timestamp": "2026-07-09T15:03:56.337Z",
+                "message": { "content": wrapped_prompt }
+            }),
+            serde_json::json!({
+                "type": "user",
+                "uuid": "meta-1",
+                "parentUuid": "prompt-1",
+                "isMeta": true,
+                "timestamp": "2026-07-09T15:03:56.337Z",
+                "message": {
+                    "content": [
+                        { "type": "text", "text": "<selected_skills>metadata</selected_skills>" },
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": "iVBORw0KGgo="
+                            }
+                        },
+                        { "type": "text", "text": "Base directory for this skill: /tmp/skill" }
+                    ]
+                }
+            }),
+            serde_json::json!({
+                "type": "assistant",
+                "uuid": "assistant-1",
+                "timestamp": "2026-07-09T15:04:05.946Z",
+                "message": {
+                    "content": [{ "type": "text", "text": "开始处理" }],
+                    "model": "claude-test"
+                }
+            }),
+            serde_json::json!({
+                "type": "user",
+                "uuid": "prompt-2",
+                "timestamp": "2026-07-09T15:17:25.645Z",
+                "message": { "content": selected_skill_prompt }
+            }),
+        ]
+        .into_iter()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+        fs::write(&session_path, format!("{lines}\n")).expect("write wrapped session file");
+
+        let (messages, segments) =
+            parse_claude_conversation_file(&session_path).expect("parse wrapped session");
+
+        assert_eq!(messages.len(), 3);
+        assert_eq!(segments[0].message_count, 3);
+        let first_blocks = messages[0]
+            .content
+            .as_array()
+            .expect("wrapped prompt should include its image");
+        assert_eq!(first_blocks.len(), 2);
+        assert_eq!(
+            first_blocks[0]
+                .get("text")
+                .and_then(serde_json::Value::as_str),
+            Some("workspace 审查 - 改动的文件 现在没法支持多媒体")
+        );
+        assert_eq!(
+            first_blocks[1]
+                .get("type")
+                .and_then(serde_json::Value::as_str),
+            Some("image")
+        );
+        assert_eq!(
+            messages[2].content,
+            serde_json::Value::String(
+                "/superpowers:finishing-a-development-branch merge back main".to_string()
+            )
+        );
 
         let _ = fs::remove_dir_all(root);
     }

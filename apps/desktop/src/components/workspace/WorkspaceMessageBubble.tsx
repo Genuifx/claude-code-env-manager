@@ -1805,6 +1805,12 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
     };
   }, [isSummary, isUser, message.content, message.isCompactBoundary, message.planContent, t]);
 
+  const handleActionRegionBlur = useCallback((event: React.FocusEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      setIsActionFocusWithin(false);
+    }
+  }, []);
+
   if (isSummary) {
     return (
       <div className="my-6 flex justify-center">
@@ -1840,12 +1846,6 @@ function WorkspaceMessageBubbleComponent({ message, prevRole }: WorkspaceMessage
   const hasMainContent = renderedContent && !(Array.isArray(renderedContent) && renderedContent.length === 0);
   const hasImages = imageBlocks.length > 0;
   const showMessageActions = isActionHovering || isActionFocusWithin;
-
-  const handleActionRegionBlur = useCallback((event: React.FocusEvent<HTMLDivElement>) => {
-    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-      setIsActionFocusWithin(false);
-    }
-  }, []);
 
   if (!hasMainContent && !hasImages && teammateMessages.length === 0) {
     return null;

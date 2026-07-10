@@ -22,6 +22,7 @@ import { WorkspaceStatusStrip } from '@/components/workspace/WorkspaceStatusStri
 import { ProjectTree } from '@/components/workspace/ProjectTree';
 import { WorkspaceGlobalSearch } from '@/components/workspace/WorkspaceGlobalSearch';
 import { WorkspaceNativeSessionView } from '@/components/workspace/WorkspaceNativeSessionView';
+import { WorkspaceHistoryErrorBoundary } from '@/components/workspace/WorkspaceHistoryErrorBoundary';
 import { WorkspaceSessionComposer } from '@/components/workspace/WorkspaceSessionComposer';
 import { BrowserPanel } from '@/components/workspace/BrowserPanel';
 import { ComposerControls } from '@/components/workspace/ComposerControls';
@@ -2361,15 +2362,20 @@ export function Workspace({
     return (
       <div className="flex h-full min-h-0 flex-col">
         <Suspense fallback={<DetailFallback />}>
-          <LazyHistoryDetail
+          <WorkspaceHistoryErrorBoundary
             key={toSessionKey(selectedSession)}
-            selectedSession={selectedSession}
-            messages={messages}
-            segments={segments}
-            activeSegment={activeSegment}
-            onActiveSegmentChange={setActiveSegment}
-            isLoadingMessages={isLoadingMessages}
-          />
+            message={t('workspace.historyRenderFailed')}
+            retryLabel={t('common.retry')}
+          >
+            <LazyHistoryDetail
+              selectedSession={selectedSession}
+              messages={messages}
+              segments={segments}
+              activeSegment={activeSegment}
+              onActiveSegmentChange={setActiveSegment}
+              isLoadingMessages={isLoadingMessages}
+            />
+          </WorkspaceHistoryErrorBoundary>
         </Suspense>
 
         <WorkspaceSessionComposer

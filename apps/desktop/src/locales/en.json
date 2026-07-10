@@ -144,6 +144,7 @@
     "openCodeLaunchFailed": "Failed to open OpenCode Web",
     "selectConversation": "Select a conversation to view details",
     "selectConversationHint": "Pick a conversation from the project tree",
+    "historyRenderFailed": "This session could not be rendered. The rest of the workspace is still available.",
     "statusRunning": "running",
     "statusIdle": "Idle",
     "statusEnv": "Environment",

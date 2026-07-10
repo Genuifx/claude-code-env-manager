@@ -246,7 +246,7 @@ export function WorkspaceConversationDetail({
     return () => {
       observer.disconnect();
     };
-  }, [hasMoreMessages, messageBatchSize, startTransition, visibleMessages.length]);
+  }, [hasMoreMessages, messageBatchSize, renderedMessageCount, startTransition, visibleMessages.length]);
 
   return (
     <>

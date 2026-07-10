@@ -144,6 +144,7 @@
     "openCodeLaunchFailed": "打开 OpenCode Web 失败",
     "selectConversation": "选择一个会话查看详情",
     "selectConversationHint": "从左侧项目树选择一个对话",
+    "historyRenderFailed": "这个会话暂时无法渲染，工作间的其他功能仍可继续使用。",
     "statusRunning": "运行中",
     "statusIdle": "空闲",
     "statusEnv": "当前环境",

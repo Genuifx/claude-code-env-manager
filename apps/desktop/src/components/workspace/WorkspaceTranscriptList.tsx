@@ -72,6 +72,25 @@ const processedMessageSegmentsCache = new WeakMap<
   }
 >();
 
+const fallbackMessageKeys = new WeakMap<ConversationMessageData, string>();
+let nextFallbackMessageKey = 0;
+
+function getStableMessageKey(message: ConversationMessageData): string {
+  if (message.uuid) {
+    return `message-${message.uuid}`;
+  }
+
+  const cached = fallbackMessageKeys.get(message);
+  if (cached) {
+    return cached;
+  }
+
+  nextFallbackMessageKey += 1;
+  const key = `message-${message.segmentIndex}-${message.timestamp ?? 'untimed'}-${nextFallbackMessageKey}`;
+  fallbackMessageKeys.set(message, key);
+  return key;
+}
+
 function getProcessedMessageSegments(
   message: ConversationMessageData,
   messageKey: string,
@@ -104,8 +123,7 @@ export function buildWorkspaceTranscriptItems(
   messages: ConversationMessageData[],
 ): WorkspaceTranscriptItem[] {
   const items: WorkspaceTranscriptItem[] = [];
-  let digestIndex = 0;
-  const pendingSegments: MessageSegment[] = [];
+  const pendingSegments: Array<MessageSegment & { key: string }> = [];
   const seenItemKeys = new Map<string, number>();
 
   const uniqueItemKey = (baseKey: string) => {
@@ -114,31 +132,29 @@ export function buildWorkspaceTranscriptItems(
     return seenCount === 0 ? baseKey : `${baseKey}-${seenCount}`;
   };
 
-  const pushToolDigest = (entries: ToolDigestEntry[]) => {
+  const pushToolDigest = (entries: ToolDigestEntry[], segmentKey: string) => {
     if (entries.length > 0) {
-      const digestKey = `tool-digest-${digestIndex}`;
       items.push({
         type: 'tool-digest',
         role: 'assistant',
-        key: uniqueItemKey(digestKey),
+        key: uniqueItemKey(`${segmentKey}-digest`),
         entries,
       });
-      digestIndex += 1;
     }
   };
 
-  const pushMessage = (message: ConversationMessageData) => {
+  const pushMessage = (message: ConversationMessageData, segmentKey: string) => {
     items.push({
       type: 'message',
       role: 'assistant',
-      key: uniqueItemKey(message.uuid || `assistant-msg-${digestIndex}`),
+      key: uniqueItemKey(`${segmentKey}-message`),
       message,
     });
   };
 
   const flushSegments = () => {
     // Merge consecutive tool-group segments across messages
-    const merged: MessageSegment[] = [];
+    const merged: Array<MessageSegment & { key: string }> = [];
     for (const seg of pendingSegments) {
       if (
         seg.type === 'tool-group'
@@ -149,6 +165,7 @@ export function buildWorkspaceTranscriptItems(
         prev.entries.push(...seg.entries);
       } else {
         merged.push({
+          key: seg.key,
           type: seg.type,
           message: seg.message,
           entries: [...seg.entries],
@@ -158,32 +175,35 @@ export function buildWorkspaceTranscriptItems(
 
     for (const seg of merged) {
       if (seg.type === 'text' && seg.message) {
-        pushMessage(seg.message);
+        pushMessage(seg.message, seg.key);
       } else {
-        pushToolDigest(seg.entries);
+        pushToolDigest(seg.entries, seg.key);
       }
     }
 
     pendingSegments.length = 0;
   };
 
-  messages.forEach((message, index) => {
+  messages.forEach((message) => {
     const role = getWorkspaceMessageRole(message);
-    const messageKey = message.uuid || `${message.segmentIndex}-${index}`;
+    const messageKey = getStableMessageKey(message);
 
     if (role === 'user') {
       flushSegments();
       items.push({
         type: 'message',
         role,
-        key: uniqueItemKey(messageKey),
+        key: uniqueItemKey(`${messageKey}-message`),
         message,
       });
       return;
     }
 
     const segments = getProcessedMessageSegments(message, messageKey);
-    pendingSegments.push(...segments);
+    pendingSegments.push(...segments.map((segment, segmentIndex) => ({
+      ...segment,
+      key: `${messageKey}-segment-${segmentIndex}`,
+    })));
   });
 
   flushSegments();
