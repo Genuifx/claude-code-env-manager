@@ -30,21 +30,40 @@ function registeredToolNames(server) {
   return Object.keys(server.instance?._registeredTools ?? {}).sort();
 }
 
-test('browser MCP permission modes only expose read tools in read-only modes', async () => {
+test('browser MCP keeps a stable tool surface and enforces hot permission changes', async () => {
   const {
     browserToolNamesForPermissionMode,
     createCcemBrowserMcpServer,
   } = await importBrowserMcpModule();
 
   const readTools = ['get_url', 'screenshot', 'snapshot'];
+  const allTools = browserToolNamesForPermissionMode('dev').sort();
 
   for (const mode of ['readonly', 'audit', 'plan', 'safe', 'ci']) {
     assert.deepEqual(browserToolNamesForPermissionMode(mode).sort(), readTools);
-    assert.deepEqual(
-      registeredToolNames(createCcemBrowserMcpServer(mode, async () => ({}))),
-      readTools,
-    );
+    assert.deepEqual(registeredToolNames(createCcemBrowserMcpServer(mode, async () => ({}))), allTools);
   }
+  assert.deepEqual(browserToolNamesForPermissionMode('custom').sort(), readTools);
+
+  let mode = 'readonly';
+  const requests = [];
+  const server = createCcemBrowserMcpServer(
+    () => mode,
+    async (toolName, args) => {
+      requests.push({ toolName, args });
+      return { ok: true };
+    },
+  );
+  const navigate = server.instance._registeredTools.navigate.handler;
+  await assert.rejects(
+    navigate({ url: 'https://example.com' }),
+    /blocked by current permission mode readonly/,
+  );
+  assert.equal(requests.length, 0);
+
+  mode = 'dev';
+  await navigate({ url: 'https://example.com' });
+  assert.deepEqual(requests, [{ toolName: 'navigate', args: { url: 'https://example.com' } }]);
 });
 
 test('browser MCP exposes interactive tools for development modes', async () => {
@@ -64,12 +83,12 @@ test('browser MCP exposes interactive tools for development modes', async () => 
   assert.equal(isBrowserEvaluateToolName('mcp__ccem-browser__evaluate'), true);
   assert.equal(isBrowserEvaluateToolName('mcp__ccem-browser__snapshot'), false);
   assert.ok(browserMcpToolNamesForPermissionMode('dev').includes('mcp__ccem-browser__navigate'));
-  assert.deepEqual(ensureBrowserMcpToolsAllowed(['Read', 'mcp__ccem-browser__snapshot'], 'readonly'), [
-    'Read',
-    'mcp__ccem-browser__snapshot',
-    'mcp__ccem-browser__get_url',
-    'mcp__ccem-browser__screenshot',
-  ]);
+  const readonlyAllowed = ensureBrowserMcpToolsAllowed(
+    ['Read', 'mcp__ccem-browser__snapshot'],
+    'readonly',
+  );
+  assert.ok(readonlyAllowed?.includes('mcp__ccem-browser__get_url'));
+  assert.ok(readonlyAllowed?.includes('mcp__ccem-browser__evaluate'));
   assert.ok(ensureBrowserMcpToolsAllowed(['Read'], 'dev')?.includes('mcp__ccem-browser__evaluate'));
   assert.equal(ensureBrowserMcpToolsAllowed(undefined, 'dev'), undefined);
 

@@ -16,11 +16,16 @@ impl BrowserManager {
         request: &BrowserToolRequest,
     ) -> Result<Value, String> {
         let session_id = normalize_browser_session_id(Some(session_id));
-        self.session_snapshot(&session_id)?;
+        let session = self.session_snapshot(&session_id)?;
+        if session.paused {
+            return Err("Browser agent control is paused by the user.".to_string());
+        }
         let actor = self.registry.actor(&session_id)?;
         let _permit = actor
             .lock()
             .map_err(|_| format!("Browser session {session_id} actor is unavailable"))?;
+        self.reveal_for_agent_tool(app, &session_id)?;
+        self.wait_for_visible_agent_control(app, &session_id)?;
         let (active, token) = self
             .registry
             .begin_agent_action(&session_id, &request.tool)?;
@@ -61,16 +66,11 @@ impl BrowserManager {
                 serde_json::to_value(info).map_err(|error| error.to_string())
             }
             "get_url" => {
-                self.reveal_for_agent_tool(app, session_id)?;
                 let info = self.info(app, Some(session_id))?;
                 Ok(json!({ "url": info.url, "title": info.title }))
             }
-            "snapshot" => {
-                self.reveal_for_agent_tool(app, session_id)?;
-                self.snapshot(app, Some(session_id))
-            }
+            "snapshot" => self.snapshot(app, Some(session_id)),
             "click" => {
-                self.reveal_for_agent_tool(app, session_id)?;
                 let reference = required_u32_arg(&request.args, "ref")?;
                 self.eval_json(
                     app,
@@ -89,7 +89,6 @@ impl BrowserManager {
                 )
             }
             "type" => {
-                self.reveal_for_agent_tool(app, session_id)?;
                 let reference = required_u32_arg(&request.args, "ref")?;
                 let text = required_string_arg(&request.args, "text")?;
                 let text_json = serde_json::to_string(&text).map_err(|error| error.to_string())?;
@@ -116,7 +115,6 @@ impl BrowserManager {
                 )
             }
             "press_key" => {
-                self.reveal_for_agent_tool(app, session_id)?;
                 let key = required_string_arg(&request.args, "key")?;
                 let key_json = serde_json::to_string(&key).map_err(|error| error.to_string())?;
                 self.eval_json(app, Some(session_id), &format!(
@@ -132,7 +130,6 @@ impl BrowserManager {
                 ))
             }
             "scroll" => {
-                self.reveal_for_agent_tool(app, session_id)?;
                 let delta_y = request
                     .args
                     .get("deltaY")
@@ -156,18 +153,15 @@ impl BrowserManager {
                 )
             }
             "screenshot" => {
-                self.reveal_for_agent_tool(app, session_id)?;
                 let data = self.screenshot_base64(app, Some(session_id))?;
                 Ok(json!({ "mime_type": "image/png", "data": data }))
             }
             "evaluate" => {
-                self.reveal_for_agent_tool(app, session_id)?;
                 let script = required_string_arg(&request.args, "script")?;
                 let result = self.eval_js(app, Some(session_id), &script)?;
                 Ok(json!({ "result": decode_eval_value(&result) }))
             }
             "wait_for" => {
-                self.reveal_for_agent_tool(app, session_id)?;
                 let text = required_string_arg(&request.args, "text")?;
                 let timeout_ms = request
                     .args
@@ -183,15 +177,48 @@ impl BrowserManager {
 
     fn reveal_for_agent_tool(&self, app: &AppHandle, session_id: &str) -> Result<(), String> {
         let session = self.session_snapshot(session_id)?;
-        if app.get_webview(&session.label).is_none() {
-            self.open(app, Some(session_id), None)?;
-        } else {
-            let state = self.registry.set_visible(session_id, true)?;
-            self.sync_webview_visibility(app)?;
-            emit_browser_opened(app, session_id, &session.label, "agent_reveal");
-            emit_browser_state(app, &state, "agent_reveal");
+        if let Some(window) = app.get_window("main") {
+            let _ = window.show();
+            let _ = window.unminimize();
+            let _ = window.set_focus();
         }
+        emit_browser_opened(app, session_id, &session.label, "agent_reveal");
+        emit_browser_state(app, &session, "agent_visibility_requested");
         Ok(())
+    }
+
+    fn wait_for_visible_agent_control(
+        &self,
+        app: &AppHandle,
+        session_id: &str,
+    ) -> Result<(), String> {
+        let deadline = Instant::now() + Duration::from_secs(8);
+        loop {
+            let session = self
+                .registry
+                .snapshot(session_id)?
+                .ok_or_else(|| "Browser session ended before it became visible.".to_string())?;
+            if session.paused {
+                return Err("Browser agent control is paused by the user.".to_string());
+            }
+            let main_visible = app
+                .get_window("main")
+                .and_then(|window| window.is_visible().ok())
+                .unwrap_or(false);
+            if main_visible
+                && app.get_webview(&session.label).is_some()
+                && self.registry.is_visible_for_agent(session_id)?
+            {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(
+                    "Browser action was cancelled because the matching Preview Browser session did not become visible."
+                        .to_string(),
+                );
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
 
     pub(super) fn snapshot(

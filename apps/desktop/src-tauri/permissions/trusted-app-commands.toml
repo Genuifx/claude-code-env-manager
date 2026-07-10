@@ -19,6 +19,7 @@ commands.allow = [
   "browser_forward",
   "browser_info",
   "browser_health_check",
+  "browser_set_paused",
   "browser_snapshot",
   "browser_screenshot",
   "open_tray_cockpit",

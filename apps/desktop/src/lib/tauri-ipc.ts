@@ -116,6 +116,7 @@ export interface TauriCommands {
   browser_forward: [{ sessionId?: string | null } | void, BrowserInfo];
   browser_info: [{ sessionId?: string | null } | void, BrowserInfo];
   browser_health_check: [{ sessionId?: string | null } | void, BrowserInfo];
+  browser_set_paused: [{ sessionId?: string | null; paused: boolean }, BrowserInfo];
   browser_snapshot: [{ sessionId?: string | null } | void, BrowserSnapshot];
   browser_screenshot: [{ sessionId?: string | null } | void, string];
   search_workspace_files: [

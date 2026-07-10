@@ -126,6 +126,7 @@ struct BrowserSmokeProbeParams {
     input_text: Option<String>,
     click_label: Option<String>,
     wait_for_text: Option<String>,
+    verify_pause: Option<bool>,
     timeout_ms: Option<u64>,
     close: Option<bool>,
     bounds: Option<BrowserBounds>,
@@ -544,6 +545,8 @@ fn run_browser_smoke_probe(
         "url": info.url,
         "visible": info.visible,
     }));
+    browser.set_active_session(app, Some(BROWSER_SMOKE_SESSION_ID), true)?;
+    steps.push(json!({ "step": "activate", "sessionId": BROWSER_SMOKE_SESSION_ID }));
 
     browser.set_bounds(app, Some(BROWSER_SMOKE_SESSION_ID), bounds)?;
     steps.push(json!({ "step": "setBounds", "bounds": bounds }));
@@ -564,6 +567,41 @@ fn run_browser_smoke_probe(
             .map(|marker| snapshot_text_contains(&snapshot, marker))
             .unwrap_or(true),
     }));
+
+    if params.verify_pause.unwrap_or(false) {
+        let paused = browser.set_paused(app, Some(BROWSER_SMOKE_SESSION_ID), true)?;
+        let paused_error = match browser.run_tool(
+            app,
+            BROWSER_SMOKE_SESSION_ID,
+            &BrowserToolRequest {
+                request_id: "smoke-paused-get-url".to_string(),
+                tool: "get_url".to_string(),
+                args: json!({}),
+            },
+        ) {
+            Ok(_) => {
+                return Err("Paused browser action unexpectedly succeeded.".to_string());
+            }
+            Err(error) => error,
+        };
+        if !paused_error.to_ascii_lowercase().contains("paused") {
+            return Err(format!(
+                "Paused browser action returned an unexpected error: {paused_error}"
+            ));
+        }
+        steps.push(json!({
+            "step": "pause",
+            "paused": paused.paused,
+            "control": paused.control,
+            "blockedError": paused_error,
+        }));
+        let resumed = browser.set_paused(app, Some(BROWSER_SMOKE_SESSION_ID), false)?;
+        steps.push(json!({
+            "step": "resume",
+            "paused": resumed.paused,
+            "control": resumed.control,
+        }));
+    }
 
     if let Some(navigate_url) = params.navigate_url.as_deref() {
         let info = browser.navigate(app, Some(BROWSER_SMOKE_SESSION_ID), navigate_url)?;

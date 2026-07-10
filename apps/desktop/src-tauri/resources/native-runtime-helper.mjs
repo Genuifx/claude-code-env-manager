@@ -36043,23 +36043,20 @@ function browserToolNamesForPermissionMode(permMode) {
   if (permMode === "readonly" || permMode === "audit" || permMode === "plan" || permMode === "safe" || permMode === "ci") {
     return [...READ_TOOLS];
   }
-  if (permMode === "yolo" || permMode === "bypassPermissions") {
+  if (permMode === "dev" || permMode === "yolo" || permMode === "bypassPermissions") {
     return [...ALL_TOOLS];
   }
-  return [...ALL_TOOLS];
+  return [...READ_TOOLS];
 }
 function isBrowserEvaluateToolName(toolName) {
   return toolName === "mcp__ccem-browser__evaluate";
 }
-function browserMcpToolNamesForPermissionMode(permMode) {
-  return browserToolNamesForPermissionMode(permMode).map((name) => `mcp__ccem-browser__${name}`);
-}
-function ensureBrowserMcpToolsAllowed(allowedTools, permMode) {
+function ensureBrowserMcpToolsAllowed(allowedTools, _permMode) {
   if (!allowedTools || allowedTools.length === 0) {
     return allowedTools;
   }
   const existing = new Set(allowedTools);
-  const missing = browserMcpToolNamesForPermissionMode(permMode).filter((toolName) => !existing.has(toolName));
+  const missing = [...ALL_TOOLS].map((name) => `mcp__ccem-browser__${name}`).filter((toolName) => !existing.has(toolName));
   return missing.length ? [...allowedTools, ...missing] : allowedTools;
 }
 function toToolResult(value) {
@@ -36117,9 +36114,17 @@ function createBrowserToolBridge(emitRequest, timeoutMs = 3e4) {
     rejectAll
   };
 }
-function createCcemBrowserMcpServer(permMode, sendBrowserToolRequest) {
-  const enabled = new Set(browserToolNamesForPermissionMode(permMode));
+function createCcemBrowserMcpServer(permissionMode, sendBrowserToolRequest) {
+  const enabled = ALL_TOOLS;
   const maybe = (name, definition) => enabled.has(name) ? [definition] : [];
+  const currentPermissionMode = () => typeof permissionMode === "function" ? permissionMode() : permissionMode;
+  const sendAuthorizedBrowserToolRequest = (toolName, args) => {
+    const mode = currentPermissionMode();
+    if (!browserToolNamesForPermissionMode(mode).includes(toolName)) {
+      throw new Error(`Browser tool ${toolName} is blocked by current permission mode ${mode}.`);
+    }
+    return sendBrowserToolRequest(toolName, args);
+  };
   return oee({
     name: "ccem-browser",
     version: "0.1.0",
@@ -36133,61 +36138,61 @@ function createCcemBrowserMcpServer(permMode, sendBrowserToolRequest) {
         "navigate",
         "Navigate the embedded browser to a URL.",
         { url: external_exports.string().min(1) },
-        async (args) => toToolResult(await sendBrowserToolRequest("navigate", args))
+        async (args) => toToolResult(await sendAuthorizedBrowserToolRequest("navigate", args))
       )),
       ...maybe("get_url", nee(
         "get_url",
         "Read the current embedded browser URL and title.",
         {},
-        async () => toToolResult(await sendBrowserToolRequest("get_url", {}))
+        async () => toToolResult(await sendAuthorizedBrowserToolRequest("get_url", {}))
       )),
       ...maybe("snapshot", nee(
         "snapshot",
-        "Return a compact accessibility-style snapshot with clickable refs.",
+        "Return a compact DOM interaction snapshot with clickable refs.",
         {},
-        async () => toToolResult(await sendBrowserToolRequest("snapshot", {}))
+        async () => toToolResult(await sendAuthorizedBrowserToolRequest("snapshot", {}))
       )),
       ...maybe("click", nee(
         "click",
         "Click an element by ref from the latest snapshot.",
         { ref: external_exports.number().int().positive() },
-        async (args) => toToolResult(await sendBrowserToolRequest("click", args))
+        async (args) => toToolResult(await sendAuthorizedBrowserToolRequest("click", args))
       )),
       ...maybe("type", nee(
         "type",
         "Type text into an input-like element by ref from the latest snapshot.",
         { ref: external_exports.number().int().positive(), text: external_exports.string() },
-        async (args) => toToolResult(await sendBrowserToolRequest("type", args))
+        async (args) => toToolResult(await sendAuthorizedBrowserToolRequest("type", args))
       )),
       ...maybe("press_key", nee(
         "press_key",
         "Dispatch a key press to the active element in the embedded browser.",
         { key: external_exports.string().min(1) },
-        async (args) => toToolResult(await sendBrowserToolRequest("press_key", args))
+        async (args) => toToolResult(await sendAuthorizedBrowserToolRequest("press_key", args))
       )),
       ...maybe("scroll", nee(
         "scroll",
         "Scroll the embedded browser viewport.",
         { deltaY: external_exports.number().optional() },
-        async (args) => toToolResult(await sendBrowserToolRequest("scroll", args))
+        async (args) => toToolResult(await sendAuthorizedBrowserToolRequest("scroll", args))
       )),
       ...maybe("screenshot", nee(
         "screenshot",
         "Capture a PNG screenshot of the embedded browser as base64.",
         {},
-        async () => toToolResult(await sendBrowserToolRequest("screenshot", {}))
+        async () => toToolResult(await sendAuthorizedBrowserToolRequest("screenshot", {}))
       )),
       ...maybe("evaluate", nee(
         "evaluate",
         "Evaluate JavaScript in the embedded browser. This is powerful and may require user approval.",
         { script: external_exports.string().min(1) },
-        async (args) => toToolResult(await sendBrowserToolRequest("evaluate", args))
+        async (args) => toToolResult(await sendAuthorizedBrowserToolRequest("evaluate", args))
       )),
       ...maybe("wait_for", nee(
         "wait_for",
         "Wait until visible page text appears in the embedded browser.",
         { text: external_exports.string().min(1), timeoutMs: external_exports.number().int().positive().optional() },
-        async (args) => toToolResult(await sendBrowserToolRequest("wait_for", args))
+        async (args) => toToolResult(await sendAuthorizedBrowserToolRequest("wait_for", args))
       ))
     ]
   });
@@ -37503,7 +37508,7 @@ function buildClaudeQueryOptions() {
     disallowedTools: initCommand.disallowed_tools ?? void 0,
     mcpServers: {
       "ccem-browser": createCcemBrowserMcpServer(
-        initCommand.perm_mode,
+        () => initCommand?.perm_mode ?? "safe",
         browserToolBridge.sendBrowserToolRequest
       )
     },

@@ -128,6 +128,8 @@ test('browser panel uses standalone sidebar chrome with tab and lower navigation
   assert.match(browserPanelSource, /browser_set_visible[\s\S]*\{ sessionId, visible: false \}/);
   assert.match(browserPanelSource, /listen<BrowserSessionStateEvent>\('browser_session_state_changed'/);
   assert.match(browserPanelSource, /browser_health_check/);
+  assert.match(browserPanelSource, /browser_set_paused/);
+  assert.match(browserPanelSource, /browserAgentControlling/);
   assert.match(
     browserPanelSource,
     /localhost\|127[\s\S]*return `http:\/\/\$\{trimmed\}`/,

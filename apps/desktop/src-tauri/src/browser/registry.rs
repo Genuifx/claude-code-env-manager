@@ -102,8 +102,7 @@ impl BrowserSessionRegistry {
         session_id: &str,
         label: impl FnOnce(u64) -> String,
     ) -> Result<BrowserSessionState, String> {
-        let mut sessions = self.lock_sessions()?;
-        if let Some(session) = sessions.get(session_id) {
+        if let Some(session) = self.lock_sessions()?.get(session_id).cloned() {
             return Ok(session.clone());
         }
 
@@ -112,9 +111,12 @@ impl BrowserSessionRegistry {
             .lock()
             .map_err(|_| "Failed to lock last browser bounds".to_string())?;
         let generation = self.next_generation.fetch_add(1, Ordering::Relaxed);
-        let session = BrowserSessionState::new(session_id, label(generation), bounds, generation);
-        sessions.insert(session_id.to_string(), session.clone());
-        Ok(session)
+        let candidate = BrowserSessionState::new(session_id, label(generation), bounds, generation);
+        let mut sessions = self.lock_sessions()?;
+        Ok(sessions
+            .entry(session_id.to_string())
+            .or_insert(candidate)
+            .clone())
     }
 
     pub fn snapshot(&self, session_id: &str) -> Result<Option<BrowserSessionState>, String> {
@@ -139,6 +141,15 @@ impl BrowserSessionRegistry {
             .map_err(|_| "Failed to lock active browser session".to_string())? =
             session_id.to_string();
         Ok(())
+    }
+
+    pub fn is_visible_for_agent(&self, session_id: &str) -> Result<bool, String> {
+        let active_session_id = self.active_session_id()?;
+        Ok(active_session_id == session_id
+            && self
+                .lock_sessions()?
+                .get(session_id)
+                .is_some_and(|session| session.visible && !session.paused))
     }
 
     pub fn set_bounds(
@@ -407,7 +418,7 @@ impl BrowserSessionRegistry {
         if !session.paused {
             session.control = BrowserControlState::User;
         }
-        if let Some(error) = error {
+        if let Some(error) = error.filter(|_| !session.paused) {
             session.last_error = Some(error.to_string());
         }
         session.touch();
@@ -559,6 +570,24 @@ mod tests {
     }
 
     #[test]
+    fn permission_epoch_change_cancels_an_inflight_agent_operation() {
+        let registry = registry();
+        registry
+            .snapshot_or_create("session-a", |_| "browser-a".to_string())
+            .expect("create session");
+        registry.mark_ready("session-a").expect("ready");
+        let (_, token) = registry
+            .begin_agent_action("session-a", "wait_for")
+            .expect("begin action");
+
+        let changed = registry
+            .bump_policy_epoch("session-a")
+            .expect("change policy epoch");
+        assert_eq!(changed.policy_epoch, token.policy_epoch + 1);
+        assert!(registry.validate_operation(&token).is_err());
+    }
+
+    #[test]
     fn destroy_then_recreate_invalidates_old_generation() {
         let registry = registry();
         let first = registry
@@ -589,5 +618,32 @@ mod tests {
         let other = registry.actor("session-b").expect("other actor");
         assert!(std::sync::Arc::ptr_eq(&first, &same));
         assert!(!std::sync::Arc::ptr_eq(&first, &other));
+    }
+
+    #[test]
+    fn agent_visibility_requires_the_exact_active_unpaused_session() {
+        let registry = registry();
+        registry
+            .snapshot_or_create("session-a", |_| "browser-a".to_string())
+            .expect("create a");
+        registry
+            .snapshot_or_create("session-b", |_| "browser-b".to_string())
+            .expect("create b");
+        registry.set_visible("session-a", true).expect("show a");
+        registry.set_visible("session-b", true).expect("show b");
+        registry
+            .set_active_session("session-a")
+            .expect("activate a");
+
+        assert!(registry
+            .is_visible_for_agent("session-a")
+            .expect("visible a"));
+        assert!(!registry
+            .is_visible_for_agent("session-b")
+            .expect("hidden b"));
+        registry.set_paused("session-a", true).expect("pause a");
+        assert!(!registry
+            .is_visible_for_agent("session-a")
+            .expect("paused a is not controllable"));
     }
 }

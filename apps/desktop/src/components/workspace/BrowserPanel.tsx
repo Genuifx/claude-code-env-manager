@@ -17,6 +17,8 @@ import {
   ExternalLink,
   Globe,
   LoaderCircle,
+  Pause,
+  Play,
   RefreshCw,
   X,
 } from 'lucide-react';
@@ -125,7 +127,9 @@ export function BrowserPanel({
   const [error, setError] = useState<string | null>(null);
   const [lifecycle, setLifecycle] = useState<BrowserInfo['lifecycle']>('creating');
   const [control, setControl] = useState<BrowserInfo['control']>('user');
+  const [paused, setPaused] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isPauseBusy, setIsPauseBusy] = useState(false);
 
   const applyBrowserInfo = useCallback((info: BrowserInfo, fallbackUrl?: string | null) => {
     const nextUrl = info.url ?? fallbackUrl ?? null;
@@ -138,6 +142,7 @@ export function BrowserPanel({
     setCanGoForward(Boolean(info.can_go_forward));
     setLifecycle(info.lifecycle ?? 'ready');
     setControl(info.control ?? 'user');
+    setPaused(Boolean(info.paused));
     setIsLoading(Boolean(info.loading));
     if (info.error !== undefined) {
       setError(info.error ?? null);
@@ -364,6 +369,21 @@ export function BrowserPanel({
     });
   }, [currentUrl, showBrowserError]);
 
+  const handleToggleAgentControl = useCallback(async () => {
+    setIsPauseBusy(true);
+    try {
+      const info = await invoke<BrowserInfo>('browser_set_paused', {
+        sessionId,
+        paused: !paused,
+      });
+      applyBrowserInfo(info);
+    } catch (pauseError) {
+      showBrowserError(String(pauseError));
+    } finally {
+      setIsPauseBusy(false);
+    }
+  }, [applyBrowserInfo, paused, sessionId, showBrowserError]);
+
   const displayUrl = currentUrl || title || t('workspace.browserTitle');
 
   return (
@@ -371,6 +391,7 @@ export function BrowserPanel({
       data-ccem-browser-panel="true"
       data-ccem-browser-lifecycle={lifecycle}
       data-ccem-browser-control={control}
+      data-ccem-browser-paused={paused ? 'true' : 'false'}
       style={style}
       className={cn(
         'workspace-browser-panel relative flex h-full min-w-0 flex-col overflow-hidden',
@@ -389,7 +410,27 @@ export function BrowserPanel({
           <span className="truncate">{t('workspace.browserTitle')}</span>
         </div>
         <div className="min-w-0 flex-1" />
+        {lifecycle === 'crashed' ? (
+          <span className="text-[11px] font-medium text-destructive">
+            {t('workspace.browserCrashed')}
+          </span>
+        ) : control === 'agent' ? (
+          <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
+            {t('workspace.browserAgentControlling')}
+          </span>
+        ) : paused ? (
+          <span className="text-[11px] font-medium text-muted-foreground">
+            {t('workspace.browserAgentPaused')}
+          </span>
+        ) : null}
         {isBusy || isLoading ? <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" /> : null}
+        <BrowserToolButton
+          label={paused ? t('workspace.browserResumeAgent') : t('workspace.browserPauseAgent')}
+          onClick={() => void handleToggleAgentControl()}
+          disabled={isPauseBusy || lifecycle === 'crashed'}
+        >
+          {paused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+        </BrowserToolButton>
         <BrowserToolButton
           label={t('workspace.browserClose')}
           onClick={onClose}

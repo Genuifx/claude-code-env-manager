@@ -4745,6 +4745,7 @@ fn main() {
             browser::browser_forward,
             browser::browser_info,
             browser::browser_health_check,
+            browser::browser_set_paused,
             browser::browser_snapshot,
             browser::browser_screenshot,
             tray::open_tray_cockpit,

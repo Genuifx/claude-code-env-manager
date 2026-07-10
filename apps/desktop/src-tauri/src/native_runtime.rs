@@ -1,4 +1,4 @@
-use crate::browser::{BrowserManager, BrowserToolRequest};
+use crate::browser::{authorize_browser_tool, BrowserManager, BrowserToolRequest};
 use crate::config::{resolve_claude_env, resolve_codex_runtime};
 use crate::event_bus::{ReplayBatch, SessionEventPayload, SessionPromptImage, SessionStore};
 use crate::native_event_log::NativeEventLog;
@@ -310,6 +310,19 @@ fn native_session_allows_dangerously_skip_permissions(options: &NativeSessionOpt
                 .is_some_and(is_bypass_permission_mode))
 }
 
+fn authorize_browser_tool_for_record(
+    record: &NativeSessionRecord,
+    tool: &str,
+) -> Result<(), String> {
+    authorize_browser_tool(
+        effective_native_perm_mode(
+            record.perm_mode.as_str(),
+            record.runtime_perm_mode.as_deref(),
+        ),
+        tool,
+    )
+}
+
 fn native_status_allows_file_rewind(status: &str) -> bool {
     matches!(status, "idle" | "ready" | "interrupted" | "closed_idle")
 }
@@ -324,6 +337,18 @@ fn destroy_browser_session(app: Option<&AppHandle>, runtime_id: &str) {
     if let Err(error) = browser.close(app, Some(runtime_id)) {
         eprintln!(
             "Failed to destroy preview browser session {}: {}",
+            runtime_id, error
+        );
+    }
+}
+
+fn notify_browser_policy_changed(app: &AppHandle, runtime_id: &str) {
+    let Some(browser) = app.try_state::<Arc<BrowserManager>>() else {
+        return;
+    };
+    if let Err(error) = browser.policy_changed(app, runtime_id) {
+        eprintln!(
+            "Failed to invalidate preview browser policy for {}: {}",
             runtime_id, error
         );
     }
@@ -870,6 +895,14 @@ impl NativeRuntimeManager {
         effort: Option<&str>,
     ) -> Result<(), String> {
         let handle = self.ensure_handle(app.clone(), runtime_id)?;
+        if let Some(mode) = perm_mode {
+            self.update_record(runtime_id, |record| {
+                record.perm_mode = mode.to_string();
+                record.runtime_perm_mode = None;
+                record.updated_at = Utc::now();
+            })?;
+            notify_browser_policy_changed(app, runtime_id);
+        }
         self.write_to_child_with_reconnect(
             app,
             runtime_id,
@@ -884,10 +917,6 @@ impl NativeRuntimeManager {
         self.update_record(runtime_id, |record| {
             if let Some(name) = env_name {
                 record.env_name = name.to_string();
-            }
-            if let Some(mode) = perm_mode {
-                record.perm_mode = mode.to_string();
-                record.runtime_perm_mode = None;
             }
             if let Some(next_effort) = effort {
                 record.effort = non_empty_error(next_effort);
@@ -917,7 +946,14 @@ impl NativeRuntimeManager {
         let helper_perm_mode = effective_native_perm_mode(
             display_perm_mode.as_str(),
             normalized_runtime_perm_mode.as_deref(),
-        );
+        )
+        .to_string();
+
+        self.update_record(runtime_id, |record| {
+            record.runtime_perm_mode = normalized_runtime_perm_mode.clone();
+            record.updated_at = Utc::now();
+        })?;
+        notify_browser_policy_changed(app, runtime_id);
 
         self.write_to_child_with_reconnect(
             app,
@@ -925,15 +961,11 @@ impl NativeRuntimeManager {
             handle,
             &HelperInputCommand::UpdateSettings {
                 env_name: None,
-                perm_mode: Some(helper_perm_mode),
+                perm_mode: Some(&helper_perm_mode),
                 env_vars: None,
                 effort: None,
             },
         )?;
-        self.update_record(runtime_id, |record| {
-            record.runtime_perm_mode = normalized_runtime_perm_mode;
-            record.updated_at = Utc::now();
-        })?;
         Ok(())
     }
 
@@ -1660,13 +1692,21 @@ impl NativeRuntimeManager {
             .cloned()
             .ok_or_else(|| format!("Native runtime {} helper is not connected", runtime_id))?;
 
-        let response = match app {
+        let authorization = {
+            let record = handle
+                .record
+                .lock()
+                .map_err(|_| "Failed to lock native session record".to_string())?;
+            authorize_browser_tool_for_record(&record, &request.tool)
+        };
+
+        let response = authorization.and_then(|_| match app {
             Some(app) => match app.try_state::<Arc<BrowserManager>>() {
                 Some(browser) => browser.run_tool(app, runtime_id, &request),
                 None => Err("Browser manager is not registered.".to_string()),
             },
             None => Err("Browser tool request requires an app handle.".to_string()),
-        };
+        });
 
         match response {
             Ok(result) => self.write_to_child(
@@ -2533,13 +2573,13 @@ fn inject_ccem_runtime_env(env_vars: &mut HashMap<String, String>, runtime_id: &
 #[cfg(test)]
 mod tests {
     use super::{
-        clear_terminal_launches, drain_helper_output_lines, is_retryable_native_child_write_error,
-        merge_helper_env_path, merge_path_values_with_separator,
-        native_runtime_state_temp_file_path, native_session_allows_dangerously_skip_permissions,
-        native_status_allows_file_rewind, reactivate_record_for_reconnect,
-        read_native_runtime_state_from, take_terminal_launches, HelperInputCommand, NativeProvider,
-        NativeRuntimeManager, NativeSessionHandle, NativeSessionOptions, NativeSessionRecord,
-        NativeTransport, PromptImage,
+        authorize_browser_tool_for_record, clear_terminal_launches, drain_helper_output_lines,
+        is_retryable_native_child_write_error, merge_helper_env_path,
+        merge_path_values_with_separator, native_runtime_state_temp_file_path,
+        native_session_allows_dangerously_skip_permissions, native_status_allows_file_rewind,
+        reactivate_record_for_reconnect, read_native_runtime_state_from, take_terminal_launches,
+        HelperInputCommand, NativeProvider, NativeRuntimeManager, NativeSessionHandle,
+        NativeSessionOptions, NativeSessionRecord, NativeTransport, PromptImage,
     };
     use crate::event_bus::{SessionEventPayload, SessionStore};
     use crate::native_event_log::NativeEventLog;
@@ -2672,6 +2712,21 @@ mod tests {
             pending_handoff_terminal: None,
             last_error: None,
         }
+    }
+
+    #[test]
+    fn browser_policy_uses_runtime_permission_override_from_record() {
+        let mut record = native_record("native-browser-policy", "ready", true);
+        record.perm_mode = "dev".to_string();
+        record.runtime_perm_mode = Some("readonly".to_string());
+
+        assert!(authorize_browser_tool_for_record(&record, "snapshot").is_ok());
+        assert!(authorize_browser_tool_for_record(&record, "click").is_err());
+
+        record.perm_mode = "readonly".to_string();
+        record.runtime_perm_mode = Some("dev".to_string());
+
+        assert!(authorize_browser_tool_for_record(&record, "click").is_ok());
     }
 
     fn native_session_options(

@@ -1,8 +1,10 @@
+mod policy;
 mod registry;
 mod tools;
 mod url;
 mod webview;
 
+pub(crate) use policy::authorize_browser_tool;
 use registry::{BrowserSessionRegistry, BrowserSessionState};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -423,6 +425,37 @@ impl BrowserManager {
         self.info(app, Some(&session_id))
     }
 
+    pub fn set_paused(
+        &self,
+        app: &AppHandle,
+        session_id: Option<&str>,
+        paused: bool,
+    ) -> Result<BrowserInfo, String> {
+        let session_id = normalize_browser_session_id(session_id);
+        self.session_snapshot(&session_id)?;
+        let state = self.registry.set_paused(&session_id, paused)?;
+        emit_browser_state(
+            app,
+            &state,
+            if paused {
+                "agent_control_paused"
+            } else {
+                "agent_control_resumed"
+            },
+        );
+        let webview_exists = app.get_webview(&state.label).is_some();
+        self.info_from_state(state, webview_exists)
+    }
+
+    pub fn policy_changed(&self, app: &AppHandle, session_id: &str) -> Result<(), String> {
+        let Some(_) = self.registry.snapshot(session_id)? else {
+            return Ok(());
+        };
+        let state = self.registry.bump_policy_epoch(session_id)?;
+        emit_browser_state(app, &state, "permission_mode_changed");
+        Ok(())
+    }
+
     fn wait_for_history_navigation(
         &self,
         app: &AppHandle,
@@ -667,6 +700,16 @@ pub async fn browser_health_check(
         state.health_check(&app, session_id.as_deref())
     })
     .await
+}
+
+#[tauri::command]
+pub fn browser_set_paused(
+    app: AppHandle,
+    state: tauri::State<'_, std::sync::Arc<BrowserManager>>,
+    session_id: Option<String>,
+    paused: bool,
+) -> Result<BrowserInfo, String> {
+    state.set_paused(&app, session_id.as_deref(), paused)
 }
 
 #[tauri::command]

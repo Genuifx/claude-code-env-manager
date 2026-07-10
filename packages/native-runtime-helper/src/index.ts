@@ -1434,7 +1434,7 @@ function buildClaudeQueryOptions() {
     disallowedTools: initCommand.disallowed_tools ?? undefined,
     mcpServers: {
       'ccem-browser': createCcemBrowserMcpServer(
-        initCommand.perm_mode,
+        () => initCommand?.perm_mode ?? 'safe',
         browserToolBridge.sendBrowserToolRequest,
       ),
     },
