@@ -541,11 +541,11 @@
     "enableEnv": "Enable",
     "disableEnv": "Disable",
     "enabledEnvs": "Enabled Environments",
-    "enabledEnvsHint": "Historically all environments are enabled. After you manage enablement, Workspace / Session pickers only show enabled ones.",
+    "enabledEnvsHint": "Runtime pickers only show enabled environments. Hover a card to enable or disable.",
     "enabledCount": "Enabled {count}",
     "allEnabledLegacy": "All enabled (default)",
     "disabledBadge": "Disabled",
-    "enabledSectionEmpty": "No environments are enabled yet. Toggle enable on a card above.",
+    "enabledSectionEmpty": "No environments are enabled yet. Hover a card and click Enable.",
     "filterEnabledOnly": "Enabled only",
     "filterAll": "All"
   },

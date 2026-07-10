@@ -541,11 +541,11 @@
     "enableEnv": "启用",
     "disableEnv": "停用",
     "enabledEnvs": "已启用的环境",
-    "enabledEnvsHint": "历史默认全部启用。开始管理后，Workspace / Session 的环境选择器只展示启用项。",
+    "enabledEnvsHint": "运行时选择器只展示这里的启用项。卡片悬停可启用/停用。",
     "enabledCount": "已启用 {count} 个",
     "allEnabledLegacy": "全部启用（默认）",
     "disabledBadge": "未启用",
-    "enabledSectionEmpty": "尚未启用任何环境。先在上方卡片打开启用开关。",
+    "enabledSectionEmpty": "尚未启用任何环境。悬停卡片后点“启用”。",
     "filterEnabledOnly": "仅看启用",
     "filterAll": "全部"
   },

@@ -96,9 +96,52 @@ export function Environments({ onAddEnv, onEditEnv, onCopyEnv, onDeleteEnv }: En
         />
       )}
 
+      {/* Enabled environments overview — keep above the full card grid */}
+      <section className="mb-4 rounded-xl border border-border-subtle bg-surface-raised/40 px-3.5 py-3">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-[14px] font-semibold text-foreground tracking-[-0.28px]">
+              {t('environments.enabledEnvs')}
+            </h2>
+            <p className="mt-0.5 text-[11px] text-muted-foreground leading-snug">
+              {t('environments.enabledEnvsHint')}
+            </p>
+          </div>
+          <span className="shrink-0 rounded-full border border-border-subtle bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+            {enabledSummary.mode === 'legacy'
+              ? t('environments.allEnabledLegacy')
+              : t('environments.enabledCount').replace('{count}', String(enabledSummary.count))}
+          </span>
+        </div>
+
+        {enabledSummary.items.length === 0 ? (
+          <p className="text-[12px] text-muted-foreground py-1">
+            {t('environments.enabledSectionEmpty')}
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-1">
+            {enabledSummary.items.map((env) => (
+              <button
+                key={env.name}
+                type="button"
+                onClick={() => onEditEnv?.(env.name)}
+                className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border-subtle bg-background px-2 py-0.5 text-[11px] text-foreground transition-colors hover:border-primary/40 hover:bg-primary/[0.03]"
+                title={env.name}
+              >
+                <ModelIcon
+                  model={env.defaultOpusModel || 'claude-opus-4-1-20250805'}
+                  size={11}
+                />
+                <span className="truncate max-w-[8.5rem]">{env.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+
       {/* Environment list section */}
       <section className="mb-8">
-        <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center justify-between mb-4">
           <h2 className="text-[17px] font-semibold text-foreground tracking-[-0.37px]">
             {t('environments.configuredEnvs')}
           </h2>
@@ -164,49 +207,6 @@ export function Environments({ onAddEnv, onEditEnv, onCopyEnv, onDeleteEnv }: En
               {t('environments.ghostCardHint')}
             </span>
           </button>
-        )}
-      </section>
-
-      {/* Enabled environments overview */}
-      <section className="mb-10 rounded-2xl border border-border-subtle bg-surface-raised/40 p-5">
-        <div className="mb-3 flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h2 className="text-[15px] font-semibold text-foreground tracking-[-0.3px]">
-              {t('environments.enabledEnvs')}
-            </h2>
-            <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-              {t('environments.enabledEnvsHint')}
-            </p>
-          </div>
-          <span className="shrink-0 rounded-full border border-border-subtle bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
-            {enabledSummary.mode === 'legacy'
-              ? t('environments.allEnabledLegacy')
-              : t('environments.enabledCount').replace('{count}', String(enabledSummary.count))}
-          </span>
-        </div>
-
-        {enabledSummary.items.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-2">
-            {t('environments.enabledSectionEmpty')}
-          </p>
-        ) : (
-          <div className="flex flex-wrap gap-1.5">
-            {enabledSummary.items.map((env) => (
-              <button
-                key={env.name}
-                type="button"
-                onClick={() => onEditEnv?.(env.name)}
-                className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border-subtle bg-background px-2.5 py-1 text-[12px] text-foreground transition-colors hover:border-primary/40 hover:bg-primary/[0.03]"
-                title={env.name}
-              >
-                <ModelIcon
-                  model={env.defaultOpusModel || 'claude-opus-4-1-20250805'}
-                  size={12}
-                />
-                <span className="truncate max-w-[9rem]">{env.name}</span>
-              </button>
-            ))}
-          </div>
         )}
       </section>
 
