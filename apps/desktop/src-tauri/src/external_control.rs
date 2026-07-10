@@ -688,6 +688,17 @@ fn run_browser_smoke_probe(
         "estimatedBytes": (screenshot_chars * 3) / 4,
     }));
 
+    let health = browser.health_check(app, Some(BROWSER_SMOKE_SESSION_ID))?;
+    steps.push(json!({
+        "step": "health",
+        "lifecycle": health.lifecycle,
+        "loading": health.loading,
+        "control": health.control,
+        "generation": health.generation,
+        "url": health.url,
+        "title": health.title,
+    }));
+
     Ok(json!({
         "ok": true,
         "snapshot": summarize_browser_snapshot(&snapshot),

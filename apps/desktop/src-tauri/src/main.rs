@@ -1445,6 +1445,7 @@ fn handoff_native_session_to_terminal(
     state: State<'_, Arc<SessionManager>>,
     interactive_state: State<'_, Arc<InteractiveRuntimeManager>>,
     native_state: State<'_, Arc<NativeRuntimeManager>>,
+    browser_state: State<'_, Arc<BrowserManager>>,
     runtime_id: String,
     terminal_type: Option<TerminalType>,
 ) -> Result<NativeHandoffResult, String> {
@@ -1459,7 +1460,7 @@ fn handoff_native_session_to_terminal(
     let attach_terminal = attach_terminal_for_native_terminal(handoff.terminal);
     let session_manager = state.inner().clone();
     let create_result = interactive_state.create_session(
-        app,
+        app.clone(),
         session_manager,
         InteractiveSessionOptions {
             session_id: handoff.runtime_id.clone(),
@@ -1486,6 +1487,12 @@ fn handoff_native_session_to_terminal(
     }
 
     native_state.complete_managed_terminal_handoff(&handoff.runtime_id, handoff.terminal)?;
+    if let Err(error) = browser_state.close(&app, Some(&handoff.runtime_id)) {
+        eprintln!(
+            "Failed to destroy preview browser for terminal handoff {}: {}",
+            handoff.runtime_id, error
+        );
+    }
 
     if let Err(error) = register_launch(SessionProvenanceUpsert {
         ccem_session_id: session.id.clone(),
@@ -4737,6 +4744,7 @@ fn main() {
             browser::browser_back,
             browser::browser_forward,
             browser::browser_info,
+            browser::browser_health_check,
             browser::browser_snapshot,
             browser::browser_screenshot,
             tray::open_tray_cockpit,

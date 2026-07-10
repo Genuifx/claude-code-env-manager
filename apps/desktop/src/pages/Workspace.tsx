@@ -496,7 +496,10 @@ export function Workspace({
     let disposed = false;
     let unlisten: (() => void) | null = null;
 
-    void listen<{ sessionId?: string; session_id?: string }>('browser_panel_requested', (event) => {
+    void listen<{ sessionId?: string; session_id?: string; cause?: string }>('browser_panel_requested', (event) => {
+      if (event.payload?.cause && event.payload.cause !== 'agent_reveal') {
+        return;
+      }
       const requestedSessionId = event.payload?.sessionId
         ?? event.payload?.session_id
         ?? WORKSPACE_BROWSER_COMPOSE_SESSION_ID;

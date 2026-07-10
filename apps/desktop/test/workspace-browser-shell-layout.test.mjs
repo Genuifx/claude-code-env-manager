@@ -25,6 +25,10 @@ test('workspace browser renders as a sidebar sibling of the workspace column', a
   assert.match(workspaceSource, /workspaceMode === 'live' && activeLiveEntry[\s\S]*activeLiveEntry\.session\.runtime_id/);
   assert.match(workspaceSource, /const browserPanelOpen = browserOpenBySessionId\[activeBrowserSessionId\] \?\? false/);
   assert.match(workspaceSource, /browser_set_active_session/);
+  assert.match(
+    workspaceSource,
+    /browser_panel_requested[\s\S]*cause !== 'agent_reveal'[\s\S]*return/,
+  );
   assert.match(workspaceSource, /<WorkspaceStatusStrip[\s\S]*browserOpen=\{browserPanelOpen\}[\s\S]*onToggleBrowser=\{\(\) => setActiveBrowserPanelOpen\(\(open\) => !open\)\}/);
   assert.match(
     workspaceSource,
@@ -122,6 +126,12 @@ test('browser panel uses standalone sidebar chrome with tab and lower navigation
   assert.match(browserPanelSource, /disabled=\{isBusy \|\| !canGoForward\}/);
   assert.match(browserPanelSource, /browser_set_bounds[\s\S]*\{ sessionId, \.\.\.bounds \}/);
   assert.match(browserPanelSource, /browser_set_visible[\s\S]*\{ sessionId, visible: false \}/);
+  assert.match(browserPanelSource, /listen<BrowserSessionStateEvent>\('browser_session_state_changed'/);
+  assert.match(browserPanelSource, /browser_health_check/);
+  assert.match(
+    browserPanelSource,
+    /localhost\|127[\s\S]*return `http:\/\/\$\{trimmed\}`/,
+  );
   assert.doesNotMatch(browserPanelSource, /border-l border-border/);
 
   const tabStripIndex = browserPanelSource.indexOf('data-ccem-browser-tab-strip="true"');

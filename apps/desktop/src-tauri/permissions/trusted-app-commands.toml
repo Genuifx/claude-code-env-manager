@@ -18,6 +18,7 @@ commands.allow = [
   "browser_back",
   "browser_forward",
   "browser_info",
+  "browser_health_check",
   "browser_snapshot",
   "browser_screenshot",
   "open_tray_cockpit",

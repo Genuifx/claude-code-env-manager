@@ -9,6 +9,7 @@ import {
   useState,
 } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { open as openExternalUrl } from '@tauri-apps/plugin-shell';
 import {
   ArrowLeft,
@@ -25,7 +26,7 @@ import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
-import type { BrowserInfo } from '@/lib/tauri-ipc';
+import type { BrowserInfo, BrowserSessionStateEvent } from '@/lib/tauri-ipc';
 import { CCEM_ZOOM_CHANGE_EVENT, CCEM_ZOOM_STORAGE_KEY } from '@/hooks/useZoom';
 import { buildNativeBrowserBounds, normalizeBrowserBoundsZoom } from './browserPanelGeometry';
 
@@ -51,6 +52,10 @@ function normalizeBrowserInput(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) {
     return '';
+  }
+
+  if (/^(localhost|127(?:\.\d{1,3}){3}|\[::1\])(:\d+)?(\/|$)/i.test(trimmed)) {
+    return `http://${trimmed}`;
   }
 
   if (/^[a-z][a-z\d+\-.]*:/i.test(trimmed)) {
@@ -109,6 +114,7 @@ export function BrowserPanel({
   const frameRef = useRef<HTMLDivElement>(null);
   const urlInputRef = useRef<HTMLInputElement>(null);
   const syncFrameRef = useRef<number | null>(null);
+  const isUrlEditingRef = useRef(false);
   const [currentUrl, setCurrentUrl] = useState<string | null>(defaultUrl ?? null);
   const [urlInput, setUrlInput] = useState(defaultUrl ?? '');
   const [isUrlEditing, setIsUrlEditing] = useState(false);
@@ -117,14 +123,25 @@ export function BrowserPanel({
   const [canGoForward, setCanGoForward] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lifecycle, setLifecycle] = useState<BrowserInfo['lifecycle']>('creating');
+  const [control, setControl] = useState<BrowserInfo['control']>('user');
+  const [isLoading, setIsLoading] = useState(false);
 
   const applyBrowserInfo = useCallback((info: BrowserInfo, fallbackUrl?: string | null) => {
     const nextUrl = info.url ?? fallbackUrl ?? null;
     setCurrentUrl(nextUrl);
-    setUrlInput(nextUrl ?? '');
+    if (!isUrlEditingRef.current) {
+      setUrlInput(nextUrl ?? '');
+    }
     setTitle(info.title ?? null);
     setCanGoBack(Boolean(info.can_go_back));
     setCanGoForward(Boolean(info.can_go_forward));
+    setLifecycle(info.lifecycle ?? 'ready');
+    setControl(info.control ?? 'user');
+    setIsLoading(Boolean(info.loading));
+    if (info.error !== undefined) {
+      setError(info.error ?? null);
+    }
     return nextUrl;
   }, []);
 
@@ -154,6 +171,7 @@ export function BrowserPanel({
   }, [applyBrowserInfo, sessionId]);
 
   const showBrowserError = useCallback((message: string) => {
+    setIsLoading(false);
     setError(message);
     toast.error(message);
   }, []);
@@ -190,6 +208,57 @@ export function BrowserPanel({
   }, [defaultUrl, openBrowser, sessionId]);
 
   useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+
+    void listen<BrowserSessionStateEvent>('browser_session_state_changed', (event) => {
+      const state = event.payload;
+      if (state.sessionId !== sessionId) {
+        return;
+      }
+      applyBrowserInfo({
+        label: state.label,
+        session_id: state.sessionId,
+        url: state.url,
+        title: state.title,
+        visible: state.visible,
+        can_go_back: state.canGoBack,
+        can_go_forward: state.canGoForward,
+        lifecycle: state.lifecycle,
+        loading: state.loading,
+        error: state.error,
+        control: state.control,
+        paused: state.paused,
+        generation: state.generation,
+        last_agent_action: state.lastAgentAction,
+        created_at: state.createdAt,
+        updated_at: state.updatedAt,
+      });
+    }).then((nextUnlisten) => {
+      if (disposed) {
+        nextUnlisten();
+      } else {
+        unlisten = nextUnlisten;
+      }
+    }).catch((listenError) => {
+      console.error('Failed to listen for browser session state:', listenError);
+    });
+
+    const healthTimer = window.setInterval(() => {
+      void invoke<BrowserInfo>('browser_health_check', { sessionId })
+        .then(applyBrowserInfo)
+        .catch(() => {});
+    }, 4_000);
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+      window.clearInterval(healthTimer);
+    };
+  }, [applyBrowserInfo, sessionId]);
+
+  useEffect(() => {
+    isUrlEditingRef.current = isUrlEditing;
     if (!isUrlEditing) {
       return;
     }
@@ -300,6 +369,8 @@ export function BrowserPanel({
   return (
     <aside
       data-ccem-browser-panel="true"
+      data-ccem-browser-lifecycle={lifecycle}
+      data-ccem-browser-control={control}
       style={style}
       className={cn(
         'workspace-browser-panel relative flex h-full min-w-0 flex-col overflow-hidden',
@@ -318,7 +389,7 @@ export function BrowserPanel({
           <span className="truncate">{t('workspace.browserTitle')}</span>
         </div>
         <div className="min-w-0 flex-1" />
-        {isBusy ? <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" /> : null}
+        {isBusy || isLoading ? <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" /> : null}
         <BrowserToolButton
           label={t('workspace.browserClose')}
           onClick={onClose}

@@ -115,6 +115,7 @@ export interface TauriCommands {
   browser_back: [{ sessionId?: string | null } | void, BrowserInfo];
   browser_forward: [{ sessionId?: string | null } | void, BrowserInfo];
   browser_info: [{ sessionId?: string | null } | void, BrowserInfo];
+  browser_health_check: [{ sessionId?: string | null } | void, BrowserInfo];
   browser_snapshot: [{ sessionId?: string | null } | void, BrowserSnapshot];
   browser_screenshot: [{ sessionId?: string | null } | void, string];
   search_workspace_files: [
@@ -518,6 +519,35 @@ export interface BrowserInfo {
   visible: boolean;
   can_go_back?: boolean;
   can_go_forward?: boolean;
+  lifecycle?: 'creating' | 'ready' | 'navigating' | 'interactive' | 'crashed' | 'destroyed';
+  loading?: boolean;
+  error?: string | null;
+  control?: 'user' | 'agent' | 'paused';
+  paused?: boolean;
+  generation?: number;
+  last_agent_action?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface BrowserSessionStateEvent {
+  sessionId: string;
+  label: string;
+  url?: string | null;
+  title?: string | null;
+  visible: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  lifecycle: NonNullable<BrowserInfo['lifecycle']>;
+  loading: boolean;
+  error?: string | null;
+  control: NonNullable<BrowserInfo['control']>;
+  paused: boolean;
+  generation: number;
+  lastAgentAction?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  cause: string;
 }
 
 export interface BrowserSnapshotElement {

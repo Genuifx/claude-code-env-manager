@@ -314,6 +314,21 @@ fn native_status_allows_file_rewind(status: &str) -> bool {
     matches!(status, "idle" | "ready" | "interrupted" | "closed_idle")
 }
 
+fn destroy_browser_session(app: Option<&AppHandle>, runtime_id: &str) {
+    let Some(app) = app else {
+        return;
+    };
+    let Some(browser) = app.try_state::<Arc<BrowserManager>>() else {
+        return;
+    };
+    if let Err(error) = browser.close(app, Some(runtime_id)) {
+        eprintln!(
+            "Failed to destroy preview browser session {}: {}",
+            runtime_id, error
+        );
+    }
+}
+
 fn helper_command_kind(command: &HelperInputCommand<'_>) -> &'static str {
     match command {
         HelperInputCommand::Init { .. } => "init",
@@ -1540,20 +1555,23 @@ impl NativeRuntimeManager {
                         .get(runtime_id)
                         .cloned()
                         .ok_or_else(|| format!("Native runtime {} not found", runtime_id))?;
-                    if let Err(error) = self.complete_terminal_handoff(record, terminal) {
-                        self.update_record(runtime_id, |record| {
-                            record.status = "ready".to_string();
-                            record.is_active = true;
-                            record.updated_at = Utc::now();
-                            record.pending_handoff_terminal = None;
-                            record.last_error = Some(error.clone());
-                        })?;
-                        self.append_event(
-                            runtime_id,
-                            SessionEventPayload::StdErrLine {
-                                line: format!("Terminal handoff failed: {}", error),
-                            },
-                        )?;
+                    match self.complete_terminal_handoff(record, terminal) {
+                        Ok(()) => destroy_browser_session(app, runtime_id),
+                        Err(error) => {
+                            self.update_record(runtime_id, |record| {
+                                record.status = "ready".to_string();
+                                record.is_active = true;
+                                record.updated_at = Utc::now();
+                                record.pending_handoff_terminal = None;
+                                record.last_error = Some(error.clone());
+                            })?;
+                            self.append_event(
+                                runtime_id,
+                                SessionEventPayload::StdErrLine {
+                                    line: format!("Terminal handoff failed: {}", error),
+                                },
+                            )?;
+                        }
                     }
                 }
 
