@@ -40,8 +40,7 @@ impl BrowserManager {
         request: &BrowserToolRequest,
     ) -> Result<Value, String> {
         let session_id = normalize_browser_session_id(Some(session_id));
-        self.registry.bind_workspace(&session_id, workspace_dir)?;
-        let session = self.session_snapshot(&session_id)?;
+        let session = self.prepare_agent_tool_session(&session_id, workspace_dir)?;
         if session.paused {
             return Err("Browser agent control is paused by the user.".to_string());
         }
@@ -77,6 +76,18 @@ impl BrowserManager {
         }
         let _ = self.drain_console_log(app, &session_id, workspace_dir);
         outcome
+    }
+
+    fn prepare_agent_tool_session(
+        &self,
+        session_id: &str,
+        workspace_dir: &str,
+    ) -> Result<super::registry::BrowserSessionState, String> {
+        // Native Agent sessions do not have a BrowserPanel until their first browser tool asks
+        // the trusted shell to reveal one. Register the browser session before binding its
+        // immutable artifact scope so the first tool can drive that reveal path.
+        self.session_snapshot(session_id)?;
+        self.registry.bind_workspace(session_id, workspace_dir)
     }
 
     fn run_tool_inner(
@@ -365,6 +376,22 @@ impl BrowserManager {
             .map(str::to_string)
             .filter(|value| !value.is_empty());
         self.record_browser_page_metadata(session_id, url, title)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BrowserManager;
+
+    #[test]
+    fn first_native_agent_tool_registers_before_binding_workspace() {
+        let browser = BrowserManager::default();
+        let state = browser
+            .prepare_agent_tool_session("native-first-tool", "/workspace/preview")
+            .expect("prepare first native Agent browser tool");
+
+        assert_eq!(state.session_id, "native-first-tool");
+        assert_eq!(state.workspace_dir.as_deref(), Some("/workspace/preview"));
     }
 }
 
