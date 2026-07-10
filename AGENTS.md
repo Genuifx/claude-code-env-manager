@@ -93,7 +93,7 @@ pnpm install
 pnpm --filter @ccem/core build
 pnpm test
 pnpm verify
-cd apps/desktop/src-tauri && cargo test
+cd apps/desktop/src-tauri && cargo test --locked
 ```
 
 Pick the smallest command set that actually verifies the changed surface area, but do not skip verification entirely.
@@ -104,12 +104,16 @@ For desktop-, Tauri-, runtime-, history-, settings-, notifications-, or other ap
 
 Minimum expected path:
 
-1. Start the app with `cd apps/desktop && pnpm tauri dev`
+1. Start the app with `cd apps/desktop && pnpm tauri dev -- --locked`
 2. Connect via `tauri-mcp-server`
 3. Drive the changed flow yourself
 4. Check the actual rendered state, not just backend logs
 
 Manual reasoning alone is not considered enough for app-facing changes when Tauri MCP can exercise the flow.
+
+Use the locked Tauri dev command by default. The trailing `-- --locked` is passed to Cargo as `cargo run --locked`, so desktop self-tests cannot silently rewrite `apps/desktop/src-tauri/Cargo.lock`.
+
+If the locked self-test fails because the lockfile needs to change, do not remove `--locked` to get past the failure. Inspect the dependency or version change first. If the lock update is intentional, regenerate it explicitly with `cd apps/desktop/src-tauri && cargo generate-lockfile --offline`, review the diff, and include `apps/desktop/src-tauri/Cargo.lock` in the related commit. If the change is only verification noise from a local run, restore the lockfile before cleanup and re-check `git status --short -- apps/desktop/src-tauri/Cargo.lock`.
 
 ### E. Evidence retention
 
@@ -154,8 +158,8 @@ pnpm verify                         # Full CI gate: test + build + cargo test
 
 ```bash
 # Desktop app
-cd apps/desktop && pnpm tauri dev   # Vite + Rust cargo dev
-cd apps/desktop && pnpm tauri build # Production build (dmg/app)
+cd apps/desktop && pnpm tauri dev -- --locked # Vite + Rust cargo dev without Cargo.lock drift
+cd apps/desktop && pnpm tauri build           # Production build (dmg/app)
 
 # CLI only
 pnpm --filter @ccem/cli build

@@ -15,14 +15,20 @@ pnpm verify                         # Full CI gate: test + build + cargo test
 
 ```bash
 # Desktop app
-cd apps/desktop && pnpm tauri dev   # Vite + Rust cargo dev
-cd apps/desktop && pnpm tauri build # Production build (dmg/app)
+cd apps/desktop && pnpm tauri dev -- --locked # Vite + Rust cargo dev without Cargo.lock drift
+cd apps/desktop && pnpm tauri build           # Production build (dmg/app)
 
 # CLI only
 pnpm --filter @ccem/cli build
 pnpm --filter @ccem/cli test
 pnpm --filter @ccem/cli test -- --run src/__tests__/usage.test.ts  # single test
 ```
+
+## Desktop Self-Test Lockfile Rule
+
+Use `cd apps/desktop && pnpm tauri dev -- --locked` for desktop self-tests. The trailing `-- --locked` reaches Cargo as `cargo run --locked`, so a Tauri dev run cannot silently rewrite `apps/desktop/src-tauri/Cargo.lock`.
+
+If that command fails because the lockfile needs to change, inspect the dependency or version change instead of dropping `--locked`. For an intentional lock update, run `cd apps/desktop/src-tauri && cargo generate-lockfile --offline`, review the diff, and commit `apps/desktop/src-tauri/Cargo.lock` with the related change. For verification-only noise, restore the lockfile before worktree cleanup.
 
 ## Monorepo Structure
 
