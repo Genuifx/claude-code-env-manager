@@ -118,6 +118,7 @@ export interface TauriCommands {
   browser_health_check: [{ sessionId?: string | null } | void, BrowserInfo];
   browser_set_paused: [{ sessionId?: string | null; paused: boolean }, BrowserInfo];
   browser_recent_activity: [{ sessionId?: string | null } | void, BrowserRecentActivity];
+  browser_runtime_readiness: [void, BrowserRuntimeReadiness];
   browser_snapshot: [{ sessionId?: string | null } | void, BrowserSnapshot];
   browser_screenshot: [{ sessionId?: string | null } | void, string];
   search_workspace_files: [
@@ -604,6 +605,15 @@ export interface BrowserRecentActivity {
   artifacts: BrowserRecentArtifact[];
   console_log_path?: string | null;
   audit_log_path?: string | null;
+}
+
+export type BrowserRuntimeReadinessStatus = 'unavailable' | 'preparing' | 'ready' | 'failed';
+
+export interface BrowserRuntimeReadiness {
+  status: BrowserRuntimeReadinessStatus;
+  version?: string | null;
+  error?: string | null;
+  checked_at: string;
 }
 
 export interface AppConfig {

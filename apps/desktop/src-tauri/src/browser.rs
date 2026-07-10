@@ -1,7 +1,10 @@
 mod artifacts;
+#[cfg(all(unix, any(test, feature = "chromium-spike")))]
+mod chromium_spike;
 mod logs;
 mod policy;
 mod registry;
+mod runtime_readiness;
 mod tools;
 mod url;
 mod webview;
@@ -11,6 +14,7 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use logs::BrowserLogStore;
 pub use logs::BrowserRecentActivity;
 pub(crate) use policy::authorize_browser_tool;
+pub use runtime_readiness::BrowserRuntimeReadiness;
 use registry::{BrowserSessionRegistry, BrowserSessionState};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -743,6 +747,11 @@ pub fn browser_recent_activity(
     session_id: Option<String>,
 ) -> Result<BrowserRecentActivity, String> {
     state.recent_activity(&normalize_browser_session_id(session_id.as_deref()))
+}
+
+#[tauri::command]
+pub fn browser_runtime_readiness() -> BrowserRuntimeReadiness {
+    runtime_readiness::runtime_readiness()
 }
 
 #[tauri::command]

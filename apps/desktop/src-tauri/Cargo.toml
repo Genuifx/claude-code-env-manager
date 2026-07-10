@@ -52,6 +52,7 @@ objc2-web-kit = { version = "0.2.2", default-features = false, features = ["bloc
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+chromium-spike = []
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
