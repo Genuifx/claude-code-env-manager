@@ -541,7 +541,7 @@
     "enableEnv": "启用",
     "disableEnv": "停用",
     "enabledEnvs": "已启用的环境",
-    "enabledEnvsHint": "运行时选择器只展示这里的启用项。卡片悬停可启用/停用。",
+    "enabledEnvsHint": "运行时选择器只展示这里的启用项。悬停卡片，右下角开关可启用/停用。",
     "enabledCount": "已启用 {count} 个",
     "allEnabledLegacy": "全部启用（默认）",
     "disabledBadge": "未启用",

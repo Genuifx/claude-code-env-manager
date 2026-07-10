@@ -541,7 +541,7 @@
     "enableEnv": "Enable",
     "disableEnv": "Disable",
     "enabledEnvs": "Enabled Environments",
-    "enabledEnvsHint": "Runtime pickers only show enabled environments. Hover a card to enable or disable.",
+    "enabledEnvsHint": "Runtime pickers only show enabled environments. Hover a card — enable switch is bottom-right.",
     "enabledCount": "Enabled {count}",
     "allEnabledLegacy": "All enabled (default)",
     "disabledBadge": "Disabled",

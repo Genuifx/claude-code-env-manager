@@ -5,6 +5,7 @@ import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
 import { ModelIcon } from '@/components/history/ModelIcon';
+import { Switch } from '@/components/ui/switch';
 import {
   isEnvironmentEnabled,
   toggleEnabledEnvironment,
@@ -179,7 +180,7 @@ interface EnvCardProps {
 
 /**
  * Compact grid card — dense, scannable.
- * Enable/disable lives in hover actions, not a permanent switch.
+ * Management actions stay top-right; enable switch appears bottom-right on hover.
  */
 function EnvGridCard({
   name,
@@ -228,39 +229,22 @@ function EnvGridCard({
             <span className="inline-flex rounded-full h-2 w-2 bg-primary"></span>
           </span>
         ) : !isEnabled ? (
-          <span className="shrink-0 rounded-full border border-border-subtle bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
+          <span className="shrink-0 rounded-full border border-border-subtle bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground group-hover:opacity-0 transition-opacity">
             {t('environments.disabledBadge')}
           </span>
         ) : null}
       </div>
 
       {/* Compact info */}
-      <div className="space-y-0.5 text-[11px] text-muted-foreground">
+      <div className="space-y-0.5 text-[11px] text-muted-foreground pr-12">
         <p className="truncate">{extractDomain(env.baseUrl)}</p>
         <p className="truncate">
           <span className="text-muted-foreground/60">runtime:</span> {runtimeModel}
         </p>
       </div>
 
-      {/* Hover actions — include enable/disable instead of permanent switches */}
+      {/* Management actions — top-right on hover */}
       <div className="absolute top-2 right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
-        <button
-          type="button"
-          className={cn(
-            'h-6 px-1.5 rounded-md text-[10px] font-medium transition-colors',
-            isEnabled
-              ? 'text-muted-foreground hover:text-foreground hover:bg-background'
-              : 'text-primary hover:bg-primary/10',
-          )}
-          disabled={isToggling}
-          title={isEnabled ? t('environments.disableEnv') : t('environments.enableEnv')}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleEnabled();
-          }}
-        >
-          {isEnabled ? t('environments.disableEnv') : t('environments.enableEnv')}
-        </button>
         <button
           type="button"
           className="w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-background transition-colors"
@@ -285,6 +269,20 @@ function EnvGridCard({
             <Trash2 className="w-3 h-3" />
           </button>
         )}
+      </div>
+
+      {/* Enable switch — bottom-right on hover */}
+      <div
+        className="absolute bottom-2.5 right-2.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <Switch
+          checked={isEnabled}
+          disabled={isToggling}
+          onCheckedChange={() => onToggleEnabled()}
+          aria-label={isEnabled ? t('environments.disableEnv') : t('environments.enableEnv')}
+          className="scale-90 origin-right"
+        />
       </div>
     </div>
   );
@@ -361,8 +359,8 @@ function EnvListCard({
         </span>
       )}
 
-      {/* Hover actions */}
-      <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+      {/* Hover actions — management left, enable switch at the end (right) */}
+      <div className="flex items-center gap-1.5 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
         {!isActive && (
           <button
             type="button"
@@ -372,23 +370,6 @@ function EnvListCard({
             {t('environments.switchTo')}
           </button>
         )}
-        <button
-          type="button"
-          className={cn(
-            'h-6 px-2 rounded-md text-[11px] font-medium transition-colors',
-            isEnabled
-              ? 'text-muted-foreground hover:text-foreground hover:bg-background'
-              : 'text-primary hover:bg-primary/10',
-          )}
-          disabled={isToggling}
-          title={isEnabled ? t('environments.disableEnv') : t('environments.enableEnv')}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleEnabled();
-          }}
-        >
-          {isEnabled ? t('environments.disableEnv') : t('environments.enableEnv')}
-        </button>
         <button
           type="button"
           className="w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-background transition-colors"
@@ -413,6 +394,18 @@ function EnvListCard({
             <Trash2 className="w-3 h-3" />
           </button>
         )}
+        <div
+          className="pl-1 border-l border-border-subtle"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Switch
+            checked={isEnabled}
+            disabled={isToggling}
+            onCheckedChange={() => onToggleEnabled()}
+            aria-label={isEnabled ? t('environments.disableEnv') : t('environments.enableEnv')}
+            className="scale-90"
+          />
+        </div>
       </div>
     </div>
   );
