@@ -117,6 +117,7 @@ export interface TauriCommands {
   browser_info: [{ sessionId?: string | null } | void, BrowserInfo];
   browser_health_check: [{ sessionId?: string | null } | void, BrowserInfo];
   browser_set_paused: [{ sessionId?: string | null; paused: boolean }, BrowserInfo];
+  browser_recent_activity: [{ sessionId?: string | null } | void, BrowserRecentActivity];
   browser_snapshot: [{ sessionId?: string | null } | void, BrowserSnapshot];
   browser_screenshot: [{ sessionId?: string | null } | void, string];
   search_workspace_files: [
@@ -589,6 +590,20 @@ export interface BrowserSnapshot {
   navigation_seq?: number;
   frame_id?: string;
   elements?: BrowserSnapshotElement[];
+}
+
+export interface BrowserRecentArtifact {
+  kind: 'screenshot' | 'interaction_snapshot' | string;
+  path: string;
+  file_name: string;
+  byte_size: number;
+  modified_at: string;
+}
+
+export interface BrowserRecentActivity {
+  artifacts: BrowserRecentArtifact[];
+  console_log_path?: string | null;
+  audit_log_path?: string | null;
 }
 
 export interface AppConfig {

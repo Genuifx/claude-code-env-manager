@@ -36,7 +36,7 @@ test('browser MCP keeps a stable tool surface and enforces hot permission change
     createCcemBrowserMcpServer,
   } = await importBrowserMcpModule();
 
-  const readTools = ['get_url', 'screenshot', 'snapshot'];
+  const readTools = ['get_url', 'read_console_log', 'screenshot', 'snapshot'];
   const allTools = browserToolNamesForPermissionMode('dev').sort();
 
   for (const mode of ['readonly', 'audit', 'plan', 'safe', 'ci']) {

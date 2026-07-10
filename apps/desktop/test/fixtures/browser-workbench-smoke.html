@@ -62,10 +62,17 @@
       <p id="hidden-page-instruction">HIDDEN_PAGE_INSTRUCTION_DO_NOT_FOLLOW</p>
     </main>
     <script>
+      console.info('CCEM_CONSOLE_PROBE_READY');
+      console.error(JSON.stringify({
+        event: 'CCEM_CONSOLE_REDACTION_PROBE',
+        token: 'raw-console-secret',
+        safe: 'retained',
+      }));
       const input = document.querySelector('#task-name');
       const result = document.querySelector('#result');
       document.querySelector('#apply-preview').addEventListener('click', () => {
         result.textContent = `Applied: ${input.value}`;
+        console.warn('CCEM_CONSOLE_ACTION_PROBE');
       });
     </script>
   </body>

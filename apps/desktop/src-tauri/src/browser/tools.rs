@@ -18,7 +18,29 @@ impl BrowserManager {
         workspace_dir: &str,
         request: &BrowserToolRequest,
     ) -> Result<Value, String> {
+        let started_at = Instant::now();
+        let outcome = self.run_tool_authorized(app, session_id, workspace_dir, request);
+        if let Err(error) = self.audit_tool_result(
+            workspace_dir,
+            session_id,
+            request,
+            started_at.elapsed().as_millis(),
+            &outcome,
+        ) {
+            eprintln!("Failed to append preview browser action audit: {error}");
+        }
+        outcome
+    }
+
+    fn run_tool_authorized(
+        &self,
+        app: &AppHandle,
+        session_id: &str,
+        workspace_dir: &str,
+        request: &BrowserToolRequest,
+    ) -> Result<Value, String> {
         let session_id = normalize_browser_session_id(Some(session_id));
+        self.registry.bind_workspace(&session_id, workspace_dir)?;
         let session = self.session_snapshot(&session_id)?;
         if session.paused {
             return Err("Browser agent control is paused by the user.".to_string());
@@ -29,6 +51,7 @@ impl BrowserManager {
             .map_err(|_| format!("Browser session {session_id} actor is unavailable"))?;
         self.reveal_for_agent_tool(app, &session_id)?;
         self.wait_for_visible_agent_control(app, &session_id)?;
+        let _ = self.drain_console_log(app, &session_id, workspace_dir);
         let (active, token) = self
             .registry
             .begin_agent_action(&session_id, &request.tool)?;
@@ -52,6 +75,7 @@ impl BrowserManager {
                 },
             );
         }
+        let _ = self.drain_console_log(app, &session_id, workspace_dir);
         outcome
     }
 
@@ -195,6 +219,7 @@ impl BrowserManager {
                     .unwrap_or(5_000);
                 self.wait_for_text(app, Some(session_id), &text, timeout_ms, Some(token))
             }
+            "read_console_log" => self.read_console_log(app, session_id, workspace_dir),
             other => Err(format!("Unsupported browser tool: {other}")),
         }
     }
@@ -268,7 +293,7 @@ impl BrowserManager {
         Ok(snapshot)
     }
 
-    fn eval_json(
+    pub(super) fn eval_json(
         &self,
         app: &AppHandle,
         session_id: Option<&str>,

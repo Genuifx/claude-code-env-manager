@@ -1,3 +1,4 @@
+use super::logs::BROWSER_CONSOLE_INIT_SCRIPT;
 use super::registry::{BrowserNavigationToken, BrowserSessionRegistry};
 use super::{
     emit_browser_state, is_allowed_browser_navigation, parse_browser_url, BrowserBounds,
@@ -34,6 +35,7 @@ pub(super) fn ensure_browser_webview(
     let builder = tauri::WebviewBuilder::new(label, tauri::WebviewUrl::External(parsed))
         .user_agent(SAFARI_DESKTOP_UA)
         .incognito(true)
+        .initialization_script(BROWSER_CONSOLE_INIT_SCRIPT)
         .on_navigation(move |url| {
             let allowed = is_allowed_browser_navigation(url);
             if allowed {

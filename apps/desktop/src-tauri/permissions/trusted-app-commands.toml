@@ -20,6 +20,7 @@ commands.allow = [
   "browser_info",
   "browser_health_check",
   "browser_set_paused",
+  "browser_recent_activity",
   "browser_snapshot",
   "browser_screenshot",
   "open_tray_cockpit",

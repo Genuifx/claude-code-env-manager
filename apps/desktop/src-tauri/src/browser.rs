@@ -1,4 +1,5 @@
 mod artifacts;
+mod logs;
 mod policy;
 mod registry;
 mod tools;
@@ -7,6 +8,8 @@ mod webview;
 
 use artifacts::BrowserArtifactStore;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use logs::BrowserLogStore;
+pub use logs::BrowserRecentActivity;
 pub(crate) use policy::authorize_browser_tool;
 use registry::{BrowserSessionRegistry, BrowserSessionState};
 use serde::{Deserialize, Serialize};
@@ -127,6 +130,7 @@ struct BrowserPageMetadata {
 pub struct BrowserManager {
     registry: Arc<BrowserSessionRegistry>,
     artifacts: Arc<BrowserArtifactStore>,
+    logs: Arc<BrowserLogStore>,
 }
 
 impl Default for BrowserManager {
@@ -134,6 +138,7 @@ impl Default for BrowserManager {
         Self {
             registry: Arc::new(BrowserSessionRegistry::new(DEFAULT_BROWSER_SESSION_ID)),
             artifacts: Arc::new(BrowserArtifactStore::default()),
+            logs: Arc::new(BrowserLogStore::default()),
         }
     }
 }
@@ -256,6 +261,9 @@ impl BrowserManager {
         let Some(session) = self.registry.snapshot(&session_id)? else {
             return Ok(());
         };
+        if let Some(workspace_dir) = session.workspace_dir.as_deref() {
+            let _ = self.drain_console_log(app, &session_id, workspace_dir);
+        }
         let close_result = if let Some(webview) = app.get_webview(&session.label) {
             webview
                 .close()
@@ -435,6 +443,9 @@ impl BrowserManager {
                 emit_browser_state(app, &crashed, "health_check_failed");
                 return self.info_from_state(crashed, true);
             }
+        }
+        if let Some(workspace_dir) = session.workspace_dir.as_deref() {
+            let _ = self.drain_console_log(app, &session_id, workspace_dir);
         }
         self.info(app, Some(&session_id))
     }
@@ -724,6 +735,14 @@ pub fn browser_set_paused(
     paused: bool,
 ) -> Result<BrowserInfo, String> {
     state.set_paused(&app, session_id.as_deref(), paused)
+}
+
+#[tauri::command]
+pub fn browser_recent_activity(
+    state: tauri::State<'_, std::sync::Arc<BrowserManager>>,
+    session_id: Option<String>,
+) -> Result<BrowserRecentActivity, String> {
+    state.recent_activity(&normalize_browser_session_id(session_id.as_deref()))
 }
 
 #[tauri::command]

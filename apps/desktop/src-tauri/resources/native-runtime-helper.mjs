@@ -36026,7 +36026,12 @@ function date4(params) {
 config(en_default());
 
 // src/browserMcp.ts
-var READ_TOOLS = /* @__PURE__ */ new Set(["get_url", "snapshot", "screenshot"]);
+var READ_TOOLS = /* @__PURE__ */ new Set([
+  "get_url",
+  "snapshot",
+  "screenshot",
+  "read_console_log"
+]);
 var NORMAL_TOOLS = /* @__PURE__ */ new Set([
   "navigate",
   "get_url",
@@ -36036,6 +36041,7 @@ var NORMAL_TOOLS = /* @__PURE__ */ new Set([
   "press_key",
   "scroll",
   "screenshot",
+  "read_console_log",
   "wait_for"
 ]);
 var ALL_TOOLS = /* @__PURE__ */ new Set([...NORMAL_TOOLS, "evaluate"]);
@@ -36183,6 +36189,12 @@ function createCcemBrowserMcpServer(permissionMode, sendBrowserToolRequest) {
         "Write a PNG screenshot artifact and return its path, dimensions, and hash.",
         {},
         async () => toToolResult(await sendAuthorizedBrowserToolRequest("screenshot", {}))
+      )),
+      ...maybe("read_console_log", nee(
+        "read_console_log",
+        "Drain console diagnostics to JSONL and return the path plus recent redacted events.",
+        {},
+        async () => toToolResult(await sendAuthorizedBrowserToolRequest("read_console_log", {}))
       )),
       ...maybe("evaluate", nee(
         "evaluate",

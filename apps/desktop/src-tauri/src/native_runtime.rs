@@ -1692,22 +1692,52 @@ impl NativeRuntimeManager {
             .cloned()
             .ok_or_else(|| format!("Native runtime {} helper is not connected", runtime_id))?;
 
-        let authorized_workspace = {
+        let (workspace_dir, permission_mode, authorization) = {
             let record = handle
                 .record
                 .lock()
                 .map_err(|_| "Failed to lock native session record".to_string())?;
-            authorize_browser_tool_for_record(&record, &request.tool)
-                .map(|_| record.project_dir.clone())
+            let permission_mode = effective_native_perm_mode(
+                record.perm_mode.as_str(),
+                record.runtime_perm_mode.as_deref(),
+            )
+            .to_string();
+            (
+                record.project_dir.clone(),
+                permission_mode,
+                authorize_browser_tool_for_record(&record, &request.tool),
+            )
         };
 
-        let response = authorized_workspace.and_then(|workspace_dir| match app {
+        let response = match app {
             Some(app) => match app.try_state::<Arc<BrowserManager>>() {
-                Some(browser) => browser.run_tool(app, runtime_id, &workspace_dir, &request),
+                Some(browser) => {
+                    let audit = browser.audit_policy_decision(
+                        &workspace_dir,
+                        runtime_id,
+                        &permission_mode,
+                        &request,
+                        authorization.is_ok(),
+                        authorization.as_ref().err().map(String::as_str),
+                    );
+                    match authorization {
+                        Ok(()) => audit.and_then(|_| {
+                            browser.run_tool(app, runtime_id, &workspace_dir, &request)
+                        }),
+                        Err(policy_error) => {
+                            if let Err(audit_error) = audit {
+                                eprintln!(
+                                    "Failed to append denied preview browser audit: {audit_error}"
+                                );
+                            }
+                            Err(policy_error)
+                        }
+                    }
+                }
                 None => Err("Browser manager is not registered.".to_string()),
             },
             None => Err("Browser tool request requires an app handle.".to_string()),
-        });
+        };
 
         match response {
             Ok(result) => self.write_to_child(

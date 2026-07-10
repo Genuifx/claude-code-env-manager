@@ -22,6 +22,7 @@ pub(super) struct BrowserSessionState {
     pub generation: u64,
     pub navigation_seq: u64,
     pub latest_snapshot: Option<BrowserSnapshotToken>,
+    pub workspace_dir: Option<String>,
     pub cancel_epoch: u64,
     pub policy_epoch: u64,
     pub operation_seq: u64,
@@ -50,6 +51,7 @@ impl BrowserSessionState {
             generation,
             navigation_seq: 0,
             latest_snapshot: None,
+            workspace_dir: None,
             cancel_epoch: 0,
             policy_epoch: 0,
             operation_seq: 0,
@@ -160,6 +162,31 @@ impl BrowserSessionRegistry {
                 .lock_sessions()?
                 .get(session_id)
                 .is_some_and(|session| session.visible && !session.paused))
+    }
+
+    pub fn bind_workspace(
+        &self,
+        session_id: &str,
+        workspace_dir: &str,
+    ) -> Result<BrowserSessionState, String> {
+        self.update(session_id, |session| {
+            match session.workspace_dir.as_deref() {
+                Some(existing) if existing != workspace_dir => {
+                    session.last_error = Some(
+                        "Browser session cannot change its workspace artifact scope.".to_string(),
+                    );
+                }
+                Some(_) => {}
+                None => session.workspace_dir = Some(workspace_dir.to_string()),
+            }
+        })
+        .and_then(|session| {
+            if session.workspace_dir.as_deref() == Some(workspace_dir) {
+                Ok(session)
+            } else {
+                Err("Browser session cannot change its workspace artifact scope.".to_string())
+            }
+        })
     }
 
     pub fn set_bounds(
@@ -748,5 +775,23 @@ mod tests {
         assert!(!registry
             .is_visible_for_agent("session-a")
             .expect("paused a is not controllable"));
+    }
+
+    #[test]
+    fn artifact_workspace_scope_cannot_change_within_a_session() {
+        let registry = registry();
+        registry
+            .snapshot_or_create("session-a", |_| "browser-a".to_string())
+            .expect("create session");
+
+        registry
+            .bind_workspace("session-a", "/workspace/a")
+            .expect("bind workspace");
+        registry
+            .bind_workspace("session-a", "/workspace/a")
+            .expect("repeat workspace");
+        assert!(registry
+            .bind_workspace("session-a", "/workspace/b")
+            .is_err());
     }
 }

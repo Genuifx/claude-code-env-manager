@@ -14,21 +14,32 @@ import { open as openExternalUrl } from '@tauri-apps/plugin-shell';
 import {
   ArrowLeft,
   ArrowRight,
+  Copy,
   ExternalLink,
+  FileImage,
+  FileJson,
+  Files,
   Globe,
   LoaderCircle,
   Pause,
   Play,
   RefreshCw,
+  ScrollText,
+  ShieldCheck,
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { useLocale } from '@/locales';
-import type { BrowserInfo, BrowserSessionStateEvent } from '@/lib/tauri-ipc';
+import type {
+  BrowserInfo,
+  BrowserRecentActivity,
+  BrowserSessionStateEvent,
+} from '@/lib/tauri-ipc';
 import { CCEM_ZOOM_CHANGE_EVENT, CCEM_ZOOM_STORAGE_KEY } from '@/hooks/useZoom';
 import { buildNativeBrowserBounds, normalizeBrowserBoundsZoom } from './browserPanelGeometry';
 
@@ -69,6 +80,12 @@ function normalizeBrowserInput(value: string): string {
   }
 
   return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`;
+}
+
+function formatArtifactBytes(byteSize: number): string {
+  if (byteSize < 1024) return `${byteSize} B`;
+  if (byteSize < 1024 * 1024) return `${Math.round(byteSize / 1024)} KB`;
+  return `${(byteSize / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function BrowserToolButton({
@@ -130,6 +147,7 @@ export function BrowserPanel({
   const [paused, setPaused] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isPauseBusy, setIsPauseBusy] = useState(false);
+  const [recentActivity, setRecentActivity] = useState<BrowserRecentActivity>({ artifacts: [] });
 
   const applyBrowserInfo = useCallback((info: BrowserInfo, fallbackUrl?: string | null) => {
     const nextUrl = info.url ?? fallbackUrl ?? null;
@@ -175,6 +193,21 @@ export function BrowserPanel({
     return info;
   }, [applyBrowserInfo, sessionId]);
 
+  const refreshRecentActivity = useCallback(async () => {
+    const activity = await invoke<BrowserRecentActivity>('browser_recent_activity', { sessionId });
+    setRecentActivity(activity);
+    return activity;
+  }, [sessionId]);
+
+  const copyActivityPath = useCallback(async (path: string) => {
+    try {
+      await navigator.clipboard.writeText(path);
+      toast.success(t('workspace.browserPathCopied'));
+    } catch (copyError) {
+      toast.error(String(copyError));
+    }
+  }, [t]);
+
   const showBrowserError = useCallback((message: string) => {
     setIsLoading(false);
     setError(message);
@@ -203,6 +236,7 @@ export function BrowserPanel({
 
   useEffect(() => {
     void openBrowser(defaultUrl);
+    void refreshRecentActivity().catch(() => {});
 
     return () => {
       if (syncFrameRef.current !== null) {
@@ -210,7 +244,7 @@ export function BrowserPanel({
       }
       void invoke('browser_set_visible', { sessionId, visible: false }).catch(() => {});
     };
-  }, [defaultUrl, openBrowser, sessionId]);
+  }, [defaultUrl, openBrowser, refreshRecentActivity, sessionId]);
 
   useEffect(() => {
     let disposed = false;
@@ -239,6 +273,9 @@ export function BrowserPanel({
         created_at: state.createdAt,
         updated_at: state.updatedAt,
       });
+      if (state.cause === 'agent_action_finished' || state.cause === 'agent_action_failed') {
+        void refreshRecentActivity().catch(() => {});
+      }
     }).then((nextUnlisten) => {
       if (disposed) {
         nextUnlisten();
@@ -251,7 +288,10 @@ export function BrowserPanel({
 
     const healthTimer = window.setInterval(() => {
       void invoke<BrowserInfo>('browser_health_check', { sessionId })
-        .then(applyBrowserInfo)
+        .then((info) => {
+          applyBrowserInfo(info);
+          void refreshRecentActivity().catch(() => {});
+        })
         .catch(() => {});
     }, 4_000);
 
@@ -260,7 +300,7 @@ export function BrowserPanel({
       unlisten?.();
       window.clearInterval(healthTimer);
     };
-  }, [applyBrowserInfo, sessionId]);
+  }, [applyBrowserInfo, refreshRecentActivity, sessionId]);
 
   useEffect(() => {
     isUrlEditingRef.current = isUrlEditing;
@@ -385,6 +425,9 @@ export function BrowserPanel({
   }, [applyBrowserInfo, paused, sessionId, showBrowserError]);
 
   const displayUrl = currentUrl || title || t('workspace.browserTitle');
+  const recentActivityCount = recentActivity.artifacts.length
+    + (recentActivity.console_log_path ? 1 : 0)
+    + (recentActivity.audit_log_path ? 1 : 0);
 
   return (
     <aside
@@ -423,6 +466,91 @@ export function BrowserPanel({
             {t('workspace.browserAgentPaused')}
           </span>
         ) : null}
+        <Popover onOpenChange={(open) => {
+          if (open) void refreshRecentActivity().catch(() => {});
+        }}>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="relative h-7 w-7 shrink-0"
+              aria-label={t('workspace.browserRecentArtifacts')}
+              title={t('workspace.browserRecentArtifacts')}
+            >
+              <Files className="h-4 w-4" />
+              {recentActivityCount > 0 ? (
+                <span className="absolute -right-1 -top-1 min-w-3.5 rounded-full bg-primary px-1 text-[9px] font-semibold leading-3.5 text-primary-foreground">
+                  {Math.min(recentActivityCount, 9)}
+                </span>
+              ) : null}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" side="bottom" className="w-80 p-2">
+            <div className="px-2 py-1.5 text-xs font-semibold text-foreground">
+              {t('workspace.browserRecentArtifacts')}
+            </div>
+            {recentActivityCount === 0 ? (
+              <div className="px-2 py-6 text-center text-xs text-muted-foreground">
+                {t('workspace.browserNoArtifacts')}
+              </div>
+            ) : (
+              <div className="max-h-72 space-y-1 overflow-y-auto">
+                {recentActivity.artifacts.map((artifact) => {
+                  const ArtifactIcon = artifact.kind === 'screenshot' ? FileImage : FileJson;
+                  return (
+                    <button
+                      key={artifact.path}
+                      type="button"
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-muted/60"
+                      title={artifact.path}
+                      onClick={() => void copyActivityPath(artifact.path)}
+                    >
+                      <ArtifactIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-xs font-medium text-foreground">
+                          {artifact.file_name}
+                        </span>
+                        <span className="block text-[10px] text-muted-foreground">
+                          {formatArtifactBytes(artifact.byte_size)}
+                        </span>
+                      </span>
+                      <Copy className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    </button>
+                  );
+                })}
+                {recentActivity.console_log_path ? (
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-muted/60"
+                    title={recentActivity.console_log_path}
+                    onClick={() => void copyActivityPath(recentActivity.console_log_path!)}
+                  >
+                    <ScrollText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+                      {t('workspace.browserConsoleLog')}
+                    </span>
+                    <Copy className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  </button>
+                ) : null}
+                {recentActivity.audit_log_path ? (
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-muted/60"
+                    title={recentActivity.audit_log_path}
+                    onClick={() => void copyActivityPath(recentActivity.audit_log_path!)}
+                  >
+                    <ShieldCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+                      {t('workspace.browserAuditLog')}
+                    </span>
+                    <Copy className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  </button>
+                ) : null}
+              </div>
+            )}
+          </PopoverContent>
+        </Popover>
         {isBusy || isLoading ? <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" /> : null}
         <BrowserToolButton
           label={paused ? t('workspace.browserResumeAgent') : t('workspace.browserPauseAgent')}

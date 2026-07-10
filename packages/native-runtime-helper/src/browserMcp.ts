@@ -11,6 +11,7 @@ type BrowserToolName =
   | 'press_key'
   | 'scroll'
   | 'screenshot'
+  | 'read_console_log'
   | 'evaluate'
   | 'wait_for';
 
@@ -35,7 +36,12 @@ type BrowserBridgePending = {
   timeout: ReturnType<typeof setTimeout>;
 };
 
-const READ_TOOLS = new Set<BrowserToolName>(['get_url', 'snapshot', 'screenshot']);
+const READ_TOOLS = new Set<BrowserToolName>([
+  'get_url',
+  'snapshot',
+  'screenshot',
+  'read_console_log',
+]);
 const NORMAL_TOOLS = new Set<BrowserToolName>([
   'navigate',
   'get_url',
@@ -45,6 +51,7 @@ const NORMAL_TOOLS = new Set<BrowserToolName>([
   'press_key',
   'scroll',
   'screenshot',
+  'read_console_log',
   'wait_for',
 ]);
 const ALL_TOOLS = new Set<BrowserToolName>([...NORMAL_TOOLS, 'evaluate']);
@@ -232,6 +239,12 @@ export function createCcemBrowserMcpServer(
         'Write a PNG screenshot artifact and return its path, dimensions, and hash.',
         {},
         async () => toToolResult(await sendAuthorizedBrowserToolRequest('screenshot', {})),
+      )),
+      ...maybe('read_console_log', tool(
+        'read_console_log',
+        'Drain console diagnostics to JSONL and return the path plus recent redacted events.',
+        {},
+        async () => toToolResult(await sendAuthorizedBrowserToolRequest('read_console_log', {})),
       )),
       ...maybe('evaluate', tool(
         'evaluate',

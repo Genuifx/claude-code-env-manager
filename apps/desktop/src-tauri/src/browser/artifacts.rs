@@ -39,6 +39,30 @@ pub(super) enum BrowserArtifactKind {
     InteractionSnapshot,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum BrowserStorageArea {
+    Artifacts,
+    Logs,
+    Audit,
+}
+
+impl BrowserStorageArea {
+    fn directory_name(self) -> &'static str {
+        match self {
+            Self::Artifacts => "artifacts",
+            Self::Logs => "logs",
+            Self::Audit => "audit",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct BrowserStorageLocation {
+    pub workspace_scope: String,
+    pub session_scope: String,
+    pub directory: PathBuf,
+}
+
 impl BrowserArtifactKind {
     fn file_prefix(self) -> &'static str {
         match self {
@@ -139,31 +163,8 @@ impl BrowserArtifactStore {
             .write_lock
             .lock()
             .map_err(|_| "Browser artifact store is unavailable.".to_string())?;
-        let workspace_scope = opaque_scope_id(&normalize_workspace_path(workspace_dir));
-        let session_scope = opaque_scope_id(session_id);
-        let artifact_dir = self
-            .root
-            .join("workspaces")
-            .join(&workspace_scope)
-            .join("sessions")
-            .join(&session_scope)
-            .join("artifacts");
-        ensure_private_directory_tree(&self.root, &artifact_dir)?;
-        let canonical_root = self.root.canonicalize().map_err(|error| {
-            format!(
-                "Failed to resolve browser artifact root {}: {error}",
-                self.root.display()
-            )
-        })?;
-        let artifact_dir = artifact_dir.canonicalize().map_err(|error| {
-            format!(
-                "Failed to resolve browser artifact directory {}: {error}",
-                artifact_dir.display()
-            )
-        })?;
-        if !artifact_dir.starts_with(&canonical_root) {
-            return Err("Browser artifact directory escaped the app-owned store.".to_string());
-        }
+        let location = self.location(workspace_dir, session_id, BrowserStorageArea::Artifacts)?;
+        let artifact_dir = location.directory;
 
         let artifact_id = random_artifact_id();
         let timestamp = Utc::now().format("%Y%m%dT%H%M%S%.6fZ");
@@ -196,8 +197,46 @@ impl BrowserArtifactStore {
             byte_size: bytes.len() as u64,
             sha256: hex::encode(Sha256::digest(bytes)),
             captured_at: captured_at.to_string(),
+            workspace_scope: location.workspace_scope,
+            session_scope: location.session_scope,
+        })
+    }
+
+    pub(super) fn location(
+        &self,
+        workspace_dir: &str,
+        session_id: &str,
+        area: BrowserStorageArea,
+    ) -> Result<BrowserStorageLocation, String> {
+        let workspace_scope = opaque_scope_id(&normalize_workspace_path(workspace_dir));
+        let session_scope = opaque_scope_id(session_id);
+        let directory = self
+            .root
+            .join("workspaces")
+            .join(&workspace_scope)
+            .join("sessions")
+            .join(&session_scope)
+            .join(area.directory_name());
+        ensure_private_directory_tree(&self.root, &directory)?;
+        let canonical_root = self.root.canonicalize().map_err(|error| {
+            format!(
+                "Failed to resolve browser storage root {}: {error}",
+                self.root.display()
+            )
+        })?;
+        let directory = directory.canonicalize().map_err(|error| {
+            format!(
+                "Failed to resolve browser storage directory {}: {error}",
+                directory.display()
+            )
+        })?;
+        if !directory.starts_with(&canonical_root) {
+            return Err("Browser storage directory escaped the app-owned store.".to_string());
+        }
+        Ok(BrowserStorageLocation {
             workspace_scope,
             session_scope,
+            directory,
         })
     }
 
@@ -446,7 +485,7 @@ fn redact_snapshot_elements(elements: &mut Value) {
     }
 }
 
-fn redact_browser_url(value: &str) -> String {
+pub(super) fn redact_browser_url(value: &str) -> String {
     let Ok(mut url) = tauri::Url::parse(value) else {
         return "[INVALID URL]".to_string();
     };
@@ -718,7 +757,7 @@ fn set_private_directory_permissions(_path: &Path) -> Result<(), String> {
 }
 
 #[cfg(unix)]
-fn set_private_file_permissions(path: &Path) -> Result<(), String> {
+pub(super) fn set_private_file_permissions(path: &Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|error| {
         format!(
@@ -729,7 +768,7 @@ fn set_private_file_permissions(path: &Path) -> Result<(), String> {
 }
 
 #[cfg(not(unix))]
-fn set_private_file_permissions(_path: &Path) -> Result<(), String> {
+pub(super) fn set_private_file_permissions(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 

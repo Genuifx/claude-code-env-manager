@@ -129,6 +129,7 @@ struct BrowserSmokeProbeParams {
     wait_for_text: Option<String>,
     verify_pause: Option<bool>,
     verify_stale_snapshot: Option<bool>,
+    verify_console: Option<bool>,
     timeout_ms: Option<u64>,
     close: Option<bool>,
     bounds: Option<BrowserBounds>,
@@ -757,6 +758,24 @@ fn run_browser_smoke_probe(
         )?;
     }
 
+    if params.verify_console.unwrap_or(false) {
+        let console = browser.run_tool(
+            app,
+            BROWSER_SMOKE_SESSION_ID,
+            &workspace_dir,
+            &BrowserToolRequest {
+                request_id: "smoke-read-console".to_string(),
+                tool: "read_console_log".to_string(),
+                args: json!({}),
+            },
+        )?;
+        verify_browser_console_log(&console)?;
+        steps.push(json!({
+            "step": "consoleLog",
+            "summary": console,
+        }));
+    }
+
     let snapshot_artifact = browser.run_tool(
         app,
         BROWSER_SMOKE_SESSION_ID,
@@ -787,6 +806,18 @@ fn run_browser_smoke_probe(
     steps.push(json!({
         "step": "screenshot",
         "artifact": screenshot,
+    }));
+
+    let recent_activity = browser.recent_activity(BROWSER_SMOKE_SESSION_ID)?;
+    if params.verify_console.unwrap_or(false) {
+        verify_browser_audit_log(
+            recent_activity.audit_log_path.as_deref(),
+            params.input_text.as_deref(),
+        )?;
+    }
+    steps.push(json!({
+        "step": "recentActivity",
+        "activity": recent_activity,
     }));
 
     let health = browser.health_check(app, Some(BROWSER_SMOKE_SESSION_ID))?;
@@ -858,6 +889,45 @@ fn verify_browser_artifact(artifact: &Value, expected_kind: &str) -> Result<(), 
                 "Browser smoke snapshot artifact is missing untrusted provenance.".to_string(),
             );
         }
+    }
+    Ok(())
+}
+
+fn verify_browser_console_log(summary: &Value) -> Result<(), String> {
+    let path = summary
+        .get("path")
+        .and_then(Value::as_str)
+        .map(Path::new)
+        .ok_or_else(|| "Browser console summary did not include a path.".to_string())?;
+    let content = fs::read_to_string(path)
+        .map_err(|error| format!("Failed to read browser console smoke log: {error}"))?;
+    if !content.contains("CCEM_CONSOLE_PROBE_READY")
+        || !content.contains("CCEM_CONSOLE_REDACTION_PROBE")
+        || !content.contains("[REDACTED]")
+        || content.contains("raw-console-secret")
+    {
+        return Err("Browser console smoke log failed capture or redaction checks.".to_string());
+    }
+    if summary.get("untrusted").and_then(Value::as_bool) != Some(true) {
+        return Err("Browser console summary is missing untrusted provenance.".to_string());
+    }
+    Ok(())
+}
+
+fn verify_browser_audit_log(
+    audit_path: Option<&str>,
+    forbidden_typed_text: Option<&str>,
+) -> Result<(), String> {
+    let path = audit_path
+        .map(Path::new)
+        .ok_or_else(|| "Browser recent activity did not include an audit path.".to_string())?;
+    let content = fs::read_to_string(path)
+        .map_err(|error| format!("Failed to read browser audit smoke log: {error}"))?;
+    if !content.contains("\"event\":\"action_result\"") {
+        return Err("Browser audit smoke log did not contain action results.".to_string());
+    }
+    if forbidden_typed_text.is_some_and(|text| !text.is_empty() && content.contains(text)) {
+        return Err("Browser audit log persisted typed page content.".to_string());
     }
     Ok(())
 }
