@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Plus, Shield, ShieldCheck, ShieldOff, ShieldAlert, ShieldBan, Search, LayoutGrid, List } from 'lucide-react';
 import { ErrorBanner } from '@/components/ui/EmptyState';
 import { EnvList } from '@/components/environments';
@@ -8,16 +8,19 @@ import { useAppStore } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { useLocale } from '../locales';
 import { EnvironmentsSkeleton } from '@/components/ui/skeleton-states';
+import { isEnvironmentEnabled } from '@/lib/enabledEnvironments';
+import { ModelIcon } from '@/components/history/ModelIcon';
 import { shallow } from 'zustand/shallow';
 
 interface EnvironmentsProps {
   onAddEnv?: () => void;
   onEditEnv?: (name: string) => void;
+  onCopyEnv?: (name: string) => void;
   onDeleteEnv?: (name: string) => void;
 }
 
-export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsProps) {
-  const { environments, permissionMode, defaultMode, setPermissionMode, setDefaultMode, isLoadingEnvs, error } = useAppStore(
+export function Environments({ onAddEnv, onEditEnv, onCopyEnv, onDeleteEnv }: EnvironmentsProps) {
+  const { environments, permissionMode, defaultMode, setPermissionMode, setDefaultMode, isLoadingEnvs, error, enabledEnvironments } = useAppStore(
     (state) => ({
       environments: state.environments,
       permissionMode: state.permissionMode,
@@ -26,6 +29,7 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
       setDefaultMode: state.setDefaultMode,
       isLoadingEnvs: state.isLoadingEnvs,
       error: state.error,
+      enabledEnvironments: state.enabledEnvironments,
     }),
     shallow
   );
@@ -58,6 +62,24 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
   // Whether to show the ghost card
   const showGhostCard = !hasAddedEnvs && environments.length <= 1;
 
+  const enabledSummary = useMemo(() => {
+    if (enabledEnvironments == null) {
+      return {
+        mode: 'legacy' as const,
+        count: environments.length,
+        items: environments,
+      };
+    }
+    const items = environments.filter((env) =>
+      isEnvironmentEnabled(env.name, enabledEnvironments),
+    );
+    return {
+      mode: 'managed' as const,
+      count: items.length,
+      items,
+    };
+  }, [enabledEnvironments, environments]);
+
   // Show skeleton when environments are loading
   if (isLoadingEnvs) {
     return <EnvironmentsSkeleton />;
@@ -74,9 +96,52 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
         />
       )}
 
+      {/* Enabled environments overview — keep above the full card grid */}
+      <section className="mb-4 rounded-xl border border-border-subtle bg-surface-raised/40 px-3.5 py-3">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-[14px] font-semibold text-foreground tracking-[-0.28px]">
+              {t('environments.enabledEnvs')}
+            </h2>
+            <p className="mt-0.5 text-[11px] text-muted-foreground leading-snug">
+              {t('environments.enabledEnvsHint')}
+            </p>
+          </div>
+          <span className="shrink-0 rounded-full border border-border-subtle bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+            {enabledSummary.mode === 'legacy'
+              ? t('environments.allEnabledLegacy')
+              : t('environments.enabledCount').replace('{count}', String(enabledSummary.count))}
+          </span>
+        </div>
+
+        {enabledSummary.items.length === 0 ? (
+          <p className="text-[12px] text-muted-foreground py-1">
+            {t('environments.enabledSectionEmpty')}
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-1">
+            {enabledSummary.items.map((env) => (
+              <button
+                key={env.name}
+                type="button"
+                onClick={() => onEditEnv?.(env.name)}
+                className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border-subtle bg-background px-2 py-0.5 text-[11px] text-foreground transition-colors hover:border-primary/40 hover:bg-primary/[0.03]"
+                title={env.name}
+              >
+                <ModelIcon
+                  model={env.defaultOpusModel || 'claude-opus-4-1-20250805'}
+                  size={11}
+                />
+                <span className="truncate max-w-[8.5rem]">{env.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+
       {/* Environment list section */}
-      <section className="mb-12">
-        <div className="flex items-center justify-between mb-5">
+      <section className="mb-8">
+        <div className="flex items-center justify-between mb-4">
           <h2 className="text-[17px] font-semibold text-foreground tracking-[-0.37px]">
             {t('environments.configuredEnvs')}
           </h2>
@@ -120,7 +185,12 @@ export function Environments({ onAddEnv, onEditEnv, onDeleteEnv }: EnvironmentsP
           </div>
         </div>
 
-        <EnvList onEdit={onEditEnv} onDelete={onDeleteEnv} viewMode={viewMode} />
+        <EnvList
+          onEdit={onEditEnv}
+          onCopy={onCopyEnv}
+          onDelete={onDeleteEnv}
+          viewMode={viewMode}
+        />
 
         {/* FTUE: Ghost card for adding first environment */}
         {showGhostCard && (

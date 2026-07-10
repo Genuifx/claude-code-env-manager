@@ -65,6 +65,7 @@ async function importWorkspaceMessageRenderer() {
         import { LocaleProvider } from '@/locales';
         import { TooltipProvider } from '@/components/ui/tooltip';
         import { WorkspaceMessageBubble } from '@/components/workspace/WorkspaceMessageBubble';
+        import { buildWorkspaceTranscriptItems } from '@/components/workspace/WorkspaceTranscriptList';
 
         function installNodeGlobals() {
           const store = new Map();
@@ -107,6 +108,20 @@ async function importWorkspaceMessageRenderer() {
               )
             )
           );
+        }
+
+        export function summarizeTranscriptItems(messages) {
+          return buildWorkspaceTranscriptItems(messages).map((item) => ({
+            key: item.key,
+            type: item.type,
+            marker: item.type === 'message'
+              ? item.message.isCompactBoundary
+                ? 'compact'
+                : typeof item.message.content === 'string'
+                  ? item.message.content
+                  : item.message.msgType
+              : item.type,
+          }));
         }
       `,
       resolveDir: desktopDir,
@@ -245,4 +260,53 @@ test('rendered user prompt keeps inline image thumbnails inside the same user bu
   assert.match(userBubbleHtml, /aria-label="[^"]*图片[^"]*"/);
   assert.doesNotMatch(userBubbleHtml, /\[Image #1\]/);
   assert.doesNotMatch(userBubbleHtml, /Images attached/);
+});
+
+test('uuid-less transcript item keys stay stable when older messages are prepended', async () => {
+  const { summarizeTranscriptItems } = await importWorkspaceMessageRenderer();
+  const olderCompactBoundary = {
+    msgType: 'compact_boundary',
+    content: 'Conversation compacted',
+    segmentIndex: 0,
+    isCompactBoundary: true,
+  };
+  const currentMessage = {
+    msgType: 'assistant',
+    content: 'current answer',
+    segmentIndex: 0,
+    isCompactBoundary: false,
+  };
+
+  const tailItems = summarizeTranscriptItems([currentMessage]);
+  const prependedItems = summarizeTranscriptItems([olderCompactBoundary, currentMessage]);
+  const tailKey = tailItems.find((item) => item.marker === 'current answer')?.key;
+  const prependedKey = prependedItems.find((item) => item.marker === 'current answer')?.key;
+  const compactKey = prependedItems.find((item) => item.marker === 'compact')?.key;
+
+  assert.ok(tailKey);
+  assert.equal(prependedKey, tailKey);
+  assert.notEqual(compactKey, tailKey);
+});
+
+test('workspace history rendering is isolated from the app root', async () => {
+  const [workspacePage, errorBoundary, historyDetail] = await Promise.all([
+    fs.readFile(path.join(desktopDir, 'src', 'pages', 'Workspace.tsx'), 'utf8'),
+    fs.readFile(
+      path.join(desktopDir, 'src', 'components', 'workspace', 'WorkspaceHistoryErrorBoundary.tsx'),
+      'utf8',
+    ),
+    fs.readFile(
+      path.join(desktopDir, 'src', 'components', 'workspace', 'WorkspaceConversationDetail.tsx'),
+      'utf8',
+    ),
+  ]);
+
+  assert.match(workspacePage, /<WorkspaceHistoryErrorBoundary[\s\S]*?<LazyHistoryDetail/);
+  assert.match(errorBoundary, /static getDerivedStateFromError/);
+  assert.match(errorBoundary, /componentDidCatch/);
+  assert.match(errorBoundary, /this\.setState\(\{ hasError: false \}\)/);
+  assert.match(
+    historyDetail,
+    /\[hasMoreMessages, messageBatchSize, renderedMessageCount, startTransition, visibleMessages\.length\]/,
+  );
 });

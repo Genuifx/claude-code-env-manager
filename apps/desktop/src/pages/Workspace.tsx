@@ -22,6 +22,7 @@ import { WorkspaceStatusStrip } from '@/components/workspace/WorkspaceStatusStri
 import { ProjectTree } from '@/components/workspace/ProjectTree';
 import { WorkspaceGlobalSearch } from '@/components/workspace/WorkspaceGlobalSearch';
 import { WorkspaceNativeSessionView } from '@/components/workspace/WorkspaceNativeSessionView';
+import { WorkspaceHistoryErrorBoundary } from '@/components/workspace/WorkspaceHistoryErrorBoundary';
 import { WorkspaceSessionComposer } from '@/components/workspace/WorkspaceSessionComposer';
 import { BrowserPanel } from '@/components/workspace/BrowserPanel';
 import { ComposerControls } from '@/components/workspace/ComposerControls';
@@ -94,6 +95,12 @@ import {
   calculateBrowserPanelWidthPercent,
   clampBrowserPanelWidthPercent,
 } from '@/components/workspace/browserPanelLayout';
+import {
+  WORKSPACE_SIDEBAR_DEFAULT_WIDTH_PX,
+  WORKSPACE_SIDEBAR_WIDTH_STORAGE_KEY,
+  calculateWorkspaceSidebarWidth,
+  clampWorkspaceSidebarWidth,
+} from '@/components/workspace/workspaceSidebarLayout';
 import { LazyWorkspaceReviewDrawer } from '@/components/workspace/LazyWorkspaceReviewDrawer';
 import {
   buildWorkspaceReviewModel,
@@ -145,6 +152,17 @@ function readStoredBrowserPanelWidthPercent(): number {
     );
   } catch {
     return BROWSER_PANEL_DEFAULT_WIDTH_PERCENT;
+  }
+}
+
+function readStoredWorkspaceSidebarWidth(): number {
+  try {
+    return clampWorkspaceSidebarWidth(
+      window.localStorage.getItem(WORKSPACE_SIDEBAR_WIDTH_STORAGE_KEY)
+        ?? WORKSPACE_SIDEBAR_DEFAULT_WIDTH_PX,
+    );
+  } catch {
+    return WORKSPACE_SIDEBAR_DEFAULT_WIDTH_PX;
   }
 }
 
@@ -284,6 +302,7 @@ export function Workspace({
     isLoadingStats,
     environments,
     currentEnv,
+    enabledEnvironments,
     permissionMode,
     selectedWorkingDir,
     defaultWorkingDir,
@@ -298,6 +317,7 @@ export function Workspace({
       isLoadingStats: state.isLoadingStats,
       environments: state.environments,
       currentEnv: state.currentEnv,
+      enabledEnvironments: state.enabledEnvironments,
       permissionMode: state.permissionMode,
       selectedWorkingDir: state.selectedWorkingDir,
       defaultWorkingDir: state.defaultWorkingDir,
@@ -390,7 +410,9 @@ export function Workspace({
   const [browserPanelWidthPercent, setBrowserPanelWidthPercent] = useState(
     readStoredBrowserPanelWidthPercent,
   );
+  const [workspaceSidebarWidth, setWorkspaceSidebarWidth] = useState(readStoredWorkspaceSidebarWidth);
   const browserLayoutRef = useRef<HTMLDivElement>(null);
+  const workspaceColumnRef = useRef<HTMLDivElement>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshRequestSeqRef = useRef(0);
   const skillsBootstrapAttemptedRef = useRef(false);
@@ -448,6 +470,14 @@ export function Workspace({
     }
   }, [browserPanelWidthPercent]);
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(WORKSPACE_SIDEBAR_WIDTH_STORAGE_KEY, String(workspaceSidebarWidth));
+    } catch {
+      // Ignore private-mode storage failures; the current session width still works.
+    }
+  }, [workspaceSidebarWidth]);
+
   const handleBrowserPanelResizeStart = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) {
       return;
@@ -478,6 +508,45 @@ export function Workspace({
     const handlePointerMove = (moveEvent: PointerEvent) => {
       updateWidth(moveEvent.clientX);
     };
+    const stopResize = () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', stopResize);
+      window.removeEventListener('pointercancel', stopResize);
+    };
+
+    updateWidth(event.clientX);
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', stopResize);
+    window.addEventListener('pointercancel', stopResize);
+  }, []);
+
+  const handleWorkspaceSidebarResizeStart = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) {
+      return;
+    }
+    const layout = workspaceColumnRef.current;
+    if (!layout) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const updateWidth = (clientX: number) => {
+      const rect = layout.getBoundingClientRect();
+      setWorkspaceSidebarWidth(calculateWorkspaceSidebarWidth({
+        layoutLeft: rect.left,
+        pointerClientX: clientX,
+      }));
+    };
+
+    const handlePointerMove = (moveEvent: PointerEvent) => updateWidth(moveEvent.clientX);
     const stopResize = () => {
       document.body.style.cursor = previousCursor;
       document.body.style.userSelect = previousUserSelect;
@@ -2340,6 +2409,7 @@ export function Workspace({
               permMode={permissionMode}
               effort={composeEffort}
               environments={environments}
+              enabledEnvironments={enabledEnvironments}
               onEnvChange={(value) => void switchEnvironment(value)}
               onPermModeChange={setPermissionMode}
               onEffortChange={setComposeEffort}
@@ -2361,15 +2431,20 @@ export function Workspace({
     return (
       <div className="flex h-full min-h-0 flex-col">
         <Suspense fallback={<DetailFallback />}>
-          <LazyHistoryDetail
+          <WorkspaceHistoryErrorBoundary
             key={toSessionKey(selectedSession)}
-            selectedSession={selectedSession}
-            messages={messages}
-            segments={segments}
-            activeSegment={activeSegment}
-            onActiveSegmentChange={setActiveSegment}
-            isLoadingMessages={isLoadingMessages}
-          />
+            message={t('workspace.historyRenderFailed')}
+            retryLabel={t('common.retry')}
+          >
+            <LazyHistoryDetail
+              selectedSession={selectedSession}
+              messages={messages}
+              segments={segments}
+              activeSegment={activeSegment}
+              onActiveSegmentChange={setActiveSegment}
+              isLoadingMessages={isLoadingMessages}
+            />
+          </WorkspaceHistoryErrorBoundary>
         </Suspense>
 
         <WorkspaceSessionComposer
@@ -2406,6 +2481,7 @@ export function Workspace({
               permMode={historyPermMode}
               effort={historyEffort}
               environments={environments}
+              enabledEnvironments={enabledEnvironments}
               onEnvChange={handleHistoryEnvChange}
               onPermModeChange={handleHistoryPermModeChange}
               onEffortChange={handleHistoryEffortChange}
@@ -2519,6 +2595,7 @@ export function Workspace({
         className="flex min-h-0 flex-1 overflow-hidden"
       >
         <div
+          ref={workspaceColumnRef}
           data-ccem-workspace-column="true"
           className={cn(
             'flex min-h-0 min-w-0 flex-col overflow-hidden',
@@ -2553,6 +2630,8 @@ export function Workspace({
               onSessionsChanged={handleProjectTreeSessionsChanged}
               onCreateForProject={handleCreateForProject}
               onNewSession={handleProjectTreeNewSession}
+              width={workspaceSidebarWidth}
+              onResizeStart={handleWorkspaceSidebarResizeStart}
             />
 
             <div className="workspace-reading-surface relative flex min-w-0 flex-1 flex-col overflow-hidden">

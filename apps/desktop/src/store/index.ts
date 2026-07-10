@@ -189,6 +189,12 @@ interface AppState {
   setCurrentEnv: (name: string) => void;
   addEnvironment: (env: Environment) => void;
   removeEnvironment: (name: string) => void;
+  /**
+   * Explicit enable list for runtime selectors.
+   * null = legacy mode (all environments treated as enabled).
+   */
+  enabledEnvironments: string[] | null;
+  setEnabledEnvironments: (names: string[] | null) => void;
 
   // Permission Mode
   permissionMode: PermissionModeName;
@@ -337,6 +343,16 @@ function areSessionsEqual(left: Session[], right: Session[]) {
   });
 }
 
+function areEnabledEnvironmentsEqual(
+  left: string[] | null,
+  right: string[] | null,
+): boolean {
+  if (left === right) return true;
+  if (left == null || right == null) return left === right;
+  if (left.length !== right.length) return false;
+  return left.every((name, index) => name === right[index]);
+}
+
 export const useAppStore = create<AppState>((set) => ({
   // Environments
   environments: [],
@@ -351,6 +367,13 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({
       environments: state.environments.filter((e) => e.name !== name),
     })),
+  enabledEnvironments: null,
+  setEnabledEnvironments: (names) =>
+    set((state) =>
+      areEnabledEnvironmentsEqual(state.enabledEnvironments, names)
+        ? state
+        : { enabledEnvironments: names },
+    ),
 
   // Permission Mode
   permissionMode: 'dev',

@@ -23,6 +23,7 @@ import { resolveEnvironmentIconHint } from '@/components/workspace/sessionTreeIc
 import { StreakUsagePopoverContent } from './StreakUsagePopover';
 import type { UsageStats } from '@/types/analytics';
 import type { Environment } from '@/store';
+import { filterRuntimeEnvironments } from '@/lib/enabledEnvironments';
 
 function EnvironmentLobeIcon({
   environment,
@@ -127,17 +128,21 @@ export function WorkspaceStatusStrip({
   onToggleBrowser,
 }: WorkspaceStatusStripProps) {
   const { t } = useLocale();
-  const { sessions, currentEnv, environments, continuousUsageDays, cronTasks, usageStats } = useAppStore(
+  const { sessions, currentEnv, environments, enabledEnvironments, continuousUsageDays, cronTasks, usageStats } = useAppStore(
     (state) => ({
       sessions: state.sessions,
       currentEnv: state.currentEnv,
       environments: state.environments,
+      enabledEnvironments: state.enabledEnvironments,
       continuousUsageDays: state.continuousUsageDays,
       cronTasks: state.cronTasks,
       usageStats: state.usageStats,
     }),
     shallow
   );
+  const runtimeEnvironments = filterRuntimeEnvironments(environments, enabledEnvironments, {
+    currentEnv,
+  });
   const [streakPopoverOpen, setStreakPopoverOpen] = useState(false);
   const [isRefreshingStreak, setIsRefreshingStreak] = useState(false);
   const { reviewEntry, reviewPanelOpen, setReviewPanelOpen } = useAppStore(
@@ -229,8 +234,8 @@ export function WorkspaceStatusStrip({
           <div className="px-3 pt-2.5 pb-1 text-2xs uppercase tracking-wider font-medium text-muted-foreground/70">
             {t('workspace.environmentLabel')}
           </div>
-          <div className={cn('p-1.5 pt-0', environments.length > 6 && 'max-h-[200px] overflow-y-auto')}>
-            {environments.map((env) => {
+          <div className={cn('p-1.5 pt-0', runtimeEnvironments.length > 6 && 'max-h-[200px] overflow-y-auto')}>
+            {runtimeEnvironments.map((env) => {
               const isActive = env.name === currentEnv;
               return (
                 <DropdownMenuItem

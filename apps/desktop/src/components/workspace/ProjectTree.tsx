@@ -1,5 +1,5 @@
 import { memo, useMemo, useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
-import type { DragEvent } from 'react';
+import type { DragEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { Check, Copy, Link, Pin, RefreshCw, X, Plus, ShieldAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ccemMotion, clearMotionProps, gsap, shouldReduceMotion } from '@/lib/gsapMotion';
@@ -66,6 +66,8 @@ interface ProjectTreeProps {
   onSessionsChanged?: () => Promise<void>;
   onCreateForProject?: (projectPath: string) => void;
   onNewSession?: () => void;
+  width?: number;
+  onResizeStart?: (event: ReactPointerEvent<HTMLDivElement>) => void;
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -490,6 +492,8 @@ export const ProjectTree = memo(function ProjectTree({
   onSessionsChanged,
   onCreateForProject,
   onNewSession,
+  width,
+  onResizeStart,
 }: ProjectTreeProps) {
   const { t } = useLocale();
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -1309,8 +1313,14 @@ export const ProjectTree = memo(function ProjectTree({
   return (
     <div
       ref={treeMotionRef}
-      className="flex w-[clamp(220px,30vw,280px)] shrink-0 flex-col bg-sidebar backdrop-blur-xl"
+      style={width ? { width } : undefined}
+      className="relative flex w-[clamp(220px,30vw,280px)] shrink-0 flex-col bg-sidebar backdrop-blur-xl"
     >
+      <div
+        data-ccem-workspace-sidebar-resize-handle="true"
+        className="absolute inset-y-0 right-0 z-20 w-1.5 cursor-col-resize touch-none"
+        onPointerDown={onResizeStart}
+      />
       {/* Header: New session + pinned conversations */}
       <div className="shrink-0 p-2 flex flex-col gap-2">
         <div className="flex items-center gap-1.5">

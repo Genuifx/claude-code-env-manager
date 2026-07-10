@@ -33,6 +33,7 @@ import {
 import { toast } from "sonner";
 import { Zhipu, Moonshot, Minimax, DeepSeek, Qwen, OpenRouter as OpenRouterIcon, Ollama, XiaomiMiMo } from "@lobehub/icons";
 import type { Environment } from "@/store";
+import { suggestCopiedEnvironmentName } from "@/lib/enabledEnvironments";
 
 type PresetIconEntry = {
   icon: any;
@@ -90,6 +91,8 @@ interface EnvironmentDialogProps {
   onOpenChange: (open: boolean) => void;
   mode: "add" | "edit";
   environment?: Environment;
+  /** Existing environment names used to suggest unique copy names. */
+  existingNames?: string[];
   onSave: (env: Environment) => void;
   onServerSync?: (
     url: string,
@@ -110,6 +113,7 @@ export function EnvironmentDialog({
   onOpenChange,
   mode,
   environment,
+  existingNames = [],
   onSave,
   onServerSync,
 }: EnvironmentDialogProps) {
@@ -131,13 +135,21 @@ export function EnvironmentDialog({
   const [serverLoading, setServerLoading] = React.useState(false);
   const [serverPasteCommand, setServerPasteCommand] = React.useState("");
 
+  const isCopyMode = mode === "add" && Boolean(environment);
+
   React.useEffect(() => {
     if (!open) {
       return;
     }
 
-    if (mode === "edit" && environment) {
-      setName(environment.name);
+    // Edit existing environment, or seed a new copy from an existing one.
+    if (environment && (mode === "edit" || mode === "add")) {
+      const nextName =
+        mode === "edit"
+          ? environment.name
+          : suggestCopiedEnvironmentName(environment.name, existingNames);
+
+      setName(nextName);
       setBaseUrl(environment.baseUrl);
       setAuthToken(environment.authToken || "");
       setDefaultOpusModel(environment.defaultOpusModel);
@@ -148,6 +160,7 @@ export function EnvironmentDialog({
       setRuntimeModel(environment.runtimeModel || "opus");
       setSubagentModel(environment.subagentModel || "");
       setSelectedPreset(null);
+      setActiveTab("manual");
       setShowAdvanced(
         Boolean(
           environment.subagentModel ||
@@ -175,7 +188,7 @@ export function EnvironmentDialog({
     setServerLoading(false);
     setSelectedPreset(null);
     setShowAdvanced(false);
-  }, [environment, mode, open]);
+  }, [environment, existingNames, mode, open]);
 
   const handlePresetSelect = (presetKey: string) => {
     const preset = ENV_PRESETS[presetKey];
@@ -455,19 +468,23 @@ export function EnvironmentDialog({
       >
         <DialogHeader>
           <DialogTitle>
-            {mode === "add"
-              ? t("environmentDialog.addTitle")
-              : t("environmentDialog.editTitle")}
+            {isCopyMode
+              ? t("environmentDialog.copyTitle")
+              : mode === "add"
+                ? t("environmentDialog.addTitle")
+                : t("environmentDialog.editTitle")}
           </DialogTitle>
           <DialogDescription>
-            {mode === "add"
-              ? t("environmentDialog.addDescription")
-              : t("environmentDialog.editDescription")}
+            {isCopyMode
+              ? t("environmentDialog.copyDescription")
+              : mode === "add"
+                ? t("environmentDialog.addDescription")
+                : t("environmentDialog.editDescription")}
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto min-h-0">
-        {mode === "add" ? (
+        {mode === "add" && !isCopyMode ? (
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="manual" className="gap-1.5 text-xs">
@@ -649,12 +666,14 @@ export function EnvironmentDialog({
           {/* Save button */}
           <LaunchButton
             onClick={handleSave}
-            disabled={!isValid || (mode === "add" && activeTab !== "manual")}
+            disabled={!isValid || (mode === "add" && !isCopyMode && activeTab !== "manual")}
             size="md"
           >
-            {mode === "add"
-              ? t("environmentDialog.add")
-              : t("environmentDialog.save")}
+            {isCopyMode
+              ? t("environmentDialog.copySave")
+              : mode === "add"
+                ? t("environmentDialog.add")
+                : t("environmentDialog.save")}
           </LaunchButton>
         </DialogFooter>
       </DialogContent>

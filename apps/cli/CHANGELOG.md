@@ -1,5 +1,11 @@
 # ccem
 
+## 2.52.1
+
+### Patch Changes
+
+- Align Desktop release versions and validate them before publishing updater manifests.
+
 ## 2.50.0
 
 ### Minor Changes

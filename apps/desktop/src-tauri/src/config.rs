@@ -840,6 +840,11 @@ pub struct DesktopSettings {
     pub ai_enhanced: bool,
     #[serde(rename = "aiEnvName", default)]
     pub ai_env_name: Option<String>,
+    /// Explicitly enabled environment names for runtime selectors.
+    /// `None` means legacy mode: all environments are treated as enabled.
+    /// Once the user starts managing enablement, this becomes `Some(vec![...])`.
+    #[serde(rename = "enabledEnvironments", default, skip_serializing_if = "Option::is_none")]
+    pub enabled_environments: Option<Vec<String>>,
 }
 
 fn default_theme() -> String {
@@ -893,6 +898,7 @@ impl Default for DesktopSettings {
             proxy_debug_record_mode: default_proxy_debug_record_mode(),
             ai_enhanced: false,
             ai_env_name: None,
+            enabled_environments: None,
         }
     }
 }
@@ -1288,5 +1294,40 @@ mod desktop_pet_settings_tests {
         .expect("settings deserialize");
 
         assert!(!settings.desktop_pet_enabled);
+    }
+
+    #[test]
+    fn enabled_environments_defaults_to_none() {
+        let settings = DesktopSettings::default();
+        assert!(settings.enabled_environments.is_none());
+    }
+
+    #[test]
+    fn enabled_environments_uses_camel_case_json_key() {
+        let settings = DesktopSettings {
+            enabled_environments: Some(vec!["official".to_string(), "glm".to_string()]),
+            ..DesktopSettings::default()
+        };
+
+        let serialized = serde_json::to_value(&settings).expect("settings serialize");
+        assert_eq!(
+            serialized["enabledEnvironments"],
+            serde_json::json!(["official", "glm"])
+        );
+    }
+
+    #[test]
+    fn enabled_environments_is_backward_compatible_when_missing() {
+        let settings: DesktopSettings = serde_json::from_str(
+            r#"{
+                "theme": "system",
+                "autoStart": false,
+                "startMinimized": false,
+                "closeToTray": true
+            }"#,
+        )
+        .expect("settings deserialize");
+
+        assert!(settings.enabled_environments.is_none());
     }
 }

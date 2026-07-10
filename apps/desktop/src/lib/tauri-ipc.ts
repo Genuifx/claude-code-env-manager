@@ -676,6 +676,8 @@ export interface DesktopSettings {
   performanceMode?: 'auto' | 'reduced' | 'default';
   aiEnhanced?: boolean;
   aiEnvName?: string | null;
+  /** null/undefined = legacy all-enabled; string[] = explicit enable list */
+  enabledEnvironments?: string[] | null;
   proxyDebugEnabled?: boolean;
   proxyDebugCodexUpstreamBaseUrl?: string;
   proxyDebugLogMaxBytes?: number;

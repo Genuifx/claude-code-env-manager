@@ -3107,6 +3107,11 @@ fn save_settings(app: tauri::AppHandle, settings: DesktopSettings) -> Result<(),
     merged_settings.notify_on_action_required = settings.notify_on_action_required;
     merged_settings.ai_enhanced = settings.ai_enhanced;
     merged_settings.ai_env_name = settings.ai_env_name;
+    // Only overwrite enablement when the payload explicitly includes it.
+    // Settings page saves omit this field; environment page writes include it.
+    if settings.enabled_environments.is_some() {
+        merged_settings.enabled_environments = settings.enabled_environments;
+    }
     config::write_settings(&merged_settings)?;
     if let Err(e) =
         pet_window::sync_pet_window_visibility(&app, merged_settings.desktop_pet_enabled)
