@@ -31,6 +31,7 @@ import {
   readLatestCodexContextUsageFromSessionFile,
 } from './codexContextUsage';
 import { buildClaudeFileCheckpointEvent } from './claudeFileCheckpoints';
+import { TodoSnapshotTracker, type TodoSnapshotV1 } from './todoSnapshots';
 
 type NativeProvider = 'claude' | 'codex';
 
@@ -203,6 +204,8 @@ const pendingPermissions = new Map<string, PermissionResolver>();
 const pendingClaudeInteractivePrompts = new Map<string, ClaudeInteractivePromptResolver>();
 const startedToolNames = new Map<string, string>();
 const completedToolUseIds = new Set<string>();
+const pendingClaudeToolInputs = new Map<string, Record<string, unknown>>();
+const todoSnapshotTracker = new TodoSnapshotTracker();
 const browserToolBridge = createBrowserToolBridge((request) => emit(request));
 let browserEvaluateApprovedForSession = false;
 
@@ -888,12 +891,26 @@ function emitClaudeToolUseStarted(payload: {
   rawName: string;
   inputSummary: string;
   needsResponse: boolean;
+  input?: Record<string, unknown>;
   prompt?: Record<string, unknown>;
+  todoSnapshot?: TodoSnapshotV1;
 }) {
-  if (!payload.toolUseId || startedToolNames.has(payload.toolUseId)) {
+  if (!payload.toolUseId) {
     return;
   }
 
+  if (payload.input) {
+    pendingClaudeToolInputs.set(payload.toolUseId, payload.input);
+  }
+
+  if (startedToolNames.has(payload.toolUseId)) {
+    return;
+  }
+
+  const todoSnapshot = payload.todoSnapshot
+    ?? (payload.input
+      ? todoSnapshotTracker.fromClaudeToolStarted(payload.rawName, payload.input)
+      : undefined);
   startedToolNames.set(payload.toolUseId, payload.rawName);
   emitEvent({
     type: 'tool_use_started',
@@ -903,10 +920,16 @@ function emitClaudeToolUseStarted(payload: {
     input_summary: payload.inputSummary,
     needs_response: payload.needsResponse,
     ...(payload.prompt ? { prompt: payload.prompt } : {}),
+    ...(todoSnapshot ? { todo_snapshot: todoSnapshot } : {}),
   });
 }
 
-function emitClaudeToolUseCompleted(toolUseId: string, resultSummary: string, success: boolean) {
+function emitClaudeToolUseCompleted(
+  toolUseId: string,
+  resultSummary: string,
+  success: boolean,
+  todoSnapshot?: TodoSnapshotV1,
+) {
   if (!toolUseId || completedToolUseIds.has(toolUseId)) {
     return;
   }
@@ -914,12 +937,14 @@ function emitClaudeToolUseCompleted(toolUseId: string, resultSummary: string, su
   completedToolUseIds.add(toolUseId);
   const rawName = startedToolNames.get(toolUseId) ?? 'tool';
   startedToolNames.delete(toolUseId);
+  pendingClaudeToolInputs.delete(toolUseId);
   emitEvent({
     type: 'tool_use_completed',
     tool_use_id: toolUseId,
     raw_name: rawName,
     result_summary: resultSummary,
     success,
+    ...(todoSnapshot ? { todo_snapshot: todoSnapshot } : {}),
   });
 }
 
@@ -1105,6 +1130,7 @@ async function waitForPermission(
     rawName: toolName,
     inputSummary,
     needsResponse: false,
+    input,
   });
   emitEvent({
     type: 'permission_required',
@@ -1596,6 +1622,7 @@ async function consumeClaudeMessages() {
               rawName: block.name,
               inputSummary: summarizeClaudeToolInput(block.name, input),
               needsResponse,
+              input,
               prompt,
             });
           }
@@ -1614,10 +1641,21 @@ async function consumeClaudeMessages() {
           if (block.type !== 'tool_result' || typeof block.tool_use_id !== 'string') {
             return;
           }
+          const success = block.is_error !== true;
+          const rawName = startedToolNames.get(block.tool_use_id) ?? 'tool';
+          const input = pendingClaudeToolInputs.get(block.tool_use_id);
+          const todoSnapshot = success && input
+            ? todoSnapshotTracker.fromClaudeToolCompleted(
+              rawName,
+              input,
+              message.tool_use_result ?? block.content,
+            )
+            : undefined;
           emitClaudeToolUseCompleted(
             block.tool_use_id,
             summarizeClaudeToolResult(block),
-            block.is_error !== true,
+            success,
+            todoSnapshot,
           );
         });
         continue;
@@ -2159,6 +2197,9 @@ async function runCodexTurn(text: string, images?: PromptImage[] | null) {
     }
 
     if (event.type === 'item.started') {
+      const todoSnapshot = item.type === 'todo_list'
+        ? todoSnapshotTracker.fromCodexTodoList(item)
+        : undefined;
       emitEvent({
         type: 'tool_use_started',
         tool_use_id: String(item.id || `${item.type}-${Date.now()}`),
@@ -2166,17 +2207,36 @@ async function runCodexTurn(text: string, images?: PromptImage[] | null) {
         raw_name: String(item.type || 'item'),
         input_summary: summarizeCodexItem(item),
         needs_response: false,
+        ...(todoSnapshot ? { todo_snapshot: todoSnapshot } : {}),
+      });
+      continue;
+    }
+
+    if (event.type === 'item.updated' && item.type === 'todo_list') {
+      const todoSnapshot = todoSnapshotTracker.fromCodexTodoList(item);
+      emitEvent({
+        type: 'tool_use_started',
+        tool_use_id: String(item.id || `${item.type}-${Date.now()}`),
+        category: codexCategoryForItem(item),
+        raw_name: String(item.type || 'item'),
+        input_summary: summarizeCodexItem(item),
+        needs_response: false,
+        ...(todoSnapshot ? { todo_snapshot: todoSnapshot } : {}),
       });
       continue;
     }
 
     if (event.type === 'item.completed') {
+      const todoSnapshot = item.type === 'todo_list'
+        ? todoSnapshotTracker.fromCodexTodoList(item)
+        : undefined;
       emitEvent({
         type: 'tool_use_completed',
         tool_use_id: String(item.id || `${item.type}-${Date.now()}`),
         raw_name: String(item.type || 'item'),
         result_summary: summarizeCodexItem(item),
         success: item.status !== 'failed',
+        ...(todoSnapshot ? { todo_snapshot: todoSnapshot } : {}),
       });
       continue;
     }
