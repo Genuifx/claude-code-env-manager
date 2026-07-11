@@ -53,10 +53,10 @@ export const ENV_PRESETS: Record<
     ANTHROPIC_MODEL: 'opus'
   },
   'BailianCodePlan': {
-    ANTHROPIC_BASE_URL: 'https://coding.dashscope.aliyuncs.com/api/v2/apps/claude-code-proxy',
-    ANTHROPIC_DEFAULT_OPUS_MODEL: 'qwen3-coder-next',
-    ANTHROPIC_DEFAULT_SONNET_MODEL: 'qwen3-coder-plus',
-    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'qwen3-coder-flash',
+    ANTHROPIC_BASE_URL: 'https://coding.dashscope.aliyuncs.com/apps/anthropic',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'qwen3.7-plus',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'qwen3.7-plus',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'qwen3.7-plus',
     ANTHROPIC_MODEL: 'opus'
   },
   'OpenRouter': {
@@ -84,7 +84,7 @@ export const ENV_PRESETS: Record<
     ANTHROPIC_BASE_URL: 'https://token-plan-cn.xiaomimimo.com/anthropic',
     ANTHROPIC_DEFAULT_OPUS_MODEL: 'mimo-v2.5-pro',
     ANTHROPIC_DEFAULT_SONNET_MODEL: 'mimo-v2.5-pro',
-    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'mimo-v2.5',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'mimo-v2.5-pro',
     ANTHROPIC_MODEL: 'opus'
   },
 };

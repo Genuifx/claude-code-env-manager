@@ -46,6 +46,27 @@ describe('presets', () => {
       expect(ENV_PRESETS.OpenRouter).toBeDefined();
     });
 
+    it('should keep coding plan presets aligned with official defaults', () => {
+      expect(ENV_PRESETS.KimiCodePlan.ANTHROPIC_BASE_URL).toBe('https://api.kimi.com/coding/');
+      expect(ENV_PRESETS.KimiCodePlan.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe('kimi-for-coding');
+      expect(ENV_PRESETS.KimiCodePlan.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('kimi-for-coding');
+      expect(ENV_PRESETS.KimiCodePlan.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('kimi-for-coding');
+
+      expect(ENV_PRESETS.BailianCodePlan.ANTHROPIC_BASE_URL).toBe(
+        'https://coding.dashscope.aliyuncs.com/apps/anthropic',
+      );
+      expect(ENV_PRESETS.BailianCodePlan.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe('qwen3.7-plus');
+      expect(ENV_PRESETS.BailianCodePlan.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('qwen3.7-plus');
+      expect(ENV_PRESETS.BailianCodePlan.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('qwen3.7-plus');
+
+      expect(ENV_PRESETS.MiMoTokenPlan.ANTHROPIC_BASE_URL).toBe(
+        'https://token-plan-cn.xiaomimimo.com/anthropic',
+      );
+      expect(ENV_PRESETS.MiMoTokenPlan.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe('mimo-v2.5-pro');
+      expect(ENV_PRESETS.MiMoTokenPlan.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('mimo-v2.5-pro');
+      expect(ENV_PRESETS.MiMoTokenPlan.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('mimo-v2.5-pro');
+    });
+
     it('should not include auth tokens in presets', () => {
       for (const preset of Object.values(ENV_PRESETS)) {
         expect((preset as any).ANTHROPIC_AUTH_TOKEN).toBeUndefined();
