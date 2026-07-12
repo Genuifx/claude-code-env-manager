@@ -1,5 +1,11 @@
 # ccem
 
+## 2.54.0
+
+### Minor Changes
+
+- Minor release: desktop workspace sidebar resize, preview browser diagnostics and session management, red-box and coding plan provider preset refresh, bundled cron skill alignment.
+
 ## 2.53.0
 
 ### Minor Changes
