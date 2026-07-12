@@ -4,6 +4,7 @@ import {
   lazy,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -102,7 +103,7 @@ import {
   calculateWorkspaceSidebarWidth,
   clampWorkspaceSidebarWidth,
 } from '@/components/workspace/workspaceSidebarLayout';
-import { LazyWorkspaceReviewDrawer } from '@/components/workspace/LazyWorkspaceReviewDrawer';
+import { LazyWorkspaceReviewPopover } from '@/components/workspace/LazyWorkspaceReviewPopover';
 import {
   buildWorkspaceReviewModel,
   buildWorkspaceReviewSummary,
@@ -426,6 +427,16 @@ export function Workspace({
   const prevIsActiveRef = useRef(isActive);
   const selectedKeyRef = useRef<string | null>(null);
   const persistedGeneratedTitleKeysRef = useRef(new Set<string>());
+  const reviewOwnerKey = `${workspaceMode}:${selectedKey ?? ''}:${activeLiveRuntimeId ?? ''}:${composeDir ?? ''}`;
+  const reviewOwnerKeyRef = useRef(reviewOwnerKey);
+
+  useLayoutEffect(() => {
+    const ownerChanged = reviewOwnerKeyRef.current !== reviewOwnerKey;
+    reviewOwnerKeyRef.current = reviewOwnerKey;
+    if ((!isActive || ownerChanged) && workspaceReviewOpen) {
+      setWorkspaceReviewOpen(false);
+    }
+  }, [isActive, reviewOwnerKey, setWorkspaceReviewOpen, workspaceReviewOpen]);
 
   const handleComposePromptChange = useCallback((value: string) => {
     composePromptRef.current = value;
@@ -2657,7 +2668,8 @@ export function Workspace({
             <div className="workspace-reading-surface relative flex min-w-0 flex-1 flex-col overflow-hidden">
               {shouldRenderWorkspaceReview && workspaceReviewOpen && workspaceReviewModel ? (
                 <Suspense fallback={null}>
-                  <LazyWorkspaceReviewDrawer
+                  <LazyWorkspaceReviewPopover
+                    key={`${workspaceReviewSession.runtime_id}:${workspaceReviewSession.project_dir}`}
                     session={workspaceReviewSession}
                     model={workspaceReviewModel}
                     gitSnapshot={workspaceGitSnapshot}

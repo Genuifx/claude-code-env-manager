@@ -109,7 +109,7 @@ import {
 } from './workspaceEventTranscript';
 import { ContextWindowIndicator } from './ContextWindowIndicator';
 import { computeSessionUsage } from './workspaceUsage';
-import { LazyWorkspaceReviewDrawer } from './LazyWorkspaceReviewDrawer';
+import { LazyWorkspaceReviewPopover } from './LazyWorkspaceReviewPopover';
 import {
   buildWorkspaceReviewModel,
   buildWorkspaceReviewSummary,
@@ -1358,7 +1358,7 @@ export function WorkspaceNativeSessionView({
   const reviewPanelOpen = useAppStore((state) => state.reviewPanelOpen);
   const setReviewPanelOpen = useAppStore((state) => state.setReviewPanelOpen);
   const setReviewEntry = useAppStore((state) => state.setReviewEntry);
-  const isReviewDrawerOpen = isVisible && reviewPanelOpen;
+  const isReviewPopoverOpen = isVisible && reviewPanelOpen;
   const [gitSnapshot, setGitSnapshot] = useState<WorkspaceGitSnapshot | null>(null);
   const [isRefreshingGitSnapshot, setIsRefreshingGitSnapshot] = useState(false);
   const [respondingRequestId, setRespondingRequestId] = useState<string | null>(null);
@@ -1613,7 +1613,7 @@ export function WorkspaceNativeSessionView({
   );
   const reviewModel = useMemo(
     () => {
-      if (!isReviewDrawerOpen) {
+      if (!isReviewPopoverOpen) {
         return null;
       }
 
@@ -1624,7 +1624,7 @@ export function WorkspaceNativeSessionView({
         gitSnapshot,
       });
     },
-    [events, gitSnapshot, isReviewDrawerOpen, messages, session],
+    [events, gitSnapshot, isReviewPopoverOpen, messages, session],
   );
 
   // Publish review summary to the status-strip entry pill while this live session owns the view.
@@ -1719,7 +1719,7 @@ export function WorkspaceNativeSessionView({
       return;
     }
 
-    const delay = isReviewDrawerOpen ? 250 : 1200;
+    const delay = isReviewPopoverOpen ? 250 : 1200;
     const timeoutId = window.setTimeout(() => {
       void refreshGitSnapshot();
     }, delay);
@@ -1729,7 +1729,7 @@ export function WorkspaceNativeSessionView({
     };
   }, [
     events.length,
-    isReviewDrawerOpen,
+    isReviewPopoverOpen,
     isVisible,
     refreshGitSnapshot,
     session.status,
@@ -2754,13 +2754,14 @@ export function WorkspaceNativeSessionView({
   return (
     <>
     <div className="relative flex h-full min-h-0 flex-col">
-      {isReviewDrawerOpen && reviewModel ? (
+      {isReviewPopoverOpen && reviewModel ? (
         <Suspense fallback={null}>
-          <LazyWorkspaceReviewDrawer
+          <LazyWorkspaceReviewPopover
+            key={`${session.runtime_id}:${session.project_dir}`}
             session={session}
             model={reviewModel}
             gitSnapshot={gitSnapshot}
-            isOpen={isReviewDrawerOpen}
+            isOpen={isReviewPopoverOpen}
             isRefreshingGit={isRefreshingGitSnapshot}
             onOpenChange={setReviewPanelOpen}
             onRefreshGit={() => void refreshGitSnapshot()}

@@ -24,6 +24,10 @@ import { StreakUsagePopoverContent } from './StreakUsagePopover';
 import type { UsageStats } from '@/types/analytics';
 import type { Environment } from '@/store';
 import { filterRuntimeEnvironments } from '@/lib/enabledEnvironments';
+import {
+  WORKSPACE_REVIEW_POPOVER_ID,
+  workspaceReviewTriggerRef,
+} from './workspaceReviewAnchor';
 
 function EnvironmentLobeIcon({
   environment,
@@ -344,8 +348,12 @@ export function WorkspaceStatusStrip({
 
       {/* Review audit entry — always visible, far-right, context-aware */}
       <button
+        ref={workspaceReviewTriggerRef}
         type="button"
-        aria-pressed={reviewPanelOpen}
+        data-ccem-workspace-review-trigger
+        aria-haspopup="dialog"
+        aria-expanded={reviewPanelOpen}
+        aria-controls={reviewPanelOpen ? WORKSPACE_REVIEW_POPOVER_ID : undefined}
         title={t('workspace.reviewEntry')}
         onClick={() => setReviewPanelOpen(!reviewPanelOpen)}
         className={cn(
