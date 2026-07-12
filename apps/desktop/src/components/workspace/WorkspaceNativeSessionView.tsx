@@ -114,6 +114,10 @@ import {
   buildWorkspaceReviewModel,
   buildWorkspaceReviewSummary,
 } from './workspaceReview';
+import {
+  mergeWorkspaceReplayEvents,
+  selectCachedWorkspaceEvents,
+} from './workspaceTodos';
 import { WorkspaceWecomBindDialog } from './WorkspaceWecomBindDialog';
 
 function ProcessingActionIcon({ stopping = false }: { stopping?: boolean }) {
@@ -458,7 +462,7 @@ function writeCachedNativeEvents(runtimeId: string, events: SessionEventRecord[]
     const key = nativeEventCacheKey(runtimeId);
     for (const limit of [NATIVE_EVENT_CACHE_LIMIT, 3000, 1000]) {
       try {
-        sessionStorage.setItem(key, JSON.stringify(events.slice(-limit)));
+        sessionStorage.setItem(key, JSON.stringify(selectCachedWorkspaceEvents(events, limit)));
         return;
       } catch {
         // Try a smaller retained window before giving up.
@@ -1398,6 +1402,7 @@ export function WorkspaceNativeSessionView({
   const pendingRewindStartSeqRef = useRef(0);
   const prevEventCountRef = useRef(0);
   const tickInFlightRef = useRef(false);
+  const initialReplayRuntimeRef = useRef<string | null>(null);
   const initialReplayBackfillRuntimeRef = useRef<string | null>(null);
   const gitSnapshotRequestSeqRef = useRef(0);
 
@@ -1548,6 +1553,10 @@ export function WorkspaceNativeSessionView({
     setGitSnapshot(null);
     setIsRefreshingGitSnapshot(false);
   }, [clearComposerDraft, clearFileRewindTimeout, initialImages, initialPrompt, session.runtime_id]);
+
+  useEffect(() => {
+    initialReplayRuntimeRef.current = null;
+  }, [session.runtime_id]);
 
   useEffect(() => {
     gitSnapshotRequestSeqRef.current += 1;
@@ -1753,12 +1762,13 @@ export function WorkspaceNativeSessionView({
         return;
       }
 
+      const fullBatchLatestSeq = latestEventSeq(fullBatch.events);
+      if (fullBatchLatestSeq != null) {
+        lastSeenSeqRef.current = Math.max(lastSeenSeqRef.current ?? fullBatchLatestSeq, fullBatchLatestSeq);
+      }
+
       startTransition(() => {
-        setEvents((previous) => {
-          const merged = appendSessionEvents(fullBatch.events, previous);
-          lastSeenSeqRef.current = latestEventSeq(merged);
-          return merged;
-        });
+        setEvents((previous) => appendSessionEvents(fullBatch.events, previous));
       });
 
       if (sessionEventsNeedSummaryRefresh(fullBatch.events)) {
@@ -1770,19 +1780,28 @@ export function WorkspaceNativeSessionView({
   }, [getNativeSessionEvents, refreshSummary, session.runtime_id]);
 
   const pollEvents = useCallback(async () => {
-    const sinceSeq = lastSeenSeqRef.current;
+    const isInitialReplay = initialReplayRuntimeRef.current !== session.runtime_id;
+    const sinceSeq = isInitialReplay ? null : lastSeenSeqRef.current;
     const batch = await getNativeSessionEvents(
       session.runtime_id,
       sinceSeq,
-      sinceSeq == null ? INITIAL_EVENT_REPLAY_LIMIT : null,
+      isInitialReplay ? INITIAL_EVENT_REPLAY_LIMIT : null,
     );
+    initialReplayRuntimeRef.current = session.runtime_id;
     if (!batch.events.length) {
       return false;
     }
 
-    lastSeenSeqRef.current = batch.events[batch.events.length - 1]?.seq ?? lastSeenSeqRef.current;
+    const batchLatestSeq = latestEventSeq(batch.events);
+    if (batchLatestSeq != null) {
+      lastSeenSeqRef.current = Math.max(lastSeenSeqRef.current ?? batchLatestSeq, batchLatestSeq);
+    }
     const updateEvents = () => {
-      setEvents((previous) => appendSessionEvents(previous, batch.events, batch.gap_detected));
+      setEvents((previous) => (
+        isInitialReplay
+          ? mergeWorkspaceReplayEvents(previous, batch.events)
+          : appendSessionEvents(previous, batch.events, batch.gap_detected)
+      ));
     };
 
     if (hasImmediateAttentionEvent(batch.events)) {
@@ -1791,7 +1810,7 @@ export function WorkspaceNativeSessionView({
       startTransition(updateEvents);
     }
 
-    if (sinceSeq == null && !replayBatchCoversAvailableSequenceRange(batch)) {
+    if (isInitialReplay && !replayBatchCoversAvailableSequenceRange(batch)) {
       void backfillInitialReplay();
     }
 

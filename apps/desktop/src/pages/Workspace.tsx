@@ -68,6 +68,7 @@ import { toSessionKey } from '@/features/conversations/types';
 import { useWorkspaceSessionDecorations } from '@/components/workspace/useWorkspaceSessionDecorations';
 import type {
   NativeSessionSummary,
+  SessionEventRecord,
   SessionPromptImage,
   WorkspaceCommand,
   WorkspaceGitSnapshot,
@@ -366,6 +367,7 @@ export function Workspace({
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [messages, setMessages] = useState<ConversationMessageData[]>([]);
   const [segments, setSegments] = useState<HistorySegment[]>([]);
+  const [historyEvents, setHistoryEvents] = useState<SessionEventRecord[]>([]);
   const [activeSegment, setActiveSegment] = useState<number | null>(null);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [codexInstalled, setCodexInstalled] = useState(false);
@@ -868,7 +870,11 @@ export function Workspace({
 
   const loadNativeHistoryConversation = useCallback(async (
     nativeSession: NativeSessionSummary,
-  ): Promise<{ messages: ConversationMessageData[]; segments: HistorySegment[] } | null> => {
+  ): Promise<{
+    messages: ConversationMessageData[];
+    segments: HistorySegment[];
+    events: SessionEventRecord[];
+  } | null> => {
     const replayBatch = await getNativeSessionEvents(nativeSession.runtime_id, null, null);
     if (replayBatch.events.length === 0) {
       return null;
@@ -880,13 +886,10 @@ export function Workspace({
       replayBatch.events,
       nativeSession.status === 'error' ? nativeSession.last_error : null,
     );
-    if (!hasNativeHistoryTranscriptMessages(nativeMessages)) {
-      return null;
-    }
-
     return {
       messages: nativeMessages,
       segments: [],
+      events: replayBatch.events,
     };
   }, [getNativeSessionEvents]);
 
@@ -905,6 +908,7 @@ export function Workspace({
       if (resetBeforeLoad) {
         setMessages([]);
         setSegments([]);
+        setHistoryEvents([]);
         setActiveSegment(null);
       }
 
@@ -922,12 +926,14 @@ export function Workspace({
         if (requestSeq !== conversationRequestSeqRef.current) {
           return;
         }
-        if (nativeHistory) {
+        if (nativeHistory && hasNativeHistoryTranscriptMessages(nativeHistory.messages)) {
           setMessages(nativeHistory.messages);
           setSegments(nativeHistory.segments);
+          setHistoryEvents(nativeHistory.events);
           return;
         }
 
+        setHistoryEvents(nativeHistory?.events ?? []);
         const { messages: msgs, segments: segs } = await fetchConversationDetail(session);
 
         if (requestSeq !== conversationRequestSeqRef.current) {
@@ -1405,6 +1411,10 @@ export function Workspace({
   const effectiveComposeDir = composeDir || selectedWorkingDir || defaultWorkingDir || null;
   const effectiveComposeDirLabel = effectiveComposeDir ? getProjectName(effectiveComposeDir) : null;
   const shouldRenderWorkspaceReview = workspaceMode !== 'live' || !activeLiveEntry;
+  const workspaceReviewEvents = useMemo(
+    () => workspaceMode === 'history' ? historyEvents : [],
+    [historyEvents, workspaceMode],
+  );
   const workspaceReviewWorkingDir = workspaceMode === 'history' && selectedSession
     ? selectedSession.project || null
     : effectiveComposeDir;
@@ -1463,10 +1473,10 @@ export function Workspace({
   ]);
   const workspaceReviewSummary = useMemo(
     () => buildWorkspaceReviewSummary({
-      events: [],
+      events: workspaceReviewEvents,
       gitSnapshot: workspaceGitSnapshot,
     }),
-    [workspaceGitSnapshot],
+    [workspaceGitSnapshot, workspaceReviewEvents],
   );
   const workspaceReviewModel = useMemo(
     () => {
@@ -1476,7 +1486,7 @@ export function Workspace({
 
       return buildWorkspaceReviewModel({
         session: workspaceReviewSession,
-        events: [],
+        events: workspaceReviewEvents,
         messages: workspaceMode === 'history' ? messages : [],
         gitSnapshot: workspaceGitSnapshot,
       });
@@ -1486,6 +1496,7 @@ export function Workspace({
       shouldRenderWorkspaceReview,
       workspaceGitSnapshot,
       workspaceMode,
+      workspaceReviewEvents,
       workspaceReviewOpen,
       workspaceReviewSession,
     ],
