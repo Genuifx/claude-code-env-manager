@@ -119,6 +119,8 @@ import {
   selectCachedWorkspaceEvents,
 } from './workspaceTodos';
 import { WorkspaceWecomBindDialog } from './WorkspaceWecomBindDialog';
+import { WorkspaceTranscriptSelection } from './WorkspaceAnnotations';
+import { useWorkspaceAnnotations } from './useWorkspaceAnnotations';
 
 function ProcessingActionIcon({ stopping = false }: { stopping?: boolean }) {
   return (
@@ -1329,6 +1331,7 @@ export function WorkspaceNativeSessionView({
   const composerHasDraftRef = useRef(false);
   const [composerDraftRevision, setComposerDraftRevision] = useState(0);
   const [composerHasDraft, setComposerHasDraft] = useState(false);
+  const sessionAnnotations = useWorkspaceAnnotations(`live:${session.runtime_id}`);
   const [composerPlanModeEnabled, setComposerPlanModeEnabled] = useState(
     () => isNativeSessionPlanRuntime(session),
   );
@@ -2030,7 +2033,7 @@ export function WorkspaceNativeSessionView({
   const hasAttentionPanel = hasBlockingAttention;
   const canSend = !isSending
     && !isTerminalStatus(session.status)
-    && composerHasDraft;
+    && (composerHasDraft || sessionAnnotations.annotations.length > 0);
   const canShowFileRestorePoints = session.provider === 'claude'
     && fileCheckpoints.length > 0;
   const canUseFileRestorePoints = canShowFileRestorePoints
@@ -2747,8 +2750,9 @@ export function WorkspaceNativeSessionView({
   ]);
 
   const hasComposerDraft = composerHasDraft;
+  const hasComposerInput = hasComposerDraft || sessionAnnotations.annotations.length > 0;
   const shouldGuideModel = !isTerminalStatus(session.status)
-    && hasComposerDraft
+    && hasComposerInput
     && (isProcessingTurn || hasHardBlockingAttention);
 
   return (
@@ -2776,6 +2780,14 @@ export function WorkspaceNativeSessionView({
             }
           />
         </Suspense>
+      ) : null}
+
+      {!isTerminalStatus(session.status) ? (
+        <WorkspaceTranscriptSelection
+          rootRef={containerRef}
+          canAdd={sessionAnnotations.canAddAnnotation}
+          onAdd={sessionAnnotations.addAnnotation}
+        />
       ) : null}
 
       <ScrollArea viewportRef={containerRef} className="workspace-transcript-scroll flex-1 bg-background/30">
@@ -2817,7 +2829,7 @@ export function WorkspaceNativeSessionView({
         primaryActionLabel={
           isTerminalStatus(session.status)
             ? t('workspace.newSession')
-            : !hasComposerDraft && isProcessingTurn
+            : !hasComposerInput && isProcessingTurn
               ? t('workspace.nativeStop')
               : shouldGuideModel
                 ? t('workspace.composerGuideModel')
@@ -2826,7 +2838,7 @@ export function WorkspaceNativeSessionView({
         primaryActionIcon={
           isTerminalStatus(session.status)
             ? <SquarePen className="h-4 w-4" />
-            : !hasComposerDraft && isProcessingTurn
+            : !hasComposerInput && isProcessingTurn
               ? <ProcessingActionIcon stopping={isStopping} />
               : shouldGuideModel
                 ? <MessageSquareQuote className="h-4 w-4" />
@@ -2835,14 +2847,14 @@ export function WorkspaceNativeSessionView({
         primaryActionDisabled={
           isTerminalStatus(session.status)
             ? false
-            : !hasComposerDraft && isProcessingTurn
+            : !hasComposerInput && isProcessingTurn
               ? isStopping
               : undefined
         }
         onPrimaryAction={
           isTerminalStatus(session.status)
             ? onStartNew
-            : !hasComposerDraft && isProcessingTurn
+            : !hasComposerInput && isProcessingTurn
               ? () => void handleStop()
               : undefined
         }
@@ -2876,6 +2888,11 @@ export function WorkspaceNativeSessionView({
           setQueuedMessages((previous) => previous.filter((message) => message.id !== id));
         }}
         queueCanFlush={!isSending && !isProcessingTurn && !hasBlockingAttention && !isTerminalStatus(session.status)}
+        annotations={sessionAnnotations.annotations}
+        onUpdateAnnotation={sessionAnnotations.updateAnnotation}
+        onRemoveAnnotation={sessionAnnotations.removeAnnotation}
+        onClearAnnotations={sessionAnnotations.clearAnnotations}
+        onAnnotationsSent={sessionAnnotations.clearAnnotations}
         aboveComposer={hasAttentionPanel ? (
           <WorkspaceAttentionPanel
             provider={session.provider}

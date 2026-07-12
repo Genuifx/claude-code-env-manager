@@ -67,6 +67,7 @@ import type {
 } from '@/features/conversations/types';
 import { toSessionKey } from '@/features/conversations/types';
 import { useWorkspaceSessionDecorations } from '@/components/workspace/useWorkspaceSessionDecorations';
+import { useWorkspaceAnnotations } from '@/components/workspace/useWorkspaceAnnotations';
 import type {
   NativeSessionSummary,
   SessionEventRecord,
@@ -1153,6 +1154,10 @@ export function Workspace({
     if (!selectedKey) return null;
     return sessions.find((session) => toSessionKey(session) === selectedKey) ?? null;
   }, [selectedKey, sessions]);
+  const historyAnnotationSessionKey = selectedSession
+    ? `history:${selectedSession.source}:${selectedSession.id}`
+    : null;
+  const historyAnnotations = useWorkspaceAnnotations(historyAnnotationSessionKey);
 
   const activeBrowserSessionId = useMemo(() => {
     if (workspaceMode === 'live' && activeLiveEntry) {
@@ -2474,6 +2479,8 @@ export function Workspace({
               activeSegment={activeSegment}
               onActiveSegmentChange={setActiveSegment}
               isLoadingMessages={isLoadingMessages}
+              canAddAnnotation={selectedHistorySupportsInline && historyAnnotations.canAddAnnotation}
+              onAddAnnotation={selectedHistorySupportsInline ? historyAnnotations.addAnnotation : undefined}
             />
           </WorkspaceHistoryErrorBoundary>
         </Suspense>
@@ -2505,6 +2512,11 @@ export function Workspace({
           codexInstalled={codexInstalled}
           opencodeInstalled={opencodeInstalled}
           onLaunchNewSession={handleNewSession}
+          annotations={historyAnnotations.annotations}
+          onUpdateAnnotation={historyAnnotations.updateAnnotation}
+          onRemoveAnnotation={historyAnnotations.removeAnnotation}
+          onClearAnnotations={historyAnnotations.clearAnnotations}
+          onAnnotationsSent={historyAnnotations.clearAnnotations}
           controls={(
             <ComposerControls
               provider={historyProvider}
