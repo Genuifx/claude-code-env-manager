@@ -53,6 +53,7 @@ type InitCommand = {
   effort?: string | null;
   allowed_tools?: string[] | null;
   disallowed_tools?: string[] | null;
+  todo_snapshot_seed?: TodoSnapshotV1 | null;
 };
 
 type PromptCommand = {
@@ -893,7 +894,6 @@ function emitClaudeToolUseStarted(payload: {
   needsResponse: boolean;
   input?: Record<string, unknown>;
   prompt?: Record<string, unknown>;
-  todoSnapshot?: TodoSnapshotV1;
 }) {
   if (!payload.toolUseId) {
     return;
@@ -907,10 +907,6 @@ function emitClaudeToolUseStarted(payload: {
     return;
   }
 
-  const todoSnapshot = payload.todoSnapshot
-    ?? (payload.input
-      ? todoSnapshotTracker.fromClaudeToolStarted(payload.rawName, payload.input)
-      : undefined);
   startedToolNames.set(payload.toolUseId, payload.rawName);
   emitEvent({
     type: 'tool_use_started',
@@ -920,7 +916,6 @@ function emitClaudeToolUseStarted(payload: {
     input_summary: payload.inputSummary,
     needs_response: payload.needsResponse,
     ...(payload.prompt ? { prompt: payload.prompt } : {}),
-    ...(todoSnapshot ? { todo_snapshot: todoSnapshot } : {}),
   });
 }
 
@@ -2300,6 +2295,13 @@ async function handleCommand(command: InputCommand) {
 
   if (command.type === 'init') {
     initCommand = command;
+    const resumedClaudeWithoutTodoSeed = command.provider === 'claude'
+      && Boolean(command.provider_session_id?.trim())
+      && !command.todo_snapshot_seed;
+    todoSnapshotTracker.reset(
+      command.todo_snapshot_seed,
+      !resumedClaudeWithoutTodoSeed,
+    );
     currentProviderSessionId = command.provider_session_id ?? null;
     browserEvaluateApprovedForSession = false;
     if (currentProviderSessionId) {

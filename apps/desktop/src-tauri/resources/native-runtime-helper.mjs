@@ -36647,6 +36647,19 @@ function parseResultObject(value) {
 function cloneItem(item) {
   return { ...item };
 }
+function isTodoSnapshotItemV1(value) {
+  const record2 = readObject2(value);
+  return Boolean(
+    record2 && typeof record2.id === "string" && record2.id.trim() && typeof record2.text === "string" && record2.text.trim() && ["pending", "in_progress", "completed", "failed"].includes(String(record2.status)) && (record2.active_text === void 0 || typeof record2.active_text === "string")
+  );
+}
+function isTodoSnapshotV1(value) {
+  const record2 = readObject2(value);
+  if (!record2 || record2.version !== 1 || record2.provider !== "claude" && record2.provider !== "codex" || typeof record2.revision !== "number" || !Number.isSafeInteger(record2.revision) || record2.revision < 0 || !Array.isArray(record2.items) || !record2.items.every(isTodoSnapshotItemV1)) {
+    return false;
+  }
+  return record2.provider === "claude" ? ["TodoWrite", "TaskCreate", "TaskUpdate", "TaskList"].includes(String(record2.source)) : record2.source === "todo_list";
+}
 function itemFromRecord(value, fallbackId) {
   const record2 = readObject2(value);
   const text = readText(record2);
@@ -36679,23 +36692,46 @@ function snapshotFromCodexTodoList(item, revision = 1) {
 var TodoSnapshotTracker = class {
   revision = 0;
   claudeItems = /* @__PURE__ */ new Map();
-  fromClaudeToolStarted(rawName, input) {
-    if (rawName !== "TodoWrite") {
-      return void 0;
+  claudeBaselineKnown = true;
+  reset(seed, claudeBaselineKnown = true) {
+    this.revision = 0;
+    this.claudeItems = /* @__PURE__ */ new Map();
+    this.claudeBaselineKnown = seed ? false : claudeBaselineKnown;
+    if (!isTodoSnapshotV1(seed)) {
+      return;
     }
-    const record2 = readObject2(input);
-    if (!Array.isArray(record2?.todos)) {
-      return void 0;
+    this.revision = seed.revision;
+    if (seed.provider !== "claude") {
+      return;
     }
+    this.claudeBaselineKnown = true;
     this.claudeItems = new Map(
-      record2.todos.map((value, index) => itemFromRecord(value, `todo-${index}`)).filter((value) => Boolean(value)).map((item) => [item.id, item])
+      seed.items.map((item) => [item.id, cloneItem(item)])
     );
-    return this.emitClaudeSnapshot("TodoWrite");
+  }
+  fromClaudeToolStarted(_rawName, _input) {
+    return void 0;
   }
   fromClaudeToolCompleted(rawName, input, result) {
     const inputRecord = readObject2(input);
     const resultRecord = parseResultObject(result);
+    if (resultRecord?.success === false) {
+      return void 0;
+    }
+    if (rawName === "TodoWrite") {
+      if (!Array.isArray(inputRecord?.todos)) {
+        return void 0;
+      }
+      this.claudeItems = new Map(
+        inputRecord.todos.map((value, index) => itemFromRecord(value, `todo-${index}`)).filter((value) => Boolean(value)).map((item) => [item.id, item])
+      );
+      this.claudeBaselineKnown = true;
+      return this.emitClaudeSnapshot("TodoWrite");
+    }
     if (rawName === "TaskCreate") {
+      if (!this.claudeBaselineKnown) {
+        return void 0;
+      }
       const task = readObject2(resultRecord?.task);
       const id2 = readId(task) ?? readId(inputRecord);
       const text = readText(inputRecord) ?? readText(task);
@@ -36712,7 +36748,7 @@ var TodoSnapshotTracker = class {
       return this.emitClaudeSnapshot("TaskCreate");
     }
     if (rawName === "TaskUpdate") {
-      if (!inputRecord || resultRecord?.success === false) {
+      if (!this.claudeBaselineKnown || !inputRecord) {
         return void 0;
       }
       const id2 = readId(inputRecord) ?? readId(resultRecord);
@@ -36741,6 +36777,7 @@ var TodoSnapshotTracker = class {
       this.claudeItems = new Map(
         resultRecord.tasks.map((value, index) => itemFromRecord(value, `task-${index}`)).filter((value) => Boolean(value)).map((item) => [item.id, item])
       );
+      this.claudeBaselineKnown = true;
       return this.emitClaudeSnapshot("TaskList");
     }
     return void 0;
@@ -37308,7 +37345,6 @@ function emitClaudeToolUseStarted(payload) {
   if (startedToolNames.has(payload.toolUseId)) {
     return;
   }
-  const todoSnapshot = payload.todoSnapshot ?? (payload.input ? todoSnapshotTracker.fromClaudeToolStarted(payload.rawName, payload.input) : void 0);
   startedToolNames.set(payload.toolUseId, payload.rawName);
   emitEvent({
     type: "tool_use_started",
@@ -37317,8 +37353,7 @@ function emitClaudeToolUseStarted(payload) {
     raw_name: payload.rawName,
     input_summary: payload.inputSummary,
     needs_response: payload.needsResponse,
-    ...payload.prompt ? { prompt: payload.prompt } : {},
-    ...todoSnapshot ? { todo_snapshot: todoSnapshot } : {}
+    ...payload.prompt ? { prompt: payload.prompt } : {}
   });
 }
 function emitClaudeToolUseCompleted(toolUseId, resultSummary, success2, todoSnapshot) {
@@ -38453,6 +38488,11 @@ async function handleCommand(command) {
   }
   if (command.type === "init") {
     initCommand = command;
+    const resumedClaudeWithoutTodoSeed = command.provider === "claude" && Boolean(command.provider_session_id?.trim()) && !command.todo_snapshot_seed;
+    todoSnapshotTracker.reset(
+      command.todo_snapshot_seed,
+      !resumedClaudeWithoutTodoSeed
+    );
     currentProviderSessionId = command.provider_session_id ?? null;
     browserEvaluateApprovedForSession = false;
     if (currentProviderSessionId) {

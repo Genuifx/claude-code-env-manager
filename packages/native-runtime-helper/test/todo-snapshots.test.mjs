@@ -72,6 +72,98 @@ async function buildHelperWithTodoSdkEvents() {
                   const iterator = prompt[Symbol.asyncIterator]();
                   const next = await iterator.next();
                   if (next.done) return;
+                  if (process.env.CCEM_TODO_TEST_SCENARIO === 'resumed-no-seed') {
+                    yield {
+                      type: 'assistant',
+                      message: {
+                        id: 'assistant-unknown-baseline-update',
+                        content: [{
+                          type: 'tool_use',
+                          id: 'task-update-unknown-baseline',
+                          name: 'TaskUpdate',
+                          input: { taskId: 'legacy-task', status: 'completed' },
+                        }],
+                      },
+                    };
+                    yield {
+                      type: 'user',
+                      tool_use_result: {
+                        success: true,
+                        taskId: 'legacy-task',
+                        updatedFields: ['status'],
+                      },
+                      message: {
+                        role: 'user',
+                        content: [{
+                          type: 'tool_result',
+                          tool_use_id: 'task-update-unknown-baseline',
+                          content: 'updated',
+                        }],
+                      },
+                    };
+                    yield { type: 'result', subtype: 'success', result: 'done', session_id: 'claude-session' };
+                    await new Promise(() => {});
+                    return;
+                  }
+                  if (process.env.CCEM_TODO_TEST_SCENARIO === 'reconnect-failed-write') {
+                    yield {
+                      type: 'assistant',
+                      message: {
+                        id: 'assistant-failed-todo-write',
+                        content: [{
+                          type: 'tool_use',
+                          id: 'todo-write-failed',
+                          name: 'TodoWrite',
+                          input: {
+                            todos: [{ content: 'Rejected replacement', status: 'in_progress' }],
+                          },
+                        }],
+                      },
+                    };
+                    yield {
+                      type: 'user',
+                      message: {
+                        role: 'user',
+                        content: [{
+                          type: 'tool_result',
+                          tool_use_id: 'todo-write-failed',
+                          content: 'permission denied',
+                          is_error: true,
+                        }],
+                      },
+                    };
+                    yield {
+                      type: 'assistant',
+                      message: {
+                        id: 'assistant-seeded-task-update',
+                        content: [{
+                          type: 'tool_use',
+                          id: 'task-update-seeded',
+                          name: 'TaskUpdate',
+                          input: { taskId: 'task-1', status: 'completed' },
+                        }],
+                      },
+                    };
+                    yield {
+                      type: 'user',
+                      tool_use_result: {
+                        success: true,
+                        taskId: 'task-1',
+                        updatedFields: ['status'],
+                      },
+                      message: {
+                        role: 'user',
+                        content: [{
+                          type: 'tool_result',
+                          tool_use_id: 'task-update-seeded',
+                          content: 'updated',
+                        }],
+                      },
+                    };
+                    yield { type: 'result', subtype: 'success', result: 'done', session_id: 'claude-session' };
+                    await new Promise(() => {});
+                    return;
+                  }
                   const longText = 'Todo text: ' + 'z'.repeat(180);
                   yield {
                     type: 'assistant',
@@ -218,19 +310,21 @@ function waitForOutput(outputs, predicate, stderrRef, description) {
   });
 }
 
-test('emits an exact TodoWrite snapshot without truncating long todo text', async () => {
+test('emits an exact TodoWrite snapshot on successful completion without truncating long todo text', async () => {
   const { TodoSnapshotTracker } = await importTodoSnapshotsModule();
   const tracker = new TodoSnapshotTracker();
   const text = `Preserve the whole task: ${'x'.repeat(180)}`;
+  const input = {
+    todos: [{
+      content: text,
+      status: 'in_progress',
+      activeForm: 'Preserving the whole task',
+    }],
+  };
 
+  assert.equal(tracker.fromClaudeToolStarted('TodoWrite', input), undefined);
   assert.deepEqual(
-    tracker.fromClaudeToolStarted('TodoWrite', {
-      todos: [{
-        content: text,
-        status: 'in_progress',
-        activeForm: 'Preserving the whole task',
-      }],
-    }),
+    tracker.fromClaudeToolCompleted('TodoWrite', input, { success: true }),
     {
       version: 1,
       provider: 'claude',
@@ -243,6 +337,149 @@ test('emits an exact TodoWrite snapshot without truncating long todo text', asyn
         active_text: 'Preserving the whole task',
       }],
     },
+  );
+});
+
+test('seeds a restarted tracker so a TaskUpdate preserves every existing task', async () => {
+  const { TodoSnapshotTracker } = await importTodoSnapshotsModule();
+  const tracker = new TodoSnapshotTracker();
+  tracker.reset({
+    version: 1,
+    provider: 'claude',
+    source: 'TaskList',
+    revision: 7,
+    items: [
+      { id: 'task-1', text: 'Keep first task', status: 'pending' },
+      { id: 'task-2', text: 'Keep second task', status: 'in_progress' },
+    ],
+  });
+
+  assert.deepEqual(
+    tracker.fromClaudeToolCompleted(
+      'TaskUpdate',
+      { taskId: 'task-1', status: 'completed' },
+      { success: true, taskId: 'task-1', updatedFields: ['status'] },
+    ),
+    {
+      version: 1,
+      provider: 'claude',
+      source: 'TaskUpdate',
+      revision: 8,
+      items: [
+        { id: 'task-1', text: 'Keep first task', status: 'completed' },
+        { id: 'task-2', text: 'Keep second task', status: 'in_progress' },
+      ],
+    },
+  );
+});
+
+test('a failed TodoWrite never replaces the last confirmed task list', async () => {
+  const { TodoSnapshotTracker } = await importTodoSnapshotsModule();
+  const tracker = new TodoSnapshotTracker();
+  tracker.reset({
+    version: 1,
+    provider: 'claude',
+    source: 'TaskList',
+    revision: 3,
+    items: [
+      { id: 'task-1', text: 'Confirmed task', status: 'pending' },
+    ],
+  });
+
+  assert.equal(
+    tracker.fromClaudeToolStarted('TodoWrite', {
+      todos: [{ content: 'Rejected replacement', status: 'in_progress' }],
+    }),
+    undefined,
+  );
+
+  assert.deepEqual(
+    tracker.fromClaudeToolCompleted(
+      'TaskUpdate',
+      { taskId: 'task-1', status: 'completed' },
+      { success: true, taskId: 'task-1', updatedFields: ['status'] },
+    ),
+    {
+      version: 1,
+      provider: 'claude',
+      source: 'TaskUpdate',
+      revision: 4,
+      items: [{ id: 'task-1', text: 'Confirmed task', status: 'completed' }],
+    },
+  );
+});
+
+test('a resumed tracker with no seed suppresses partial Task events until a full baseline exists', async () => {
+  const { TodoSnapshotTracker } = await importTodoSnapshotsModule();
+  const tracker = new TodoSnapshotTracker();
+  tracker.reset(undefined, false);
+
+  assert.equal(
+    tracker.fromClaudeToolCompleted(
+      'TaskCreate',
+      { subject: 'Partial new task' },
+      { task: { id: 'task-new', subject: 'Partial new task' } },
+    ),
+    undefined,
+  );
+  assert.equal(
+    tracker.fromClaudeToolCompleted(
+      'TaskUpdate',
+      { taskId: 'task-old', status: 'completed' },
+      { success: true, taskId: 'task-old', updatedFields: ['status'] },
+    ),
+    undefined,
+  );
+
+  const baseline = tracker.fromClaudeToolCompleted(
+    'TodoWrite',
+    {
+      todos: [
+        { id: 'task-old', content: 'Known old task', status: 'completed' },
+        { id: 'task-next', content: 'Known next task', status: 'pending' },
+      ],
+    },
+    { success: true },
+  );
+  assert.deepEqual(baseline, {
+    version: 1,
+    provider: 'claude',
+    source: 'TodoWrite',
+    revision: 1,
+    items: [
+      { id: 'task-old', text: 'Known old task', status: 'completed' },
+      { id: 'task-next', text: 'Known next task', status: 'pending' },
+    ],
+  });
+
+  assert.deepEqual(
+    tracker.fromClaudeToolCompleted(
+      'TaskCreate',
+      { subject: 'Now safe to append' },
+      { task: { id: 'task-new', subject: 'Now safe to append' } },
+    )?.items.map((item) => item.id),
+    ['task-old', 'task-next', 'task-new'],
+  );
+});
+
+test('an invalid or wrong-provider seed cannot mark a resumed Claude baseline as known', async () => {
+  const { TodoSnapshotTracker } = await importTodoSnapshotsModule();
+  const tracker = new TodoSnapshotTracker();
+  tracker.reset({
+    version: 1,
+    provider: 'codex',
+    source: 'todo_list',
+    revision: 9,
+    items: [{ id: 'codex:0', text: 'Wrong provider state', status: 'pending' }],
+  }, true);
+
+  assert.equal(
+    tracker.fromClaudeToolCompleted(
+      'TaskUpdate',
+      { taskId: 'legacy-task', status: 'completed' },
+      { success: true, taskId: 'legacy-task', updatedFields: ['status'] },
+    ),
+    undefined,
   );
 });
 
@@ -383,8 +620,9 @@ test('does not advance revision for events that do not emit snapshots', async ()
     undefined,
   );
 
+  assert.equal(tracker.fromClaudeToolStarted('TodoWrite', { todos: [] }), undefined);
   assert.equal(
-    tracker.fromClaudeToolStarted('TodoWrite', { todos: [] }).revision,
+    tracker.fromClaudeToolCompleted('TodoWrite', { todos: [] }, { success: true }).revision,
     1,
   );
 });
@@ -465,17 +703,17 @@ test('attaches Claude todo snapshots to real helper start and completion events'
     initial_prompt: 'track todos',
   })}\n`);
 
-  const started = await waitForOutput(
+  const completedTodoWrite = await waitForOutput(
     outputs,
     (output) => output.type === 'event'
-      && output.payload?.type === 'tool_use_started'
+      && output.payload?.type === 'tool_use_completed'
       && output.payload.tool_use_id === 'todo-write-1'
       && output.payload.todo_snapshot?.revision === 1,
     stderrRef,
-    'Claude TodoWrite snapshot',
+    'confirmed Claude TodoWrite snapshot',
   );
-  assert.equal(started.payload.todo_snapshot.items[0].text.length, 191);
-  assert.equal(started.payload.todo_snapshot.items[0].status, 'in_progress');
+  assert.equal(completedTodoWrite.payload.todo_snapshot.items[0].text.length, 191);
+  assert.equal(completedTodoWrite.payload.todo_snapshot.items[0].status, 'in_progress');
 
   const completed = await waitForOutput(
     outputs,
@@ -490,6 +728,99 @@ test('attaches Claude todo snapshots to real helper start and completion events'
     'todo-0',
     'task-1',
   ]);
+});
+
+test('helper reconnect seed survives a failed TodoWrite and a later TaskUpdate', async (t) => {
+  const helperPath = await buildHelperWithTodoSdkEvents();
+  const helper = spawn(process.execPath, [helperPath], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      CCEM_TODO_TEST_SCENARIO: 'reconnect-failed-write',
+    },
+  });
+  t.after(() => helper.kill('SIGTERM'));
+
+  const { outputs, stderrRef } = collectHelperOutput(helper);
+  helper.stdin.write(`${JSON.stringify({
+    type: 'init',
+    provider: 'claude',
+    env_name: 'default',
+    perm_mode: 'dev',
+    working_dir: os.tmpdir(),
+    provider_session_id: 'existing-provider-session',
+    todo_snapshot_seed: {
+      version: 1,
+      provider: 'claude',
+      source: 'TaskList',
+      revision: 7,
+      items: [
+        { id: 'task-1', text: 'Keep first task', status: 'pending' },
+        { id: 'task-2', text: 'Keep second task', status: 'in_progress' },
+      ],
+    },
+    initial_prompt: 'continue seeded work',
+  })}\n`);
+
+  const updated = await waitForOutput(
+    outputs,
+    (output) => output.type === 'event'
+      && output.payload?.type === 'tool_use_completed'
+      && output.payload.tool_use_id === 'task-update-seeded'
+      && output.payload.todo_snapshot?.revision === 8,
+    stderrRef,
+    'seeded TaskUpdate snapshot after failed TodoWrite',
+  );
+
+  const failedTodoEvents = outputs.filter(
+    (output) => output.type === 'event'
+      && output.payload?.tool_use_id === 'todo-write-failed',
+  );
+  assert.equal(failedTodoEvents.length, 2);
+  assert.equal(failedTodoEvents.some((output) => output.payload.todo_snapshot), false);
+  assert.deepEqual(updated.payload.todo_snapshot.items, [
+    { id: 'task-1', text: 'Keep first task', status: 'completed' },
+    { id: 'task-2', text: 'Keep second task', status: 'in_progress' },
+  ]);
+});
+
+test('resumed helper without a seed does not publish a partial TaskUpdate snapshot', async (t) => {
+  const helperPath = await buildHelperWithTodoSdkEvents();
+  const helper = spawn(process.execPath, [helperPath], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      CCEM_TODO_TEST_SCENARIO: 'resumed-no-seed',
+    },
+  });
+  t.after(() => helper.kill('SIGTERM'));
+
+  const { outputs, stderrRef } = collectHelperOutput(helper);
+  helper.stdin.write(`${JSON.stringify({
+    type: 'init',
+    provider: 'claude',
+    env_name: 'default',
+    perm_mode: 'dev',
+    working_dir: os.tmpdir(),
+    provider_session_id: 'legacy-provider-session',
+    initial_prompt: 'continue legacy work',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'status'
+      && output.status === 'ready'
+      && output.detail === 'Ready for the next prompt.',
+    stderrRef,
+    'resumed no-seed turn completion',
+  );
+
+  const taskEvents = outputs.filter(
+    (output) => output.type === 'event'
+      && output.payload?.tool_use_id === 'task-update-unknown-baseline',
+  );
+  assert.equal(taskEvents.length, 2);
+  assert.equal(taskEvents.some((output) => output.payload.todo_snapshot), false);
 });
 
 test('attaches replacement snapshots to all Codex todo_list lifecycle events', async (t) => {

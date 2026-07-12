@@ -95,6 +95,39 @@ function cloneItem(item: TodoSnapshotItemV1): TodoSnapshotItemV1 {
   return { ...item };
 }
 
+function isTodoSnapshotItemV1(value: unknown): value is TodoSnapshotItemV1 {
+  const record = readObject(value);
+  return Boolean(
+    record
+    && typeof record.id === 'string'
+    && record.id.trim()
+    && typeof record.text === 'string'
+    && record.text.trim()
+    && ['pending', 'in_progress', 'completed', 'failed'].includes(String(record.status))
+    && (record.active_text === undefined || typeof record.active_text === 'string'),
+  );
+}
+
+function isTodoSnapshotV1(value: unknown): value is TodoSnapshotV1 {
+  const record = readObject(value);
+  if (
+    !record
+    || record.version !== 1
+    || (record.provider !== 'claude' && record.provider !== 'codex')
+    || typeof record.revision !== 'number'
+    || !Number.isSafeInteger(record.revision)
+    || record.revision < 0
+    || !Array.isArray(record.items)
+    || !record.items.every(isTodoSnapshotItemV1)
+  ) {
+    return false;
+  }
+
+  return record.provider === 'claude'
+    ? ['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList'].includes(String(record.source))
+    : record.source === 'todo_list';
+}
+
 function itemFromRecord(
   value: unknown,
   fallbackId: string,
@@ -142,24 +175,32 @@ export function snapshotFromCodexTodoList(
 export class TodoSnapshotTracker {
   private revision = 0;
   private claudeItems = new Map<string, TodoSnapshotItemV1>();
+  private claudeBaselineKnown = true;
 
-  fromClaudeToolStarted(rawName: string, input: unknown): TodoSnapshotV1 | undefined {
-    if (rawName !== 'TodoWrite') {
-      return undefined;
+  reset(seed?: TodoSnapshotV1 | null, claudeBaselineKnown = true) {
+    this.revision = 0;
+    this.claudeItems = new Map();
+    this.claudeBaselineKnown = seed ? false : claudeBaselineKnown;
+
+    if (!isTodoSnapshotV1(seed)) {
+      return;
     }
 
-    const record = readObject(input);
-    if (!Array.isArray(record?.todos)) {
-      return undefined;
+    this.revision = seed.revision;
+    if (seed.provider !== 'claude') {
+      return;
     }
 
+    this.claudeBaselineKnown = true;
     this.claudeItems = new Map(
-      record.todos
-        .map((value, index) => itemFromRecord(value, `todo-${index}`))
-        .filter((value): value is TodoSnapshotItemV1 => Boolean(value))
-        .map((item) => [item.id, item]),
+      seed.items.map((item) => [item.id, cloneItem(item)]),
     );
-    return this.emitClaudeSnapshot('TodoWrite');
+  }
+
+  fromClaudeToolStarted(_rawName: string, _input: unknown): TodoSnapshotV1 | undefined {
+    // TodoWrite is persisted only after a successful tool result. This keeps a
+    // rejected write from becoming the canonical snapshot across replay/restart.
+    return undefined;
   }
 
   fromClaudeToolCompleted(
@@ -170,7 +211,30 @@ export class TodoSnapshotTracker {
     const inputRecord = readObject(input);
     const resultRecord = parseResultObject(result);
 
+    if (resultRecord?.success === false) {
+      return undefined;
+    }
+
+    if (rawName === 'TodoWrite') {
+      if (!Array.isArray(inputRecord?.todos)) {
+        return undefined;
+      }
+
+      this.claudeItems = new Map(
+        inputRecord.todos
+          .map((value, index) => itemFromRecord(value, `todo-${index}`))
+          .filter((value): value is TodoSnapshotItemV1 => Boolean(value))
+          .map((item) => [item.id, item]),
+      );
+      this.claudeBaselineKnown = true;
+      return this.emitClaudeSnapshot('TodoWrite');
+    }
+
     if (rawName === 'TaskCreate') {
+      if (!this.claudeBaselineKnown) {
+        return undefined;
+      }
+
       const task = readObject(resultRecord?.task);
       const id = readId(task) ?? readId(inputRecord);
       const text = readText(inputRecord) ?? readText(task);
@@ -189,7 +253,7 @@ export class TodoSnapshotTracker {
     }
 
     if (rawName === 'TaskUpdate') {
-      if (!inputRecord || resultRecord?.success === false) {
+      if (!this.claudeBaselineKnown || !inputRecord) {
         return undefined;
       }
 
@@ -226,6 +290,7 @@ export class TodoSnapshotTracker {
           .filter((value): value is TodoSnapshotItemV1 => Boolean(value))
           .map((item) => [item.id, item]),
       );
+      this.claudeBaselineKnown = true;
       return this.emitClaudeSnapshot('TaskList');
     }
 

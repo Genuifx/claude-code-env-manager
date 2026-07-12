@@ -1,4 +1,4 @@
-use crate::event_bus::{ReplayBatch, SessionEventPayload, SessionEventRecord};
+use crate::event_bus::{ReplayBatch, SessionEventPayload, SessionEventRecord, TodoSnapshotV1};
 use crate::session_provenance::state_db_path;
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -140,6 +140,45 @@ impl NativeEventLog {
         })
     }
 
+    pub fn latest_todo_snapshot(
+        &self,
+        runtime_id: &str,
+    ) -> Result<Option<TodoSnapshotV1>, String> {
+        self.flush_pending()?;
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT payload_json
+                     FROM native_session_events
+                     WHERE runtime_id = ?1
+                       AND payload_json LIKE '%\"todo_snapshot\":{%'
+                     ORDER BY seq DESC",
+                )
+                .map_err(|error| {
+                    format!("Failed to prepare latest native todo snapshot query: {}", error)
+                })?;
+            let rows = stmt
+                .query_map([runtime_id], |row| row.get::<_, String>(0))
+                .map_err(|error| {
+                    format!("Failed to query latest native todo snapshot: {}", error)
+                })?;
+
+            for row in rows {
+                let payload_json = row.map_err(|error| {
+                    format!("Failed to read latest native todo snapshot row: {}", error)
+                })?;
+                let payload: SessionEventPayload = serde_json::from_str(&payload_json).map_err(
+                    |error| format!("Failed to deserialize native todo snapshot event: {}", error),
+                )?;
+                if let Some(snapshot) = todo_snapshot_from_payload(&payload) {
+                    return Ok(Some(snapshot.clone()));
+                }
+            }
+
+            Ok(None)
+        })
+    }
+
     fn write_records(&self, records: &[SessionEventRecord]) -> Result<(), String> {
         self.with_conn(|conn| {
             let tx = conn.transaction().map_err(|error| {
@@ -227,6 +266,14 @@ impl NativeEventLog {
             .as_mut()
             .ok_or_else(|| "Native event log connection was not initialized".to_string())?;
         f(conn)
+    }
+}
+
+fn todo_snapshot_from_payload(payload: &SessionEventPayload) -> Option<&TodoSnapshotV1> {
+    match payload {
+        SessionEventPayload::ToolUseStarted { todo_snapshot, .. }
+        | SessionEventPayload::ToolUseCompleted { todo_snapshot, .. } => todo_snapshot.as_ref(),
+        _ => None,
     }
 }
 

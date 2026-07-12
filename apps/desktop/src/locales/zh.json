@@ -183,7 +183,7 @@
     "reviewTodoUnavailableBody": "当前会话尚未提供可验证的任务快照。",
     "reviewTodoStructuredEmptyTitle": "没有遗留任务",
     "reviewTodoStructuredEmpty": "最新任务快照为空，没有遗留任务。",
-    "reviewTodoHint": "验证真实 Workspace 主路径",
+    "reviewTodoHint": "来自最新已确认的任务快照",
     "reviewTodoLegacyWarning": "这是从旧版工具事件恢复的任务状态，实时性可能有限。",
     "reviewCompleted": "已完成",
     "reviewInProgress": "正在进行",

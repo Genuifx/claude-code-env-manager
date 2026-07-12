@@ -32,6 +32,45 @@ fn native_event_log_flushes_todo_snapshot_started_immediately() {
 }
 
 #[test]
+fn native_event_log_returns_latest_todo_snapshot_for_helper_reconnect() {
+    let db_path = std::env::temp_dir().join(format!(
+        "ccem-native-event-log-todo-seed-test-{}.sqlite",
+        Utc::now().timestamp_nanos_opt().unwrap_or_default(),
+    ));
+    let runtime_id = "runtime-todo-seed";
+    let log = NativeEventLog::new(db_path.clone());
+
+    for (index, payload) in [
+        todo_snapshot_started_payload(4, "first task"),
+        todo_snapshot_completed_payload(7, "latest task"),
+        SessionEventPayload::AssistantChunk {
+            text: r#"diagnostic text containing \"todo_snapshot\":{}"#.to_string(),
+        },
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        log.append(&SessionEventRecord {
+            runtime_id: runtime_id.to_string(),
+            seq: index as u64 + 1,
+            occurred_at: Utc::now(),
+            payload,
+        })
+        .expect("append reconnect seed fixture");
+    }
+
+    let snapshot = log
+        .latest_todo_snapshot(runtime_id)
+        .expect("query latest todo snapshot")
+        .expect("latest todo snapshot exists");
+    assert_eq!(snapshot.revision, 7);
+    assert_eq!(snapshot.items[0].text, "latest task");
+
+    drop(log);
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[test]
 fn native_event_log_keeps_latest_todo_snapshot_anchor_in_limited_replay() {
     let db_path = std::env::temp_dir().join(format!(
         "ccem-native-event-log-todo-anchor-test-{}.sqlite",
@@ -163,6 +202,28 @@ fn todo_snapshot_started_payload(revision: u64, text: &str) -> SessionEventPaylo
         input_summary: "1 todo".to_string(),
         needs_response: false,
         prompt: None,
+        todo_snapshot: Some(TodoSnapshotV1 {
+            version: 1,
+            provider: "claude".to_string(),
+            source: "TodoWrite".to_string(),
+            revision,
+            items: vec![TodoSnapshotItemV1 {
+                id: "todo-1".to_string(),
+                text: text.to_string(),
+                status: "in_progress".to_string(),
+                active_text: Some("Working".to_string()),
+            }],
+        }),
+    }
+}
+
+fn todo_snapshot_completed_payload(revision: u64, text: &str) -> SessionEventPayload {
+    SessionEventPayload::ToolUseCompleted {
+        tool_use_id: format!("toolu-todo-{revision}"),
+        raw_name: "TodoWrite".to_string(),
+        result_summary: "updated".to_string(),
+        result_content: None,
+        success: true,
         todo_snapshot: Some(TodoSnapshotV1 {
             version: 1,
             provider: "claude".to_string(),

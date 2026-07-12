@@ -183,7 +183,7 @@
     "reviewTodoUnavailableBody": "This session has not provided a verifiable task snapshot yet.",
     "reviewTodoStructuredEmptyTitle": "No remaining tasks",
     "reviewTodoStructuredEmpty": "The latest task snapshot is empty; there are no remaining tasks.",
-    "reviewTodoHint": "Verify the real Workspace primary path",
+    "reviewTodoHint": "Updated from the latest confirmed task snapshot",
     "reviewTodoLegacyWarning": "This task state was restored from legacy tool events and may not be fully current.",
     "reviewCompleted": "Completed",
     "reviewInProgress": "In progress",
