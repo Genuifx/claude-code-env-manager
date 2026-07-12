@@ -36580,6 +36580,191 @@ function buildClaudeFileCheckpointEvent(message, providerSessionId) {
   };
 }
 
+// src/todoSnapshots.ts
+function readObject2(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value;
+}
+function readString(record2, keys) {
+  if (!record2) {
+    return void 0;
+  }
+  for (const key of keys) {
+    const value = record2[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return void 0;
+}
+function readText(record2) {
+  return readString(record2, ["subject", "content", "text", "description"]);
+}
+function readActiveText(record2) {
+  return readString(record2, ["activeForm", "active_text"]);
+}
+function readId(record2) {
+  return readString(record2, ["id", "taskId", "task_id"]);
+}
+function normalizeStatus(value, fallback = "pending") {
+  if (value === "pending" || value === "in_progress" || value === "completed" || value === "failed") {
+    return value;
+  }
+  return fallback;
+}
+function parseResultObject(value) {
+  const direct = readObject2(value);
+  if (direct) {
+    if (direct.type === "tool_result" && direct.content !== void 0) {
+      return parseResultObject(direct.content);
+    }
+    return direct;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    try {
+      return readObject2(JSON.parse(trimmed));
+    } catch {
+      return null;
+    }
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const record2 = readObject2(entry);
+      const parsed = record2?.type === "text" ? parseResultObject(record2.text) : parseResultObject(entry);
+      if (parsed) {
+        return parsed;
+      }
+    }
+  }
+  return null;
+}
+function cloneItem(item) {
+  return { ...item };
+}
+function itemFromRecord(value, fallbackId) {
+  const record2 = readObject2(value);
+  const text = readText(record2);
+  if (!record2 || !text) {
+    return null;
+  }
+  const activeText = readActiveText(record2);
+  return {
+    id: readId(record2) ?? fallbackId,
+    text,
+    status: typeof record2.completed === "boolean" ? record2.completed ? "completed" : "pending" : normalizeStatus(record2.status),
+    ...activeText ? { active_text: activeText } : {}
+  };
+}
+function snapshotFromCodexTodoList(item, revision = 1) {
+  const record2 = readObject2(item);
+  if (record2?.type !== "todo_list" || !Array.isArray(record2.items)) {
+    return void 0;
+  }
+  const listId = readId(record2) ?? "todo-list";
+  const items = record2.items.map((value, index) => itemFromRecord(value, `${listId}:${index}`)).filter((value) => Boolean(value));
+  return {
+    version: 1,
+    provider: "codex",
+    source: "todo_list",
+    revision,
+    items
+  };
+}
+var TodoSnapshotTracker = class {
+  revision = 0;
+  claudeItems = /* @__PURE__ */ new Map();
+  fromClaudeToolStarted(rawName, input) {
+    if (rawName !== "TodoWrite") {
+      return void 0;
+    }
+    const record2 = readObject2(input);
+    if (!Array.isArray(record2?.todos)) {
+      return void 0;
+    }
+    this.claudeItems = new Map(
+      record2.todos.map((value, index) => itemFromRecord(value, `todo-${index}`)).filter((value) => Boolean(value)).map((item) => [item.id, item])
+    );
+    return this.emitClaudeSnapshot("TodoWrite");
+  }
+  fromClaudeToolCompleted(rawName, input, result) {
+    const inputRecord = readObject2(input);
+    const resultRecord = parseResultObject(result);
+    if (rawName === "TaskCreate") {
+      const task = readObject2(resultRecord?.task);
+      const id2 = readId(task) ?? readId(inputRecord);
+      const text = readText(inputRecord) ?? readText(task);
+      if (!id2 || !text) {
+        return void 0;
+      }
+      const activeText = readActiveText(inputRecord) ?? readActiveText(task);
+      this.claudeItems.set(id2, {
+        id: id2,
+        text,
+        status: normalizeStatus(inputRecord?.status),
+        ...activeText ? { active_text: activeText } : {}
+      });
+      return this.emitClaudeSnapshot("TaskCreate");
+    }
+    if (rawName === "TaskUpdate") {
+      if (!inputRecord || resultRecord?.success === false) {
+        return void 0;
+      }
+      const id2 = readId(inputRecord) ?? readId(resultRecord);
+      if (!id2) {
+        return void 0;
+      }
+      if (inputRecord.status === "deleted") {
+        this.claudeItems.delete(id2);
+        return this.emitClaudeSnapshot("TaskUpdate");
+      }
+      const current = this.claudeItems.get(id2);
+      const text = readText(inputRecord) ?? current?.text ?? `Task ${id2}`;
+      const activeText = readActiveText(inputRecord) ?? current?.active_text;
+      this.claudeItems.set(id2, {
+        id: id2,
+        text,
+        status: normalizeStatus(inputRecord.status, current?.status),
+        ...activeText ? { active_text: activeText } : {}
+      });
+      return this.emitClaudeSnapshot("TaskUpdate");
+    }
+    if (rawName === "TaskList") {
+      if (!Array.isArray(resultRecord?.tasks)) {
+        return void 0;
+      }
+      this.claudeItems = new Map(
+        resultRecord.tasks.map((value, index) => itemFromRecord(value, `task-${index}`)).filter((value) => Boolean(value)).map((item) => [item.id, item])
+      );
+      return this.emitClaudeSnapshot("TaskList");
+    }
+    return void 0;
+  }
+  fromCodexTodoList(item) {
+    const snapshot = snapshotFromCodexTodoList(item, this.revision + 1);
+    if (!snapshot) {
+      return void 0;
+    }
+    this.revision = snapshot.revision;
+    return snapshot;
+  }
+  emitClaudeSnapshot(source) {
+    this.revision += 1;
+    return {
+      version: 1,
+      provider: "claude",
+      source,
+      revision: this.revision,
+      items: Array.from(this.claudeItems.values(), cloneItem)
+    };
+  }
+};
+
 // src/index.ts
 var DEFAULT_CLAUDE_IDLE_TTL_MS = 10 * 60 * 1e3;
 var DEFAULT_CLAUDE_INTERRUPT_TIMEOUT_MS = 8e3;
@@ -36611,6 +36796,8 @@ var pendingPermissions = /* @__PURE__ */ new Map();
 var pendingClaudeInteractivePrompts = /* @__PURE__ */ new Map();
 var startedToolNames = /* @__PURE__ */ new Map();
 var completedToolUseIds = /* @__PURE__ */ new Set();
+var pendingClaudeToolInputs = /* @__PURE__ */ new Map();
+var todoSnapshotTracker = new TodoSnapshotTracker();
 var browserToolBridge = createBrowserToolBridge((request) => emit(request));
 var browserEvaluateApprovedForSession = false;
 var AsyncMessageQueue = class {
@@ -37112,9 +37299,16 @@ function parseClaudeInteractiveToolPrompt(name, input) {
   return void 0;
 }
 function emitClaudeToolUseStarted(payload) {
-  if (!payload.toolUseId || startedToolNames.has(payload.toolUseId)) {
+  if (!payload.toolUseId) {
     return;
   }
+  if (payload.input) {
+    pendingClaudeToolInputs.set(payload.toolUseId, payload.input);
+  }
+  if (startedToolNames.has(payload.toolUseId)) {
+    return;
+  }
+  const todoSnapshot = payload.todoSnapshot ?? (payload.input ? todoSnapshotTracker.fromClaudeToolStarted(payload.rawName, payload.input) : void 0);
   startedToolNames.set(payload.toolUseId, payload.rawName);
   emitEvent({
     type: "tool_use_started",
@@ -37123,22 +37317,25 @@ function emitClaudeToolUseStarted(payload) {
     raw_name: payload.rawName,
     input_summary: payload.inputSummary,
     needs_response: payload.needsResponse,
-    ...payload.prompt ? { prompt: payload.prompt } : {}
+    ...payload.prompt ? { prompt: payload.prompt } : {},
+    ...todoSnapshot ? { todo_snapshot: todoSnapshot } : {}
   });
 }
-function emitClaudeToolUseCompleted(toolUseId, resultSummary, success2) {
+function emitClaudeToolUseCompleted(toolUseId, resultSummary, success2, todoSnapshot) {
   if (!toolUseId || completedToolUseIds.has(toolUseId)) {
     return;
   }
   completedToolUseIds.add(toolUseId);
   const rawName = startedToolNames.get(toolUseId) ?? "tool";
   startedToolNames.delete(toolUseId);
+  pendingClaudeToolInputs.delete(toolUseId);
   emitEvent({
     type: "tool_use_completed",
     tool_use_id: toolUseId,
     raw_name: rawName,
     result_summary: resultSummary,
-    success: success2
+    success: success2,
+    ...todoSnapshot ? { todo_snapshot: todoSnapshot } : {}
   });
 }
 function summarizeClaudeToolResult(block) {
@@ -37251,7 +37448,8 @@ async function waitForPermission(toolName, input, options) {
     toolUseId,
     rawName: toolName,
     inputSummary,
-    needsResponse: false
+    needsResponse: false,
+    input
   });
   emitEvent({
     type: "permission_required",
@@ -37654,6 +37852,7 @@ async function consumeClaudeMessages() {
               rawName: block.name,
               inputSummary: summarizeClaudeToolInput(block.name, input),
               needsResponse,
+              input,
               prompt
             });
           }
@@ -37670,10 +37869,19 @@ async function consumeClaudeMessages() {
           if (block.type !== "tool_result" || typeof block.tool_use_id !== "string") {
             return;
           }
+          const success2 = block.is_error !== true;
+          const rawName = startedToolNames.get(block.tool_use_id) ?? "tool";
+          const input = pendingClaudeToolInputs.get(block.tool_use_id);
+          const todoSnapshot = success2 && input ? todoSnapshotTracker.fromClaudeToolCompleted(
+            rawName,
+            input,
+            message.tool_use_result ?? block.content
+          ) : void 0;
           emitClaudeToolUseCompleted(
             block.tool_use_id,
             summarizeClaudeToolResult(block),
-            block.is_error !== true
+            success2,
+            todoSnapshot
           );
         });
         continue;
@@ -38153,23 +38361,40 @@ async function runCodexTurn(text, images) {
         continue;
       }
       if (event.type === "item.started") {
+        const todoSnapshot = item.type === "todo_list" ? todoSnapshotTracker.fromCodexTodoList(item) : void 0;
         emitEvent({
           type: "tool_use_started",
           tool_use_id: String(item.id || `${item.type}-${Date.now()}`),
           category: codexCategoryForItem(item),
           raw_name: String(item.type || "item"),
           input_summary: summarizeCodexItem(item),
-          needs_response: false
+          needs_response: false,
+          ...todoSnapshot ? { todo_snapshot: todoSnapshot } : {}
+        });
+        continue;
+      }
+      if (event.type === "item.updated" && item.type === "todo_list") {
+        const todoSnapshot = todoSnapshotTracker.fromCodexTodoList(item);
+        emitEvent({
+          type: "tool_use_started",
+          tool_use_id: String(item.id || `${item.type}-${Date.now()}`),
+          category: codexCategoryForItem(item),
+          raw_name: String(item.type || "item"),
+          input_summary: summarizeCodexItem(item),
+          needs_response: false,
+          ...todoSnapshot ? { todo_snapshot: todoSnapshot } : {}
         });
         continue;
       }
       if (event.type === "item.completed") {
+        const todoSnapshot = item.type === "todo_list" ? todoSnapshotTracker.fromCodexTodoList(item) : void 0;
         emitEvent({
           type: "tool_use_completed",
           tool_use_id: String(item.id || `${item.type}-${Date.now()}`),
           raw_name: String(item.type || "item"),
           result_summary: summarizeCodexItem(item),
-          success: item.status !== "failed"
+          success: item.status !== "failed",
+          ...todoSnapshot ? { todo_snapshot: todoSnapshot } : {}
         });
         continue;
       }
