@@ -47,9 +47,15 @@ test('review capsule is the accessible external dialog trigger', async () => {
   assert.doesNotMatch(reviewButton, /aria-pressed=/, 'review capsule is a popup trigger, not a toggle button');
 });
 
-test('review popover is portalled from the shared virtual anchor without an overlay', async () => {
+test('review popover stays open as a modeless inspector while users interact with Workspace', async () => {
   const popover = await readSource('src', 'components', 'workspace', 'WorkspaceReviewPopover.tsx');
+  const outsideHandler = popover.match(/const handleInteractOutside[\s\S]*?\n  }, \[\]\);/)?.[0] ?? '';
 
+  assert.match(
+    popover,
+    /<Popover\s+modal=\{false\}\s+open=\{isOpen\}\s+onOpenChange=\{handleOpenChange\}>/,
+    'review inspector should explicitly use Radix non-modal behavior',
+  );
   assert.match(
     popover,
     /<PopoverAnchor\s+virtualRef=\{workspaceReviewTriggerRef\}\s*\/>/,
@@ -63,17 +69,16 @@ test('review popover is portalled from the shared virtual anchor without an over
   assert.match(
     popover,
     /onInteractOutside=\{handleInteractOutside\}/,
-    'virtual-trigger interactions should be handled separately from ordinary outside clicks',
+    'background interaction should be intercepted before Radix dismisses the inspector',
   );
+  assert.match(outsideHandler, /event\.preventDefault\(\)/, 'all outside interactions should keep the inspector open');
+  assert.doesNotMatch(outsideHandler, /\bif\s*\(/, 'outside dismissal must not depend on the interaction target');
+  assert.doesNotMatch(outsideHandler, /\.contains\(/, 'conversation and composer interactions should be treated like the capsule');
+  assert.doesNotMatch(popover, /onPointerDownOutside=/, 'one outside-interaction handler should own dismissal prevention');
   assert.match(
     popover,
-    /onPointerDownOutside=\{handleInteractOutside\}/,
-    'pointer down on the virtual trigger should not race its click toggle',
-  );
-  assert.match(
-    popover,
-    /workspaceReviewTriggerRef\.current\?\.contains\([^)]*target[^)]*\)[\s\S]*event\.preventDefault\(\)/,
-    'the external capsule should own its open/close toggle without a dismiss-and-reopen race',
+    /onOpenAutoFocus=\{\(event\) => event\.preventDefault\(\)\}/,
+    'opening the inspector should not steal focus from the conversation or composer',
   );
   assert.doesNotMatch(
     popover,
@@ -93,18 +98,18 @@ test('review detail requests are isolated when users switch files quickly', asyn
   );
 });
 
-test('closing the review popover restores focus to its capsule', async () => {
+test('explicit or Escape close restores focus to the review capsule', async () => {
   const popover = await readSource('src', 'components', 'workspace', 'WorkspaceReviewPopover.tsx');
 
   assert.match(
     popover,
     /onOpenChange=\{handleOpenChange\}/,
-    'controlled popover should funnel outside/Escape close through one handler',
+    'controlled popover should funnel explicit and Escape close through one handler',
   );
   assert.match(
     popover,
-    /if \(!nextOpen\)[\s\S]*workspaceReviewTriggerRef\.current\?\.focus\(\)/,
-    'the close handler should return focus to the external capsule',
+    /onCloseAutoFocus=\{\(event\) => \{[\s\S]*?event\.preventDefault\(\);[\s\S]*?focusTrigger\(\);[\s\S]*?\}\}/,
+    'the close autofocus hook should return focus to the external capsule once',
   );
 });
 

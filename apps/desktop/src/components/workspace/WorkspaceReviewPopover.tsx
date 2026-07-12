@@ -236,15 +236,11 @@ export function WorkspaceReviewPopover({
     onOpenChange(nextOpen);
     if (!nextOpen) {
       setPage('main');
-      window.requestAnimationFrame(() => workspaceReviewTriggerRef.current?.focus());
     }
   }, [onOpenChange]);
 
-  const handleInteractOutside = useCallback((event: { target: EventTarget | null; preventDefault: () => void }) => {
-    const target = event.target;
-    if (target instanceof Node && workspaceReviewTriggerRef.current?.contains(target)) {
-      event.preventDefault();
-    }
+  const handleInteractOutside = useCallback((event: { preventDefault: () => void }) => {
+    event.preventDefault();
   }, []);
 
   const branchLabel = gitSnapshot?.is_repo
@@ -262,7 +258,7 @@ export function WorkspaceReviewPopover({
       : t('workspace.reviewProgress');
 
   return (
-    <Popover open={isOpen} onOpenChange={handleOpenChange}>
+    <Popover modal={false} open={isOpen} onOpenChange={handleOpenChange}>
       <PopoverAnchor virtualRef={workspaceReviewTriggerRef} />
       <PopoverContent
         id={WORKSPACE_REVIEW_POPOVER_ID}
@@ -274,7 +270,7 @@ export function WorkspaceReviewPopover({
         collisionPadding={12}
         data-ccem-workspace-review-popover
         onInteractOutside={handleInteractOutside}
-        onPointerDownOutside={handleInteractOutside}
+        onOpenAutoFocus={(event) => event.preventDefault()}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           focusTrigger();
