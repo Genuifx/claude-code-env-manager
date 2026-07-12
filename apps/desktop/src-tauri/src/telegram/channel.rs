@@ -279,6 +279,7 @@ impl TelegramChannel {
                 input_summary,
                 needs_response,
                 prompt,
+                ..
             } => {
                 if !self.manager.mark_interactive_tool_seen(
                     self.chat_id,

@@ -299,6 +299,12 @@ fn query_events_since(
                      WHERE runtime_id = ?1
                      ORDER BY seq DESC
                      LIMIT ?2
+                 ),
+                 latest_todo AS (
+                     SELECT MAX(seq) AS seq
+                     FROM native_session_events
+                     WHERE runtime_id = ?1
+                       AND payload_json LIKE '%\"todo_snapshot\"%'
                  )
                  SELECT seq, occurred_at, payload_json
                  FROM native_session_events
@@ -306,6 +312,7 @@ fn query_events_since(
                    AND (
                      seq IN (SELECT seq FROM oldest)
                      OR seq IN (SELECT seq FROM tail)
+                     OR seq IN (SELECT seq FROM latest_todo)
                      OR payload_json LIKE '{\"type\":\"user_prompt\"%'
                      OR payload_json LIKE '{\"type\":\"checkpoint_created\"%'
                      OR payload_json LIKE '{\"type\":\"files_rewound\"%'
@@ -455,7 +462,11 @@ fn should_flush_after_append(payload: &SessionEventPayload) -> bool {
         | SessionEventPayload::FileRewindFailed { .. }
         | SessionEventPayload::TokenUsage { .. }
         | SessionEventPayload::ContextUsage { .. } => true,
-        SessionEventPayload::ToolUseStarted { needs_response, .. } => *needs_response,
+        SessionEventPayload::ToolUseStarted {
+            needs_response,
+            todo_snapshot,
+            ..
+        } => *needs_response || todo_snapshot.is_some(),
         SessionEventPayload::ToolUseCompleted { .. } => true,
         _ => false,
     }
@@ -464,7 +475,9 @@ fn should_flush_after_append(payload: &SessionEventPayload) -> bool {
 #[cfg(test)]
 mod tests {
     use super::NativeEventLog;
-    use crate::event_bus::{SessionEventPayload, SessionEventRecord};
+    use crate::event_bus::{
+        SessionEventPayload, SessionEventRecord, TodoSnapshotItemV1, TodoSnapshotV1, ToolCategory,
+    };
     use chrono::Utc;
     use rusqlite::Connection;
 
@@ -550,6 +563,127 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn native_event_log_flushes_todo_snapshot_started_immediately() {
+        let db_path = std::env::temp_dir().join(format!(
+            "ccem-native-event-log-todo-flush-test-{}.sqlite",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default(),
+        ));
+        let runtime_id = "runtime-todo-flush";
+        let log = NativeEventLog::new(db_path.clone());
+
+        log.append(&SessionEventRecord {
+            runtime_id: runtime_id.to_string(),
+            seq: 1,
+            occurred_at: Utc::now(),
+            payload: todo_snapshot_started_payload(1, "flush now"),
+        })
+        .expect("append snapshot-bearing tool start");
+
+        let observer = NativeEventLog::new(db_path.clone());
+        assert!(observer
+            .has_events(runtime_id)
+            .expect("query persisted events"));
+
+        drop(observer);
+        drop(log);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn native_event_log_keeps_latest_todo_snapshot_anchor_in_limited_replay() {
+        let db_path = std::env::temp_dir().join(format!(
+            "ccem-native-event-log-todo-anchor-test-{}.sqlite",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default(),
+        ));
+        let runtime_id = "runtime-todo-anchor";
+        let log = NativeEventLog::new(db_path.clone());
+
+        let payloads = [
+            SessionEventPayload::Lifecycle {
+                stage: "runtime_boot".to_string(),
+                detail: "Starting claude native runtime.".to_string(),
+            },
+            todo_snapshot_started_payload(1, "stale snapshot"),
+            SessionEventPayload::AssistantChunk {
+                text: "between snapshots".to_string(),
+            },
+            todo_snapshot_started_payload(2, "latest snapshot"),
+            SessionEventPayload::AssistantChunk {
+                text: "after snapshot".to_string(),
+            },
+            SessionEventPayload::AssistantChunk {
+                text: "tail one".to_string(),
+            },
+            SessionEventPayload::AssistantChunk {
+                text: "tail two".to_string(),
+            },
+        ];
+
+        for (index, payload) in payloads.into_iter().enumerate() {
+            log.append(&SessionEventRecord {
+                runtime_id: runtime_id.to_string(),
+                seq: index as u64 + 1,
+                occurred_at: Utc::now(),
+                payload,
+            })
+            .expect("append todo anchor fixture");
+        }
+
+        let replay = log.replay(runtime_id, None, Some(2)).expect("replay tail");
+        assert!(replay.truncated);
+        assert_eq!(
+            replay
+                .events
+                .iter()
+                .map(|event| event.seq)
+                .collect::<Vec<_>>(),
+            vec![1, 4, 6, 7],
+        );
+        assert_eq!(
+            replay
+                .events
+                .iter()
+                .filter(|event| matches!(
+                    event.payload,
+                    SessionEventPayload::ToolUseStarted {
+                        todo_snapshot: Some(_),
+                        ..
+                    }
+                ))
+                .count(),
+            1,
+        );
+
+        drop(log);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    fn todo_snapshot_started_payload(revision: u64, text: &str) -> SessionEventPayload {
+        SessionEventPayload::ToolUseStarted {
+            tool_use_id: format!("toolu-todo-{revision}"),
+            category: ToolCategory::TaskMgmt {
+                raw_name: "TodoWrite".to_string(),
+            },
+            raw_name: "TodoWrite".to_string(),
+            input_summary: "1 todo".to_string(),
+            needs_response: false,
+            prompt: None,
+            todo_snapshot: Some(TodoSnapshotV1 {
+                version: 1,
+                provider: "claude".to_string(),
+                source: "TodoWrite".to_string(),
+                revision,
+                items: vec![TodoSnapshotItemV1 {
+                    id: "todo-1".to_string(),
+                    text: text.to_string(),
+                    status: "in_progress".to_string(),
+                    active_text: Some("Working".to_string()),
+                }],
+            }),
+        }
     }
 
     #[test]

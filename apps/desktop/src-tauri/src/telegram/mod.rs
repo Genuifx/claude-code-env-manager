@@ -4897,6 +4897,7 @@ fn monitor_interactive_session(
                         input_summary,
                         needs_response,
                         prompt,
+                        ..
                     } => {
                         if !manager.mark_interactive_tool_seen(chat_id, thread_id, &tool_use_id) {
                             continue;
