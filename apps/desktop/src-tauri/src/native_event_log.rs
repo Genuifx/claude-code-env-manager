@@ -300,10 +300,11 @@ fn query_events_since(
                      ORDER BY seq DESC
                      LIMIT ?2
                  ),
-                 latest_todo AS (
+                 latest_pre_tail_todo AS (
                      SELECT MAX(seq) AS seq
                      FROM native_session_events
                      WHERE runtime_id = ?1
+                       AND seq < (SELECT MIN(seq) FROM tail)
                        AND payload_json LIKE '%\"todo_snapshot\"%'
                  )
                  SELECT seq, occurred_at, payload_json
@@ -312,7 +313,7 @@ fn query_events_since(
                    AND (
                      seq IN (SELECT seq FROM oldest)
                      OR seq IN (SELECT seq FROM tail)
-                     OR seq IN (SELECT seq FROM latest_todo)
+                     OR seq IN (SELECT seq FROM latest_pre_tail_todo)
                      OR payload_json LIKE '{\"type\":\"user_prompt\"%'
                      OR payload_json LIKE '{\"type\":\"checkpoint_created\"%'
                      OR payload_json LIKE '{\"type\":\"files_rewound\"%'
@@ -655,6 +656,70 @@ mod tests {
                 ))
                 .count(),
             1,
+        );
+
+        drop(log);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn native_event_log_keeps_pre_tail_todo_snapshot_when_newer_snapshot_is_in_tail() {
+        let db_path = std::env::temp_dir().join(format!(
+            "ccem-native-event-log-pre-tail-todo-anchor-test-{}.sqlite",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default(),
+        ));
+        let runtime_id = "runtime-pre-tail-todo-anchor";
+        let log = NativeEventLog::new(db_path.clone());
+        let payloads = [
+            SessionEventPayload::Lifecycle {
+                stage: "runtime_boot".to_string(),
+                detail: "Starting claude native runtime.".to_string(),
+            },
+            todo_snapshot_started_payload(1, "pre-tail snapshot"),
+            SessionEventPayload::AssistantChunk {
+                text: "middle one".to_string(),
+            },
+            SessionEventPayload::AssistantChunk {
+                text: "middle two".to_string(),
+            },
+            todo_snapshot_started_payload(2, "tail snapshot"),
+            SessionEventPayload::AssistantChunk {
+                text: "tail chunk".to_string(),
+            },
+        ];
+
+        for (index, payload) in payloads.into_iter().enumerate() {
+            log.append(&SessionEventRecord {
+                runtime_id: runtime_id.to_string(),
+                seq: index as u64 + 1,
+                occurred_at: Utc::now(),
+                payload,
+            })
+            .expect("append pre-tail todo anchor fixture");
+        }
+
+        let replay = log.replay(runtime_id, None, Some(2)).expect("replay tail");
+        assert_eq!(
+            replay
+                .events
+                .iter()
+                .map(|event| event.seq)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 5, 6],
+        );
+        assert_eq!(
+            replay
+                .events
+                .iter()
+                .filter(|event| matches!(
+                    event.payload,
+                    SessionEventPayload::ToolUseStarted {
+                        todo_snapshot: Some(_),
+                        ..
+                    }
+                ))
+                .count(),
+            2,
         );
 
         drop(log);
