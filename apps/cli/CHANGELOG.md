@@ -1,5 +1,11 @@
 # ccem
 
+## 2.55.0
+
+### Minor Changes
+
+- Release v2.55.0: workspace todo persistence, native runtime helper refresh, and interactive workspace review improvements
+
 ## 2.54.0
 
 ### Minor Changes
