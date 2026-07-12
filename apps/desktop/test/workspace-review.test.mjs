@@ -489,7 +489,7 @@ test('native history carries replay events into review and provider-only history
   );
   assert.match(
     source,
-    /setHistoryEvents\(nativeHistory\?\.events \?\? \[\]\);[\s\S]*fetchConversationDetail\(session\)/,
+    /if \(hasNativeHistorySessionOption\) \{[\s\S]*setHistoryEvents\(nativeHistory\?\.events \?\? \[\]\);[\s\S]*\}/,
   );
   assert.equal(
     source.match(/events: workspaceReviewEvents/g)?.length,
@@ -498,6 +498,39 @@ test('native history carries replay events into review and provider-only history
   );
   assert.match(
     source,
-    /const workspaceReviewEvents = useMemo\([\s\S]*workspaceMode === 'history' \? historyEvents : \[\],[\s\S]*\[historyEvents, workspaceMode\]/,
+    /const workspaceReviewEvents = useMemo\([\s\S]*workspaceMode === 'history' && selectedSession[\s\S]*\? historyEvents[\s\S]*: \[\],[\s\S]*\[historyEvents, selectedSession, workspaceMode\]/,
+  );
+});
+
+test('routine history refresh with native option omitted preserves replay events', async () => {
+  const source = await readSource('src', 'pages', 'Workspace.tsx');
+
+  assert.match(
+    source,
+    /const hasNativeHistorySessionOption = Object\.prototype\.hasOwnProperty\.call\([\s\S]*options,[\s\S]*'nativeHistorySession',[\s\S]*\)/,
+  );
+  assert.match(
+    source,
+    /loadConversation\(selectedSession, \{[\s\S]*resetBeforeLoad: false,[\s\S]*showLoading: false,[\s\S]*\}\)/,
+    'routine background refresh should continue omitting nativeHistorySession',
+  );
+  assert.match(
+    source,
+    /if \(hasNativeHistorySessionOption\) \{[\s\S]*setHistoryEvents\(nativeHistory\?\.events \?\? \[\]\);[\s\S]*\}/,
+    'history events should only be replaced when the native option was explicitly supplied',
+  );
+});
+
+test('selection loss clears history events and prevents stale review publication', async () => {
+  const source = await readSource('src', 'pages', 'Workspace.tsx');
+  const selectionLossStart = source.indexOf('if (!stillExists) {');
+  const selectionLossEnd = source.indexOf('return retainedSessions;', selectionLossStart);
+  const selectionLossBlock = source.slice(selectionLossStart, selectionLossEnd);
+
+  assert.notEqual(selectionLossStart, -1, 'selection-loss cleanup branch should exist');
+  assert.match(selectionLossBlock, /setHistoryEvents\(\[\]\)/);
+  assert.match(
+    source,
+    /const workspaceReviewEvents = useMemo\([\s\S]*workspaceMode === 'history' && selectedSession[\s\S]*\? historyEvents[\s\S]*: \[\],[\s\S]*\[historyEvents, selectedSession, workspaceMode\]/,
   );
 });

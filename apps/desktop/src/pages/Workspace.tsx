@@ -805,6 +805,7 @@ export function Workspace({
       setSelectedKey(null);
       setMessages([]);
       setSegments([]);
+      setHistoryEvents([]);
       setActiveSegment(null);
       setIsLoadingMessages(false);
       if (Object.keys(liveSessionsSnapshot).length === 0) {
@@ -903,12 +904,18 @@ export function Workspace({
       } = {}
     ) => {
       const { resetBeforeLoad = true, showLoading = true } = options;
+      const hasNativeHistorySessionOption = Object.prototype.hasOwnProperty.call(
+        options,
+        'nativeHistorySession',
+      );
       const requestSeq = ++conversationRequestSeqRef.current;
 
       if (resetBeforeLoad) {
         setMessages([]);
         setSegments([]);
-        setHistoryEvents([]);
+        if (hasNativeHistorySessionOption) {
+          setHistoryEvents([]);
+        }
         setActiveSegment(null);
       }
 
@@ -933,7 +940,9 @@ export function Workspace({
           return;
         }
 
-        setHistoryEvents(nativeHistory?.events ?? []);
+        if (hasNativeHistorySessionOption) {
+          setHistoryEvents(nativeHistory?.events ?? []);
+        }
         const { messages: msgs, segments: segs } = await fetchConversationDetail(session);
 
         if (requestSeq !== conversationRequestSeqRef.current) {
@@ -1412,8 +1421,8 @@ export function Workspace({
   const effectiveComposeDirLabel = effectiveComposeDir ? getProjectName(effectiveComposeDir) : null;
   const shouldRenderWorkspaceReview = workspaceMode !== 'live' || !activeLiveEntry;
   const workspaceReviewEvents = useMemo(
-    () => workspaceMode === 'history' ? historyEvents : [],
-    [historyEvents, workspaceMode],
+    () => workspaceMode === 'history' && selectedSession ? historyEvents : [],
+    [historyEvents, selectedSession, workspaceMode],
   );
   const workspaceReviewWorkingDir = workspaceMode === 'history' && selectedSession
     ? selectedSession.project || null
