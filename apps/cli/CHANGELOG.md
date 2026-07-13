@@ -1,5 +1,11 @@
 # ccem
 
+## 2.56.0
+
+### Minor Changes
+
+- Stabilize workspace annotation markers and desktop fixes.
+
 ## 2.55.0
 
 ### Minor Changes
