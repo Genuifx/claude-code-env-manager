@@ -11,13 +11,11 @@ import {
 } from '@/components/cron/cronSessionLink';
 import { PageActionsSlot } from '@/components/layout';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
 import {
   Clock, Plus, Play, Trash2, CheckCircle2, XCircle,
   Timer, AlertTriangle, FolderOpen, ChevronDown, GitPullRequest,
   FlaskConical, FileText, Shield, Newspaper, Sparkles, X,
-  Zap, Terminal, Copy, Check, Bell, ExternalLink, History, Pencil,
+  Zap, Terminal, Copy, Check, Bell, ExternalLink, History,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -519,10 +517,7 @@ function TimelineTaskCard({
 
 // --- Task Dialog ---
 
-const FIELD_LABEL_CLS = 'text-[11px] font-medium text-muted-foreground';
-const INPUT_CLS = 'w-full h-9 px-3 rounded-lg bg-surface-raised border border-[hsl(var(--glass-border-light)/0.22)] text-sm text-foreground placeholder:text-muted-foreground/55 focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/35 transition-colors';
-const SELECT_TRIGGER_CLS = 'w-full h-9 px-3 rounded-lg bg-surface-raised border border-[hsl(var(--glass-border-light)/0.22)] text-sm focus:ring-2 focus:ring-primary/25';
-const SECTION_CLS = 'rounded-xl border border-[hsl(var(--glass-border-light)/0.16)] bg-[hsl(var(--surface-raised)/0.45)] px-3 py-2.5';
+const INPUT_CLS = 'w-full px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 transition-all';
 const MODAL_SELECT_CONTENT_CLS = '!z-[160]';
 
 function TaskDialog({ open, onClose, onSave, editTask, environments }: {
@@ -561,7 +556,6 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
   const [wecomPeerId, setWecomPeerId] = useState('');
   const [useManualWecomTarget, setUseManualWecomTarget] = useState(false);
   const [wecomOptions, setWecomOptions] = useState<WecomTaskBindingOption[]>([]);
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const wecomTargetOptions = useMemo(() => wecomOptions.flatMap((bot) => (
@@ -587,34 +581,22 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
     return match?.id ?? '__manual__';
   }, [useManualWecomTarget, wecomBotId, wecomPeerId, wecomTargetOptions]);
 
-  const profileHint = executionProfile === 'conservative'
-    ? t('cron.profileConservativeDesc')
-    : executionProfile === 'standard'
-      ? t('cron.profileStandardDesc')
-      : t('cron.profileAutonomousDesc');
-
-  const canSave = Boolean(name.trim() && cronExpr.trim() && prompt.trim() && workDir.trim());
-
   useEffect(() => {
     if (editTask) {
-      const budget = editTask.maxBudgetUsd != null ? String(editTask.maxBudgetUsd) : '';
-      const allowed = formatToolListInput(editTask.allowedTools);
-      const disallowed = formatToolListInput(editTask.disallowedTools);
       setName(editTask.name);
       setCronExpr(editTask.cronExpression);
       setPrompt(editTask.prompt);
       setWorkDir(editTask.workingDir);
       setEnvName(editTask.envName || '');
       setExecutionProfile(editTask.executionProfile || 'conservative');
-      setMaxBudgetUsdInput(budget);
-      setAllowedToolsInput(allowed);
-      setDisallowedToolsInput(disallowed);
+      setMaxBudgetUsdInput(editTask.maxBudgetUsd != null ? String(editTask.maxBudgetUsd) : '');
+      setAllowedToolsInput(formatToolListInput(editTask.allowedTools));
+      setDisallowedToolsInput(formatToolListInput(editTask.disallowedTools));
       setTimeoutSecs(editTask.timeoutSecs);
       setNotifyWecom(Boolean(editTask.wecomNotification?.enabled));
       setWecomBotId(editTask.wecomNotification?.botId || '');
       setWecomPeerId(editTask.wecomNotification?.peerId || '');
       setUseManualWecomTarget(false);
-      setShowAdvanced(Boolean(budget || allowed || disallowed));
     } else {
       setName('');
       setCronExpr('0 9 * * 1-5');
@@ -630,7 +612,6 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
       setWecomBotId('');
       setWecomPeerId('');
       setUseManualWecomTarget(false);
-      setShowAdvanced(false);
     }
   }, [editTask, open]);
 
@@ -646,7 +627,7 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
   if (!open) return null;
 
   const doSave = async () => {
-    if (!canSave) return;
+    if (!name.trim() || !cronExpr.trim() || !prompt.trim() || !workDir.trim()) return;
     const parsedBudget = maxBudgetUsdInput.trim() ? Number(maxBudgetUsdInput.trim()) : null;
     if (maxBudgetUsdInput.trim() && (!Number.isFinite(parsedBudget) || Number(parsedBudget) <= 0)) {
       toast.error(t('cron.invalidBudget'));
@@ -680,112 +661,59 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
   };
 
   return createPortal(
-    <div
-      className="fixed inset-0 z-[130] flex items-center justify-center bg-black/45 backdrop-blur-[3px] p-3 sm:p-5"
-      onClick={onClose}
-    >
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="task-dialog-title"
-        className="relative flex w-full max-w-[560px] max-h-[min(88vh,760px)] flex-col overflow-hidden rounded-2xl border border-[hsl(var(--glass-border-light)/0.28)] frosted-panel glass-noise shadow-elevation-4"
+        className="relative rounded-2xl w-[calc(100%-1.5rem)] sm:w-[calc(100%-2rem)] md:w-[calc(100%-2.5rem)] lg:w-[calc(100%-3rem)] xl:w-[calc(100%-4rem)] 2xl:w-[calc(100%-5rem)] mx-auto max-w-md sm:max-w-lg md:max-w-xl lg:max-w-2xl xl:max-w-3xl 2xl:max-w-4xl max-h-[min(90vh,900px)] overflow-hidden shadow-elevation-4 border border-[hsl(var(--glass-border-light)/0.25)]"
+        style={{ background: 'hsl(var(--surface-overlay))' }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex shrink-0 items-center gap-3 border-b border-[hsl(var(--glass-border-light)/0.14)] px-4 py-3 sm:px-5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/12">
-            {editTask
-              ? <Pencil className="h-3.5 w-3.5 text-primary" />
-              : <Clock className="h-3.5 w-3.5 text-primary" />}
+        <div className="relative px-5 pt-5 pb-4">
+          <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-purple-500/5" />
+          <div className="relative flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-primary/15 flex items-center justify-center">
+                <Clock className="w-4 h-4 text-primary" />
+              </div>
+              <h2 id="task-dialog-title" className="text-sm font-semibold text-foreground">{editTask ? t('cron.editTask') : t('cron.addTask')}</h2>
+            </div>
+            <button onClick={onClose} aria-label={t('common.cancel')} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/[0.06] transition-colors">
+              <X className="w-4 h-4" />
+            </button>
           </div>
-          <div className="min-w-0 flex-1">
-            <h2 id="task-dialog-title" className="truncate text-[15px] font-semibold tracking-tight text-foreground">
-              {editTask ? t('cron.editTask') : t('cron.addTask')}
-            </h2>
-            <p className="truncate text-[11px] text-muted-foreground">
-              {editTask ? t('cron.editTaskHint') : t('cron.addTaskHint')}
-            </p>
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={onClose}
-            aria-label={t('common.cancel')}
-            className="h-8 w-8 shrink-0 text-muted-foreground"
-          >
-            <X className="h-4 w-4" />
-          </Button>
         </div>
 
-        {/* Scrollable form body */}
-        <div className="min-h-0 flex-1 space-y-3.5 overflow-y-auto px-4 py-3.5 sm:px-5">
-          {/* Essentials */}
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <label className={FIELD_LABEL_CLS} htmlFor="cron-task-name">{t('cron.taskName')}</label>
-              <input
-                id="cron-task-name"
-                className={INPUT_CLS}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder={t('cron.taskNamePlaceholder')}
-                autoFocus={!editTask}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className={FIELD_LABEL_CLS}>{t('cron.schedule')}</label>
-              <div className={SECTION_CLS}>
-                <CronEditor value={cronExpr} onChange={setCronExpr} />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className={FIELD_LABEL_CLS} htmlFor="cron-task-prompt">{t('cron.prompt')}</label>
-              <textarea
-                id="cron-task-prompt"
-                className={cn(INPUT_CLS, 'h-auto min-h-[88px] resize-y py-2 leading-relaxed')}
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder={t('cron.promptPlaceholder')}
-                rows={3}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className={FIELD_LABEL_CLS} htmlFor="cron-task-workdir">{t('cron.workingDir')}</label>
-              <div className="flex gap-1.5">
-                <input
-                  id="cron-task-workdir"
-                  className={cn(INPUT_CLS, 'min-w-0 flex-1 font-mono text-[12px]')}
-                  value={workDir}
-                  onChange={(e) => setWorkDir(e.target.value)}
-                  placeholder="/path/to/project"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="h-9 w-9 shrink-0"
-                  onClick={async () => {
-                    const d = await openDirectoryPicker();
-                    if (d) setWorkDir(d);
-                  }}
-                  aria-label={t('cron.workingDir')}
-                >
-                  <FolderOpen className="h-4 w-4" />
-                </Button>
-              </div>
+        {/* Form */}
+        <div className="px-5 pb-5 space-y-4 overflow-y-auto max-h-[calc(min(85vh,900px)-80px)]">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">{t('cron.taskName')}</label>
+            <input className={INPUT_CLS} value={name} onChange={(e) => setName(e.target.value)} placeholder={t('cron.taskNamePlaceholder')} />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">{t('cron.schedule')}</label>
+            <CronEditor value={cronExpr} onChange={setCronExpr} />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">{t('cron.prompt')}</label>
+            <textarea className={cn(INPUT_CLS, 'min-h-[80px] resize-y')} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('cron.promptPlaceholder')} rows={3} />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">{t('cron.workingDir')}</label>
+            <div className="flex gap-2">
+              <input className={cn(INPUT_CLS, 'flex-1 font-mono')} value={workDir} onChange={(e) => setWorkDir(e.target.value)} placeholder="/path/to/project" />
+              <button type="button" onClick={async () => { const d = await openDirectoryPicker(); if (d) setWorkDir(d); }} className="px-3 py-2 rounded-xl border border-black/[0.08] dark:border-white/[0.08] bg-black/[0.03] dark:bg-white/[0.06] text-foreground hover:bg-black/[0.06] dark:hover:bg-white/[0.1] transition-colors shrink-0">
+                <FolderOpen className="w-4 h-4" />
+              </button>
             </div>
           </div>
-
-          {/* Runtime */}
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="space-y-1.5">
-              <label className={FIELD_LABEL_CLS}>{t('cron.environment')}</label>
+              <label className="text-xs font-medium text-muted-foreground">{t('cron.environment')}</label>
               <Select value={envName || '__default__'} onValueChange={(v) => setEnvName(v === '__default__' ? '' : v)}>
-                <SelectTrigger className={SELECT_TRIGGER_CLS}>
+                <SelectTrigger className="w-full h-auto px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm">
                   <SelectValue placeholder={t('cron.envDefault')} />
                 </SelectTrigger>
                 <SelectContent className={MODAL_SELECT_CONTENT_CLS}>
@@ -795,24 +723,16 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <label className={FIELD_LABEL_CLS} htmlFor="cron-task-timeout">{t('cron.timeout')}</label>
-              <div className="flex items-center gap-1.5">
-                <input
-                  id="cron-task-timeout"
-                  type="number"
-                  className={cn(INPUT_CLS, 'tabular-nums')}
-                  value={timeoutSecs}
-                  onChange={(e) => setTimeoutSecs(Number(e.target.value) || 300)}
-                  min={30}
-                  max={3600}
-                />
-                <span className="shrink-0 text-2xs text-muted-foreground">{t('cron.timeoutUnit')}</span>
+              <label className="text-xs font-medium text-muted-foreground">{t('cron.timeout')}</label>
+              <div className="flex items-center gap-2">
+                <input type="number" className={INPUT_CLS} value={timeoutSecs} onChange={(e) => setTimeoutSecs(Number(e.target.value) || 300)} min={30} max={3600} />
+                <span className="text-2xs text-muted-foreground shrink-0">{t('cron.timeoutUnit')}</span>
               </div>
             </div>
             <div className="space-y-1.5">
-              <label className={FIELD_LABEL_CLS}>{t('cron.executionProfile')}</label>
+              <label className="text-xs font-medium text-muted-foreground">{t('cron.executionProfile')}</label>
               <Select value={executionProfile} onValueChange={(value) => setExecutionProfile(value as CronTask['executionProfile'])}>
-                <SelectTrigger className={SELECT_TRIGGER_CLS}>
+                <SelectTrigger className="w-full h-auto px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className={MODAL_SELECT_CONTENT_CLS}>
@@ -821,30 +741,41 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
                   <SelectItem value="autonomous">{t('cron.profileAutonomous')}</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-2xs text-muted-foreground">
+                {executionProfile === 'conservative'
+                  ? t('cron.profileConservativeDesc')
+                  : executionProfile === 'standard'
+                    ? t('cron.profileStandardDesc')
+                    : t('cron.profileAutonomousDesc')}
+              </p>
             </div>
           </div>
-          <p className="text-[11px] leading-snug text-muted-foreground">{profileHint}</p>
-
-          {/* Notification */}
-          <div className={cn(SECTION_CLS, 'space-y-2.5')}>
+          <div className="rounded-xl border border-black/[0.08] dark:border-white/[0.08] bg-black/[0.02] dark:bg-white/[0.03] p-3 space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5">
                   <Bell className="h-3.5 w-3.5 text-primary" />
                   <p className="text-xs font-medium text-foreground">{t('cron.resultNotification')}</p>
                 </div>
-                <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{t('cron.wecomNotificationDesc')}</p>
+                <p className="mt-1 text-2xs text-muted-foreground">{t('cron.wecomNotificationDesc')}</p>
               </div>
-              <Switch
-                checked={notifyWecom}
-                onCheckedChange={setNotifyWecom}
-                aria-label={t('cron.resultNotification')}
-              />
+              <button
+                type="button"
+                onClick={() => setNotifyWecom((value) => !value)}
+                className={cn(
+                  'shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-all active:scale-[0.97]',
+                  notifyWecom
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'border border-black/[0.08] dark:border-white/[0.12] text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {notifyWecom ? t('cron.wecomNotifyOn') : t('cron.wecomNotifyOff')}
+              </button>
             </div>
             {notifyWecom && (
-              <div className="space-y-2.5 border-t border-[hsl(var(--glass-border-light)/0.12)] pt-2.5">
+              <div className="space-y-3">
                 <div className="space-y-1.5">
-                  <label className={FIELD_LABEL_CLS}>{t('cron.wecomTarget')}</label>
+                  <label className="text-xs font-medium text-muted-foreground">{t('cron.wecomTarget')}</label>
                   <Select
                     value={selectedWecomTargetValue}
                     onValueChange={(value) => {
@@ -866,7 +797,7 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
                       }
                     }}
                   >
-                    <SelectTrigger className={SELECT_TRIGGER_CLS}>
+                    <SelectTrigger className="w-full h-auto px-3 py-2 rounded-xl bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-sm">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent className={MODAL_SELECT_CONTENT_CLS}>
@@ -879,22 +810,20 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
                   </Select>
                 </div>
                 {selectedWecomTargetValue === '__manual__' && (
-                  <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div className="space-y-1.5">
-                      <label className={FIELD_LABEL_CLS} htmlFor="cron-wecom-bot">{t('cron.wecomBotId')}</label>
+                      <label className="text-xs font-medium text-muted-foreground">{t('cron.wecomBotId')}</label>
                       <input
-                        id="cron-wecom-bot"
-                        className={cn(INPUT_CLS, 'font-mono text-[12px]')}
+                        className={cn(INPUT_CLS, 'font-mono')}
                         value={wecomBotId}
                         onChange={(e) => { setUseManualWecomTarget(true); setWecomBotId(e.target.value); }}
                         placeholder="aibot..."
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <label className={FIELD_LABEL_CLS} htmlFor="cron-wecom-peer">{t('cron.wecomPeerId')}</label>
+                      <label className="text-xs font-medium text-muted-foreground">{t('cron.wecomPeerId')}</label>
                       <input
-                        id="cron-wecom-peer"
-                        className={cn(INPUT_CLS, 'font-mono text-[12px]')}
+                        className={cn(INPUT_CLS, 'font-mono')}
                         value={wecomPeerId}
                         onChange={(e) => { setUseManualWecomTarget(true); setWecomPeerId(e.target.value); }}
                         placeholder="iveswen or group:chatid"
@@ -905,79 +834,56 @@ function TaskDialog({ open, onClose, onSave, editTask, environments }: {
               </div>
             )}
           </div>
-
-          {/* Advanced — progressive disclosure */}
-          <div className={SECTION_CLS}>
-            <button
-              type="button"
-              onClick={() => setShowAdvanced((v) => !v)}
-              className="flex w-full items-center gap-2 text-left"
-              aria-expanded={showAdvanced}
-            >
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium text-foreground">{t('cron.advancedOptions')}</p>
-                <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{t('cron.customToolPolicyDesc')}</p>
+          <div className="rounded-xl border border-black/[0.08] dark:border-white/[0.08] bg-black/[0.02] dark:bg-white/[0.03] p-3 space-y-3">
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-foreground">{t('cron.customToolPolicy')}</p>
+              <p className="text-2xs text-muted-foreground">{t('cron.customToolPolicyDesc')}</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">{t('cron.profileBudget')}</label>
+                <input
+                  type="number"
+                  min={0.01}
+                  step={0.01}
+                  className={INPUT_CLS}
+                  value={maxBudgetUsdInput}
+                  onChange={(e) => setMaxBudgetUsdInput(e.target.value)}
+                  placeholder={t('cron.profileBudgetPlaceholder')}
+                />
               </div>
-              <ChevronDown className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-150', showAdvanced && 'rotate-180')} />
-            </button>
-            {showAdvanced && (
-              <div className="mt-2.5 space-y-2.5 border-t border-[hsl(var(--glass-border-light)/0.12)] pt-2.5">
-                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-                  <div className="space-y-1.5">
-                    <label className={FIELD_LABEL_CLS} htmlFor="cron-budget">{t('cron.profileBudget')}</label>
-                    <input
-                      id="cron-budget"
-                      type="number"
-                      min={0.01}
-                      step={0.01}
-                      className={cn(INPUT_CLS, 'tabular-nums')}
-                      value={maxBudgetUsdInput}
-                      onChange={(e) => setMaxBudgetUsdInput(e.target.value)}
-                      placeholder={t('cron.profileBudgetPlaceholder')}
-                    />
-                  </div>
-                  <div className="space-y-1.5 sm:col-span-2">
-                    <label className={FIELD_LABEL_CLS} htmlFor="cron-allowed-tools">{t('cron.allowedTools')}</label>
-                    <textarea
-                      id="cron-allowed-tools"
-                      className={cn(INPUT_CLS, 'h-auto min-h-[64px] resize-y py-2 font-mono text-[12px]')}
-                      value={allowedToolsInput}
-                      onChange={(e) => setAllowedToolsInput(e.target.value)}
-                      placeholder={t('cron.toolListPlaceholder')}
-                      rows={2}
-                    />
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <label className={FIELD_LABEL_CLS} htmlFor="cron-disallowed-tools">{t('cron.disallowedTools')}</label>
-                  <textarea
-                    id="cron-disallowed-tools"
-                    className={cn(INPUT_CLS, 'h-auto min-h-[64px] resize-y py-2 font-mono text-[12px]')}
-                    value={disallowedToolsInput}
-                    onChange={(e) => setDisallowedToolsInput(e.target.value)}
-                    placeholder={t('cron.toolListPlaceholder')}
-                    rows={2}
-                  />
-                </div>
+              <div className="space-y-1.5 md:col-span-2">
+                <label className="text-xs font-medium text-muted-foreground">{t('cron.allowedTools')}</label>
+                <textarea
+                  className={cn(INPUT_CLS, 'min-h-[72px] resize-y')}
+                  value={allowedToolsInput}
+                  onChange={(e) => setAllowedToolsInput(e.target.value)}
+                  placeholder={t('cron.toolListPlaceholder')}
+                  rows={3}
+                />
               </div>
-            )}
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">{t('cron.disallowedTools')}</label>
+              <textarea
+                className={cn(INPUT_CLS, 'min-h-[72px] resize-y')}
+                value={disallowedToolsInput}
+                onChange={(e) => setDisallowedToolsInput(e.target.value)}
+                placeholder={t('cron.toolListPlaceholder')}
+                rows={3}
+              />
+            </div>
           </div>
-        </div>
-
-        {/* Sticky footer */}
-        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-[hsl(var(--glass-border-light)/0.14)] bg-[hsl(var(--surface-overlay)/0.72)] px-4 py-3 sm:px-5">
-          <Button type="button" variant="outline" size="sm" className="h-8 rounded-full px-3.5" onClick={onClose}>
-            {t('common.cancel')}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            className="h-8 rounded-full px-4"
-            onClick={doSave}
-            disabled={saving || !canSave}
-          >
-            {saving ? t('common.loading') : t('common.save')}
-          </Button>
+          <div className="flex justify-end gap-2.5 pt-3 border-t border-black/[0.06] dark:border-white/[0.06]">
+            <button className="px-4 py-[7px] text-[13px] font-medium rounded-full border border-black/[0.08] dark:border-white/[0.12] text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-all active:scale-[0.97]" onClick={onClose}>{t('common.cancel')}</button>
+            <button
+              onClick={doSave}
+              disabled={saving || !name.trim() || !prompt.trim() || !workDir.trim()}
+              className="px-4 py-[7px] text-[13px] font-medium rounded-full bg-primary text-white shadow-sm hover:bg-primary/90 transition-all active:scale-[0.97] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
+            >
+              {saving ? t('common.loading') : t('common.save')}
+            </button>
+          </div>
         </div>
       </div>
     </div>,
