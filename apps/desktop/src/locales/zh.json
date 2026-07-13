@@ -1394,7 +1394,20 @@
     "aiCreated": "任务已创建",
     "aiError": "生成失败",
     "needWorkingDir": "请先在设置中配置默认工作目录",
-    "goToSettings": "前往设置"
+    "goToSettings": "前往设置",
+    "openSession": "打开会话",
+    "openSessionUnavailable": "仅输出",
+    "sessionAvailableLive": "可打开 live 会话",
+    "sessionAvailableHistory": "可打开历史会话",
+    "sessionUnavailable": "无可恢复会话，仅保留输出",
+    "viewAllRuns": "查看全部",
+    "showLessRuns": "收起",
+    "recentRuns": "最近执行",
+    "runsToday": "今天",
+    "runs7d": "近 7 天",
+    "runsAll": "全部",
+    "runCount": "{n} 条",
+    "timelineDotLabel": "{name} · {status}"
   },
   "projectPicker": {
     "title": "选择项目",

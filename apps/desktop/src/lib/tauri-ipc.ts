@@ -1486,6 +1486,8 @@ export interface CronTaskRun {
   durationMs?: number | null;
   runtimeId?: string | null;
   runtimeKind?: string | null;
+  providerSessionId?: string | null;
+  workingDir?: string | null;
 }
 
 export interface CronRunDetail {
