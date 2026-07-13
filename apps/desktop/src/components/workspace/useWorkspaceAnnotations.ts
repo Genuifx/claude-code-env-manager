@@ -6,6 +6,7 @@ import {
   normalizeStoredWorkspaceAnnotations,
   normalizeWorkspaceSelection,
   type WorkspaceAnnotation,
+  type WorkspaceAnnotationAnchor,
 } from './workspaceAnnotationModel';
 
 const STORAGE_PREFIX = 'ccem:workspace-annotations:v1:';
@@ -89,7 +90,11 @@ export function useWorkspaceAnnotations(sessionKey: string | null) {
     });
   }, [sessionKey]);
 
-  const addAnnotation = useCallback((quote: string, note: string): boolean => {
+  const addAnnotation = useCallback((
+    quote: string,
+    note: string,
+    anchor?: WorkspaceAnnotationAnchor,
+  ): boolean => {
     const normalizedQuote = normalizeWorkspaceSelection(quote);
     const normalizedNote = note.trim();
     if (
@@ -107,6 +112,7 @@ export function useWorkspaceAnnotations(sessionKey: string | null) {
       quote: normalizedQuote,
       note: normalizedNote,
       createdAt: new Date().toISOString(),
+      ...(anchor ? { anchor } : {}),
     }]);
     return true;
   }, [annotationCharCount, annotations.length, updateItems]);

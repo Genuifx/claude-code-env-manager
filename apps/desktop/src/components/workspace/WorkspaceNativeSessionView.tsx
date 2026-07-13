@@ -2782,13 +2782,17 @@ export function WorkspaceNativeSessionView({
         </Suspense>
       ) : null}
 
-      {!isTerminalStatus(session.status) ? (
-        <WorkspaceTranscriptSelection
-          rootRef={containerRef}
-          canAdd={sessionAnnotations.canAddAnnotation}
-          onAdd={sessionAnnotations.addAnnotation}
-        />
-      ) : null}
+      <WorkspaceTranscriptSelection
+        rootRef={containerRef}
+        scopeKey={`live:${session.runtime_id}`}
+        isActive={isVisible}
+        canCreate={!isTerminalStatus(session.status)}
+        canAdd={sessionAnnotations.canAddAnnotation}
+        annotations={sessionAnnotations.annotations}
+        onAdd={sessionAnnotations.addAnnotation}
+        onUpdate={sessionAnnotations.updateAnnotation}
+        onRemove={sessionAnnotations.removeAnnotation}
+      />
 
       <ScrollArea viewportRef={containerRef} className="workspace-transcript-scroll flex-1 bg-background/30">
         <div className="mx-auto max-w-[960px] px-8 py-8">

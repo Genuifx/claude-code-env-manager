@@ -2480,7 +2480,10 @@ export function Workspace({
               onActiveSegmentChange={setActiveSegment}
               isLoadingMessages={isLoadingMessages}
               canAddAnnotation={selectedHistorySupportsInline && historyAnnotations.canAddAnnotation}
+              annotations={historyAnnotations.annotations}
               onAddAnnotation={selectedHistorySupportsInline ? historyAnnotations.addAnnotation : undefined}
+              onUpdateAnnotation={selectedHistorySupportsInline ? historyAnnotations.updateAnnotation : undefined}
+              onRemoveAnnotation={selectedHistorySupportsInline ? historyAnnotations.removeAnnotation : undefined}
             />
           </WorkspaceHistoryErrorBoundary>
         </Suspense>

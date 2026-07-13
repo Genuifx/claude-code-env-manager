@@ -105,20 +105,61 @@ test('stored annotations enforce a total prompt budget', async () => {
   assert.ok(normalized.length < records.length);
 });
 
+test('stored annotations preserve valid transcript anchors and discard malformed anchors only', async () => {
+  const { normalizeStoredWorkspaceAnnotations } = await importWorkspaceAnnotations();
+  const normalized = normalizeStoredWorkspaceAnnotations([
+    {
+      id: 'anchored',
+      quote: 'selected text',
+      note: 'change this',
+      createdAt: '2026-07-13T00:00:00.000Z',
+      anchor: {
+        startItemKey: 'message-a-segment-0-message',
+        startOffset: 4,
+        endItemKey: 'message-a-segment-0-message',
+        endOffset: 17,
+      },
+    },
+    {
+      id: 'legacy',
+      quote: 'legacy text',
+      note: 'keep working',
+      createdAt: '2026-07-13T00:00:01.000Z',
+      anchor: { startItemKey: '', startOffset: -1 },
+    },
+  ]);
+
+  assert.deepEqual(normalized[0].anchor, {
+    startItemKey: 'message-a-segment-0-message',
+    startOffset: 4,
+    endItemKey: 'message-a-segment-0-message',
+    endOffset: 17,
+  });
+  assert.equal('anchor' in normalized[1], false);
+});
+
 test('live and history workspace paths wire transcript selections into successful composer sends', async () => {
-  const [composerSource, liveSource, historySource, detailSource] = await Promise.all([
+  const [composerSource, liveSource, historySource, detailSource, annotationSource] = await Promise.all([
     fs.readFile(path.join(desktopDir, 'src', 'components', 'workspace', 'WorkspaceSessionComposer.tsx'), 'utf8'),
     fs.readFile(path.join(desktopDir, 'src', 'components', 'workspace', 'WorkspaceNativeSessionView.tsx'), 'utf8'),
     fs.readFile(path.join(desktopDir, 'src', 'pages', 'Workspace.tsx'), 'utf8'),
     fs.readFile(path.join(desktopDir, 'src', 'components', 'workspace', 'WorkspaceConversationDetail.tsx'), 'utf8'),
+    fs.readFile(path.join(desktopDir, 'src', 'components', 'workspace', 'WorkspaceAnnotations.tsx'), 'utf8'),
   ]);
 
   assert.match(composerSource, /text = buildComposerPromptWithAnnotations\(text, annotations\)/);
   assert.match(composerSource, /if \(result !== false\)[\s\S]*onAnnotationsSent\?\.\(\)/);
   assert.match(liveSource, /composerHasDraft \|\| sessionAnnotations\.annotations\.length > 0/);
   assert.match(liveSource, /onAdd=\{sessionAnnotations\.addAnnotation\}/);
+  assert.match(liveSource, /isActive=\{isVisible\}/);
+  assert.match(liveSource, /annotations=\{sessionAnnotations\.annotations\}/);
   assert.match(liveSource, /onAnnotationsSent=\{sessionAnnotations\.clearAnnotations\}/);
   assert.match(historySource, /onAddAnnotation=\{selectedHistorySupportsInline \? historyAnnotations\.addAnnotation : undefined\}/);
+  assert.match(historySource, /annotations=\{historyAnnotations\.annotations\}/);
   assert.match(historySource, /onAnnotationsSent=\{historyAnnotations\.clearAnnotations\}/);
   assert.match(detailSource, /<WorkspaceTranscriptSelection/);
+  assert.match(annotationSource, /scopeKey/);
+  assert.match(annotationSource, /data-workspace-annotation-marker/);
+  assert.match(annotationSource, /group-hover:opacity-100/);
+  assert.match(annotationSource, /candidate\?\.editing \? candidate\.rects/);
 });

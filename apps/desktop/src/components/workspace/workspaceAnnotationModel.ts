@@ -2,12 +2,22 @@ export const MAX_WORKSPACE_SELECTION_CHARS = 12_000;
 export const MAX_WORKSPACE_ANNOTATION_NOTE_CHARS = 4_000;
 export const MAX_WORKSPACE_ANNOTATION_TOTAL_CHARS = 60_000;
 export const MAX_WORKSPACE_ANNOTATIONS = 20;
+const MAX_WORKSPACE_ANNOTATION_ITEM_KEY_CHARS = 512;
+const MAX_WORKSPACE_ANNOTATION_ANCHOR_OFFSET = 1_000_000;
+
+export interface WorkspaceAnnotationAnchor {
+  startItemKey: string;
+  startOffset: number;
+  endItemKey: string;
+  endOffset: number;
+}
 
 export interface WorkspaceAnnotation {
   id: string;
   quote: string;
   note: string;
   createdAt: string;
+  anchor?: WorkspaceAnnotationAnchor;
 }
 
 export function normalizeWorkspaceSelection(value: string): string | null {
@@ -39,6 +49,41 @@ function isWorkspaceAnnotation(value: unknown): value is WorkspaceAnnotation {
     && candidate.createdAt.length > 0;
 }
 
+function normalizeWorkspaceAnnotationAnchor(value: unknown): WorkspaceAnnotationAnchor | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const candidate = value as Partial<WorkspaceAnnotationAnchor>;
+  const validItemKey = (itemKey: unknown): itemKey is string => (
+    typeof itemKey === 'string'
+    && itemKey.length > 0
+    && itemKey.length <= MAX_WORKSPACE_ANNOTATION_ITEM_KEY_CHARS
+  );
+  const validOffset = (offset: unknown): offset is number => (
+    typeof offset === 'number'
+    && Number.isInteger(offset)
+    && offset >= 0
+    && offset <= MAX_WORKSPACE_ANNOTATION_ANCHOR_OFFSET
+  );
+
+  if (
+    !validItemKey(candidate.startItemKey)
+    || !validItemKey(candidate.endItemKey)
+    || !validOffset(candidate.startOffset)
+    || !validOffset(candidate.endOffset)
+  ) {
+    return undefined;
+  }
+
+  return {
+    startItemKey: candidate.startItemKey,
+    startOffset: candidate.startOffset,
+    endItemKey: candidate.endItemKey,
+    endOffset: candidate.endOffset,
+  };
+}
+
 export function normalizeStoredWorkspaceAnnotations(value: unknown): WorkspaceAnnotation[] {
   if (!Array.isArray(value)) {
     return [];
@@ -57,11 +102,16 @@ export function normalizeStoredWorkspaceAnnotations(value: unknown): WorkspaceAn
       retainedChars += nextChars;
       return true;
     })
-    .map((annotation) => ({
-      ...annotation,
-      quote: annotation.quote.trim(),
-      note: annotation.note.trim(),
-    }));
+    .map((annotation) => {
+      const anchor = normalizeWorkspaceAnnotationAnchor(annotation.anchor);
+      return {
+        id: annotation.id,
+        quote: annotation.quote.trim(),
+        note: annotation.note.trim(),
+        createdAt: annotation.createdAt,
+        ...(anchor ? { anchor } : {}),
+      };
+    });
 }
 
 function escapeXml(value: string): string {

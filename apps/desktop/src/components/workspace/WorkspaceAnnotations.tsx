@@ -16,41 +16,212 @@ import {
   MAX_WORKSPACE_SELECTION_CHARS,
   normalizeWorkspaceSelection,
   type WorkspaceAnnotation,
+  type WorkspaceAnnotationAnchor,
 } from './workspaceAnnotationModel';
+import {
+  captureWorkspaceAnnotationAnchor,
+  resolveWorkspaceAnnotationRange,
+} from './workspaceAnnotationAnchors';
+
+interface ViewportRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  right: number;
+  bottom: number;
+}
 
 interface SelectionCandidate {
   quote: string;
+  anchor: WorkspaceAnnotationAnchor;
+  rects: ViewportRect[];
   left: number;
   top: number;
   editing: boolean;
 }
 
+interface AnnotationPlacement {
+  annotation: WorkspaceAnnotation;
+  index: number;
+  rects: ViewportRect[];
+  markerLeft: number;
+  markerTop: number;
+}
+
 interface WorkspaceTranscriptSelectionProps {
   rootRef: RefObject<HTMLElement | null>;
+  scopeKey: string;
+  isActive?: boolean;
+  canCreate?: boolean;
   canAdd: boolean;
-  onAdd: (quote: string, note: string) => boolean;
+  annotations: WorkspaceAnnotation[];
+  onAdd: (quote: string, note: string, anchor?: WorkspaceAnnotationAnchor) => boolean;
+  onUpdate: (id: string, note: string) => void;
+  onRemove: (id: string) => void;
 }
 
 function selectionNodeIsInside(root: HTMLElement, node: Node | null): boolean {
   return Boolean(node && (node === root || root.contains(node)));
 }
 
+function copyRect(rect: DOMRect): ViewportRect {
+  return {
+    left: rect.left,
+    top: rect.top,
+    width: rect.width,
+    height: rect.height,
+    right: rect.right,
+    bottom: rect.bottom,
+  };
+}
+
+function visibleRangeRects(range: Range, root: HTMLElement): ViewportRect[] {
+  const rootRect = root.getBoundingClientRect();
+  return Array.from(range.getClientRects())
+    .filter((rect) => (
+      rect.width > 0
+      && rect.height > 0
+      && rect.bottom >= rootRect.top
+      && rect.top <= rootRect.bottom
+      && rect.right >= rootRect.left
+      && rect.left <= rootRect.right
+    ))
+    .map((rect) => {
+      const left = Math.max(rect.left, rootRect.left);
+      const top = Math.max(rect.top, rootRect.top);
+      const right = Math.min(rect.right, rootRect.right);
+      const bottom = Math.min(rect.bottom, rootRect.bottom);
+      return copyRect(new DOMRect(left, top, Math.max(0, right - left), Math.max(0, bottom - top)));
+    })
+    .filter((rect) => rect.width > 0 && rect.height > 0);
+}
+
+function useAnnotationPlacements(
+  rootRef: RefObject<HTMLElement | null>,
+  annotations: WorkspaceAnnotation[],
+  isActive: boolean,
+): AnnotationPlacement[] {
+  const [placements, setPlacements] = useState<AnnotationPlacement[]>([]);
+  const annotationKey = useMemo(
+    () => annotations.map((annotation) => [
+      annotation.id,
+      annotation.quote,
+      annotation.anchor?.startItemKey ?? '',
+      annotation.anchor?.startOffset ?? '',
+      annotation.anchor?.endItemKey ?? '',
+      annotation.anchor?.endOffset ?? '',
+    ].join(':')).join('|'),
+    [annotations],
+  );
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || !isActive) {
+      setPlacements([]);
+      return;
+    }
+
+    let frame: number | null = null;
+    const refresh = () => {
+      frame = null;
+      const next = annotations.flatMap<AnnotationPlacement>((annotation, index) => {
+        const range = resolveWorkspaceAnnotationRange(root, annotation);
+        if (!range) {
+          return [];
+        }
+        const rects = visibleRangeRects(range, root);
+        const lastRect = rects[rects.length - 1];
+        if (!lastRect) {
+          return [];
+        }
+        return [{
+          annotation,
+          index,
+          rects,
+          markerLeft: Math.max(12, Math.min(window.innerWidth - 32, lastRect.right + 8)),
+          markerTop: Math.max(8, Math.min(window.innerHeight - 28, lastRect.top - 2)),
+        }];
+      });
+
+      next.sort((left, right) => left.markerTop - right.markerTop);
+      next.forEach((placement, index) => {
+        const previous = next[index - 1];
+        if (
+          previous
+          && Math.abs(placement.markerLeft - previous.markerLeft) < 30
+          && placement.markerTop - previous.markerTop < 24
+        ) {
+          placement.markerTop = Math.min(window.innerHeight - 28, previous.markerTop + 24);
+        }
+      });
+      setPlacements(next);
+    };
+    const scheduleRefresh = () => {
+      if (frame !== null) {
+        cancelAnimationFrame(frame);
+      }
+      frame = requestAnimationFrame(refresh);
+    };
+
+    refresh();
+    root.addEventListener('scroll', scheduleRefresh, { passive: true });
+    window.addEventListener('resize', scheduleRefresh);
+    const mutationObserver = new MutationObserver(scheduleRefresh);
+    mutationObserver.observe(root, { childList: true, subtree: true, characterData: true });
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(scheduleRefresh);
+    resizeObserver?.observe(root);
+
+    return () => {
+      if (frame !== null) {
+        cancelAnimationFrame(frame);
+      }
+      root.removeEventListener('scroll', scheduleRefresh);
+      window.removeEventListener('resize', scheduleRefresh);
+      mutationObserver.disconnect();
+      resizeObserver?.disconnect();
+    };
+  }, [annotationKey, annotations, isActive, rootRef]);
+
+  return placements;
+}
+
 export function WorkspaceTranscriptSelection({
   rootRef,
+  scopeKey,
+  isActive = true,
+  canCreate = true,
   canAdd,
+  annotations,
   onAdd,
+  onUpdate,
+  onRemove,
 }: WorkspaceTranscriptSelectionProps) {
   const { t } = useLocale();
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const savedEditorRef = useRef<HTMLDivElement | null>(null);
   const [candidate, setCandidate] = useState<SelectionCandidate | null>(null);
   const [note, setNote] = useState('');
+  const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
+  const [editingAnnotationNote, setEditingAnnotationNote] = useState('');
+  const placements = useAnnotationPlacements(rootRef, annotations, isActive);
 
   const dismiss = useCallback(() => {
     setCandidate(null);
     setNote('');
   }, []);
 
+  const dismissSavedEditor = useCallback(() => {
+    setEditingAnnotationId(null);
+    setEditingAnnotationNote('');
+  }, []);
+
   const captureSelection = useCallback((event?: Event) => {
+    if (!isActive || !canCreate) {
+      return;
+    }
     const target = event?.target;
     if (target instanceof Element && target.closest('[data-workspace-selection-action]')) {
       return;
@@ -85,24 +256,30 @@ export function WorkspaceTranscriptSelection({
       return;
     }
 
-    const rect = selection.getRangeAt(0).getBoundingClientRect();
-    if (rect.width === 0 && rect.height === 0) {
+    const range = selection.getRangeAt(0);
+    const anchor = captureWorkspaceAnnotationAnchor(root, range);
+    const rects = visibleRangeRects(range, root);
+    const rect = range.getBoundingClientRect();
+    if (!anchor || rects.length === 0 || (rect.width === 0 && rect.height === 0)) {
       return;
     }
     setCandidate({
       quote,
+      anchor,
+      rects,
       left: Math.max(124, Math.min(window.innerWidth - 124, rect.left + rect.width / 2)),
       top: Math.max(12, Math.min(window.innerHeight - 72, rect.bottom + 8)),
       editing: false,
     });
     setNote('');
-  }, [candidate?.editing, dismiss, rootRef]);
+  }, [canCreate, candidate?.editing, dismiss, isActive, rootRef]);
 
   useEffect(() => {
     const handleMouseUp = (event: MouseEvent) => captureSelection(event);
     const handleKeyUp = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         dismiss();
+        dismissSavedEditor();
         return;
       }
       if (event.key.startsWith('Arrow') || event.key === 'Shift') {
@@ -118,7 +295,13 @@ export function WorkspaceTranscriptSelection({
       document.removeEventListener('keyup', handleKeyUp, true);
       window.removeEventListener('resize', handleResize);
     };
-  }, [captureSelection, dismiss]);
+  }, [captureSelection, dismiss, dismissSavedEditor]);
+
+  useEffect(() => {
+    dismiss();
+    dismissSavedEditor();
+    window.getSelection()?.removeAllRanges();
+  }, [dismiss, dismissSavedEditor, isActive, scopeKey]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -142,90 +325,239 @@ export function WorkspaceTranscriptSelection({
     return () => document.removeEventListener('pointerdown', handlePointerDown, true);
   }, [candidate?.editing, dismiss]);
 
-  if (!candidate || typeof document === 'undefined') {
+  useEffect(() => {
+    if (!editingAnnotationId) {
+      return;
+    }
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (
+        !savedEditorRef.current?.contains(target)
+        && !(target instanceof Element && target.closest('[data-workspace-annotation-marker]'))
+      ) {
+        dismissSavedEditor();
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    return () => document.removeEventListener('pointerdown', handlePointerDown, true);
+  }, [dismissSavedEditor, editingAnnotationId]);
+
+  if (!isActive || typeof document === 'undefined') {
     return null;
   }
 
   const save = () => {
-    if (!note.trim()) {
+    if (!candidate || !note.trim()) {
       return;
     }
-    if (onAdd(candidate.quote, note)) {
+    if (onAdd(candidate.quote, note, candidate.anchor)) {
       window.getSelection()?.removeAllRanges();
       dismiss();
     }
   };
 
+  const editingPlacement = editingAnnotationId
+    ? placements.find((placement) => placement.annotation.id === editingAnnotationId) ?? null
+    : null;
+
   return createPortal(
-    <div
-      ref={panelRef}
-      data-workspace-selection-action
-      className={cn(
-        'fixed z-[100] -translate-x-1/2 rounded-2xl border border-border/45 bg-popover shadow-xl',
-        candidate.editing ? 'w-[min(420px,calc(100vw-24px))] p-3' : 'p-1',
-      )}
-      style={{ left: candidate.left, top: candidate.top }}
-      onMouseDown={(event) => {
-        if (!candidate.editing) {
-          event.preventDefault();
-        }
-      }}
-    >
-      {candidate.editing ? (
-        <div className="space-y-2.5">
-          <div className="flex items-start gap-2">
-            <MessageSquareQuote className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-            <p className="line-clamp-3 text-xs leading-5 text-foreground/80">
-              {candidate.quote}
+    <>
+      <div className="pointer-events-none fixed inset-0 z-[70]" aria-hidden="true">
+        {placements.flatMap((placement) => placement.rects.map((rect, rectIndex) => (
+          <span
+            key={`${placement.annotation.id}:${rectIndex}`}
+            className="fixed rounded-[2px] bg-primary/15 ring-1 ring-inset ring-primary/15"
+            style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
+          />
+        )))}
+        {candidate?.editing ? candidate.rects.map((rect, index) => (
+          <span
+            key={`candidate:${index}`}
+            className="fixed rounded-[2px] bg-primary/20 ring-1 ring-inset ring-primary/25"
+            style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
+          />
+        )) : null}
+      </div>
+
+      {placements.map((placement) => {
+        const tooltipOnLeft = placement.markerLeft > window.innerWidth - 300;
+        return (
+          <div
+            key={placement.annotation.id}
+            data-workspace-selection-action
+            data-workspace-annotation-marker
+            className="group fixed z-[90]"
+            style={{ left: placement.markerLeft, top: placement.markerTop }}
+          >
+            <button
+              type="button"
+              aria-label={t('workspace.composerAnnotationEdit')}
+              className="flex h-6 min-w-6 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground shadow-[0_4px_14px_rgba(0,122,255,0.28)] transition-transform hover:scale-105"
+              onClick={() => {
+                setEditingAnnotationId(placement.annotation.id);
+                setEditingAnnotationNote(placement.annotation.note);
+                dismiss();
+              }}
+            >
+              {placement.index + 1}
+            </button>
+            {editingAnnotationId !== placement.annotation.id ? (
+              <div
+                className={cn(
+                  'pointer-events-none absolute top-1/2 w-[min(300px,calc(100vw-56px))] -translate-y-1/2 rounded-xl border border-border/45 bg-popover px-3 py-2 text-xs leading-5 text-foreground opacity-0 shadow-xl transition-opacity group-hover:opacity-100',
+                  tooltipOnLeft ? 'right-8' : 'left-8',
+                )}
+              >
+                <p className="line-clamp-4 whitespace-pre-wrap">{placement.annotation.note}</p>
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+
+      {editingPlacement ? (
+        <div
+          ref={savedEditorRef}
+          data-workspace-selection-action
+          className="fixed z-[100] w-[min(340px,calc(100vw-24px))] rounded-2xl border border-border/45 bg-popover p-3 shadow-xl"
+          style={{
+            left: Math.max(12, Math.min(
+              window.innerWidth - Math.min(340, window.innerWidth - 24) - 12,
+              editingPlacement.markerLeft > window.innerWidth - 380
+                ? editingPlacement.markerLeft - 348
+                : editingPlacement.markerLeft + 30,
+            )),
+            top: Math.max(12, Math.min(window.innerHeight - 190, editingPlacement.markerTop - 12)),
+          }}
+        >
+          <div className="mb-2 flex items-start gap-2">
+            <MessageSquareQuote className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            <p className="line-clamp-3 text-[11px] leading-4.5 text-muted-foreground">
+              {editingPlacement.annotation.quote}
             </p>
           </div>
           <textarea
             autoFocus
             maxLength={4_000}
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
+            value={editingAnnotationNote}
+            onChange={(event) => setEditingAnnotationNote(event.target.value)}
             onKeyDown={(event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && editingAnnotationNote.trim()) {
                 event.preventDefault();
-                save();
+                onUpdate(editingPlacement.annotation.id, editingAnnotationNote);
+                dismissSavedEditor();
               }
             }}
-            placeholder={t('workspace.selectionAnnotationPlaceholder')}
-            className="min-h-[72px] w-full resize-none rounded-xl border border-input bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+            className="min-h-[72px] w-full resize-none rounded-xl border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
           />
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] text-muted-foreground">
-              {t('workspace.selectionAnnotationSubmitHint')}
-            </span>
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <button
+              type="button"
+              className="rounded-full p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              aria-label={t('workspace.composerAnnotationRemove')}
+              onClick={() => {
+                onRemove(editingPlacement.annotation.id);
+                dismissSavedEditor();
+              }}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
             <div className="flex gap-1.5">
-              <Button type="button" size="sm" variant="ghost" className="h-7 rounded-full px-3" onClick={dismiss}>
+              <Button type="button" size="sm" variant="ghost" className="h-7 rounded-full px-3" onClick={dismissSavedEditor}>
                 {t('common.cancel')}
               </Button>
-              <Button type="button" size="sm" className="h-7 rounded-full px-3" disabled={!note.trim()} onClick={save}>
-                <Check className="mr-1 h-3.5 w-3.5" />
-                {t('workspace.selectionAnnotationAdd')}
+              <Button
+                type="button"
+                size="sm"
+                className="h-7 rounded-full px-3"
+                disabled={!editingAnnotationNote.trim()}
+                onClick={() => {
+                  onUpdate(editingPlacement.annotation.id, editingAnnotationNote);
+                  dismissSavedEditor();
+                }}
+              >
+                {t('common.save')}
               </Button>
             </div>
           </div>
         </div>
-      ) : (
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="h-8 rounded-xl px-3"
-          disabled={!canAdd}
-          onClick={() => setCandidate((current) => current ? {
-            ...current,
-            editing: true,
-            top: Math.max(12, Math.min(current.top, window.innerHeight - 230)),
-          } : current)}
+      ) : null}
+
+      {candidate ? (
+        <div
+          ref={panelRef}
+          data-workspace-selection-action
+          className={cn(
+            'fixed z-[100] -translate-x-1/2 rounded-2xl border border-border/45 bg-popover shadow-xl',
+            candidate.editing ? 'w-[min(420px,calc(100vw-24px))] p-3' : 'p-1',
+          )}
+          style={{ left: candidate.left, top: candidate.top }}
+          onMouseDown={(event) => {
+            if (!candidate.editing) {
+              event.preventDefault();
+            }
+          }}
         >
-          <Plus className="mr-1.5 h-3.5 w-3.5" />
-          {t(canAdd ? 'workspace.selectionAddToTask' : 'workspace.selectionAnnotationLimit')}
-        </Button>
-      )}
-    </div>,
+          {candidate.editing ? (
+            <div className="space-y-2.5">
+              <div className="flex items-start gap-2">
+                <MessageSquareQuote className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                <p className="line-clamp-3 text-xs leading-5 text-foreground/80">
+                  {candidate.quote}
+                </p>
+              </div>
+              <textarea
+                autoFocus
+                maxLength={4_000}
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+                onKeyDown={(event) => {
+                  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                    event.preventDefault();
+                    save();
+                  }
+                }}
+                placeholder={t('workspace.selectionAnnotationPlaceholder')}
+                className="min-h-[72px] w-full resize-none rounded-xl border border-input bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+              />
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] text-muted-foreground">
+                  {t('workspace.selectionAnnotationSubmitHint')}
+                </span>
+                <div className="flex gap-1.5">
+                  <Button type="button" size="sm" variant="ghost" className="h-7 rounded-full px-3" onClick={dismiss}>
+                    {t('common.cancel')}
+                  </Button>
+                  <Button type="button" size="sm" className="h-7 rounded-full px-3" disabled={!note.trim()} onClick={save}>
+                    <Check className="mr-1 h-3.5 w-3.5" />
+                    {t('workspace.selectionAnnotationAdd')}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 rounded-xl px-3"
+              disabled={!canAdd}
+              onClick={() => {
+                setCandidate((current) => current ? {
+                  ...current,
+                  editing: true,
+                  top: Math.max(12, Math.min(current.top, window.innerHeight - 230)),
+                } : current);
+                window.getSelection()?.removeAllRanges();
+              }}
+            >
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              {t(canAdd ? 'workspace.selectionAddToTask' : 'workspace.selectionAnnotationLimit')}
+            </Button>
+          )}
+        </div>
+      ) : null}
+    </>,
     document.body,
   );
 }
