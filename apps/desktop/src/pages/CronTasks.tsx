@@ -1264,6 +1264,8 @@ export function CronTasks({
     }
   };
 
+  const hasTaskColumn = upcomingTasks.length > 0 || disabledTasks.length > 0;
+
   return (
     <div ref={cronMotionRef} className="space-y-4">
       {/* Tmux warning */}
@@ -1334,143 +1336,167 @@ export function CronTasks({
       ) : cronTasks.length === 0 ? (
         <CronEmptyState onAdd={handleAdd} onAi={handleAiCreate} />
       ) : (
-        <div className="space-y-5">
-          {/* Timeline bar */}
+        <div className="space-y-4">
+          {/* Timeline bar — always full width */}
           <TimelineBar tasks={cronTasks} runs={cronRuns} onSelectRun={openRunDrawer} />
 
-          {/* Upcoming section */}
-          {upcomingTasks.length > 0 && (
-            <div data-cron-motion-section className="space-y-2.5">
-              <div className="flex items-center gap-2">
-                <Zap className="w-3.5 h-3.5 text-primary" />
-                <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">{t('cron.upcoming')}</h3>
-                <span className="text-[10px] font-medium text-primary bg-primary/10 px-1.5 py-0.5 rounded-full tabular-nums">{upcomingTasks.length}</span>
-              </div>
-              <div className="space-y-1.5">
-                {upcomingTasks.map((task) => (
-                  <TimelineTaskCard
-                    key={task.id}
-                    task={task}
-                    runs={cronRuns[task.id] || []}
-                    nextRun={nextRunTimes[task.id]}
-                    expanded={expandedTaskId === task.id}
-                    onToggleExpand={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
-                    onEdit={() => handleEdit(task)}
-                    onDelete={() => setPendingDelete(task)}
-                    onToggleEnabled={() => toggleCronTask(task.id)}
-                    onRetry={() => handleRetry(task.id)}
-                    onViewRun={(runId) => openRunDrawer(task.id, runId)}
-                    onOpenSession={(run) => openRunSession(task, run)}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Disabled tasks */}
-          {disabledTasks.length > 0 && (
-            <div data-cron-motion-section className="space-y-2.5">
-              <div className="flex items-center gap-2">
-                <Timer className="w-3.5 h-3.5 text-muted-foreground" />
-                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{t('cron.disabled')}</h3>
-                <span className="text-[10px] font-medium text-muted-foreground bg-muted-foreground/10 px-1.5 py-0.5 rounded-full tabular-nums">{disabledTasks.length}</span>
-              </div>
-              <div className="space-y-1.5">
-                {disabledTasks.map((task) => (
-                  <TimelineTaskCard
-                    key={task.id}
-                    task={task}
-                    runs={cronRuns[task.id] || []}
-                    expanded={expandedTaskId === task.id}
-                    onToggleExpand={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
-                    onEdit={() => handleEdit(task)}
-                    onDelete={() => setPendingDelete(task)}
-                    onToggleEnabled={() => toggleCronTask(task.id)}
-                    onRetry={() => handleRetry(task.id)}
-                    onViewRun={(runId) => openRunDrawer(task.id, runId)}
-                    onOpenSession={(run) => openRunSession(task, run)}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Recent runs section */}
-          <div data-cron-motion-section className="space-y-2.5">
-            <div className="flex items-center gap-2 flex-wrap">
-              <History className="w-3.5 h-3.5 text-muted-foreground" />
-              <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">{t('cron.recentRuns')}</h3>
-              <span className="text-[10px] font-medium text-muted-foreground bg-muted-foreground/10 px-1.5 py-0.5 rounded-full tabular-nums">{recentCompletedRuns.length}</span>
-              <div className="ml-auto flex items-center gap-1">
-                {([
-                  ['today', 'cron.runsToday'],
-                  ['7d', 'cron.runs7d'],
-                  ['all', 'cron.runsAll'],
-                ] as const).map(([key, labelKey]) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setRecentRange(key)}
-                    className={cn(
-                      'px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors',
-                      recentRange === key
-                        ? 'bg-primary/15 text-primary'
-                        : 'text-muted-foreground hover:bg-foreground/[0.05]',
-                    )}
-                  >
-                    {t(labelKey)}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {recentCompletedRuns.length === 0 ? (
-              <div className="glass-subtle glass-noise rounded-lg px-4 py-3 text-xs text-muted-foreground">
-                {t('cron.noRuns')}
-              </div>
-            ) : (
-              <div className="space-y-1.5">
-                {recentCompletedRuns.map(({ task, run }) => {
-                  const session = getCronRunSessionAvailability({
-                    id: run.id,
-                    runtimeId: run.runtimeId,
-                    providerSessionId: run.providerSessionId,
-                    workingDir: run.workingDir ?? task.workingDir,
-                    status: run.status,
-                  });
-                  return (
-                    <div key={run.id} data-cron-motion-run data-cron-run-id={run.id} className="group/run glass-subtle glass-noise rounded-lg px-3 py-1.5 flex items-center gap-2">
-                      <StatusBadge status={run.status} />
-                      <span className="text-xs font-medium text-foreground flex-1 min-w-0 truncate">{task.name}</span>
-                      <span className="text-2xs text-muted-foreground tabular-nums shrink-0">{formatTime(run.finishedAt || run.startedAt)}</span>
-                      <span className="text-2xs text-muted-foreground tabular-nums shrink-0">{formatDuration(run.durationMs)}</span>
-                      <button
-                        type="button"
-                        onClick={() => openRunSession(task, run)}
-                        disabled={!session.canOpen}
-                        className={cn(
-                          'inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] shrink-0 transition-colors',
-                          session.canOpen
-                            ? 'text-primary hover:bg-primary/10'
-                            : 'text-muted-foreground/50 cursor-not-allowed',
-                        )}
-                        aria-label={session.canOpen ? t('cron.openSession') : t('cron.openSessionUnavailable')}
-                        title={session.canOpen ? t('cron.openSession') : t('cron.sessionUnavailable')}
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        {session.canOpen ? t('cron.openSession') : t('cron.openSessionUnavailable')}
-                      </button>
-                      <button
-                        onClick={() => openRunDrawer(task.id, run.id)}
-                        className="p-1 rounded-md hover:bg-foreground/[0.06] shrink-0"
-                        aria-label={t('cron.viewOutput')}
-                      >
-                        <Terminal className="w-3.5 h-3.5 text-muted-foreground" />
-                      </button>
+          {/* Responsive: stack below lg, tasks + recent side-by-side at lg+ */}
+          <div
+            className={cn(
+              'grid gap-4 items-start',
+              hasTaskColumn
+                ? 'grid-cols-1 lg:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.95fr)] xl:grid-cols-[minmax(0,1.55fr)_minmax(300px,0.9fr)] 2xl:grid-cols-[minmax(0,1.65fr)_minmax(320px,0.85fr)]'
+                : 'grid-cols-1',
+            )}
+          >
+            {hasTaskColumn && (
+              <div className="min-w-0 space-y-4">
+                {upcomingTasks.length > 0 && (
+                  <div data-cron-motion-section className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Zap className="w-3.5 h-3.5 text-primary" />
+                      <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">{t('cron.upcoming')}</h3>
+                      <span className="text-[10px] font-medium text-primary bg-primary/10 px-1.5 py-0.5 rounded-full tabular-nums">{upcomingTasks.length}</span>
                     </div>
-                  );
-                })}
+                    <div className="space-y-1.5">
+                      {upcomingTasks.map((task) => (
+                        <TimelineTaskCard
+                          key={task.id}
+                          task={task}
+                          runs={cronRuns[task.id] || []}
+                          nextRun={nextRunTimes[task.id]}
+                          expanded={expandedTaskId === task.id}
+                          onToggleExpand={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
+                          onEdit={() => handleEdit(task)}
+                          onDelete={() => setPendingDelete(task)}
+                          onToggleEnabled={() => toggleCronTask(task.id)}
+                          onRetry={() => handleRetry(task.id)}
+                          onViewRun={(runId) => openRunDrawer(task.id, runId)}
+                          onOpenSession={(run) => openRunSession(task, run)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {disabledTasks.length > 0 && (
+                  <div data-cron-motion-section className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Timer className="w-3.5 h-3.5 text-muted-foreground" />
+                      <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{t('cron.disabled')}</h3>
+                      <span className="text-[10px] font-medium text-muted-foreground bg-muted-foreground/10 px-1.5 py-0.5 rounded-full tabular-nums">{disabledTasks.length}</span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {disabledTasks.map((task) => (
+                        <TimelineTaskCard
+                          key={task.id}
+                          task={task}
+                          runs={cronRuns[task.id] || []}
+                          expanded={expandedTaskId === task.id}
+                          onToggleExpand={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
+                          onEdit={() => handleEdit(task)}
+                          onDelete={() => setPendingDelete(task)}
+                          onToggleEnabled={() => toggleCronTask(task.id)}
+                          onRetry={() => handleRetry(task.id)}
+                          onViewRun={(runId) => openRunDrawer(task.id, runId)}
+                          onOpenSession={(run) => openRunSession(task, run)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
+
+            <div
+              data-cron-motion-section
+              className={cn(
+                'min-w-0 space-y-2',
+                hasTaskColumn && 'lg:sticky lg:top-0 lg:max-h-[calc(100vh-7.5rem)] lg:overflow-y-auto lg:pr-0.5',
+              )}
+            >
+              <div className="flex items-center gap-2 flex-wrap">
+                <History className="w-3.5 h-3.5 text-muted-foreground" />
+                <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">{t('cron.recentRuns')}</h3>
+                <span className="text-[10px] font-medium text-muted-foreground bg-muted-foreground/10 px-1.5 py-0.5 rounded-full tabular-nums">{recentCompletedRuns.length}</span>
+                <div className="ml-auto flex items-center gap-1">
+                  {([
+                    ['today', 'cron.runsToday'],
+                    ['7d', 'cron.runs7d'],
+                    ['all', 'cron.runsAll'],
+                  ] as const).map(([key, labelKey]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setRecentRange(key)}
+                      className={cn(
+                        'px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors',
+                        recentRange === key
+                          ? 'bg-primary/15 text-primary'
+                          : 'text-muted-foreground hover:bg-foreground/[0.05]',
+                      )}
+                    >
+                      {t(labelKey)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {recentCompletedRuns.length === 0 ? (
+                <div className="glass-subtle glass-noise rounded-lg px-3 py-2.5 text-xs text-muted-foreground">
+                  {t('cron.noRuns')}
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {recentCompletedRuns.map(({ task, run }) => {
+                    const session = getCronRunSessionAvailability({
+                      id: run.id,
+                      runtimeId: run.runtimeId,
+                      providerSessionId: run.providerSessionId,
+                      workingDir: run.workingDir ?? task.workingDir,
+                      status: run.status,
+                    });
+                    return (
+                      <div
+                        key={run.id}
+                        data-cron-motion-run
+                        data-cron-run-id={run.id}
+                        className="group/run glass-subtle glass-noise rounded-lg px-2.5 py-1.5 flex items-center gap-1.5"
+                      >
+                        <StatusBadge status={run.status} />
+                        <span className="text-xs font-medium text-foreground flex-1 min-w-0 truncate">{task.name}</span>
+                        <span className="text-2xs text-muted-foreground tabular-nums shrink-0 hidden sm:inline">{formatTime(run.finishedAt || run.startedAt)}</span>
+                        <span className="text-2xs text-muted-foreground tabular-nums shrink-0">{formatDuration(run.durationMs)}</span>
+                        <button
+                          type="button"
+                          onClick={() => openRunSession(task, run)}
+                          disabled={!session.canOpen}
+                          className={cn(
+                            'inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] shrink-0 transition-colors',
+                            session.canOpen
+                              ? 'text-primary hover:bg-primary/10'
+                              : 'text-muted-foreground/50 cursor-not-allowed',
+                          )}
+                          aria-label={session.canOpen ? t('cron.openSession') : t('cron.openSessionUnavailable')}
+                          title={session.canOpen ? t('cron.openSession') : t('cron.sessionUnavailable')}
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span className="hidden xl:inline">
+                            {session.canOpen ? t('cron.openSession') : t('cron.openSessionUnavailable')}
+                          </span>
+                        </button>
+                        <button
+                          onClick={() => openRunDrawer(task.id, run.id)}
+                          className="p-1 rounded-md hover:bg-foreground/[0.06] shrink-0"
+                          aria-label={t('cron.viewOutput')}
+                        >
+                          <Terminal className="w-3.5 h-3.5 text-muted-foreground" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
