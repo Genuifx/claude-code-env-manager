@@ -242,6 +242,11 @@ function App() {
     navigateToTab('workspace');
   }, [navigateToTab]);
 
+  const openCronRunSessionLink = useCallback((link: string) => {
+    setWorkspaceSessionLinkRequest({ id: Date.now(), link });
+    navigateToTab('workspace');
+  }, [navigateToTab]);
+
   useEffect(() => {
     if (!perfAutopilotEnabled) {
       return;
@@ -742,7 +747,7 @@ function App() {
       case 'history':
         return <HistoryPage />;
       case 'cron':
-        return <CronTasksPage onAiCreate={openWorkspaceCronCreate} />;
+        return <CronTasksPage onAiCreate={openWorkspaceCronCreate} onOpenSessionLink={openCronRunSessionLink} />;
       case 'chat-app':
         return <ChatAppPage />;
       case 'proxy-debug':

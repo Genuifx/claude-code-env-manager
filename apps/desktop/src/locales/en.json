@@ -1394,7 +1394,20 @@
     "aiCreated": "Task created",
     "aiError": "Generation failed",
     "needWorkingDir": "Please set a default working directory in Settings first",
-    "goToSettings": "Go to Settings"
+    "goToSettings": "Go to Settings",
+    "openSession": "Open session",
+    "openSessionUnavailable": "Output only",
+    "sessionAvailableLive": "Live session available",
+    "sessionAvailableHistory": "History session available",
+    "sessionUnavailable": "No recoverable session; output only",
+    "viewAllRuns": "View all",
+    "showLessRuns": "Show less",
+    "recentRuns": "Recent runs",
+    "runsToday": "Today",
+    "runs7d": "Last 7 days",
+    "runsAll": "All",
+    "runCount": "{n} runs",
+    "timelineDotLabel": "{name} · {status}"
   },
   "projectPicker": {
     "title": "Select Project",
