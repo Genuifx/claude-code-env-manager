@@ -22,15 +22,10 @@ import {
   captureWorkspaceAnnotationAnchor,
   resolveWorkspaceAnnotationRange,
 } from './workspaceAnnotationAnchors';
-
-interface ViewportRect {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-  right: number;
-  bottom: number;
-}
+import {
+  visibleTextRangeRects,
+  type ViewportRect,
+} from './workspaceAnnotationRects';
 
 interface SelectionCandidate {
   quote: string;
@@ -63,38 +58,6 @@ interface WorkspaceTranscriptSelectionProps {
 
 function selectionNodeIsInside(root: HTMLElement, node: Node | null): boolean {
   return Boolean(node && (node === root || root.contains(node)));
-}
-
-function copyRect(rect: DOMRect): ViewportRect {
-  return {
-    left: rect.left,
-    top: rect.top,
-    width: rect.width,
-    height: rect.height,
-    right: rect.right,
-    bottom: rect.bottom,
-  };
-}
-
-function visibleRangeRects(range: Range, root: HTMLElement): ViewportRect[] {
-  const rootRect = root.getBoundingClientRect();
-  return Array.from(range.getClientRects())
-    .filter((rect) => (
-      rect.width > 0
-      && rect.height > 0
-      && rect.bottom >= rootRect.top
-      && rect.top <= rootRect.bottom
-      && rect.right >= rootRect.left
-      && rect.left <= rootRect.right
-    ))
-    .map((rect) => {
-      const left = Math.max(rect.left, rootRect.left);
-      const top = Math.max(rect.top, rootRect.top);
-      const right = Math.min(rect.right, rootRect.right);
-      const bottom = Math.min(rect.bottom, rootRect.bottom);
-      return copyRect(new DOMRect(left, top, Math.max(0, right - left), Math.max(0, bottom - top)));
-    })
-    .filter((rect) => rect.width > 0 && rect.height > 0);
 }
 
 function useAnnotationPlacements(
@@ -130,7 +93,7 @@ function useAnnotationPlacements(
         if (!range) {
           return [];
         }
-        const rects = visibleRangeRects(range, root);
+        const rects = visibleTextRangeRects(range, root);
         const lastRect = rects[rects.length - 1];
         if (!lastRect) {
           return [];
@@ -207,6 +170,7 @@ export function WorkspaceTranscriptSelection({
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
   const [editingAnnotationNote, setEditingAnnotationNote] = useState('');
   const placements = useAnnotationPlacements(rootRef, annotations, isActive);
+  const hasSelectionCandidate = Boolean(candidate);
 
   const dismiss = useCallback(() => {
     setCandidate(null);
@@ -258,24 +222,46 @@ export function WorkspaceTranscriptSelection({
 
     const range = selection.getRangeAt(0);
     const anchor = captureWorkspaceAnnotationAnchor(root, range);
-    const rects = visibleRangeRects(range, root);
-    const rect = range.getBoundingClientRect();
-    if (!anchor || rects.length === 0 || (rect.width === 0 && rect.height === 0)) {
+    const rects = visibleTextRangeRects(range, root);
+    const lastRect = rects[rects.length - 1];
+    if (!anchor || !lastRect) {
       return;
     }
     setCandidate({
       quote,
       anchor,
       rects,
-      left: Math.max(124, Math.min(window.innerWidth - 124, rect.left + rect.width / 2)),
-      top: Math.max(12, Math.min(window.innerHeight - 72, rect.bottom + 8)),
+      left: Math.max(124, Math.min(window.innerWidth - 124, lastRect.left + lastRect.width / 2)),
+      top: Math.max(12, Math.min(window.innerHeight - 72, lastRect.bottom + 8)),
       editing: false,
     });
     setNote('');
   }, [canCreate, candidate?.editing, dismiss, isActive, rootRef]);
 
   useEffect(() => {
+    const handleMouseDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (
+        !candidate?.editing
+        && !(target instanceof Element && target.closest('[data-workspace-selection-action]'))
+      ) {
+        dismiss();
+      }
+    };
     const handleMouseUp = (event: MouseEvent) => captureSelection(event);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const changesSelection = (
+        event.shiftKey
+        && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']
+          .includes(event.key)
+      ) || ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a');
+      if (
+        !candidate?.editing
+        && changesSelection
+      ) {
+        dismiss();
+      }
+    };
     const handleKeyUp = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         dismiss();
@@ -287,21 +273,40 @@ export function WorkspaceTranscriptSelection({
       }
     };
     const handleResize = () => dismiss();
+    document.addEventListener('mousedown', handleMouseDown, true);
     document.addEventListener('mouseup', handleMouseUp, true);
+    document.addEventListener('keydown', handleKeyDown, true);
     document.addEventListener('keyup', handleKeyUp, true);
     window.addEventListener('resize', handleResize);
     return () => {
+      document.removeEventListener('mousedown', handleMouseDown, true);
       document.removeEventListener('mouseup', handleMouseUp, true);
+      document.removeEventListener('keydown', handleKeyDown, true);
       document.removeEventListener('keyup', handleKeyUp, true);
       window.removeEventListener('resize', handleResize);
     };
-  }, [captureSelection, dismiss, dismissSavedEditor]);
+  }, [candidate?.editing, captureSelection, dismiss, dismissSavedEditor]);
 
   useEffect(() => {
     dismiss();
     dismissSavedEditor();
     window.getSelection()?.removeAllRanges();
   }, [dismiss, dismissSavedEditor, isActive, scopeKey]);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) {
+      return;
+    }
+    if (hasSelectionCandidate) {
+      root.dataset.workspaceSelectionHighlightActive = 'true';
+    } else {
+      delete root.dataset.workspaceSelectionHighlightActive;
+    }
+    return () => {
+      delete root.dataset.workspaceSelectionHighlightActive;
+    };
+  }, [hasSelectionCandidate, rootRef]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -366,13 +371,15 @@ export function WorkspaceTranscriptSelection({
         {placements.flatMap((placement) => placement.rects.map((rect, rectIndex) => (
           <span
             key={`${placement.annotation.id}:${rectIndex}`}
+            data-workspace-selection-highlight="saved"
             className="fixed rounded-[2px] bg-primary/15 ring-1 ring-inset ring-primary/15"
             style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
           />
         )))}
-        {candidate?.editing ? candidate.rects.map((rect, index) => (
+        {candidate ? candidate.rects.map((rect, index) => (
           <span
             key={`candidate:${index}`}
+            data-workspace-selection-highlight="candidate"
             className="fixed rounded-[2px] bg-primary/20 ring-1 ring-inset ring-primary/25"
             style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
           />

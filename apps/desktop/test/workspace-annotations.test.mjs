@@ -20,6 +20,93 @@ async function importWorkspaceAnnotations() {
   return import(`${outfile}?v=${Date.now()}`);
 }
 
+async function importWorkspaceAnnotationRects() {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ccem-workspace-annotation-rects-'));
+  const outfile = path.join(tempDir, 'workspaceAnnotationRects.mjs');
+  await build({
+    entryPoints: [path.join(desktopDir, 'src', 'components', 'workspace', 'workspaceAnnotationRects.ts')],
+    outfile,
+    bundle: true,
+    format: 'esm',
+    platform: 'node',
+  });
+  return import(`${outfile}?v=${Date.now()}`);
+}
+
+test('annotation highlights use selected text boxes instead of broad layout boxes', async () => {
+  const { visibleTextRangeRects } = await importWorkspaceAnnotationRects();
+  const firstText = { nodeType: 3, data: '  selected' };
+  const interBlockWhitespace = { nodeType: 3, data: '\n    ' };
+  const lastText = { nodeType: 3, data: 'words  ' };
+  const unselectedTail = { nodeType: 3, data: 'must not be scanned' };
+  const nodes = [firstText, interBlockWhitespace, lastText, unselectedTail];
+  const visitedNodes = [];
+  const textRects = new Map([
+    [firstText, [{ left: 20, top: 10, right: 84, bottom: 28, width: 64, height: 18 }]],
+    [interBlockWhitespace, []],
+    [lastText, [{ left: 20, top: 82, right: 60, bottom: 100, width: 40, height: 18 }]],
+  ]);
+  let currentNode = null;
+  const ownerDocument = {
+    defaultView: { NodeFilter: { SHOW_TEXT: 4 } },
+    createTreeWalker() {
+      let index = -1;
+      return {
+        get currentNode() {
+          return nodes[index];
+        },
+        set currentNode(node) {
+          index = nodes.indexOf(node);
+        },
+        nextNode() {
+          index += 1;
+          if (index < nodes.length) visitedNodes.push(nodes[index]);
+          return index < nodes.length;
+        },
+      };
+    },
+    createRange() {
+      return {
+        setStart(node, offset) {
+          currentNode = node;
+          if (node === firstText) assert.equal(offset, 2);
+        },
+        setEnd(node, offset) {
+          assert.equal(node, currentNode);
+          if (node === lastText) assert.equal(offset, 5);
+        },
+        getClientRects() {
+          return textRects.get(currentNode) ?? [];
+        },
+      };
+    },
+  };
+  const root = {
+    nodeType: 1,
+    ownerDocument,
+    getBoundingClientRect() {
+      return { left: 0, top: 0, right: 300, bottom: 120, width: 300, height: 120 };
+    },
+  };
+  const range = {
+    commonAncestorContainer: root,
+    startContainer: firstText,
+    startOffset: 0,
+    endContainer: lastText,
+    endOffset: lastText.data.length,
+    intersectsNode: () => true,
+    getClientRects() {
+      throw new Error('aggregate Range boxes include block element areas and must not be used');
+    },
+  };
+
+  assert.deepEqual(visibleTextRangeRects(range, root), [
+    { left: 20, top: 10, right: 84, bottom: 28, width: 64, height: 18 },
+    { left: 20, top: 82, right: 60, bottom: 100, width: 40, height: 18 },
+  ]);
+  assert.equal(visitedNodes.includes(unselectedTail), false);
+});
+
 test('normalizes selected transcript text without destroying meaningful line breaks', async () => {
   const { normalizeWorkspaceSelection } = await importWorkspaceAnnotations();
 
@@ -139,12 +226,13 @@ test('stored annotations preserve valid transcript anchors and discard malformed
 });
 
 test('live and history workspace paths wire transcript selections into successful composer sends', async () => {
-  const [composerSource, liveSource, historySource, detailSource, annotationSource] = await Promise.all([
+  const [composerSource, liveSource, historySource, detailSource, annotationSource, styleSource] = await Promise.all([
     fs.readFile(path.join(desktopDir, 'src', 'components', 'workspace', 'WorkspaceSessionComposer.tsx'), 'utf8'),
     fs.readFile(path.join(desktopDir, 'src', 'components', 'workspace', 'WorkspaceNativeSessionView.tsx'), 'utf8'),
     fs.readFile(path.join(desktopDir, 'src', 'pages', 'Workspace.tsx'), 'utf8'),
     fs.readFile(path.join(desktopDir, 'src', 'components', 'workspace', 'WorkspaceConversationDetail.tsx'), 'utf8'),
     fs.readFile(path.join(desktopDir, 'src', 'components', 'workspace', 'WorkspaceAnnotations.tsx'), 'utf8'),
+    fs.readFile(path.join(desktopDir, 'src', 'index.css'), 'utf8'),
   ]);
 
   assert.match(composerSource, /text = buildComposerPromptWithAnnotations\(text, annotations\)/);
@@ -161,5 +249,10 @@ test('live and history workspace paths wire transcript selections into successfu
   assert.match(annotationSource, /scopeKey/);
   assert.match(annotationSource, /data-workspace-annotation-marker/);
   assert.match(annotationSource, /group-hover:opacity-100/);
-  assert.match(annotationSource, /candidate\?\.editing \? candidate\.rects/);
+  assert.match(annotationSource, /candidate \? candidate\.rects/);
+  assert.match(annotationSource, /workspaceSelectionHighlightActive/);
+  assert.match(annotationSource, /document\.addEventListener\('mousedown', handleMouseDown, true\)/);
+  assert.match(annotationSource, /event\.shiftKey[\s\S]*'Home'[\s\S]*'PageDown'[\s\S]*\.includes\(event\.key\)/);
+  assert.match(annotationSource, /event\.metaKey \|\| event\.ctrlKey/);
+  assert.match(styleSource, /data-workspace-selection-highlight-active/);
 });
