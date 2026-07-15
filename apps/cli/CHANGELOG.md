@@ -1,5 +1,11 @@
 # ccem
 
+## 2.57.0
+
+### Minor Changes
+
+- Minor release: cron run session history, responsive cron page, workspace selection polish.
+
 ## 2.56.0
 
 ### Minor Changes
