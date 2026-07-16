@@ -29,6 +29,7 @@ mod native_runtime;
 mod notifications;
 mod opencode;
 mod permission;
+mod permission_preview;
 mod pet_notifications;
 mod pet_window;
 mod prompt_image_store;

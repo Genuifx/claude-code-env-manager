@@ -22151,8 +22151,7 @@ async function applyClaudePermissionModeToQuery(query, permMode) {
 
 // src/claudePermissionRequests.ts
 function resolveClaudePermissionRequestId(options, now = Date.now) {
-  const sdkRequestId = options.requestId?.trim();
-  return sdkRequestId || `${options.toolUseID}:${now()}`;
+  return typeof options.requestId === "string" && options.requestId.length > 0 ? options.requestId : `${options.toolUseID}:${now()}`;
 }
 
 // src/claudeQuerySnapshotSlot.ts
@@ -36802,6 +36801,90 @@ var TodoSnapshotTracker = class {
   }
 };
 
+// src/permissionPreview.ts
+var DEFAULT_IGNORABLE_RANGES = [
+  [173, 173],
+  [847, 847],
+  [1564, 1564],
+  [4447, 4448],
+  [6068, 6069],
+  [6155, 6159],
+  [8203, 8207],
+  [8234, 8238],
+  [8288, 8303],
+  [12644, 12644],
+  [65024, 65039],
+  [65279, 65279],
+  [65440, 65440],
+  [65520, 65528],
+  [113824, 113827],
+  [119155, 119162],
+  [917504, 921599]
+];
+function belongsToRange(codePoint, ranges) {
+  return ranges.some(([start, end]) => codePoint >= start && codePoint <= end);
+}
+function isLookalikeQuote(codePoint) {
+  return codePoint >= 697 && codePoint <= 701 || codePoint === 715 || codePoint >= 8216 && codePoint <= 8223 || codePoint >= 8242 && codePoint <= 8247 || codePoint === 65282 || codePoint === 65287 || codePoint === 65344;
+}
+function shouldExposeCodePoint(codePoint) {
+  return belongsToRange(codePoint, DEFAULT_IGNORABLE_RANGES) || codePoint >= 0 && codePoint <= 31 || codePoint >= 127 && codePoint <= 159 || codePoint >= 8232 && codePoint <= 8233 || codePoint >= 65529 && codePoint <= 65531 || codePoint >= 10075 && codePoint <= 10078 || codePoint >= 12317 && codePoint <= 12319 || isLookalikeQuote(codePoint);
+}
+function visibleCodePoint(codePoint) {
+  return `\\u{${codePoint.toString(16).toUpperCase().padStart(4, "0")}}`;
+}
+function formatPermissionPreview(value, maxLength = 160) {
+  if (maxLength <= 0) {
+    return "";
+  }
+  const tokens = [];
+  let displayLength = 0;
+  let pendingSpace = false;
+  const appendToken = (token) => {
+    if (displayLength + token.length <= maxLength) {
+      tokens.push(token);
+      displayLength += token.length;
+      return null;
+    }
+    if (maxLength === 1) {
+      return "\u2026";
+    }
+    const availableLength = maxLength - 1;
+    while (tokens.length > 0 && displayLength > availableLength) {
+      displayLength -= tokens.pop().length;
+    }
+    while (tokens.at(-1) === " ") {
+      displayLength -= tokens.pop().length;
+    }
+    return `${tokens.join("")}\u2026`;
+  };
+  for (const character of value) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    if (shouldExposeCodePoint(codePoint)) {
+      if (pendingSpace && tokens.length > 0) {
+        const truncated3 = appendToken(" ");
+        if (truncated3) return truncated3;
+      }
+      pendingSpace = false;
+      const truncated2 = appendToken(visibleCodePoint(codePoint));
+      if (truncated2) return truncated2;
+      continue;
+    }
+    if (/\s/u.test(character)) {
+      pendingSpace = tokens.length > 0;
+      continue;
+    }
+    if (pendingSpace) {
+      const truncated2 = appendToken(" ");
+      if (truncated2) return truncated2;
+      pendingSpace = false;
+    }
+    const truncated = appendToken(character);
+    if (truncated) return truncated;
+  }
+  return tokens.join("");
+}
+
 // src/index.ts
 var DEFAULT_CLAUDE_IDLE_TTL_MS = 10 * 60 * 1e3;
 var DEFAULT_CLAUDE_INTERRUPT_TIMEOUT_MS = 8e3;
@@ -37234,17 +37317,17 @@ function summarizeQuestionInput(input) {
   if (!firstQuestion || typeof firstQuestion !== "object") {
     return null;
   }
-  const questionText = typeof firstQuestion.question === "string" ? firstQuestion.question.trim() : "";
-  if (!questionText) {
+  const questionText = typeof firstQuestion.question === "string" ? firstQuestion.question : "";
+  if (!formatPermissionPreview(questionText)) {
     return null;
   }
-  return truncateSummary2(`\u9700\u8981\u7528\u6237\u56DE\u7B54 ${questions.length} \u4E2A\u95EE\u9898\uFF1A${questionText}`);
+  return formatPermissionPreview(`\u9700\u8981\u7528\u6237\u56DE\u7B54 ${questions.length} \u4E2A\u95EE\u9898\uFF1A${questionText}`);
 }
 function extractStringField(input, keys) {
   for (const key of keys) {
     const value = input[key];
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
+    if (typeof value === "string" && formatPermissionPreview(value)) {
+      return value;
     }
   }
   return null;
@@ -37257,13 +37340,13 @@ function summarizeClaudeToolInput(toolName, input, options) {
   if (toolName.includes("PlanMode") && toolName.includes("Exit")) {
     const planSummary = extractStringField(input, ["plan"]);
     if (planSummary) {
-      return truncateSummary2(planSummary);
+      return formatPermissionPreview(planSummary);
     }
   }
   if (toolName === "Bash") {
     const command = extractStringField(input, ["command"]);
     if (command) {
-      return truncateSummary2(command);
+      return formatPermissionPreview(command);
     }
   }
   const pathLikeValue = extractStringField(input, [
@@ -37274,18 +37357,18 @@ function summarizeClaudeToolInput(toolName, input, options) {
     "query"
   ]);
   if (pathLikeValue) {
-    return truncateSummary2(pathLikeValue);
+    return formatPermissionPreview(pathLikeValue);
   }
   const displayReason = [
     options?.title,
     options?.description,
     options?.blockedPath,
     options?.decisionReason
-  ].find((value) => typeof value === "string" && value.trim().length > 0);
+  ].find((value) => typeof value === "string" && formatPermissionPreview(value).length > 0);
   if (displayReason) {
-    return truncateSummary2(displayReason);
+    return formatPermissionPreview(displayReason);
   }
-  return truncateSummary2(compactJson(input));
+  return formatPermissionPreview(compactJson(input));
 }
 function parseClaudeInteractiveToolPrompt(name, input) {
   if (name.includes("AskUser") || name.includes("Question")) {
@@ -37490,7 +37573,7 @@ async function waitForPermission(toolName, input, options) {
     type: "permission_required",
     request_id: requestId,
     tool_use_id: toolUseId,
-    tool_name: options.displayName || toolName,
+    tool_name: formatPermissionPreview(options.displayName || toolName, 80),
     input_summary: inputSummary
   });
   const approved = await new Promise((resolve) => {

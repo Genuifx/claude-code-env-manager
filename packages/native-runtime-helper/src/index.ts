@@ -32,6 +32,7 @@ import {
 } from './codexContextUsage';
 import { buildClaudeFileCheckpointEvent } from './claudeFileCheckpoints';
 import { TodoSnapshotTracker, type TodoSnapshotV1 } from './todoSnapshots';
+import { formatPermissionPreview } from './permissionPreview';
 
 type NativeProvider = 'claude' | 'codex';
 
@@ -726,13 +727,13 @@ function summarizeQuestionInput(input: Record<string, unknown>) {
   }
 
   const questionText = typeof firstQuestion.question === 'string'
-    ? firstQuestion.question.trim()
+    ? firstQuestion.question
     : '';
-  if (!questionText) {
+  if (!formatPermissionPreview(questionText)) {
     return null;
   }
 
-  return truncateSummary(`需要用户回答 ${questions.length} 个问题：${questionText}`);
+  return formatPermissionPreview(`需要用户回答 ${questions.length} 个问题：${questionText}`);
 }
 
 function extractStringField(
@@ -741,8 +742,8 @@ function extractStringField(
 ): string | null {
   for (const key of keys) {
     const value = input[key];
-    if (typeof value === 'string' && value.trim()) {
-      return value.trim();
+    if (typeof value === 'string' && formatPermissionPreview(value)) {
+      return value;
     }
   }
   return null;
@@ -766,14 +767,14 @@ function summarizeClaudeToolInput(
   if (toolName.includes('PlanMode') && toolName.includes('Exit')) {
     const planSummary = extractStringField(input, ['plan']);
     if (planSummary) {
-      return truncateSummary(planSummary);
+      return formatPermissionPreview(planSummary);
     }
   }
 
   if (toolName === 'Bash') {
     const command = extractStringField(input, ['command']);
     if (command) {
-      return truncateSummary(command);
+      return formatPermissionPreview(command);
     }
   }
 
@@ -785,7 +786,7 @@ function summarizeClaudeToolInput(
     'query',
   ]);
   if (pathLikeValue) {
-    return truncateSummary(pathLikeValue);
+    return formatPermissionPreview(pathLikeValue);
   }
 
   const displayReason = [
@@ -793,12 +794,14 @@ function summarizeClaudeToolInput(
     options?.description,
     options?.blockedPath,
     options?.decisionReason,
-  ].find((value): value is string => typeof value === 'string' && value.trim().length > 0);
+  ].find((value): value is string => (
+    typeof value === 'string' && formatPermissionPreview(value).length > 0
+  ));
   if (displayReason) {
-    return truncateSummary(displayReason);
+    return formatPermissionPreview(displayReason);
   }
 
-  return truncateSummary(compactJson(input));
+  return formatPermissionPreview(compactJson(input));
 }
 
 function parseClaudeInteractiveToolPrompt(name: string, input: Record<string, unknown>) {
@@ -1131,7 +1134,7 @@ async function waitForPermission(
     type: 'permission_required',
     request_id: requestId,
     tool_use_id: toolUseId,
-    tool_name: options.displayName || toolName,
+    tool_name: formatPermissionPreview(options.displayName || toolName, 80),
     input_summary: inputSummary,
   });
 
