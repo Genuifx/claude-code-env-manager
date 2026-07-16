@@ -854,6 +854,16 @@ export function Workspace({
     ? liveSessionsByRuntimeId[activeLiveRuntimeId] ?? null
     : null;
 
+  const statusStripEnvContext = useMemo(() => {
+    if (workspaceMode === 'history') {
+      return historyEnv || undefined;
+    }
+    if (workspaceMode === 'live') {
+      return activeLiveEntry?.session.env_name || undefined;
+    }
+    return undefined;
+  }, [workspaceMode, historyEnv, activeLiveEntry]);
+
   useEffect(() => {
     if (workspaceMode !== 'live') {
       return;
@@ -2655,6 +2665,7 @@ export function Workspace({
             onOpenSearch={() => setIsGlobalSearchOpen(true)}
             browserOpen={browserPanelOpen}
             onToggleBrowser={() => setActiveBrowserPanelOpen((open) => !open)}
+            envContext={statusStripEnvContext}
           />
 
           <div
