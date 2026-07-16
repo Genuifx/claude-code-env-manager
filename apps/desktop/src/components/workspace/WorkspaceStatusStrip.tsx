@@ -65,6 +65,8 @@ interface WorkspaceStatusStripProps {
   onOpenSearch: () => void;
   browserOpen?: boolean;
   onToggleBrowser?: () => void;
+  /** Optional env context (e.g. the active history/live session env) to keep visible alongside the global current env. */
+  envContext?: string;
 }
 
 function StatusChip({
@@ -130,6 +132,7 @@ export function WorkspaceStatusStrip({
   onOpenSearch,
   browserOpen = false,
   onToggleBrowser,
+  envContext,
 }: WorkspaceStatusStripProps) {
   const { t } = useLocale();
   const { sessions, currentEnv, environments, enabledEnvironments, continuousUsageDays, cronTasks, usageStats } = useAppStore(
@@ -144,8 +147,11 @@ export function WorkspaceStatusStrip({
     }),
     shallow
   );
+  const statusStripCurrentEnvs = envContext
+    ? [currentEnv, envContext].filter((name): name is string => Boolean(name))
+    : currentEnv;
   const runtimeEnvironments = filterRuntimeEnvironments(environments, enabledEnvironments, {
-    currentEnv,
+    currentEnv: statusStripCurrentEnvs.length > 0 ? statusStripCurrentEnvs : null,
   });
   const [streakPopoverOpen, setStreakPopoverOpen] = useState(false);
   const [isRefreshingStreak, setIsRefreshingStreak] = useState(false);
