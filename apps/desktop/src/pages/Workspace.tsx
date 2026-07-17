@@ -76,15 +76,19 @@ import type {
   WorkspaceGitSnapshot,
 } from '@/lib/tauri-ipc';
 import {
+  buildLiveSessionTreeState,
   buildWorkspaceSidebarSessions,
+  canRestoreWorkspaceLiveSession,
   findLiveEntryForSidebarSession,
+  hasWorkspaceLiveActivityConflict,
   retainStableHistorySessions,
   resolveWorkspaceReviewProviderSessionId,
+  selectWorkspaceLiveSessionsForRestore,
   toLiveHistorySessionItem,
 } from '@/components/workspace/workspaceSidebarSessions';
 import { launchWorkspaceTerminalSession } from '@/components/workspace/workspaceTerminalLaunch';
 import {
-  replaceWorkspaceLiveSessionsSnapshot,
+  reconcileWorkspaceLiveSessionsSnapshot,
   updateWorkspaceLiveSessionsSnapshot,
   upsertWorkspaceLiveSessionEntry,
   type WorkspaceLiveSessionEntry,
@@ -146,6 +150,9 @@ const ACTIVE_LIVE_RUNTIME_STORAGE_KEY = 'ccem-workspace-live-runtime';
 const LIVE_RUNTIME_SET_STORAGE_KEY = 'ccem-workspace-live-runtimes';
 const WORKSPACE_BROWSER_COMPOSE_SESSION_ID = 'workspace';
 const WORKSPACE_HISTORY_SESSION_LIMIT = 240;
+const NATIVE_ACTIVITY_CONFLICT_RETRY_MS = 3000;
+const NATIVE_ACTIVITY_CONFLICT_MAX_RETRIES = 10;
+const NATIVE_ACTIVITY_CONFLICT_MAX_RETRY_MS = 60_000;
 
 function readStoredBrowserPanelWidthPercent(): number {
   try {
@@ -204,18 +211,6 @@ function writePersistedLiveRuntimeIds(runtimeIds: string[]) {
 
 function DetailFallback() {
   return <div className="flex-1 overflow-hidden" />;
-}
-
-function canRestoreWorkspaceLiveSession(session: NativeSessionSummary): boolean {
-  if (session.status === 'interrupted' || session.status === 'closed_idle') {
-    return true;
-  }
-
-  if (!session.is_active) {
-    return false;
-  }
-
-  return !['stopped', 'error', 'handoff'].includes(session.status);
 }
 
 function contentBlockHasRenderableContent(
@@ -400,6 +395,7 @@ export function Workspace({
   const [workspaceCommands, setWorkspaceCommands] = useState<WorkspaceCommand[]>([]);
   const [liveSessionsByRuntimeId, setLiveSessionsByRuntimeId] = useState<WorkspaceLiveSessionsByRuntimeId>({});
   const liveSessionsByRuntimeIdRef = useRef<WorkspaceLiveSessionsByRuntimeId>(liveSessionsByRuntimeId);
+  const nativeSessionRestoreRequestSeqRef = useRef(0);
   const [activeLiveRuntimeId, setActiveLiveRuntimeId] = useState<string | null>(null);
   const [hasAttemptedNativeSessionRestore, setHasAttemptedNativeSessionRestore] = useState(false);
   const [workspaceGitSnapshot, setWorkspaceGitSnapshot] = useState<WorkspaceGitSnapshot | null>(null);
@@ -638,14 +634,6 @@ export function Workspace({
     }
   }, [composeDir, composeSeed, defaultWorkingDir, resetComposePrompt, selectedWorkingDir]);
 
-  const replaceLiveSessionsByRuntimeId = useCallback((next: WorkspaceLiveSessionsByRuntimeId) => {
-    return replaceWorkspaceLiveSessionsSnapshot(
-      liveSessionsByRuntimeIdRef,
-      setLiveSessionsByRuntimeId,
-      next,
-    );
-  }, []);
-
   const updateLiveSessionsByRuntimeId = useCallback((
     updater: (previous: WorkspaceLiveSessionsByRuntimeId) => WorkspaceLiveSessionsByRuntimeId,
   ) => {
@@ -683,53 +671,43 @@ export function Workspace({
     });
   }, [updateLiveSessionsByRuntimeId]);
 
-  const restoreNativeSessions = useCallback(async () => {
+  const restoreNativeSessions = useCallback(async ({
+    restorePersistedSelection = true,
+  }: {
+    restorePersistedSelection?: boolean;
+  } = {}) => {
+    const requestSeq = ++nativeSessionRestoreRequestSeqRef.current;
     const persistedRuntimeId = localStorage.getItem(ACTIVE_LIVE_RUNTIME_STORAGE_KEY);
     const persistedRuntimeIds = readPersistedLiveRuntimeIds();
-
-    if (persistedRuntimeIds.length === 0) {
-      setHasAttemptedNativeSessionRestore(true);
-      return;
-    }
+    const requestBaseline = liveSessionsByRuntimeIdRef.current;
 
     try {
       const nativeSessions = await listNativeSessions();
-      const restorableSessionsByRuntimeId = new Map(
-        nativeSessions
-          .filter(canRestoreWorkspaceLiveSession)
-          .map((session) => [session.runtime_id, session]),
+      if (requestSeq !== nativeSessionRestoreRequestSeqRef.current) {
+        return;
+      }
+      const restoredSessions = selectWorkspaceLiveSessionsForRestore(
+        nativeSessions,
+        persistedRuntimeIds,
       );
-      const restoredSessions = persistedRuntimeIds
-        .map((runtimeId) => restorableSessionsByRuntimeId.get(runtimeId))
-        .filter((session): session is NativeSessionSummary => Boolean(session));
+      const reconciledSessions = updateLiveSessionsByRuntimeId((previous) =>
+        reconcileWorkspaceLiveSessionsSnapshot(previous, restoredSessions, requestBaseline)
+      );
 
-      if (restoredSessions.length === 0) {
+      if (Object.keys(reconciledSessions).length === 0) {
         localStorage.removeItem(ACTIVE_LIVE_RUNTIME_STORAGE_KEY);
         localStorage.removeItem(LIVE_RUNTIME_SET_STORAGE_KEY);
-        replaceLiveSessionsByRuntimeId({});
-        setActiveLiveRuntimeId(null);
+        if (restorePersistedSelection) {
+          setActiveLiveRuntimeId(null);
+        }
         return;
       }
 
-      replaceLiveSessionsByRuntimeId(
-        Object.fromEntries(
-          restoredSessions.map((session) => [
-            session.runtime_id,
-            {
-              session,
-              initialPrompt: null,
-              initialImages: null,
-              seedMessages: [],
-            } satisfies WorkspaceLiveSessionEntry,
-          ]),
-        ),
-      );
-
-      if (!persistedRuntimeId) {
+      if (!restorePersistedSelection || !persistedRuntimeId) {
         return;
       }
 
-      const target = restoredSessions.find((session) => session.runtime_id === persistedRuntimeId);
+      const target = reconciledSessions[persistedRuntimeId]?.session;
       if (!target) {
         localStorage.removeItem(ACTIVE_LIVE_RUNTIME_STORAGE_KEY);
         setActiveLiveRuntimeId(null);
@@ -741,11 +719,15 @@ export function Workspace({
       setSelectedWorkingDir(target.project_dir);
       setWorkspaceMode('live');
     } catch (error) {
-      console.error('Failed to restore native workspace sessions:', error);
+      if (requestSeq === nativeSessionRestoreRequestSeqRef.current) {
+        console.error('Failed to restore native workspace sessions:', error);
+      }
     } finally {
-      setHasAttemptedNativeSessionRestore(true);
+      if (requestSeq === nativeSessionRestoreRequestSeqRef.current) {
+        setHasAttemptedNativeSessionRestore(true);
+      }
     }
-  }, [listNativeSessions, replaceLiveSessionsByRuntimeId, setSelectedWorkingDir]);
+  }, [listNativeSessions, setSelectedWorkingDir, updateLiveSessionsByRuntimeId]);
 
   useEffect(() => {
     if (installedSkills.length === 0 || workspaceInstalledSkills.length > 0) {
@@ -1242,10 +1224,80 @@ export function Workspace({
     [liveSessionEntries, sessions],
   );
 
+  const liveSessionTreeState = useMemo(
+    () => buildLiveSessionTreeState(liveSessionEntries),
+    [liveSessionEntries],
+  );
+
+  useEffect(() => {
+    const currentKey = selectedKeyRef.current;
+    if (!currentKey) {
+      return;
+    }
+    const canonicalKey = liveSessionTreeState.canonicalKeyBySessionKey[currentKey] ?? currentKey;
+    if (canonicalKey === currentKey) {
+      return;
+    }
+    selectedKeyRef.current = canonicalKey;
+    setSelectedKey(canonicalKey);
+  }, [liveSessionTreeState.canonicalKeyBySessionKey]);
+
   const { decorationsBySessionKey } = useWorkspaceSessionDecorations({
     sessions: sidebarSessions,
     isActive,
   });
+
+  const hasNativeActivityTruthConflict = useMemo(
+    () => hasWorkspaceLiveActivityConflict(
+      liveSessionTreeState.activeSessionKeys,
+      decorationsBySessionKey,
+    ),
+    [decorationsBySessionKey, liveSessionTreeState.activeSessionKeys],
+  );
+
+  useEffect(() => {
+    if (!isActive || !hasAttemptedNativeSessionRestore || !hasNativeActivityTruthConflict) {
+      return;
+    }
+
+    let cancelled = false;
+    let retryTimer: number | null = null;
+    let retryCount = 0;
+    const reconcileNativeActivity = async () => {
+      await restoreNativeSessions({ restorePersistedSelection: false });
+      if (cancelled) {
+        return;
+      }
+      if (retryCount >= NATIVE_ACTIVITY_CONFLICT_MAX_RETRIES) {
+        console.warn(
+          `Native activity conflict persisted after ${NATIVE_ACTIVITY_CONFLICT_MAX_RETRIES} retries; stopping background reconciliation.`,
+        );
+        return;
+      }
+      const delay = Math.min(
+        NATIVE_ACTIVITY_CONFLICT_RETRY_MS * 2 ** retryCount,
+        NATIVE_ACTIVITY_CONFLICT_MAX_RETRY_MS,
+      );
+      retryCount++;
+      retryTimer = window.setTimeout(
+        () => void reconcileNativeActivity(),
+        delay,
+      );
+    };
+
+    void reconcileNativeActivity();
+    return () => {
+      cancelled = true;
+      if (retryTimer !== null) {
+        window.clearTimeout(retryTimer);
+      }
+    };
+  }, [
+    hasAttemptedNativeSessionRestore,
+    hasNativeActivityTruthConflict,
+    isActive,
+    restoreNativeSessions,
+  ]);
 
   const findLiveEntryForSession = useCallback((session: HistorySessionItem) => {
     const sessionKey = toSessionKey(session);
@@ -2581,12 +2633,15 @@ export function Workspace({
   };
 
   const handleProjectTreeRefresh = useCallback(() => {
-    void refreshWorkspaceData({
-      force: true,
-      silent: false,
-      includeSelectedConversation: true,
-    });
-  }, [refreshWorkspaceData]);
+    void Promise.all([
+      refreshWorkspaceData({
+        force: true,
+        silent: false,
+        includeSelectedConversation: true,
+      }),
+      restoreNativeSessions({ restorePersistedSelection: false }),
+    ]);
+  }, [refreshWorkspaceData, restoreNativeSessions]);
 
   const handleProjectTreeSaveTitle = useCallback(async (
     session: HistorySessionItem,
@@ -2677,6 +2732,8 @@ export function Workspace({
               precomputedProjectNodes={precomputedProjectNodes}
               environmentByName={environmentByName}
               decorationsBySessionKey={decorationsBySessionKey}
+              canonicalKeyBySessionKey={liveSessionTreeState.canonicalKeyBySessionKey}
+              activeSessionKeys={liveSessionTreeState.activeSessionKeys}
               isLoading={isLoadingSessions}
               isRefreshing={isRefreshing}
               selectedKey={selectedKey}

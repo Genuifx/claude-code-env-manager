@@ -78,6 +78,7 @@ export const ProjectTreeContent = memo(function ProjectTreeContent({
   classificationsByProject,
   effectiveExpanded,
   getVisibleCount,
+  getVisibleSessions,
   isLoading,
   mainProjectNodes,
   onCreateForProject,
@@ -95,6 +96,7 @@ export const ProjectTreeContent = memo(function ProjectTreeContent({
   classificationsByProject: Record<string, ProjectClassification | undefined>;
   effectiveExpanded: Set<string>;
   getVisibleCount: (project: string) => number;
+  getVisibleSessions: (node: ProjectNode) => HistorySessionItem[];
   isLoading: boolean;
   mainProjectNodes: ProjectNode[];
   onCreateForProject?: (projectPath: string) => void;
@@ -120,7 +122,7 @@ export const ProjectTreeContent = memo(function ProjectTreeContent({
     const isActiveTemporary = section === 'activeTemporary';
     const isExpanded = effectiveExpanded.has(node.project);
     const visibleCount = getVisibleCount(node.project);
-    const visible = node.sessions.slice(0, visibleCount);
+    const visible = getVisibleSessions(node);
     const hasMore = node.sessions.length > visible.length;
     const canCollapse = visibleCount > PROJECT_TREE_PAGE_SIZE;
     const classification = classificationsByProject[node.project];
