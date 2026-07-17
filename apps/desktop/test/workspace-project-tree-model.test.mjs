@@ -253,18 +253,17 @@ test('project session window keeps all active rows visible without expanding to 
 
   const visible = selectVisibleProjectSessions(sessions, 6, activeSessionKeys);
 
-  assert.equal(visible.length, 6);
-  assert.deepEqual(visible.slice(0, 3).map((session) => session.id), [
+  assert.equal(visible.length, 7);
+  assert.deepEqual(visible.map((session) => session.id), [
     'session-0',
+    'session-1',
+    'session-2',
+    'session-3',
+    'session-4',
     'session-5',
     'session-154',
   ]);
   assert.equal(new Set(visible.map((session) => session.id)).size, visible.length);
-  assert.deepEqual(visible.slice(3).map((session) => session.id), [
-    'session-1',
-    'session-2',
-    'session-3',
-  ]);
 });
 
 test('project session window shows every active row when active count exceeds page budget', async () => {
@@ -279,8 +278,8 @@ test('project session window shows every active row when active count exceeds pa
 
   const visible = selectVisibleProjectSessions(sessions, 6, activeSessionKeys);
 
-  assert.equal(visible.length, 7);
-  assert.deepEqual(visible.map((session) => session.id), sessions.slice(5).map((session) => session.id));
+  assert.equal(visible.length, 12);
+  assert.deepEqual(visible.map((session) => session.id), sessions.map((session) => session.id));
 });
 
 test('project session window resolves a stale runtime selection to its provider row', async () => {
@@ -302,8 +301,9 @@ test('project session window resolves a stale runtime selection to its provider 
     canonicalKeyBySessionKey,
   );
 
-  assert.equal(visible[0].id, 'provider-1');
-  assert.equal(visible.length, 6);
+  assert.equal(visible.some((session) => session.id === 'provider-1'), true);
+  assert.equal(visible[0].id, 'session-0');
+  assert.equal(visible.length, 7);
 });
 
 test('project session window preserves active visibility across load-more and collapse budgets', async () => {
@@ -322,9 +322,50 @@ test('project session window preserves active visibility across load-more and co
   assert.equal(collapsed.some((session) => session.id === 'session-19'), true);
   assert.equal(expanded.some((session) => session.id === 'session-19'), true);
   assert.equal(collapsedAgain.some((session) => session.id === 'session-19'), true);
-  assert.equal(collapsed.length, 6);
-  assert.equal(expanded.length, 12);
+  assert.equal(collapsed.length, 7);
+  assert.equal(expanded.length, 13);
   assert.deepEqual(collapsedAgain.map((session) => session.id), collapsed.map((session) => session.id));
+});
+
+test('project session window caps priority overflow to one extra page', async () => {
+  const { selectVisibleProjectSessions } = await importWorkspaceProjectTreeModel();
+  const sessions = Array.from({ length: 30 }, (_, index) => historySession({
+    id: `session-${index}`,
+    source: 'claude',
+    timestamp: 1_000 - index,
+  }));
+  const activeSessionKeys = new Set([
+    'claude:session-0',
+    'claude:session-5',
+    'claude:session-10',
+    'claude:session-15',
+    'claude:session-20',
+    'claude:session-25',
+    'claude:session-26',
+    'claude:session-27',
+    'claude:session-28',
+    'claude:session-29',
+  ]);
+
+  const visible = selectVisibleProjectSessions(sessions, 6, activeSessionKeys);
+
+  // 6 base + 6 overflow = 12 max. Ordinary sessions 6/7 are squeezed out by
+  // priority overflow; the last priorities at indices 28/29 are dropped.
+  assert.equal(visible.length, 12);
+  assert.deepEqual(visible.map((session) => session.id), [
+    'session-0',
+    'session-1',
+    'session-2',
+    'session-3',
+    'session-4',
+    'session-5',
+    'session-10',
+    'session-15',
+    'session-20',
+    'session-25',
+    'session-26',
+    'session-27',
+  ]);
 });
 
 test('project priorities combine true live activity with urgent runtime decorations only', async () => {

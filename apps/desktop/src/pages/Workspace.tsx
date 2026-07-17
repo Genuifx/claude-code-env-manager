@@ -151,6 +151,8 @@ const LIVE_RUNTIME_SET_STORAGE_KEY = 'ccem-workspace-live-runtimes';
 const WORKSPACE_BROWSER_COMPOSE_SESSION_ID = 'workspace';
 const WORKSPACE_HISTORY_SESSION_LIMIT = 240;
 const NATIVE_ACTIVITY_CONFLICT_RETRY_MS = 3000;
+const NATIVE_ACTIVITY_CONFLICT_MAX_RETRIES = 10;
+const NATIVE_ACTIVITY_CONFLICT_MAX_RETRY_MS = 60_000;
 
 function readStoredBrowserPanelWidthPercent(): number {
   try {
@@ -1260,14 +1262,27 @@ export function Workspace({
 
     let cancelled = false;
     let retryTimer: number | null = null;
+    let retryCount = 0;
     const reconcileNativeActivity = async () => {
       await restoreNativeSessions({ restorePersistedSelection: false });
-      if (!cancelled) {
-        retryTimer = window.setTimeout(
-          () => void reconcileNativeActivity(),
-          NATIVE_ACTIVITY_CONFLICT_RETRY_MS,
-        );
+      if (cancelled) {
+        return;
       }
+      if (retryCount >= NATIVE_ACTIVITY_CONFLICT_MAX_RETRIES) {
+        console.warn(
+          `Native activity conflict persisted after ${NATIVE_ACTIVITY_CONFLICT_MAX_RETRIES} retries; stopping background reconciliation.`,
+        );
+        return;
+      }
+      const delay = Math.min(
+        NATIVE_ACTIVITY_CONFLICT_RETRY_MS * 2 ** retryCount,
+        NATIVE_ACTIVITY_CONFLICT_MAX_RETRY_MS,
+      );
+      retryCount++;
+      retryTimer = window.setTimeout(
+        () => void reconcileNativeActivity(),
+        delay,
+      );
     };
 
     void reconcileNativeActivity();

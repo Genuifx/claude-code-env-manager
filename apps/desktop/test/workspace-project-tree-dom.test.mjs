@@ -449,8 +449,71 @@ test('ProjectTree keeps three ready active rows visible through runtime-to-provi
 
   const selectedRow = rowsWithKey(projectNode, MISSING_PROVIDER_KEY)[0];
   assert.match(selectedRow.className, /bg-primary\/\[0\.08\]/);
+  // The migrated provider row is already visible in the JSDOM viewport, so
+  // the scroll-into-view guard intentionally skips scrolling.
+  assert.equal(scrollCalls.some((call) => call.key === MISSING_PROVIDER_KEY), false);
+});
+
+test('ProjectTree scrolls a selected row into view only when it is outside the viewport', async (t) => {
+  const { dom, scrollCalls } = installDom();
+  const { harness, tempDir } = await importProjectTreeHarness();
+  const container = document.querySelector('#root');
+  assert.ok(container);
+
+  let mounted;
+  t.after(async () => {
+    await mounted?.unmount();
+    dom.window.close();
+    await fs.rm(tempDir, { recursive: true, force: true });
+    await stopEsbuild();
+  });
+
+  const sessions = Array.from({ length: 20 }, (_, index) => historySession({
+    id: `session-${index}`,
+    timestamp: BASE_TIMESTAMP - index * 1_000,
+  }));
+
+  mounted = await harness.mountProjectTree(container, {
+    historySessions: sessions,
+    liveEntries: [],
+    onSelect: () => {},
+  });
+
+  const projectNode = Array.from(container.querySelectorAll('[data-project-motion-key]'))
+    .find((element) => element.dataset.projectMotionKey === `project:main:${PROJECT}`);
+  assert.ok(projectNode);
+
+  const rowA = rowsWithKey(projectNode, 'claude:session-0')[0];
+  const rowB = rowsWithKey(projectNode, 'claude:session-5')[0];
+  assert.ok(rowA);
+  assert.ok(rowB);
+
+  // Make the container think every row is fully visible.
+  const originalGetBoundingClientRect = dom.window.HTMLElement.prototype.getBoundingClientRect;
+  dom.window.HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+    if (this === projectNode || this.contains(projectNode)) {
+      return { top: 0, bottom: 400, left: 0, right: 300, width: 300, height: 400 };
+    }
+    return { top: 10, bottom: 30, left: 0, right: 300, width: 300, height: 20 };
+  };
+
+  await mounted.click(rowA);
+  assert.equal(scrollCalls.length, 0, 'expected no scroll when target is already visible');
+
+  // Now make the container think the selected row is below the viewport.
+  dom.window.HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+    if (this === projectNode || this.contains(projectNode)) {
+      return { top: 0, bottom: 100, left: 0, right: 300, width: 300, height: 100 };
+    }
+    return { top: 150, bottom: 170, left: 0, right: 300, width: 300, height: 20 };
+  };
+
+  // Click another row to trigger selection change and scroll-into-view.
+  await mounted.click(rowB);
   assert.deepEqual(scrollCalls.at(-1), {
-    key: MISSING_PROVIDER_KEY,
+    key: 'claude:session-5',
     options: { block: 'nearest' },
   });
+
+  dom.window.HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
 });

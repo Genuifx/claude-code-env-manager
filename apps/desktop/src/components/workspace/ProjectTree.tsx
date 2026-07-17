@@ -516,16 +516,19 @@ export const ProjectTree = memo(function ProjectTree({
 
   const processingKeysRef = useRef<Set<string>>(new Set());
   const treeMotionRef = useRef<HTMLDivElement>(null);
+  const sessionElementRef = useRef<Map<string, HTMLElement>>(new Map());
   const previousTreeRectsRef = useRef<Map<string, DOMRect>>(new Map());
   const hasHydratedTreeMotionRef = useRef(false);
   const stableProjectNodesRef = useRef<ProjectNode[]>([]);
   const lastRevealedSelectedKeyRef = useRef<string | null>(null);
   const [freshDotKeys, setFreshDotKeys] = useState<Set<string>>(new Set());
 
-  const canonicalizeSessionKey = useCallback(
-    (key: string) => canonicalKeyBySessionKey[key] ?? key,
-    [canonicalKeyBySessionKey]
-  );
+  const canonicalizeSessionKey = useMemo(() => {
+    if (Object.keys(canonicalKeyBySessionKey).length === 0) {
+      return (key: string) => key;
+    }
+    return (key: string) => canonicalKeyBySessionKey[key] ?? key;
+  }, [canonicalKeyBySessionKey]);
   const canonicalSelectedKey = selectedKey ? canonicalizeSessionKey(selectedKey) : null;
 
   useEffect(() => {
@@ -1163,18 +1166,23 @@ export const ProjectTree = memo(function ProjectTree({
       return;
     }
 
-    const root = treeMotionRef.current;
-    if (!root) {
-      return;
-    }
-    const target = Array.from(
-      root.querySelectorAll<HTMLElement>('[data-workspace-session-key]')
-    ).find((element) => element.dataset.workspaceSessionKey === canonicalSelectedKey);
+    const target = sessionElementRef.current.get(canonicalSelectedKey);
     if (!target) {
       return;
     }
 
-    target.scrollIntoView({ block: 'nearest' });
+    const root = treeMotionRef.current;
+    if (root) {
+      const rootRect = root.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const isVisible = targetRect.top >= rootRect.top
+        && targetRect.bottom <= rootRect.bottom;
+      if (!isVisible) {
+        target.scrollIntoView({ block: 'nearest' });
+      }
+    } else {
+      target.scrollIntoView({ block: 'nearest' });
+    }
     lastRevealedSelectedKeyRef.current = canonicalSelectedKey;
   }, [canonicalSelectedKey, treeMotionKey]);
 
@@ -1241,6 +1249,13 @@ export const ProjectTree = memo(function ProjectTree({
       return (
         <div
           key={key}
+          ref={(element) => {
+            if (element) {
+              sessionElementRef.current.set(key, element);
+            } else {
+              sessionElementRef.current.delete(key);
+            }
+          }}
           data-project-motion-key={`session:${key}`}
           data-workspace-session-key={key}
           className={cn(
@@ -1282,6 +1297,13 @@ export const ProjectTree = memo(function ProjectTree({
     const row = (
       <div
         key={key}
+        ref={(element) => {
+          if (element) {
+            sessionElementRef.current.set(key, element);
+          } else {
+            sessionElementRef.current.delete(key);
+          }
+        }}
         data-project-motion-key={`session:${key}`}
         data-workspace-session-key={key}
         role="button"

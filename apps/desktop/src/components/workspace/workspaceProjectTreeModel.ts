@@ -35,6 +35,10 @@ const TEMPORARY_PROJECT_NAME_PATTERNS = [
   /(?:^|-)checkpoint(?:-|$)/i,
 ];
 
+// Align overflow budget with the UI page size so auto-expansion for active
+// sessions feels like one extra "Load more" click rather than an unbounded list.
+const PRIORITY_OVERFLOW_BUDGET = 6;
+
 export function normalizeProjectPath(path: string): string {
   return path.replace(/\\/g, '/').replace(/\/+$/, '').trim();
 }
@@ -231,9 +235,12 @@ export function stabilizeProjectNodeSessions(
 }
 
 /**
- * Build the rendered page without mutating the canonical stable order. Active
- * and selected rows consume the page budget first; if they exceed the budget,
- * every priority row remains visible instead of expanding to a hidden index.
+ * Build the rendered page while preserving the canonical stable order.
+ * Priority (active/selected) rows are guaranteed visible, but they stay in
+ * their original position instead of jumping to the top. The first
+ * `visibleCount` rows are shown as the base window; any priority row beyond
+ * that window is appended without displacing earlier rows, up to one extra
+ * page budget so the list cannot auto-expand without bound.
  */
 export function selectVisibleProjectSessions(
   sessions: HistorySessionItem[],
@@ -246,9 +253,14 @@ export function selectVisibleProjectSessions(
     canonicalPriorityKeys.add(canonicalKeyBySessionKey[key] ?? key);
   }
 
-  const prioritySessions: HistorySessionItem[] = [];
-  const ordinarySessions: HistorySessionItem[] = [];
+  const pageBudget = Number.isFinite(visibleCount)
+    ? Math.max(0, Math.floor(visibleCount))
+    : 0;
+  const maxVisible = pageBudget + PRIORITY_OVERFLOW_BUDGET;
+
+  const visible: HistorySessionItem[] = [];
   const seenKeys = new Set<string>();
+  let count = 0;
 
   for (const session of sessions) {
     const key = canonicalProjectSessionKey(session, canonicalKeyBySessionKey);
@@ -256,18 +268,15 @@ export function selectVisibleProjectSessions(
       continue;
     }
     seenKeys.add(key);
-    if (canonicalPriorityKeys.has(key)) {
-      prioritySessions.push(session);
-    } else {
-      ordinarySessions.push(session);
+
+    const isPriority = canonicalPriorityKeys.has(key);
+    if (count < pageBudget || (isPriority && count < maxVisible)) {
+      visible.push(session);
+      count++;
     }
   }
 
-  const pageBudget = Number.isFinite(visibleCount)
-    ? Math.max(0, Math.floor(visibleCount))
-    : 0;
-  const ordinaryBudget = Math.max(0, pageBudget - prioritySessions.length);
-  return [...prioritySessions, ...ordinarySessions.slice(0, ordinaryBudget)];
+  return visible;
 }
 
 /**
