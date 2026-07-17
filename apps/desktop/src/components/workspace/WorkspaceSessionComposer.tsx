@@ -1581,6 +1581,7 @@ export function WorkspaceSessionComposer({
               disabled={disabled}
               minHeight={72}
               maxHeight={260}
+              autoGrow
               markdown={false}
               onSubmit={() => void handleComposerSubmit()}
               onChipClick={handlePromptChipClick}
