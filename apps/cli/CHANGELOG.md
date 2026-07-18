@@ -1,5 +1,11 @@
 # ccem
 
+## 2.58.0
+
+### Minor Changes
+
+- Minor release covering workspace session visibility, composer auto-grow, provider preset refresh, and i18n type alignment fixes since v2.57.0.
+
 ## 2.57.0
 
 ### Minor Changes
