@@ -1,5 +1,11 @@
 # ccem
 
+## 2.59.0
+
+### Minor Changes
+
+- Release v2.59.0: bundle desktop session-environment fix as a minor bump.
+
 ## 2.58.0
 
 ### Minor Changes
