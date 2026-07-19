@@ -225,8 +225,13 @@ export function ComposerControls({
               </p>
             )}
           </div>
-          <ScrollArea className="min-h-0 max-h-[200px]">
-            <div className="p-1.5 pt-0">
+          <ScrollArea
+            type="always"
+            data-ccem-composer-environment-scroll
+            className="min-h-0 max-h-[200px]"
+            viewportClassName="pr-1"
+          >
+            <div className="p-1.5 pt-0 pr-2">
               {selectableEnvironments.map((environment) => (
                 <button
                   key={environment.name}
