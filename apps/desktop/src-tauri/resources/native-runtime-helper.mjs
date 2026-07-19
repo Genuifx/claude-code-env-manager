@@ -37257,6 +37257,10 @@ function emitClaudeTurnCompleted(detail) {
     stage: "turn_completed",
     detail
   });
+  if (applyPendingClaudeSettingsAfterTurn()) {
+    emitStatus("ready", "Settings applied.");
+    return true;
+  }
   emitStatus("ready", "Ready for the next prompt.");
   scheduleClaudeIdleClose();
   return true;
@@ -37272,6 +37276,10 @@ function emitClaudeTurnInterrupted(detail = "Claude turn interrupted by desktop 
       stage: "turn_interrupted",
       detail
     });
+  }
+  if (applyPendingClaudeSettingsAfterTurn()) {
+    emitStatus("ready", "Settings applied.");
+    return;
   }
   emitStatus("ready", "Turn interrupted. Ready for the next prompt.");
   scheduleClaudeIdleClose();
@@ -37807,6 +37815,22 @@ function canApplySettingsImmediately() {
     return !activeTurn;
   }
   return !hasRetainedClaudeRuntime();
+}
+function applyPendingClaudeSettingsAfterTurn() {
+  if (initCommand?.provider !== "claude" || !pendingSettings) {
+    return false;
+  }
+  applyPendingSettingsToInitCommand();
+  closeClaudeQueryForRecovery();
+  return true;
+}
+function applyClaudeSettingsByRestartingIdleRuntime(command) {
+  if (shouldInterruptCurrentClaudeTurn()) {
+    return false;
+  }
+  applySettingsCommand(command);
+  closeClaudeQueryForRecovery();
+  return true;
 }
 function buildClaudeQueryOptions() {
   if (!initCommand || initCommand.provider !== "claude") {
@@ -38682,6 +38706,8 @@ async function handleCommand(command) {
     if (initCommand.provider === "claude") {
       if (canApplySettingsImmediately()) {
         applySettingsCommand(command);
+        emitStatus("ready", "Settings applied.");
+      } else if (applyClaudeSettingsByRestartingIdleRuntime(command)) {
         emitStatus("ready", "Settings applied.");
       } else {
         queuePendingSettings(command);

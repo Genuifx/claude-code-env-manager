@@ -14,6 +14,7 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ccem-helper-claude-restart-test-'));
   const outfile = path.join(tempDir, 'native-runtime-helper.mjs');
   const firstResultSubtype = options.firstResultSubtype ?? 'success';
+  const delayMsBeforeResult = options.delayMsBeforeResult ?? 0;
   const settleDelayMsAfterResult = options.settleDelayMsAfterResult ?? 0;
   const yieldIdleBeforeResult = options.yieldIdleBeforeResult ?? false;
   const interruptible = options.interruptible ?? false;
@@ -58,6 +59,7 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
             }
 
             const firstResultSubtype = ${JSON.stringify(firstResultSubtype)};
+            const delayMsBeforeResult = ${JSON.stringify(delayMsBeforeResult)};
             const settleDelayMsAfterResult = ${JSON.stringify(settleDelayMsAfterResult)};
             const yieldIdleBeforeResult = ${JSON.stringify(yieldIdleBeforeResult)};
             const interruptible = ${JSON.stringify(interruptible)};
@@ -121,6 +123,9 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
                       session_id,
                       message: { content: [{ type: 'text', text }] },
                     };
+                    if (delayMsBeforeResult > 0) {
+                      await new Promise((resolve) => setTimeout(resolve, delayMsBeforeResult));
+                    }
                     if (interruptible && localTurn === 1) {
                       await waitForInterrupt();
                       if (closed) return;
@@ -610,100 +615,7 @@ test('closes an idle Claude query after the retention timeout', async (t) => {
   );
 });
 
-test('queues Claude settings without closing an idle retained query', async (t) => {
-  const helperPath = await buildHelperWithMockClaudeSdk({
-    keepAliveAfterResult: true,
-    logClose: true,
-  });
-  const helper = spawn(process.execPath, [helperPath], {
-    env: {
-      ...process.env,
-      CCEM_NATIVE_CLAUDE_IDLE_TTL_MS: '500',
-    },
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-
-  t.after(() => {
-    helper.kill('SIGTERM');
-  });
-
-  const outputs = [];
-  const stderrRef = { value: '' };
-  let stdoutBuffer = '';
-
-  helper.stdout.setEncoding('utf8');
-  helper.stdout.on('data', (chunk) => {
-    stdoutBuffer += chunk;
-    let newlineIndex = stdoutBuffer.indexOf('\n');
-    while (newlineIndex >= 0) {
-      const line = stdoutBuffer.slice(0, newlineIndex).trim();
-      stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
-      if (line) {
-        outputs.push(JSON.parse(line));
-      }
-      newlineIndex = stdoutBuffer.indexOf('\n');
-    }
-  });
-
-  helper.stderr.setEncoding('utf8');
-  helper.stderr.on('data', (chunk) => {
-    stderrRef.value += chunk;
-  });
-
-  helper.stdin.write(`${JSON.stringify({
-    type: 'init',
-    provider: 'claude',
-    env_name: 'default',
-    perm_mode: 'dev',
-    working_dir: os.tmpdir(),
-    initial_prompt: 'first',
-  })}\n`);
-
-  await waitForOutput(
-    outputs,
-    (output) => output.type === 'status'
-      && output.status === 'ready'
-      && output.detail === 'Ready for the next prompt.',
-    stderrRef,
-    'ready status before settings update',
-  );
-
-  helper.stdin.write(`${JSON.stringify({
-    type: 'update_settings',
-    env_name: 'updated',
-    env_vars: { ANTHROPIC_MODEL: 'new-model' },
-  })}\n`);
-
-  await waitForOutput(
-    outputs,
-    (output) => output.type === 'status'
-      && output.status === 'ready'
-      && output.detail === 'Settings will apply to the next Claude runtime.',
-    stderrRef,
-    'queued settings status',
-  );
-
-  await delay(80);
-  assert.doesNotMatch(stderrRef.value, /__MOCK_CLAUDE_CLOSE__/);
-
-  helper.stdin.write(`${JSON.stringify({
-    type: 'prompt',
-    text: 'second',
-  })}\n`);
-
-  await waitForOutput(
-    outputs,
-    (output) => output.type === 'event'
-      && output.payload?.type === 'assistant_chunk'
-      && output.payload.text === 'mock response 2',
-    stderrRef,
-    'second Claude response on retained query after settings update',
-  );
-
-  assert.doesNotMatch(stderrRef.value, /__MOCK_CLAUDE_CLOSE__/);
-});
-
-test('applies queued Claude settings after the retained query is reclaimed', async (t) => {
+test('restarts an idle retained Claude query before sending with updated environment settings', async (t) => {
   const helperPath = await buildHelperWithMockClaudeSdk({
     keepAliveAfterResult: true,
     logClose: true,
@@ -712,7 +624,7 @@ test('applies queued Claude settings after the retained query is reclaimed', asy
   const helper = spawn(process.execPath, [helperPath], {
     env: {
       ...process.env,
-      CCEM_NATIVE_CLAUDE_IDLE_TTL_MS: '60',
+      CCEM_NATIVE_CLAUDE_IDLE_TTL_MS: '60000',
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -760,16 +672,103 @@ test('applies queued Claude settings after the retained query is reclaimed', asy
       && output.payload?.type === 'assistant_chunk'
       && output.payload.text === 'model=old-model;setModel=false',
     stderrRef,
-    'first Claude response with original model',
+    'first Claude response with original environment model',
   );
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'update_settings',
+    env_name: 'updated',
+    env_vars: { ANTHROPIC_MODEL: 'new-model' },
+  })}\n`);
+  helper.stdin.write(`${JSON.stringify({
+    type: 'prompt',
+    text: 'second',
+  })}\n`);
 
   await waitForOutput(
     outputs,
     (output) => output.type === 'status'
       && output.status === 'ready'
-      && output.detail === 'Ready for the next prompt.',
+      && output.detail === 'Settings applied.',
     stderrRef,
-    'ready status before queued settings update',
+    'applied settings status',
+  );
+
+  await waitForStderr(
+    stderrRef,
+    /__MOCK_CLAUDE_CLOSE__/,
+    'idle retained query close after environment update',
+  );
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'event'
+      && output.payload?.type === 'assistant_chunk'
+      && output.payload.text === 'model=new-model;setModel=false',
+    stderrRef,
+    'second Claude response with updated environment model',
+  );
+});
+
+test('applies environment settings after the active Claude turn before accepting the next prompt', async (t) => {
+  const helperPath = await buildHelperWithMockClaudeSdk({
+    delayMsBeforeResult: 120,
+    keepAliveAfterResult: true,
+    logClose: true,
+    reportModelState: true,
+  });
+  const helper = spawn(process.execPath, [helperPath], {
+    env: {
+      ...process.env,
+      CCEM_NATIVE_CLAUDE_IDLE_TTL_MS: '60000',
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  t.after(() => {
+    helper.kill('SIGTERM');
+  });
+
+  const outputs = [];
+  const stderrRef = { value: '' };
+  let stdoutBuffer = '';
+
+  helper.stdout.setEncoding('utf8');
+  helper.stdout.on('data', (chunk) => {
+    stdoutBuffer += chunk;
+    let newlineIndex = stdoutBuffer.indexOf('\n');
+    while (newlineIndex >= 0) {
+      const line = stdoutBuffer.slice(0, newlineIndex).trim();
+      stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+      if (line) {
+        outputs.push(JSON.parse(line));
+      }
+      newlineIndex = stdoutBuffer.indexOf('\n');
+    }
+  });
+
+  helper.stderr.setEncoding('utf8');
+  helper.stderr.on('data', (chunk) => {
+    stderrRef.value += chunk;
+  });
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'init',
+    provider: 'claude',
+    env_name: 'default',
+    env_vars: { ANTHROPIC_MODEL: 'old-model' },
+    perm_mode: 'dev',
+    working_dir: os.tmpdir(),
+    initial_prompt: 'first',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'event'
+      && output.payload?.type === 'assistant_chunk'
+      && output.payload.text === 'model=old-model;setModel=false',
+    stderrRef,
+    'first Claude response while the turn remains active',
   );
 
   helper.stdin.write(`${JSON.stringify({
@@ -778,15 +777,29 @@ test('applies queued Claude settings after the retained query is reclaimed', asy
     env_vars: { ANTHROPIC_MODEL: 'new-model' },
   })}\n`);
 
-  await delay(25);
-  assert.doesNotMatch(stderrRef.value, /__MOCK_CLAUDE_CLOSE__/);
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'status'
+      && output.status === 'processing'
+      && output.detail === 'Settings will apply to the next Claude runtime.',
+    stderrRef,
+    'queued active-turn settings status',
+  );
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'status'
+      && output.status === 'ready'
+      && output.detail === 'Settings applied.',
+    stderrRef,
+    'settings applied after active turn completion',
+  );
 
   await waitForStderr(
     stderrRef,
     /__MOCK_CLAUDE_CLOSE__/,
-    'idle retained query close after queued settings',
+    'active-turn query close after applying environment settings',
   );
-  await delay(30);
 
   helper.stdin.write(`${JSON.stringify({
     type: 'prompt',
@@ -799,7 +812,7 @@ test('applies queued Claude settings after the retained query is reclaimed', asy
       && output.payload?.type === 'assistant_chunk'
       && output.payload.text === 'model=new-model;setModel=false',
     stderrRef,
-    'second Claude response with queued model',
+    'next Claude response with active-turn environment update',
   );
 });
 

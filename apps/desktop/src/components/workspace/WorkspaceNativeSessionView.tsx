@@ -1329,6 +1329,8 @@ export function WorkspaceNativeSessionView({
   );
   const composerTextRef = useRef('');
   const composerHasDraftRef = useRef(false);
+  const pendingEnvironmentUpdateRef = useRef<Promise<boolean> | null>(null);
+  const environmentUpdateRequestSeqRef = useRef(0);
   const [composerDraftRevision, setComposerDraftRevision] = useState(0);
   const [composerHasDraft, setComposerHasDraft] = useState(false);
   const sessionAnnotations = useWorkspaceAnnotations(`live:${session.runtime_id}`);
@@ -1558,6 +1560,8 @@ export function WorkspaceNativeSessionView({
   }, [clearComposerDraft, clearFileRewindTimeout, initialImages, initialPrompt, session.runtime_id]);
 
   useEffect(() => {
+    environmentUpdateRequestSeqRef.current += 1;
+    pendingEnvironmentUpdateRef.current = null;
     initialReplayRuntimeRef.current = null;
   }, [session.runtime_id]);
 
@@ -2375,16 +2379,53 @@ export function WorkspaceNativeSessionView({
     t,
   ]);
 
+  const waitForPendingEnvironmentUpdate = useCallback(async () => {
+    while (pendingEnvironmentUpdateRef.current) {
+      const pendingUpdate = pendingEnvironmentUpdateRef.current;
+      const succeeded = await pendingUpdate;
+      if (!succeeded) {
+        return false;
+      }
+      if (pendingEnvironmentUpdateRef.current === pendingUpdate) {
+        return true;
+      }
+    }
+    return true;
+  }, []);
+
   const handleEnvChange = useCallback((envName: string) => {
     const previousEnv = sessionEnv;
+    const runtimeId = session.runtime_id;
+    const requestSeq = environmentUpdateRequestSeqRef.current + 1;
+    const previousUpdate = pendingEnvironmentUpdateRef.current;
+    environmentUpdateRequestSeqRef.current = requestSeq;
     setSessionEnv(envName);
-    void updateNativeSessionSettings(session.runtime_id, envName, undefined)
-      .then(() => refreshSummary({ force: true }))
-      .catch((error) => {
+
+    let updatePromise: Promise<boolean>;
+    updatePromise = (async () => {
+      if (previousUpdate) {
+        await previousUpdate;
+      }
+      try {
+        await updateNativeSessionSettings(runtimeId, envName, undefined);
+        if (environmentUpdateRequestSeqRef.current === requestSeq) {
+          await refreshSummary({ force: true });
+        }
+        return true;
+      } catch (error) {
         console.error('Failed to update native session environment:', error);
-        setSessionEnv(previousEnv);
-        toast.error(t('workspace.nativeSettingsFailed'));
-      });
+        if (environmentUpdateRequestSeqRef.current === requestSeq) {
+          setSessionEnv(previousEnv);
+          toast.error(t('workspace.nativeSettingsFailed'));
+        }
+        return false;
+      }
+    })().finally(() => {
+      if (pendingEnvironmentUpdateRef.current === updatePromise) {
+        pendingEnvironmentUpdateRef.current = null;
+      }
+    });
+    pendingEnvironmentUpdateRef.current = updatePromise;
   }, [refreshSummary, session.runtime_id, sessionEnv, t, updateNativeSessionSettings]);
 
   const handlePermModeChange = useCallback((mode: PermissionModeName) => {
@@ -2437,6 +2478,9 @@ export function WorkspaceNativeSessionView({
     const displayText = payload?.displayText ?? text;
     const attachments = payload?.attachments ?? [];
     if (!text && attachments.length === 0) {
+      return false;
+    }
+    if (!await waitForPendingEnvironmentUpdate()) {
       return false;
     }
     const isCronCommand = isWorkspaceCronCommand(text);
@@ -2539,6 +2583,7 @@ export function WorkspaceNativeSessionView({
     session.project_dir,
     sessionRuntimePermMode,
     t,
+    waitForPendingEnvironmentUpdate,
   ]);
 
   const flushQueuedMessages = useCallback(async () => {
@@ -2549,6 +2594,10 @@ export function WorkspaceNativeSessionView({
       || hasBlockingAttention
       || isTerminalStatus(session.status)
     ) {
+      return;
+    }
+
+    if (!await waitForPendingEnvironmentUpdate()) {
       return;
     }
 
@@ -2569,6 +2618,7 @@ export function WorkspaceNativeSessionView({
     sendPromptBatch,
     session.status,
     t,
+    waitForPendingEnvironmentUpdate,
   ]);
 
   useEffect(() => {
