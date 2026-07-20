@@ -997,9 +997,14 @@ export const ProjectTree = memo(function ProjectTree({
     });
   }, [canonicalSelectedKey, selectedProject]);
 
-  // Active projects stay open while their activity signal is present. This is
-  // the project-level half of the "active rows cannot disappear" contract.
+  // Active projects stay open while their activity signal is present, but only
+  // until the user explicitly interacts with the tree. After the first toggle,
+  // user intent wins and active projects can be collapsed like any other.
+  const [hasUserToggled, setHasUserToggled] = useState(false);
   const effectiveExpanded = useMemo(() => {
+    if (hasUserToggled && expandedProjects !== null) {
+      return expandedProjects;
+    }
     const expanded = new Set(expandedProjects ?? defaultExpandedProjects);
     for (const project of activeProjectSet) {
       expanded.add(project);
@@ -1009,6 +1014,7 @@ export const ProjectTree = memo(function ProjectTree({
     activeProjectSet,
     defaultExpandedProjects,
     expandedProjects,
+    hasUserToggled,
   ]);
 
   // Per-project visible count helper
@@ -1046,6 +1052,7 @@ export const ProjectTree = memo(function ProjectTree({
 
   const toggleProject = useCallback(
     (project: string) => {
+      setHasUserToggled(true);
       setExpandedProjects((prev) => {
         const next = new Set(prev ?? effectiveExpanded);
         if (next.has(project)) {
