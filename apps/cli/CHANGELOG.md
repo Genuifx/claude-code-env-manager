@@ -1,5 +1,11 @@
 # ccem
 
+## 2.60.0
+
+### Minor Changes
+
+- Respect user collapse intent for active workspace projects and guard incomplete Claude responses.
+
 ## 2.59.0
 
 ### Minor Changes
