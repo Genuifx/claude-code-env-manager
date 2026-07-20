@@ -25,6 +25,7 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
   const expectedQueryModel = options.expectedQueryModel ?? null;
   const reportModelState = options.reportModelState ?? false;
   const keepAliveAfterResult = options.keepAliveAfterResult ?? false;
+  const endFirstTurnWithoutResult = options.endFirstTurnWithoutResult ?? false;
 
   await build({
     entryPoints: [path.join(packageDir, 'src', 'index.ts')],
@@ -70,6 +71,7 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
             const expectedQueryModel = ${JSON.stringify(expectedQueryModel)};
             const reportModelState = ${JSON.stringify(reportModelState)};
             const keepAliveAfterResult = ${JSON.stringify(keepAliveAfterResult)};
+            const endFirstTurnWithoutResult = ${JSON.stringify(endFirstTurnWithoutResult)};
             let queryCount = 0;
             let setModelCalled = false;
             export function query({ prompt, options }) {
@@ -135,6 +137,9 @@ async function buildHelperWithMockClaudeSdk(options = {}) {
                     }
                     if (yieldIdleBeforeResult) {
                       yield { type: 'system', subtype: 'session_state_changed', state: 'idle', session_id };
+                    }
+                    if (endFirstTurnWithoutResult && turn === 1 && localTurn === 1) {
+                      return;
                     }
                     if (!interruptible && turn === 1 && firstResultSubtype !== 'success') {
                       yield { type: 'result', subtype: firstResultSubtype, errors: ['hit turn limit'], session_id };
@@ -1018,6 +1023,116 @@ test('marks Claude helper ready after a non-success result so the workspace can 
       && output.payload.text === 'mock response 2',
     stderrRef,
     'second Claude response',
+  );
+});
+
+test('preserves partial output, reports one incomplete response, and recovers the next Claude prompt', async (t) => {
+  const helperPath = await buildHelperWithMockClaudeSdk({
+    endFirstTurnWithoutResult: true,
+    yieldIdleBeforeResult: true,
+  });
+  const helper = spawn(process.execPath, [helperPath], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  t.after(() => {
+    helper.kill('SIGTERM');
+  });
+
+  const outputs = [];
+  const stderrRef = { value: '' };
+  let stdoutBuffer = '';
+  const incompleteReason = 'Claude response ended before a final result. Partial output was preserved; send the next prompt to retry.';
+
+  helper.stdout.setEncoding('utf8');
+  helper.stdout.on('data', (chunk) => {
+    stdoutBuffer += chunk;
+    let newlineIndex = stdoutBuffer.indexOf('\n');
+    while (newlineIndex >= 0) {
+      const line = stdoutBuffer.slice(0, newlineIndex).trim();
+      stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+      if (line) {
+        outputs.push(JSON.parse(line));
+      }
+      newlineIndex = stdoutBuffer.indexOf('\n');
+    }
+  });
+
+  helper.stderr.setEncoding('utf8');
+  helper.stderr.on('data', (chunk) => {
+    stderrRef.value += chunk;
+  });
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'init',
+    provider: 'claude',
+    env_name: 'default',
+    perm_mode: 'dev',
+    working_dir: os.tmpdir(),
+    initial_prompt: 'first',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'event'
+      && output.payload?.type === 'assistant_chunk'
+      && output.payload.text === 'mock response 1',
+    stderrRef,
+    'partial Claude response before the missing result',
+  );
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'event'
+      && output.payload?.type === 'session_completed'
+      && output.payload.reason === incompleteReason,
+    stderrRef,
+    'recoverable incomplete-response error',
+  );
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'status'
+      && output.status === 'ready'
+      && output.detail === 'Claude response incomplete. Ready to retry.',
+    stderrRef,
+    'ready status after the incomplete response',
+  );
+
+  helper.stdin.write(`${JSON.stringify({
+    type: 'prompt',
+    text: 'second',
+  })}\n`);
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'event'
+      && output.payload?.type === 'assistant_chunk'
+      && output.payload.text === 'mock response 2',
+    stderrRef,
+    'second Claude response after reconnect',
+  );
+
+  await waitForOutput(
+    outputs,
+    (output) => output.type === 'status'
+      && output.status === 'ready'
+      && output.detail === 'Ready for the next prompt.',
+    stderrRef,
+    'ready status after the recovered response',
+  );
+
+  assert.equal(
+    outputs.filter((output) => output.type === 'event'
+      && output.payload?.type === 'session_completed'
+      && output.payload.reason === incompleteReason).length,
+    1,
+  );
+  assert.deepEqual(
+    outputs
+      .filter((output) => output.type === 'event' && output.payload?.type === 'assistant_chunk')
+      .map((output) => output.payload.text),
+    ['mock response 1', 'mock response 2'],
   );
 });
 

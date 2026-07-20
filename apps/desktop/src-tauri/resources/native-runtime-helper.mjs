@@ -36888,6 +36888,7 @@ function formatPermissionPreview(value, maxLength = 160) {
 // src/index.ts
 var DEFAULT_CLAUDE_IDLE_TTL_MS = 10 * 60 * 1e3;
 var DEFAULT_CLAUDE_INTERRUPT_TIMEOUT_MS = 8e3;
+var CLAUDE_INCOMPLETE_RESPONSE_REASON = "Claude response ended before a final result. Partial output was preserved; send the next prompt to retry.";
 var initCommand = null;
 var stopped = false;
 var activeTurn = false;
@@ -36904,6 +36905,7 @@ var claudeInterruptCompletionEmitted = false;
 var claudeSawPartialText = false;
 var claudeSawPartialThinking = false;
 var claudeTurnCompletionEmitted = false;
+var claudeTurnAwaitingResult = false;
 var pendingClaudePromptReplay = null;
 var claudeSeenMessageIds = /* @__PURE__ */ new Set();
 var claudeContextUsageFailureKey = null;
@@ -37050,6 +37052,9 @@ function closeClaudeQueryForRecovery(snapshot = captureCurrentClaudeQuerySnapsho
   if (!snapshot) {
     return;
   }
+  if (isCurrentClaudeQuerySnapshot(snapshot)) {
+    claudeTurnAwaitingResult = false;
+  }
   const queueToClose = snapshot.inputQueue;
   const queryToClose = snapshot.query;
   if (queueToClose) {
@@ -37062,7 +37067,7 @@ function closeClaudeQueryForRecovery(snapshot = captureCurrentClaudeQuerySnapsho
   clearCurrentClaudeQuerySnapshot(snapshot);
 }
 function shouldInterruptCurrentClaudeTurn(snapshot = captureCurrentClaudeQuerySnapshot()) {
-  return snapshot !== null && isCurrentClaudeQuerySnapshot(snapshot) && !claudeTurnCompletionEmitted && claudeLastSessionState !== "idle";
+  return snapshot !== null && isCurrentClaudeQuerySnapshot(snapshot) && !claudeTurnCompletionEmitted && claudeTurnAwaitingResult;
 }
 function scheduleClaudeIdleClose() {
   clearClaudeIdleCloseTimer();
@@ -37266,6 +37271,7 @@ function emitClaudeTurnCompleted(detail) {
   return true;
 }
 function emitClaudeTurnInterrupted(detail = "Claude turn interrupted by desktop workspace.") {
+  claudeTurnAwaitingResult = false;
   claudeLastSessionState = "idle";
   resetClaudeTurnTracking();
   claudeTurnCompletionEmitted = true;
@@ -37283,6 +37289,20 @@ function emitClaudeTurnInterrupted(detail = "Claude turn interrupted by desktop 
   }
   emitStatus("ready", "Turn interrupted. Ready for the next prompt.");
   scheduleClaudeIdleClose();
+}
+function emitClaudeIncompleteResponse() {
+  if (!claudeTurnAwaitingResult) {
+    return false;
+  }
+  claudeTurnAwaitingResult = false;
+  claudeLastSessionState = "idle";
+  claudeTurnCompletionEmitted = true;
+  emitEvent({
+    type: "session_completed",
+    reason: CLAUDE_INCOMPLETE_RESPONSE_REASON
+  });
+  emitStatus("ready", "Claude response incomplete. Ready to retry.");
+  return true;
 }
 function categorizeClaudeTool(name) {
   if (name.includes("AskUser") || name.includes("Question")) {
@@ -37934,6 +37954,7 @@ async function consumeClaudeMessages() {
   const querySnapshot = claudeQuerySlot.activate(claudeQuery, inputQueue);
   currentClaudeQuery = querySnapshot.query;
   claudeInputQueue = querySnapshot.inputQueue;
+  let incompleteResponse = false;
   try {
     for await (const message of claudeQuery) {
       const sessionId = message?.session_id;
@@ -37941,6 +37962,9 @@ async function consumeClaudeMessages() {
         emitSessionMeta(sessionId);
       }
       if (message.type === "stream_event") {
+        if (isCurrentClaudeQuerySnapshot(querySnapshot)) {
+          pendingClaudePromptReplay = null;
+        }
         const event = message.event;
         if (event) {
           handleClaudePartialEvent(event);
@@ -37948,6 +37972,9 @@ async function consumeClaudeMessages() {
         continue;
       }
       if (message.type === "assistant") {
+        if (isCurrentClaudeQuerySnapshot(querySnapshot)) {
+          pendingClaudePromptReplay = null;
+        }
         const msgId = message.message?.id;
         const msgUsage = message.message?.usage;
         if (msgId && !claudeSeenMessageIds.has(msgId) && msgUsage) {
@@ -38076,8 +38103,6 @@ async function consumeClaudeMessages() {
           if (message.state === "idle") {
             if (claudeInterruptRequested) {
               emitClaudeTurnInterrupted();
-            } else {
-              emitClaudeTurnCompleted("Claude turn completed.");
             }
           }
         }
@@ -38085,6 +38110,10 @@ async function consumeClaudeMessages() {
         continue;
       }
       if (message.type === "result") {
+        if (isCurrentClaudeQuerySnapshot(querySnapshot)) {
+          claudeTurnAwaitingResult = false;
+          pendingClaudePromptReplay = null;
+        }
         if (claudeInterruptRequested) {
           emitClaudeTurnInterrupted();
           claudeInterruptRequested = false;
@@ -38126,6 +38155,7 @@ async function consumeClaudeMessages() {
         });
       }
     }
+    incompleteResponse = claudeTurnAwaitingResult && pendingClaudePromptReplay === null && !stopped && !claudeInterruptRequested && isCurrentClaudeQuerySnapshot(querySnapshot);
   } finally {
     if (claudeInputQueue === inputQueue) {
       claudeInputQueue = null;
@@ -38138,6 +38168,9 @@ async function consumeClaudeMessages() {
       applyPendingSettingsToInitCommand();
       emitStatus("ready", "Settings applied.");
     }
+  }
+  if (incompleteResponse) {
+    emitClaudeIncompleteResponse();
   }
 }
 async function ensureClaudeSession() {
@@ -38161,6 +38194,9 @@ async function ensureClaudeSession() {
       }
       if (stopped || isAbort) {
         return;
+      }
+      if (!currentClaudeQuery) {
+        claudeTurnAwaitingResult = false;
       }
       const message = error48 instanceof Error ? error48.message : String(error48);
       emitEvent({
@@ -38239,6 +38275,7 @@ function enqueueClaudePrompt(text, images) {
     },
     parent_tool_use_id: null
   });
+  claudeTurnAwaitingResult = true;
   emitStatus("processing", "Claude is processing a turn.");
 }
 async function rewindClaudeFiles(checkpointId) {
