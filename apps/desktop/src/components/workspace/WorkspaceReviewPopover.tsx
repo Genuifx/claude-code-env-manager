@@ -12,7 +12,7 @@ import {
   PackageCheck,
   RefreshCw,
   X,
-} from 'lucide-react';
+} from '@/lib/lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
 import { ScrollArea } from '@/components/ui/scroll-area';

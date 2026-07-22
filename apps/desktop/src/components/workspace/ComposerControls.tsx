@@ -10,7 +10,7 @@ import {
   ShieldBan,
   ShieldCheck,
   ShieldOff,
-} from 'lucide-react';
+} from '@/lib/lucide-react';
 import { ModelIcon } from '@/components/history/ModelIcon';
 import {
   Select,

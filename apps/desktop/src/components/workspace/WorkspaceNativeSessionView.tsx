@@ -14,7 +14,7 @@ import {
   Square,
   SquarePen,
   Terminal,
-} from 'lucide-react';
+} from '@/lib/lucide-react';
 import { Suspense, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';

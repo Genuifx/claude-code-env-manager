@@ -26,7 +26,7 @@ import {
   Paperclip,
   Plus,
   X,
-} from 'lucide-react';
+} from '@/lib/lucide-react';
 import { Claude, Codex, OpenCode } from '@lobehub/icons';
 import { PromptArea } from '@/components/prompt-area';
 import { plainTextToSegments, segmentsToPlainText } from '@/components/segment-helpers';

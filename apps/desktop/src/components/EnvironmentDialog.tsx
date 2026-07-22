@@ -29,7 +29,7 @@ import {
   Terminal,
   Wrench,
   Zap,
-} from "lucide-react";
+} from "@/lib/lucide-react";
 import { toast } from "sonner";
 import { Zhipu, Moonshot, Minimax, DeepSeek, Qwen, OpenRouter as OpenRouterIcon, Ollama, XiaomiMiMo } from "@lobehub/icons";
 import type { Environment } from "@/store";

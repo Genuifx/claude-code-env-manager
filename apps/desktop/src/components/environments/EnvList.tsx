@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Copy, Edit2, Globe, Search, Trash2 } from 'lucide-react';
+import { Copy, Edit2, Globe, Search, Trash2 } from '@/lib/lucide-react';
 import { useAppStore, type Environment } from '@/store';
 import { useTauriCommands } from '@/hooks/useTauriCommands';
 import { cn } from '@/lib/utils';

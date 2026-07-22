@@ -16,7 +16,7 @@ import {
   Terminal,
   Wrench,
   X,
-} from 'lucide-react';
+} from '@/lib/lucide-react';
 import { MarkdownRenderer } from '@/components/history/MarkdownRenderer';
 import {
   extractToolSummary,

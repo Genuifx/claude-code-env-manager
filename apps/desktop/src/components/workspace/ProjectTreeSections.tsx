@@ -9,7 +9,7 @@ import {
   RefreshCw,
   SquarePen,
   X,
-} from 'lucide-react';
+} from '@/lib/lucide-react';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';

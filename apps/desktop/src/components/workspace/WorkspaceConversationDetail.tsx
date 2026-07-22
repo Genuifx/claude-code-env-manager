@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from 'react';
-import { Layers3 } from 'lucide-react';
+import { Layers3 } from '@/lib/lucide-react';
 import { WorkspaceTranscriptList } from './WorkspaceTranscriptList';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';

@@ -16,7 +16,7 @@ import {
   Timer, AlertTriangle, FolderOpen, ChevronDown, GitPullRequest,
   FlaskConical, FileText, Shield, Newspaper, Sparkles, X,
   Zap, Terminal, Copy, Check, Bell, ExternalLink, History,
-} from 'lucide-react';
+} from '@/lib/lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { ccemMotion, clearMotionProps, getMotionTargets, gsap, shouldReduceMotion, useGSAP } from '@/lib/gsapMotion';

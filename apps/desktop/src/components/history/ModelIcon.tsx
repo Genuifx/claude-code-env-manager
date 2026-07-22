@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Bot } from 'lucide-react';
+import { Bot } from '@/lib/lucide-react';
 import { Claude, Codex, OpenAI, DeepSeek, Grok, Minimax, Moonshot, Zhipu, Gemini, Ollama, OpenRouter as OpenRouterIcon, Qwen, XiaomiMiMo } from '@lobehub/icons';
 
 interface ModelIconProps {

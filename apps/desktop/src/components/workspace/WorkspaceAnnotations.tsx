@@ -7,7 +7,7 @@ import {
   useState,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, MessageSquareQuote, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { Check, MessageSquareQuote, Pencil, Plus, Trash2, X } from '@/lib/lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useLocale } from '@/locales';

@@ -16,7 +16,7 @@ import {
   FolderOpen,
   LoaderCircle,
   Terminal,
-} from 'lucide-react';
+} from '@/lib/lucide-react';
 import { toast } from 'sonner';
 import { shallow } from 'zustand/shallow';
 import { WorkspaceStatusStrip } from '@/components/workspace/WorkspaceStatusStrip';

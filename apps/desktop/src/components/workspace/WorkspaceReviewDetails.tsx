@@ -8,7 +8,7 @@ import {
   FileText,
   LoaderCircle,
   Users,
-} from 'lucide-react';
+} from '@/lib/lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';

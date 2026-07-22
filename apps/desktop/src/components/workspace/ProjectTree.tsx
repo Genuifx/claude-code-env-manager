@@ -1,6 +1,6 @@
 import { memo, useMemo, useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
 import type { DragEvent, PointerEvent as ReactPointerEvent } from 'react';
-import { Check, Copy, Link, Pin, RefreshCw, X, Plus, ShieldAlert } from 'lucide-react';
+import { Check, Copy, Link, Pin, RefreshCw, X, Plus, ShieldAlert } from '@/lib/lucide-react';
 import { cn } from '@/lib/utils';
 import { ccemMotion, clearMotionProps, gsap, shouldReduceMotion } from '@/lib/gsapMotion';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
