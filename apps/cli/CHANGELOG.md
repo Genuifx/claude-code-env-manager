@@ -1,5 +1,11 @@
 # ccem
 
+## 2.61.0
+
+### Minor Changes
+
+- Hugeicons migration, CLI permission rule rendering fix, incomplete Claude response guard, and fast-uri security fix.
+
 ## 2.60.0
 
 ### Minor Changes
