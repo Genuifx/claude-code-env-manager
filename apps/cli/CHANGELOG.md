@@ -1,5 +1,11 @@
 # ccem
 
+## 2.62.0
+
+### Minor Changes
+
+- Minor release: expose composer environment overflow on desktop and align CLI/Desktop release surfaces for the next minor cycle.
+
 ## 2.61.0
 
 ### Minor Changes
